@@ -1192,7 +1192,7 @@ Worried about the API rate limit during the burst window...</code></pre>
     <span class="eyebrow reveal"><span class="pulse"></span>openclaw/openclaw · v2026.5.30 · TypeScript · MIT</span>
     <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">OpenClaw</span> · 全渠道个人 AI 助手</h1>
     <p class="lead reveal" style="margin-bottom:0">在你的<strong>所有消息平台</strong>上运行同一个 AI 助手——WhatsApp、Telegram、Discord、Slack、Signal、iMessage、MS Teams、Matrix 等 20+ 渠道，一个助手、一套记忆、零 API 隔离。</p>
-    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">375k</div><div class="l">Stars</div></div><div class="cell"><div class="n">20+</div><div class="l">消息平台</div></div><div class="cell"><div class="n">130+</div><div class="l">插件扩展</div></div><div class="cell"><div class="n">59</div><div class="l">内置技能</div></div></div>
+    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">375k</div><div class="l">Stars</div></div><div class="cell"><div class="n">20+</div><div class="l">消息平台</div></div><div class="cell"><div class="n">140+</div><div class="l">插件扩展</div></div><div class="cell"><div class="n">58</div><div class="l">内置技能</div></div></div>
   </div>
 </section>
 
@@ -1209,8 +1209,8 @@ Worried about the API rate limit during the burst window...</code></pre>
       <div class="statrow reveal">
         <div class="chip"><div class="n">375,638</div><div class="l">Stars</div></div>
         <div class="chip"><div class="n">20+</div><div class="l">消息平台</div></div>
-        <div class="chip"><div class="n">130+</div><div class="l">插件扩展</div></div>
-        <div class="chip"><div class="n">59</div><div class="l">内置技能</div></div>
+        <div class="chip"><div class="n">140+</div><div class="l">插件扩展</div></div>
+        <div class="chip"><div class="n">58</div><div class="l">内置技能</div></div>
         <div class="chip"><div class="n">100%</div><div class="l">本地优先</div></div>
       </div>
 
@@ -1241,8 +1241,8 @@ Worried about the API rate limit during the burst window...</code></pre>
     └── <span class="d">tools/</span>        <span class="c"># browser · codex · image-generation-core · video-generation-core</span></div>
 
       <div class="prose">
-        <h4 class="reveal">核心创新：ACP 协议 — Agent Communication Protocol</h4>
-        <p class="reveal">OpenClaw 的核心创新是 <strong>ACP（Agent Communication Protocol）</strong>——一套用于 agent 之间跨会话、跨实例通信的协议。它定义在 <code>packages/gateway-protocol/</code> 里，处理 session 建立、消息路由、身份鉴权。一个 agent 可以派生出多个<strong>子 agent</strong>（<code>src/agents/subagent-*</code>），每个子 agent 有独立上下文，通过 ACP 消息和主 agent 协调工作。ACP 更强调协议层面的标准化。</p>
+        <h4 class="reveal">核心能力：把 ACP（Agent Client Protocol）做成一等公民</h4>
+        <p class="reveal">很多介绍把 ACP 说成 OpenClaw 自创的"Agent Communication Protocol"——<strong>这是个常见误解</strong>。读源码可确认：<strong>ACP = Agent Client Protocol</strong>，是一个<em>外部开放标准</em>（npm 包 <code>@agentclientprotocol/sdk</code>），定义 agent（client）与宿主（server）之间的双向流式通信：<code>PromptRequest → PromptResponse</code>、工具调用流式更新、权限请求、session 生命周期。OpenClaw 真正的独特之处是<strong>同时实现了协议两端</strong>——对外它是 ACP server，接受 Codex / CLI / IDE 等外部 client 接入（<code>src/acp/</code>）；对内它又作为 ACP client 去<strong>派生子 agent</strong>（<code>extensions/acpx/</code> + <code>src/agents/acp-spawn.ts</code>）。下方源码拆解会展开这套机制。</p>
 
         <h4 class="reveal">多 Channel 适配：20+ 消息平台</h4>
         <p class="reveal">每个消息平台是一个独立的 channel 插件（<code>extensions/channels/</code>），通过统一的 <code>ChannelAdapter</code> 接口接入 OpenClaw。入站消息统一成 <code>InboundMessage</code>，出站走 <code>OutboundDispatcher</code>，中间件负责 typing indicator、@mention 解析、消息去重等跨平台通用逻辑。</p>
@@ -1261,6 +1261,174 @@ Worried about the API rate limit during the burst window...</code></pre>
         <h4 class="reveal">与 Hermes Agent 的比较</h4>
         <p class="reveal">OpenClaw 和 Hermes Agent 是两个最相似的项目——都是多平台 messaging gateway + 多 agent 协作框架。但路线不同：<strong>Hermes Agent</strong> 用 Python，走"大而全"路线（30+ provider、20+ platform、6 种 terminal backend）；<strong>OpenClaw</strong> 用 TypeScript，走"强类型 + 插件化"路线（130+ 插件扩展、ACP 协议强调标准化）。</p>
 
+      </div><!-- /intro prose -->
+
+      <!-- OPENCLAW_DEEP_DIVE -->
+      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
+      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>src/acp/</code>、<code>src/agents/</code>、<code>src/channels/</code>、<code>src/plugins/</code>、<code>src/tools/</code>、<code>packages/net-policy/</code>、<code>extensions/memory-*</code> 的逐文件阅读，把上面几块展开到「关键代码 + 协议 + 失败模式」的粒度。141 个 extension、16 个 packages、58 个 skill 的真实结构。</p>
+
+      <!-- ① ACP -->
+      <div class="prose">
+        <h4 class="reveal">① ACP（Agent Client Protocol）—— 既当 server 又当 client</h4>
+        <p class="reveal">ACP 不是 OpenClaw 发明的，而是它<strong>把一个外部标准做成了一等公民</strong>。协议本体来自 npm 包 <code>@agentclientprotocol/sdk</code>，OpenClaw 在 <code>src/acp/</code> 实现 server 端（<code>AgentSideConnection</code>），把协议消息翻译成内部的 session / event 模型；<code>extensions/acpx/</code> 则是插件化的 ACP runtime 后端。一个进程<strong>既对外接受 ACP client（Codex、CLI、IDE 插件）</strong>，<strong>又对内作为 client 去 spawn 子 agent</strong>——这就是它能在"被集成"和"做编排"之间自由切换的根因。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/acp/types.ts — ACP server 身份声明</span></div>
+        <pre><code><span class="tok-k">export const</span> <span class="tok-t">ACP_AGENT_INFO</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  name<span class="tok-p">:</span> <span class="tok-s">"openclaw-acp"</span><span class="tok-p">,</span>
+  title<span class="tok-p">:</span> <span class="tok-s">"OpenClaw ACP Gateway"</span><span class="tok-p">,</span>
+  version<span class="tok-p">:</span> <span class="tok-t">VERSION</span><span class="tok-p">,</span>
+<span class="tok-p">}</span><span class="tok-p">;</span>
+<span class="tok-c">// 协议来自 @agentclientprotocol/sdk：PromptRequest → PromptResponse、</span>
+<span class="tok-c">// 工具调用流式更新、权限请求、NewSession/ResumeSession/CloseSession</span></code></pre>
+      </div>
+
+      <!-- ② Agent turn + Session -->
+      <div class="prose">
+        <h4 class="reveal">② Agent turn loop 与 Session —— 全程 JSONL append-only</h4>
+        <p class="reveal">一条消息进来后，<code>agentCommand()</code>（<code>src/agents/agent-command.ts:1819</code>）是本地入口，网络请求走 <code>agentCommandFromIngress()</code>（强制 <code>senderIsOwner=false</code>）。运行态落在 <code>AgentSession</code> 类里。最关键的设计是<strong>没有"纯内存会话"</strong>：每个 turn 完成都把条目<strong>追加写进 JSONL</strong>（<code>session-manager.ts</code>），重启时 <code>loadEntriesFromFile()</code> 逐行重放、确定性地重建上下文。代价是每回合一次磁盘 I/O，换来的是崩溃可恢复 + 全程可审计 + 跨 client 重放。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agents/sessions/session-manager.ts — 追加写 + 重放</span></div>
+        <pre><code><span class="tok-f">persist</span>(entry)<span class="tok-p">:</span> <span class="tok-k">void</span> <span class="tok-p">{</span>
+  <span class="tok-k">if</span> (<span class="tok-k">this</span>.shouldPersist) <span class="tok-f">appendJsonlEntrySync</span>(<span class="tok-k">this</span>.sessionFile<span class="tok-p">,</span> entry)<span class="tok-p">;</span>
+  <span class="tok-k">this</span>.fileEntries.<span class="tok-f">push</span>(entry)<span class="tok-p">;</span>
+<span class="tok-p">}</span>
+<span class="tok-f">appendTurn</span>(message<span class="tok-p">,</span> parentId <span class="tok-p">=</span> <span class="tok-k">null</span>) <span class="tok-p">{</span>
+  <span class="tok-k">this</span>.<span class="tok-f">persist</span>(<span class="tok-p">{</span> type<span class="tok-p">:</span> <span class="tok-s">"message"</span><span class="tok-p">,</span> id<span class="tok-p">:</span> <span class="tok-f">uuidv7</span>()<span class="tok-p">,</span>
+    parentId<span class="tok-p">,</span> timestamp<span class="tok-p">:</span> <span class="tok-k">new</span> <span class="tok-t">Date</span>().<span class="tok-f">toISOString</span>()<span class="tok-p">,</span> message <span class="tok-p">}</span>)<span class="tok-p">;</span>
+<span class="tok-p">}</span>  <span class="tok-c">// parentId 形成树状会话，支持分叉</span></code></pre>
+      </div>
+
+      <!-- ③ Subagent -->
+      <div class="prose">
+        <h4 class="reveal">③ Subagent —— 派生独立<em>进程</em>，经 ACP 回流</h4>
+        <p class="reveal">OpenClaw 的子 agent 不是同进程里的对象，而是 <code>spawnAcpDirect()</code>（<code>src/agents/acp-spawn.ts</code>）<strong>启动一个新的 OpenClaw 子进程</strong>，子进程通过 ACP 反连父进程。隔离更彻底（独立 cwd / model / 工具 allow-list），但也更重。安全上有两道闸：<code>subagent-depth.ts</code> 的 <code>DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</code> 限制递归深度、每 agent 子代理数上限防止"派生爆炸"；<code>inherited-tool-deny.ts</code> 保证<strong>子 agent 权限不能超过父 agent</strong>。子进程的工具输出经 <code>startAcpSpawnParentStreamRelay()</code> 实时中继回父 session。</p>
+      </div>
+
+      <div class="tree reveal">  <span class="h">父 OpenClaw 进程</span>  (AgentSession · JSONL)
+  │  spawnAcpDirect({ profile, model, toolDeny })
+  │
+  ├─▶ <span class="d">子进程#1</span>  ← 新进程，ACP 反连父，独立 cwd/上下文
+  │      │  depth ≤ MAX_SPAWN_DEPTH，权限 ⊆ 父权限
+  │      └─ 工具输出 ──startAcpSpawnParentStreamRelay()──▶ 父 session 实时回放
+  │
+  ├─▶ <span class="d">子进程#2</span>  ← children ≤ MAX_CHILDREN_PER_AGENT
+  │      └─ SubagentEndReason: COMPLETE | ERROR | KILLED
+  │
+  └─ 父重启时 reconcileOrphanedRun() 回收孤儿子运行</div>
+
+      <!-- ④ Channels -->
+      <div class="prose">
+        <h4 class="reveal">④ 多 Channel —— 一个 <code>sessionKey</code> 锚定所有平台</h4>
+        <p class="reveal">每个平台实现统一的 <code>ChannelMessageAdapterShape</code>（<code>src/channels/message/types.ts</code>）。入站时平台原生事件经 <code>buildChannelInboundEventContext()</code> 归一化成统一的 <code>MsgContext</code>（携 <code>From / To / ChatType / SessionKey / Body</code>）；出站走 <code>ChannelMessageSendAdapter</code> 的四个方法 <code>text / media / payload(交互卡片/投票) / poll</code>，返回 <code>MessageReceipt</code> 追踪投递。<strong>真正让"一个助手跨所有平台"成立的是 <code>sessionKey</code></strong>——它是跨平台身份锚点（如 <code>telegram:123</code>、<code>-987:42</code> 群:话题、<code>discord:u_456</code>），<code>recordInboundSession()</code> 把"用户→上次 agent/channel/account"的绑定持久化；同一用户下次在<em>任意</em>平台发消息，都路由回同一助手与记忆。</p>
+      </div>
+
+      <div class="pipe reveal">
+        <div class="stage"><span class="sn">01</span><div class="st"><b>平台原生事件</b><small>Telegram 长轮询 / Discord WebSocket / Feishu 事件订阅 / WhatsApp Webhook …</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">02</span><div class="st"><b>buildChannelInboundEventContext()</b><small>归一化 → MsgContext(From/To/SessionKey/Body) · 中间件：typing(3s 续约/60s TTL) · @mention 门控 · 去重 debounce</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">03</span><div class="st"><b>sessionKey → Gateway → AgentSession</b><small>跨平台身份锚点解析上次 agent/account 绑定 · 经 gateway-protocol RPC 派发</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">04</span><div class="st"><b>ChannelMessageSendAdapter 出站</b><small>text / media / payload(卡片) / poll → 回到同一 bot 账号 · MessageReceipt 追踪 · 失败重试 + 机器人回环抑制</small></div></div>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/channels/message/types.ts — channel 必须实现的契约</span></div>
+        <pre><code><span class="tok-k">export type</span> <span class="tok-t">ChannelMessageAdapterShape</span>&lt;<span class="tok-t">TConfig</span>&gt; <span class="tok-p">=</span> <span class="tok-p">{</span>
+  id<span class="tok-p">?:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+  receive<span class="tok-p">?:</span> <span class="tok-t">ChannelMessageReceiveAdapterShape</span><span class="tok-p">;</span>  <span class="tok-c">// 入站归一化</span>
+  send<span class="tok-p">?:</span>    <span class="tok-t">ChannelMessageSendAdapter</span>&lt;<span class="tok-t">TConfig</span>&gt;<span class="tok-p">;</span>      <span class="tok-c">// text/media/payload/poll</span>
+  live<span class="tok-p">?:</span>    <span class="tok-t">ChannelMessageLiveAdapterShape</span><span class="tok-p">;</span>         <span class="tok-c">// typing / 流式</span>
+<span class="tok-p">}</span><span class="tok-p">;</span>
+<span class="tok-c">// 已实现的消息渠道：telegram · discord · slack · whatsapp · signal ·</span>
+<span class="tok-c">// feishu · matrix · msteams · googlechat · line · irc · imessage · qqbot …</span></code></pre>
+      </div>
+
+      <!-- ⑤ Provider + Plugin -->
+      <div class="prose">
+        <h4 class="reveal">⑤ Provider 抽象与插件系统 —— 68 个 provider 收敛到 ~10 个 API 类型</h4>
+        <p class="reveal">插件靠 <code>openclaw.plugin.json</code> 声明式注册：manifest 里写 <code>providers / channels / modelCatalog / modelIdNormalization(别名)</code>。关键设计是<strong>「冷控制面」</strong>——manifest 解析、模型目录、ID 归一化<em>不导入插件运行时代码</em>（<code>plugin-activation-boundary</code>），所以选模型/列能力在插件激活前就能完成、且利于 prompt 缓存。运行时 <code>registerApiProvider()</code> 把每个 provider 的 API 类型串（<code>anthropic-messages</code> / <code>openai-completions</code> / <code>google-generative-ai</code>…）连同 stream 函数注册进表。30+ 厂商最终收敛到约 10 个 API family，工具 schema 按 family 归一化（Gemini 砍掉 <code>pattern/minLength</code>、OpenAI 套 strict JSON）。141 个 extension 里约 <strong>68 个是 provider</strong>、~20 个是 channel、其余是 memory/tool/基础设施。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/llm-runtime/src/api-registry.ts — provider 统一注册</span></div>
+        <pre><code><span class="tok-k">export function</span> <span class="tok-f">registerApiProvider</span>(provider<span class="tok-p">,</span> sourceId) <span class="tok-p">{</span>
+  apiProviderRegistry.<span class="tok-f">set</span>(provider.api<span class="tok-p">,</span> <span class="tok-p">{</span>     <span class="tok-c">// "anthropic-messages" …</span>
+    provider<span class="tok-p">:</span> <span class="tok-p">{</span> api<span class="tok-p">,</span> stream<span class="tok-p">,</span> streamSimple <span class="tok-p">}</span><span class="tok-p">,</span>
+    sourceId<span class="tok-p">,</span>
+  <span class="tok-p">}</span>)<span class="tok-p">;</span>
+<span class="tok-p">}</span>
+<span class="tok-c">// 插件作者只用 definePluginEntry({ id, register(api){…} }) 这层 facade，</span>
+<span class="tok-c">// 钩子：auth / resolveCatalog / resolveDynamicModel / normalizeToolSchemas / wrapStreamFn</span></code></pre>
+      </div>
+
+      <!-- ⑥ Tools + MCP + Security -->
+      <div class="prose">
+        <h4 class="reveal">⑥ 工具系统 · MCP 双向 · 网络安全</h4>
+        <p class="reveal">工具用 <code>ToolDescriptor</code>（<code>src/tools/types.ts</code>）描述，<code>owner</code> 区分四种来源：<code>core / plugin / channel / mcp</code>。<code>buildToolPlan()</code> 去重、查可用性，切成 visible（带 executor）与 hidden（带不可用原因），重名或缺 executor 直接抛 <code>ToolPlanContractError</code>。MCP 是<strong>双向</strong>的：既作 client 连外部 stdio MCP server，又作 server 把自身工具（甚至 <code>conversations_list / messages_read</code> 这类 channel 工具）经 MCP 暴露出去。安全是"默认锁定"：bash 执行有 <code>ExecMode</code>（<code>deny/allowlist/ask/auto/full</code>，<strong>默认 allowlist</strong>，未命中即弹批准）、符号链接父目录校验、以及 <code>packages/net-policy</code> 的 SSRF 防护——封掉 RFC1918 私网、loopback、link-local 与<strong>云元数据地址</strong>（<code>100.100.100.200</code> 等），还能识别 IPv6 里内嵌的 IPv4（NAT64/6to4/Teredo）。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/net-policy/src/ip.ts — SSRF：拦私网与云元数据</span></div>
+        <pre><code><span class="tok-k">export function</span> <span class="tok-f">isBlockedSpecialUseIpv4Address</span>(addr<span class="tok-p">,</span> options <span class="tok-p">=</span> <span class="tok-p">{}</span>) <span class="tok-p">{</span>
+  <span class="tok-k">const</span> bench <span class="tok-p">=</span> addr.<span class="tok-f">match</span>(<span class="tok-t">RFC2544_BENCHMARK_PREFIX</span>)<span class="tok-p">;</span>
+  <span class="tok-k">if</span> (bench <span class="tok-p">&amp;&amp;</span> options.allowRfc2544BenchmarkRange) <span class="tok-k">return</span> <span class="tok-k">false</span><span class="tok-p">;</span>
+  <span class="tok-k">return</span> <span class="tok-t">BLOCKED_IPV4_SPECIAL_USE_RANGES</span>.<span class="tok-f">has</span>(addr.<span class="tok-f">range</span>()) <span class="tok-p">||</span> bench<span class="tok-p">;</span>
+<span class="tok-p">}</span>  <span class="tok-c">// 10/8 · 127/8 · 169.254/16 · 100.100.100.200(云 metadata) …</span></code></pre>
+      </div>
+
+      <!-- ⑦ Memory -->
+      <div class="prose">
+        <h4 class="reveal">⑦ 记忆 —— <code>memory-host-sdk</code> 契约 + 三种可插拔后端</h4>
+        <p class="reveal">所有记忆后端实现统一的 <code>MemorySearchManager</code> 接口（<code>packages/memory-host-sdk</code>）：<code>search / readFile / status / probeEmbeddingAvailability / probeVectorAvailability</code>。三种内置后端各司其职：<code>memory-lancedb</code>（向量，L2 距离 → 相似度 <code>1/(1+d)</code>）、<code>memory-wiki</code>（Markdown vault + 全文检索，注入 prompt 段）、<code>active-memory</code>（按会话滑动窗口的即时上下文）。记忆<strong>自动沉淀</strong>挂在 <code>agent_end</code> 钩子上：抽取用户消息、嵌入、<strong>0.95 相似即判重跳过</strong>，否则入库。记忆同样按 <code>agentId + sessionKey</code> 检索，所以可跨 Telegram/Discord/… 共享同一份记忆。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">extensions/memory-lancedb/index.ts — agent_end 自动沉淀 + 判重</span></div>
+        <pre><code><span class="tok-k">const</span> vector <span class="tok-p">=</span> <span class="tok-k">await</span> embeddings.<span class="tok-f">embed</span>(text)<span class="tok-p">;</span>
+<span class="tok-k">const</span> existing <span class="tok-p">=</span> <span class="tok-k">await</span> db.<span class="tok-f">search</span>(vector<span class="tok-p">,</span> <span class="tok-n">1</span><span class="tok-p">,</span> <span class="tok-n">0.95</span>)<span class="tok-p">;</span>  <span class="tok-c">// 0.95 相似 = 重复</span>
+<span class="tok-k">if</span> (existing.length <span class="tok-p">&gt;</span> <span class="tok-n">0</span>) <span class="tok-k">continue</span><span class="tok-p">;</span>
+<span class="tok-k">await</span> db.<span class="tok-f">store</span>(<span class="tok-p">{</span> text<span class="tok-p">,</span> vector<span class="tok-p">,</span> importance<span class="tok-p">:</span> <span class="tok-n">0.7</span><span class="tok-p">,</span> category <span class="tok-p">}</span>)<span class="tok-p">;</span>
+<span class="tok-c">// embedding 端点挂了 → probeEmbeddingAvailability=false → 退回全文检索，沉淀暂停</span></code></pre>
+      </div>
+
+      <!-- 失败模式 -->
+      <div class="prose">
+        <h4 class="reveal">失败模式 · 默认锁定再按需放宽</h4>
+      </div>
+      <div class="grid2">
+        <div class="card reveal"><span class="ico">🌀</span><h5 class="accent">子代理派生爆炸</h5><p><code>MAX_SPAWN_DEPTH</code> + 每 agent 子数上限挡住递归失控；父崩溃后 <code>reconcileOrphanedRun()</code> 回收孤儿子运行。</p></div>
+        <div class="card reveal"><span class="ico">🔁</span><h5 class="accent">机器人互回环</h5><p><code>recordChannelBotPairLoopAndCheckSuppression()</code> 检测"bot 回 bot"循环并抑制第二代生成，避免无限刷屏。</p></div>
+        <div class="card reveal"><span class="ico">🧬</span><h5 class="accent">向量/嵌入不可用</h5><p>探针返回 false → 记忆降级为<strong>纯全文检索</strong>，新记忆沉淀暂停；不抛错、不阻塞 agent。</p></div>
+        <div class="card reveal"><span class="ico">🛡️</span><h5 class="accent">SSRF / 私网访问</h5><p>net-policy 在网络层直接拒绝私网与云元数据 IP，<strong>无 fallback</strong>；URL 日志前先剥离 userinfo 凭证。</p></div>
+        <div class="card reveal"><span class="ico">⛔</span><h5 class="accent">exec 批准超时</h5><p>bash 默认 allowlist，未命中走 ask；批准请求超时即失效，agent 须重试或升级，绝不静默执行。</p></div>
+        <div class="card reveal"><span class="ico">📡</span><h5 class="accent">投递失败</h5><p>瞬时错误指数退避重试；永久错误（403/已退群）标记终态；未知态经 <code>reconcileUnknownSend()</code> 反查平台确认。</p></div>
+      </div>
+
+      <!-- 对比 -->
+      <div class="prose">
+        <h4 class="reveal">与 Kimi Code / Odysseus 的定位对比</h4>
+      </div>
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead><tr><th>维度</th><th class="c-cg">OpenClaw</th><th>Kimi Code</th><th>Odysseus</th></tr></thead>
+          <tbody>
+            <tr><td>形态</td><td class="c-cg">全渠道 messaging gateway</td><td>CLI/TUI 编程 Agent</td><td>自托管 Web 工作台</td></tr>
+            <tr><td>入口面</td><td class="c-cg">20+ 聊天平台</td><td>终端单 Binary</td><td>浏览器（FastAPI）</td></tr>
+            <tr><td>多 Agent</td><td class="c-cg">派生<strong>独立进程</strong>，ACP 反连</td><td>同进程多 Agent 对象 + Wire</td><td>原生 async turn loop</td></tr>
+            <tr><td>协议立场</td><td class="c-cg">ACP 两端（被集成 + 编排）</td><td>MCP 一等公民</td><td>内建 5 个 MCP server</td></tr>
+            <tr><td>记忆</td><td class="c-cg">三后端可插拔 + 跨平台 sessionKey</td><td>Compaction 为主</td><td>ChromaDB 混合检索</td></tr>
+            <tr><td>语言/形态</td><td class="c-cg">TS · 141 扩展插件化</td><td>TS · 7 包 monorepo</td><td>Python · 单体进程</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- /OPENCLAW_DEEP_DIVE -->
+
+      <div class="prose">
         <h4 class="reveal">对 coding agent 生态的意义</h4>
         <p class="reveal">OpenClaw 的核心价值在于<strong>把"个人 AI"从"某个平台的 AI 工具"里解放出来</strong>。你的 AI 助手不需要存在于每个消息平台——它只需要存在一次，通过 channel 适配器连接到所有平台。OpenClaw 的 subagent 系统和 ACP 协议，也为 multi-agent 协作提供了可复用的基础设施。</p>
       </div>
