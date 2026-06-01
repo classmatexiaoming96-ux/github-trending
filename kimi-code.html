@@ -39,18 +39,13 @@
   </div>
   <div class="tabs-wrap">
     <div class="tabs" role="tablist">
-      <button role="tab" data-tab="cg"><span class="dot"></span>CodeGraph <span class="pill">索引层</span></button>
-      <button role="tab" data-tab="ua"><span class="dot"></span>Understand-Anything <span class="pill">认知层</span></button>
-      <button role="tab" data-tab="cp"><span class="dot"></span>Claude Plugins <span class="pill">能力层</span></button>
-      <button role="tab" data-tab="oh"><span class="dot"></span>OpenHuman Memory Tree <span class="pill">记忆层</span></button>
-      <button role="tab" data-tab="kc"><span class="dot"></span>Kimi Code <span class="pill">模型层</span></button>
-      <button role="tab" data-tab="od"><span class="dot"></span>Odysseus <span class="pill">Agent</span></button>
+      <button role="tab" class="active" data-tab="kc"><span class="dot"></span>Kimi Code <span class="pill">模型层</span></button>
     </div>
   </div>
 </header>
 
 <main>
-<div class="tab-panel" data-tab="kc">
+<div class="tab-panel active" data-tab="kc">
   <section class="hero" style="padding:130px 0 30px">
   <div class="wrap">
     <span class="eyebrow reveal"><span class="pulse"></span>MoonshotAI/kimi-code · TypeScript Monorepo · MIT</span>
@@ -60,7 +55,7 @@
   </div>
 </section>
 
-  <section id="kc-anchor" class="project kc">
+  <section id="kc" class="project kc">
   <div class="wrap">
     <div class="proj-head reveal">
       <div class="proj-badge">KC</div>
@@ -117,7 +112,287 @@
 
         <h5 class="reveal">Kaos —— 执行环境抽象</h5>
         <p class="reveal"><code>Kaos</code> 把文件系统 / 进程 / 路径抽象成一个统一接口。<code>LocalKaos</code> 用 Node.js <code>fs</code>/<code>child_process</code> 实现；<code>ssh.ts</code> 提供远程执行——同一套 API surface 既能跑本地也能跑远程。</p>
+      </div>
 
+      <!-- ======================= 深度源码拆解 ======================= -->
+      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
+      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>packages/agent-core</code>、<code>packages/kosong</code>、<code>packages/kaos</code> 的逐文件阅读，把上面六个模块展开到「关键代码段 + 算法 + 失败模式」的粒度。</p>
+
+      <!-- ====== 1. 多 Agent Session 与 Subagent 隔离 ====== -->
+      <div class="prose">
+        <h4 class="reveal">① 多 Agent Session 架构：一个 Session，N 个隔离 Agent</h4>
+        <p class="reveal">kimi-code 的「多 Agent」不是把一个大上下文切片，而是<strong>真正实例化多个独立 <code>Agent</code> 对象</strong>。<code>Session</code> 是容器，持有一张 <code>agents: Map&lt;string, Agent&gt;</code>；主 agent（<code>type:'main'</code>）启动时创建，subagent（<code>type:'sub'</code>）则在运行期由 <code>SessionSubagentHost</code> 按需 spawn。每个 Agent 都自带<strong>独立的</strong> <code>Kaos</code> 执行环境、<code>ToolManager</code>、<code>PermissionManager</code>、<code>AgentRecords</code>（独立 wire.jsonl）、以及独立的 <code>context.history</code>——所以子 agent 探索时塞满的上下文，<em>不会污染</em>主 agent 的窗口。这正是「explore 子代理读 50 个文件，主 agent 只收到一段 200 字摘要」的实现基础。</p>
+        <p class="reveal">关键在于<strong>父子之间只通过「一次 prompt 进、一段 summary 出」通信</strong>。<code>spawn()</code> 先解析 profile（coder / explore / plan），用父 agent 的 <code>rawGenerate</code> 创建子 agent，再用 <code>linkAbortSignal</code> 把父信号挂到子 <code>AbortController</code>——父一旦中断，子立即级联 abort。子 agent 跑完后只回传 <code>lastAssistantText</code>，且有一条<strong>「摘要太短就重跑」</strong>的兜底：少于 200 字符触发一次 <code>SUMMARY_CONTINUATION_PROMPT</code> 续写。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">session/subagent-host.ts — spawn() 隔离创建</span></div>
+        <pre><code><span class="tok-k">async</span> <span class="tok-f">spawn</span>(profileName<span class="tok-p">,</span> options)<span class="tok-p">:</span> <span class="tok-t">Promise</span>&lt;<span class="tok-t">SubagentHandle</span>&gt; <span class="tok-p">{</span>
+  options.signal.<span class="tok-f">throwIfAborted</span>()<span class="tok-p">;</span>
+  <span class="tok-k">const</span> parent <span class="tok-p">=</span> <span class="tok-k">this</span>.session.agents.<span class="tok-f">get</span>(<span class="tok-k">this</span>.ownerAgentId)<span class="tok-p">;</span>
+  <span class="tok-k">const</span> profile <span class="tok-p">=</span> <span class="tok-k">this</span>.<span class="tok-f">resolveProfile</span>(parent<span class="tok-p">,</span> profileName)<span class="tok-c">;  // coder|explore|plan</span>
+
+  <span class="tok-c">// ① 创建一个全新的 Agent 实例（独立 Kaos / Tools / Records / context）</span>
+  <span class="tok-k">const</span> <span class="tok-p">{</span> id<span class="tok-p">,</span> agent <span class="tok-p">}</span> <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">this</span>.session.<span class="tok-f">createAgent</span>(
+    <span class="tok-p">{</span> type<span class="tok-p">:</span> <span class="tok-s">'sub'</span><span class="tok-p">,</span> generate<span class="tok-p">:</span> parent.rawGenerate <span class="tok-p">}</span><span class="tok-p">,</span> <span class="tok-k">undefined</span><span class="tok-p">,</span> <span class="tok-k">this</span>.ownerAgentId<span class="tok-p">,</span>
+  )<span class="tok-p">;</span>
+
+  <span class="tok-c">// ② 父信号 → 子 controller，父 abort 时子级联 abort</span>
+  <span class="tok-k">const</span> controller <span class="tok-p">=</span> <span class="tok-k">new</span> <span class="tok-t">AbortController</span>()<span class="tok-p">;</span>
+  <span class="tok-k">const</span> unlink <span class="tok-p">=</span> <span class="tok-f">linkAbortSignal</span>(options.signal<span class="tok-p">,</span> controller)<span class="tok-p">;</span>
+
+  <span class="tok-k">const</span> completion <span class="tok-p">=</span> <span class="tok-k">this</span>.<span class="tok-f">runChild</span>(parent<span class="tok-p">,</span> id<span class="tok-p">,</span> agent<span class="tok-p">,</span> profile.name<span class="tok-p">,</span>
+    <span class="tok-p">{</span> ...options<span class="tok-p">,</span> signal<span class="tok-p">:</span> controller.signal <span class="tok-p">}</span><span class="tok-p">,</span>
+    () <span class="tok-p">=&gt;</span> <span class="tok-k">this</span>.<span class="tok-f">configureChild</span>(parent<span class="tok-p">,</span> agent<span class="tok-p">,</span> profile)<span class="tok-p">,</span> <span class="tok-c">// 继承 cwd/model/thinking</span>
+  ).<span class="tok-f">finally</span>(() <span class="tok-p">=&gt;</span> <span class="tok-p">{</span> <span class="tok-f">unlink</span>()<span class="tok-p">;</span> <span class="tok-k">this</span>.activeChildren.<span class="tok-f">delete</span>(id)<span class="tok-p">;</span> <span class="tok-p">}</span>)<span class="tok-p">;</span>
+  <span class="tok-k">return</span> <span class="tok-p">{</span> agentId<span class="tok-p">:</span> id<span class="tok-p">,</span> profileName<span class="tok-p">:</span> profile.name<span class="tok-p">,</span> resumed<span class="tok-p">:</span> <span class="tok-k">false</span><span class="tok-p">,</span> completion <span class="tok-p">}</span><span class="tok-p">;</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <p class="reveal"><strong>explore 子代理的冷启动优化：</strong>因为 explore agent 从空上下文出发，<code>runChild</code> 会在 prompt 前注入一段 <code>collectGitContext()</code> 的仓库快照（当前分支、最近 commit、改动文件），让它「落地即知身在何处」。这是个很小但很关键的细节——别的 subagent 没有这个待遇。</p>
+      </div>
+
+      <div class="tree reveal">  <span class="h">Session</span> (一个会话大脑)
+  │  agents: Map&lt;id, Agent&gt;          metadata.agents[id] = {type, parentAgentId}
+  │
+  ├── <span class="d">Agent#main</span>  ── Kaos · Tools · Permission · Records(wire.jsonl) · context.history
+  │      │  turn.prompt("重构鉴权模块")
+  │      │
+  │      ├─▶ <span class="d">Agent#sub-1 (explore)</span>  ← 注入 gitContext，读 40 个文件
+  │      │      └─ 独立 context（40 文件不回传父）→ 只回 200+ 字摘要 ───┐
+  │      │                                                              │
+  │      ├─▶ <span class="d">Agent#sub-2 (coder)</span>   ← 独立 Permission 链，写文件      │
+  │      │      └─ 返回 diff 摘要 ──────────────────────────────────┐ │
+  │      │                                                          ▼ ▼
+  │      └─◀ 父 agent 的 context 只追加两段 summary（窗口零污染）  &lt;tool_result&gt;</div>
+
+      <div class="prose">
+        <h5 class="reveal">失败模式</h5>
+        <ul class="reveal">
+          <li><strong>子在 max_tokens 处停：</strong><code>throwIfSubagentStoppedAtMaxTokens</code> 直接抛 <code>Subagent turn failed before completing its final summary: reason=max_tokens</code>——拒绝把半截结果当成功交回。</li>
+          <li><strong>并发 resume 同一子：</strong><code>activeChildren.has(id) || child.turn.hasActiveTurn</code> 命中即抛 <code>already running ... cannot be resumed concurrently</code>。</li>
+          <li><strong>归属校验：</strong>resume 时 <code>metadata.parentAgentId !== ownerAgentId</code> 抛 <code>does not belong to this parent</code>——子 agent 不能被别的父「认领」。</li>
+          <li><strong>resume 模型对齐：</strong>子永远跟随父<em>当前</em>模型——resume 时强制 <code>child.config.update({ modelAlias: parent.config.modelAlias })</code>，即使 spawn 后父换了模型。</li>
+        </ul>
+      </div>
+
+      <!-- ====== 2. Turn Loop 双层设计 ====== -->
+      <div class="prose">
+        <h4 class="reveal">② Agent Turn Loop：runTurn / executeLoopStep 双层收敛</h4>
+        <p class="reveal">turn loop 被刻意拆成<strong>两层无状态函数</strong>，状态全部外置到 Agent，所以 loop 本身可独立单测。外层 <code>runTurn()</code> 管「turn 级收敛」：循环边界 abort、max-step 保护、usage 聚合，以及一个微妙的「非工具停止后是否继续」决策；内层 <code>executeLoopStep()</code> 管「单 step 原子操作」：pre/post hook、构建消息、原子 step envelope、LLM 调用 + retry、工具批处理。两者的分界点是 <code>stopReason === 'tool_use'</code>——它不是终止信号，而是<strong>循环控制信号</strong>：有工具调用就 <code>continue</code> 进下一 step，没有才进入「要不要收尾」判断。</p>
+        <p class="reveal">一个容易被忽略但很重要的设计：<strong>usage 在 LLM 返回后<em>立即</em>记账</strong>，而不是等工具执行完。这样即使工具执行期间用户 abort，已经消费的 token 也不会丢——计费/预算永远准确。<code>TurnFlow</code> 是对外的发射器，持有 <code>activeTurn</code> 状态和一个 <code>steerBuffer</code>：当一个 turn 正在跑时，新输入走 <code>steer()</code> 被 buffer 起来（而非并发启动），turn 间隙再注入；如果没有活跃 turn，<code>steer</code> 等价于 <code>prompt</code> 直接 launch。<code>launch</code> 里那句 <code>turn.agent_busy</code> 错误就是并发 turn 的硬防线。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">loop/run-turn.ts — 外层 turn 收敛（精简）</span></div>
+        <pre><code><span class="tok-k">while</span> (<span class="tok-k">true</span>) <span class="tok-p">{</span>
+  signal.<span class="tok-f">throwIfAborted</span>()<span class="tok-p">;</span>                 <span class="tok-c">// 循环边界 abort 检查</span>
+  <span class="tok-k">if</span> (steps &gt;= maxSteps) <span class="tok-k">throw</span> <span class="tok-f">createMaxStepsExceededError</span>(maxSteps)<span class="tok-p">;</span>
+  steps<span class="tok-p">++;</span>
+
+  <span class="tok-k">const</span> stepResult <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-f">executeLoopStep</span>(<span class="tok-p">{</span>
+    turnId<span class="tok-p">,</span> signal<span class="tok-p">,</span> buildMessages<span class="tok-p">,</span> dispatchEvent<span class="tok-p">,</span> llm<span class="tok-p">,</span> tools<span class="tok-p">,</span> hooks<span class="tok-p">,</span>
+    <span class="tok-f">recordUsage</span><span class="tok-p">:</span> (u) <span class="tok-p">=&gt;</span> <span class="tok-p">{</span> usage <span class="tok-p">=</span> <span class="tok-f">addUsage</span>(usage<span class="tok-p">,</span> u)<span class="tok-p">;</span> <span class="tok-p">}</span><span class="tok-p">,</span> <span class="tok-c">// 立即记账</span>
+  <span class="tok-p">}</span>)<span class="tok-p">;</span>
+
+  <span class="tok-k">if</span> (stepResult.stopReason <span class="tok-p">===</span> <span class="tok-s">'tool_use'</span>) <span class="tok-k">continue</span><span class="tok-p">;</span>  <span class="tok-c">// ← 控制信号，非终止</span>
+  stopReason <span class="tok-p">=</span> stepResult.stopReason<span class="tok-p">;</span>
+
+  <span class="tok-c">// 非工具停止：问 host hook「要不要再说一轮」</span>
+  <span class="tok-k">if</span> (!(<span class="tok-k">await</span> hooks?.<span class="tok-f">shouldContinueAfterStop</span>?.(<span class="tok-p">{</span> turnId<span class="tok-p">,</span> stopReason<span class="tok-p">,</span> ... <span class="tok-p">}</span>))?.continue) <span class="tok-k">break</span><span class="tok-p">;</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="tree reveal">  用户输入 ─▶ TurnFlow.prompt() ──▶ runTurn()
+                                       │
+              ┌────────────────────────┴───────────────────────────┐
+              ▼                                                     │
+        executeLoopStep()   beforeStep hook → buildMessages →       │
+          step.begin ─▶ LLM(chatWithRetry) ─▶ recordUsage(立即) ─▶  │
+          deriveStopReason                                          │
+              │                                                     │
+       tool_use? ──yes──▶ runToolCallBatch(并行/冲突调度) ──────────┘ (continue)
+              │
+              no ──▶ shouldContinueAfterStop? ──yes──▶ 再循环
+                                              └─no──▶ TurnResult{stopReason,steps,usage}</div>
+
+      <div class="prose">
+        <p class="reveal"><strong>并行工具调度（<code>ToolScheduler</code>）：</strong>同一 step 里 LLM 可能一次发多个 tool_call。调度器不是无脑全并行，而是基于 <code>ToolAccesses.conflict()</code> 做<strong>资源冲突检测</strong>——读同一文件可并行，写同一文件则排队（<code>queuedTasks</code>），任务完成后 <code>startQueuedTasks()</code> 重新唤醒被挡住的任务。这避免了两个工具同时写一个文件的竞态。</p>
+        <div class="tablewrap reveal">
+          <table class="cmp">
+            <thead><tr><th>失败场景</th><th>表现 / 归一</th><th>处理</th></tr></thead>
+            <tbody>
+              <tr><td>LLM 网络抖动</td><td><code>isRetryableGenerateError</code></td><td><code>chatWithRetry</code> 指数退避（300ms→5s，×2，≤3 次）</td></tr>
+              <tr><td>turn 中途 abort</td><td><code>signal.aborted</code></td><td>返回 <code>{stopReason:'aborted'}</code>，usage 已记不丢</td></tr>
+              <tr><td>步数超限</td><td><code>max_steps</code></td><td><code>createMaxStepsExceededError</code> → <code>turn.interrupted</code></td></tr>
+              <tr><td>安全过滤</td><td><code>filtered</code></td><td>非工具停止，不继续循环</td></tr>
+              <tr><td>截断</td><td><code>max_tokens</code></td><td>同上，提前收尾</td></tr>
+              <tr><td>step.end 前 abort</td><td>envelope 不完整</td><td><code>runTurn</code> 捕获 → 发 <code>turn.interrupted</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ====== 3. Kosong 多 Provider ====== -->
+      <div class="prose">
+        <h4 class="reveal">③ Kosong：把 5 类 LLM 协议压平成一个 ChatProvider</h4>
+        <p class="reveal"><code>kosong</code> 是纯粹的<strong>数据转换层</strong>，不含任何业务逻辑——这是它能被独立发布、独立测试的原因。<code>createProvider(config)</code> 是工厂，按 <code>config.type</code> 分发到六种实现，注意 <code>vertexai</code> 复用了 <code>GoogleGenAIChatProvider</code>，所以代码里其实是 5 个 adapter 服务 6 种 provider type。每个 adapter 干的是同一件事：把自家 SDK 的流式事件，翻译成 kosong 统一的 <code>StreamedMessagePart</code> 序列，并把自家的 <code>finish_reason</code> 归一到 6 值枚举。</p>
+        <p class="reveal"><code>generate()</code> 的核心难点是<strong>并行工具调用的参数 delta 会交错</strong>：provider 流里 tool-call A 的参数片段和 tool-call B 的可能交替到达，所以维护了一张 <code>toolCallIndexMap: Map&lt;index, arrayIdx&gt;</code> 把碎片路由回正确的 toolCall。也因此，<code>onToolCall</code> 回调只在<strong>流完全结束、参数合并完成后</strong>才触发——delta 期间只更新 UI，不当真。最后一道闸是 <code>isEmptyMessage</code>：既无 text 又无 tool_calls 就抛 <code>APIEmptyResponseError</code>（reasoning 模型把预算全耗在 <code>reasoning_content</code> 上、content 为空，正是这个坑）。</p>
+      </div>
+
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead><tr><th>Provider</th><th>底层 SDK</th><th>关键差异 / 坑</th></tr></thead>
+          <tbody>
+            <tr><td class="c-cg">kimi.ts</td><td>openai (Moonshot 兼容端点)</td><td>支持 <code>uploadVideo()</code>；强制只发 <code>max_completion_tokens</code>（发 <code>max_tokens</code> 会被 reasoning 预算吃掉 → 200 空响应）</td></tr>
+            <tr><td class="c-cg">anthropic.ts</td><td>@anthropic-ai/sdk</td><td>原生 thinking block；多一个 <code>pause_turn</code> → 归一为 <code>paused</code>；<code>refusal</code> → <code>filtered</code></td></tr>
+            <tr><td class="c-cg">openai-common.ts</td><td>openai (共享转换)</td><td>承载 <code>convertContentPart</code> / <code>toolToOpenAI</code> / finish_reason 归一，被 kimi & legacy 复用</td></tr>
+            <tr><td class="c-cg">openai-legacy.ts</td><td>openai (Chat Completions)</td><td>标准/Azure Chat Completions；旧版 function-calling 形状</td></tr>
+            <tr><td class="c-cg">openai-responses.ts</td><td>openai (Responses API)</td><td>新 Responses 协议，事件流形状与 Chat Completions 不同</td></tr>
+            <tr><td class="c-cg">google-genai.ts</td><td>@google/genai</td><td>同时服务 <code>google-genai</code> 与 <code>vertexai</code> 两种 type；Gemini 专用 <code>STOP/MAX_TOKENS</code> 归一</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">kosong/src/provider.ts — finish_reason 6 值归一</span></div>
+        <pre><code><span class="tok-k">export type</span> <span class="tok-t">FinishReason</span> <span class="tok-p">=</span>
+  <span class="tok-p">|</span> <span class="tok-s">'completed'</span>   <span class="tok-c">// OpenAI 'stop' · Anthropic 'end_turn'/'stop_sequence' · Gemini 'STOP'</span>
+  <span class="tok-p">|</span> <span class="tok-s">'tool_calls'</span>  <span class="tok-c">// Anthropic 'tool_use' · Chat Completions 'tool_calls'</span>
+  <span class="tok-p">|</span> <span class="tok-s">'truncated'</span>   <span class="tok-c">// OpenAI 'length' · Anthropic 'max_tokens' · Gemini 'MAX_TOKENS'</span>
+  <span class="tok-p">|</span> <span class="tok-s">'filtered'</span>    <span class="tok-c">// Anthropic 'refusal' / 安全策略</span>
+  <span class="tok-p">|</span> <span class="tok-s">'paused'</span>      <span class="tok-c">// Anthropic 'pause_turn'（仅此家有）</span>
+  <span class="tok-p">|</span> <span class="tok-s">'other'</span><span class="tok-p">;</span>     <span class="tok-c">// 未分类的 provider 原生值</span></code></pre>
+      </div>
+
+      <!-- ====== 4. Wire Records / Replay ====== -->
+      <div class="prose">
+        <h4 class="reveal">④ Wire Records / Replay：每个动作都是一行 JSONL</h4>
+        <p class="reveal">这是 kimi-code 最有辨识度的能力。系统里<strong>没有可变的"会话状态对象"被直接持久化</strong>——取而代之，每个状态变化都被记成一条结构化 <code>AgentRecord</code>，append 进 <code>wire.jsonl</code>（每行一个 JSON）。记录类型有 20+ 种：<code>turn.prompt</code> / <code>turn.steer</code> / <code>config.update</code> / <code>permission.set_mode</code> / <code>usage.record</code> / <code>context.append_message</code> / <code>context.append_loop_event</code> / <code>full_compaction.begin</code> / <code>full_compaction.complete</code> / <code>tools.register_user_tool</code> …。重启恢复时，<code>AgentRecords.restore()</code> 把 <code>_restoring</code> 置 true，逐行回放 <code>restoreAgentRecord</code>，每种类型映射到对应的 agent 内部方法。</p>
+        <p class="reveal"><strong>恢复期的硬契约：restore 不得产生任何副作用</strong>——不调 LLM、不执行工具、不碰文件系统。它纯粹是「把日志重演成内存状态」。<code>ReplayBuilder</code> 只在 <code>restoring</code> 模式下收集记录用于可视化（<code>apps/vis</code> 调试器就吃这个格式）。这套 wire-first 设计带来三个直接好处：① 崩溃后能精确恢复到包括 pending turn 的状态；② 跨客户端重放同一会话；③ 协议版本升级时用 <code>migrateWireRecord</code> 做逐条迁移（<code>v1.1</code> / <code>v1.2</code> 迁移器就在 <code>records/migration/</code>）。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">~/.kimi/sessions/&lt;id&gt;/agent-&lt;id&gt;/wire.jsonl（示意）</span></div>
+        <pre><code><span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"metadata"</span><span class="tok-p">,</span><span class="tok-s">"protocol_version"</span><span class="tok-p">:</span><span class="tok-s">"1.2"</span><span class="tok-p">,</span><span class="tok-s">"created_at"</span><span class="tok-p">:</span><span class="tok-n">1717200000</span><span class="tok-p">}</span>
+<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"config.update"</span><span class="tok-p">,</span><span class="tok-s">"modelAlias"</span><span class="tok-p">:</span><span class="tok-s">"kimi-k2"</span><span class="tok-p">,</span><span class="tok-s">"cwd"</span><span class="tok-p">:</span><span class="tok-s">"/repo"</span><span class="tok-p">}</span>
+<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"turn.prompt"</span><span class="tok-p">,</span><span class="tok-s">"input"</span><span class="tok-p">:</span><span class="tok-p">[{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"text"</span><span class="tok-p">,</span><span class="tok-s">"text"</span><span class="tok-p">:</span><span class="tok-s">"修复登录 bug"</span><span class="tok-p">}]</span><span class="tok-p">}</span>
+<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"context.append_loop_event"</span><span class="tok-p">,</span><span class="tok-s">"event"</span><span class="tok-p">:</span><span class="tok-p">{</span><span class="tok-s">"kind"</span><span class="tok-p">:</span><span class="tok-s">"tool.call"</span><span class="tok-p">,</span><span class="tok-s">"name"</span><span class="tok-p">:</span><span class="tok-s">"edit"</span><span class="tok-p">}}</span>
+<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"usage.record"</span><span class="tok-p">,</span><span class="tok-s">"model"</span><span class="tok-p">:</span><span class="tok-s">"kimi-k2"</span><span class="tok-p">,</span><span class="tok-s">"usage"</span><span class="tok-p">:</span><span class="tok-p">{</span><span class="tok-s">"input"</span><span class="tok-p">:</span><span class="tok-n">8200</span><span class="tok-p">,</span><span class="tok-s">"output"</span><span class="tok-p">:</span><span class="tok-n">410</span><span class="tok-p">}}</span>
+<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"full_compaction.complete"</span><span class="tok-p">,</span><span class="tok-s">"compactedCount"</span><span class="tok-p">:</span><span class="tok-n">42</span><span class="tok-p">,</span><span class="tok-s">"tokensBefore"</span><span class="tok-p">:</span><span class="tok-n">95000</span><span class="tok-p">,</span><span class="tok-s">"tokensAfter"</span><span class="tok-p">:</span><span class="tok-n">31000</span><span class="tok-p">}</span></code></pre>
+      </div>
+
+      <!-- ====== 5. MCP + OAuth ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑤ McpConnectionManager + OAuth：401 不是错误，是"该登录了"</h4>
+        <p class="reveal"><code>McpConnectionManager</code> 为每个 Session 持有全部 MCP server 的生命周期。<code>connectAll</code> 用 <code>Promise.allSettled</code> <strong>并行连接、故障隔离</strong>——一个崩掉的 server 绝不阻塞 Session 启动。每个 entry 有五态机：<code>pending → connected / failed / disabled / needs-auth</code>，状态变化通过 <code>onStatusChange</code> 推给 TUI。stdio 走 <code>StdioMcpClient</code>（子进程 + stderr 快照用于报错），HTTP 走 <code>HttpMcpClient</code>。还有一个 <code>attemptId</code> 单调递增的<strong>陈旧回调防护</strong>：reconnect 期间老连接的 <code>onUnexpectedClose</code> 回来时，<code>isCurrent()</code> 发现 attemptId 不匹配就丢弃，避免老连接的事件污染新状态。</p>
+        <p class="reveal"><strong>OAuth 的精髓在「何时<em>不</em>挂 provider」：</strong>对没有静态 bearer token 的 HTTP server，首次连接<strong>故意不挂 OAuth provider</strong>，让 401 干净地冒成 <code>UnauthorizedError</code>，从而把 entry 翻成 <code>needs-auth</code>（而不是 <code>failed</code>）——这样用户能看到 <code>run /mcp-config login &lt;name&gt;</code> 的可操作提示。只有当 <code>hasTokens()</code> 已经有盘上 token 时，才把 provider 挂上去让 SDK 在 401 时自动刷新。真正的浏览器授权由 <code>McpOAuthService.beginAuthorization</code> 驱动：起一个一次性 localhost 回调监听 → 推进 SDK <code>auth()</code> 拿到授权 URL → 用户浏览器完成 → <code>complete()</code> 校验 <code>state</code>（防 CSRF）后换 token。整条流程通过一个<strong>合成工具</strong> <code>mcp__&lt;server&gt;__authenticate</code> 暴露给对话，授权成功后 <code>reconnect</code> 把合成工具替换成真正的 MCP 工具。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">mcp/connection-manager.ts — 401 → needs-auth 的判定</span></div>
+        <pre><code><span class="tok-k">private</span> <span class="tok-f">resolveOAuthProvider</span>(config<span class="tok-p">,</span> name) <span class="tok-p">{</span>
+  <span class="tok-k">if</span> (config.transport <span class="tok-p">!==</span> <span class="tok-s">'http'</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
+  <span class="tok-k">if</span> (config.bearerTokenEnvVar <span class="tok-p">!==</span> <span class="tok-k">undefined</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
+  <span class="tok-c">// 关键：没 token 时不挂 provider，让 401 干净冒出 → needs-auth</span>
+  <span class="tok-k">if</span> (!oauthService.<span class="tok-f">hasTokens</span>(name<span class="tok-p">,</span> config.url)) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
+  <span class="tok-k">return</span> oauthService.<span class="tok-f">getProvider</span>(name<span class="tok-p">,</span> config.url)<span class="tok-p">;</span>
+<span class="tok-p">}</span>
+
+<span class="tok-c">// connectOne 的 catch 分支：</span>
+<span class="tok-k">if</span> (<span class="tok-k">this</span>.<span class="tok-f">shouldMarkNeedsAuth</span>(entry<span class="tok-p">,</span> error)) <span class="tok-p">{</span>
+  entry.status <span class="tok-p">=</span> <span class="tok-s">'needs-auth'</span><span class="tok-p">;</span>
+  entry.error <span class="tok-p">=</span> <span class="tok-s">`${entry.name} requires OAuth — run /mcp-config login ${entry.name}`</span><span class="tok-p">;</span>
+<span class="tok-p">}</span> <span class="tok-k">else</span> <span class="tok-p">{</span> entry.status <span class="tok-p">=</span> <span class="tok-s">'failed'</span><span class="tok-p">;</span> <span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="tree reveal">  /mcp-config login github
+       │
+       ├─▶ beginAuthorization()
+       │      ├─ startCallbackServer()         一次性 localhost:&lt;port&gt;/callback
+       │      ├─ auth(provider) ── 'REDIRECT' ─▶ 返回 authorizationUrl ──▶ 浏览器打开
+       │      └─ 返回 { authorizationUrl, complete(), cancel() }
+       │
+  用户在浏览器授权 ──▶ 重定向回 localhost callback（携带 code & state）
+       │
+       └─▶ complete()
+              ├─ state 校验（不匹配 → 拒绝换 token，防 CSRF）
+              ├─ auth(provider, { authorizationCode }) ── 'AUTHORIZED'
+              └─ token 落盘 → manager.reconnect() → 合成 auth 工具换成真 MCP 工具</div>
+
+      <!-- ====== 6. Context Compaction ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑥ Context Compaction：0.85 触发、保留近 3 步、每 turn 最多 3 次</h4>
+        <p class="reveal">压缩策略 <code>DefaultCompactionStrategy</code> 的阈值全部是可读的常量：<code>triggerRatio = 0.85</code>（用量达到 max_context 的 85% 触发）、<code>reservedContextSize = 50_000</code>（再留 5 万 token 余量，<code>used + reserved ≥ max</code> 也触发）、<code>maxCompactionPerTurn = 3</code>（一个 turn 内最多压 3 次，超了抛 <code>CONTEXT_OVERFLOW</code>）。<code>blockRatio</code> 默认等于 <code>triggerRatio</code>——这是个有意的开关：两者相等时<code>checkAfterStep</code> 为 false，<strong>禁用异步压缩</strong>，压缩只在 <code>beforeStep</code> 同步阻塞式发生（<code>block()</code> await 压缩 worker 完成），保证下一步 LLM 调用一定在安全窗口内。</p>
+        <p class="reveal"><code>computeCompactCount</code> 是算法核心：从尾部往前扫，<strong>保护最近 3 步 + 尾部连续的 user 消息 + 占比不超过 20% 的近期内容</strong>，找一个「角色边界」作为 splitAt——只在 <code>m1.role !== m2.role</code> 且不会切断 user→assistant 配对、且 <code>m2</code> 不是 tool 消息处切分，避免把一个 tool_call 和它的 tool_result 拆散。被切走的前半段连同一条 <code>COMPACTION_INSTRUCTION</code> 喂给 LLM 生成摘要，摘要 + 保留的近期消息构成新 history。压缩 worker 跑完还会<strong>逐条比对 history 是否被改过</strong>（比如用户中途 undo），变了就 <code>cancel()</code> 放弃这次压缩结果——绝不把摘要套到一个已经变化的历史上。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">agent/compaction/config.ts + full.ts — 阈值与触发</span></div>
+        <pre><code><span class="tok-k">export const</span> <span class="tok-t">DEFAULT_COMPACTION_CONFIG</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  triggerRatio<span class="tok-p">:</span> <span class="tok-n">0.85</span><span class="tok-p">,</span>          <span class="tok-c">// ≥85% 触发压缩</span>
+  blockRatio<span class="tok-p">:</span> <span class="tok-n">0.85</span><span class="tok-p">,</span>            <span class="tok-c">// == trigger → 禁用异步压缩，纯同步阻塞</span>
+  reservedContextSize<span class="tok-p">:</span> <span class="tok-n">50_000</span><span class="tok-p">,</span>  <span class="tok-c">// used+5万≥max 也触发</span>
+  maxCompactionPerTurn<span class="tok-p">:</span> <span class="tok-n">3</span><span class="tok-p">,</span>       <span class="tok-c">// 超 3 次 → throw CONTEXT_OVERFLOW</span>
+  maxRecentSteps<span class="tok-p">:</span> <span class="tok-n">3</span><span class="tok-p">,</span>             <span class="tok-c">// 最近 3 步永远保留</span>
+  maxRecentSizeRatio<span class="tok-p">:</span> <span class="tok-n">0.2</span><span class="tok-p">,</span>       <span class="tok-c">// 近期内容上限 20% 窗口</span>
+<span class="tok-p">}</span><span class="tok-p">;</span>
+
+<span class="tok-f">shouldCompact</span>(used<span class="tok-p">,</span> max) <span class="tok-p">{</span>
+  <span class="tok-k">return</span> used <span class="tok-p">&gt;=</span> max <span class="tok-p">*</span> triggerRatio <span class="tok-p">||</span> <span class="tok-f">shouldUseReservedContext</span>(max<span class="tok-p">,</span> used)<span class="tok-p">;</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <!-- ====== 7. Lifecycle Hooks ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑦ Lifecycle Hooks：13 种事件 × 外部命令门控</h4>
+        <p class="reveal"><code>HookEngine</code> 是一个把<strong>外部 shell 命令</strong>挂到 agent 生命周期的引擎。<code>HOOK_EVENT_TYPES</code> 定义了 13 种事件：<code>PreToolUse</code> / <code>PostToolUse</code> / <code>PostToolUseFailure</code> / <code>UserPromptSubmit</code> / <code>Stop</code> / <code>StopFailure</code> / <code>SessionStart</code> / <code>SessionEnd</code> / <code>SubagentStart</code> / <code>SubagentStop</code> / <code>PreCompact</code> / <code>PostCompact</code> / <code>Notification</code>。注册时按 event 归桶（<code>byEvent: Map&lt;event, HookDef[]&gt;</code>），每个 <code>HookDef</code> 带一个可选的 <code>matcher</code>（正则字符串）——触发时用 <code>new RegExp(matcher).test(matcherValue)</code> 过滤，比如只对 <code>edit|write</code> 工具跑某个 hook。匹配的命令并行执行（<code>Promise.all</code>），默认 30s 超时。</p>
+        <p class="reveal">Hook 有两种语义：<strong>阻塞型</strong>（<code>triggerBlock</code>）任一命令返回 <code>action:'block'</code> 就否决该操作——这是权限门控、危险命令拦截的实现；<strong>fire-and-forget</strong>（<code>fireAndForgetTrigger</code>）用于 <code>PostCompact</code>、<code>SubagentStop</code> 这类不需要结果的通知场景，promise 进 <code>pendingTriggers</code> 集合但不 await。注意整个引擎<strong>对自身故障极度宽容</strong>：<code>trigger</code> 外层 <code>.catch(() =&gt; [])</code>、matcher 正则编译失败返回 false、监听器回调异常被吞——hook 是「增强」而非「关键路径」，绝不能因为一个坏 hook 让 agent 卡死。上面 ⑤⑥ 里 <code>PreCompact</code>/<code>SubagentStart</code> 的触发点，正是这套引擎的实际调用方。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">agent/hooks/engine.ts — 阻塞决策聚合</span></div>
+        <pre><code><span class="tok-k">async</span> <span class="tok-f">triggerBlock</span>(event<span class="tok-p">,</span> args) <span class="tok-p">{</span>
+  <span class="tok-k">return</span> <span class="tok-f">blockDecision</span>(event<span class="tok-p">,</span> <span class="tok-k">await</span> <span class="tok-k">this</span>.<span class="tok-f">trigger</span>(event<span class="tok-p">,</span> args))<span class="tok-p">;</span>
+<span class="tok-p">}</span>
+<span class="tok-k">function</span> <span class="tok-f">blockDecision</span>(event<span class="tok-p">,</span> results) <span class="tok-p">{</span>
+  <span class="tok-k">const</span> block <span class="tok-p">=</span> results.<span class="tok-f">find</span>((r) <span class="tok-p">=&gt;</span> r.action <span class="tok-p">===</span> <span class="tok-s">'block'</span>)<span class="tok-p">;</span>  <span class="tok-c">// 任一 block 即否决</span>
+  <span class="tok-k">if</span> (block <span class="tok-p">===</span> <span class="tok-k">undefined</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
+  <span class="tok-k">return</span> <span class="tok-p">{</span> block<span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span> reason<span class="tok-p">:</span> block.reason?.<span class="tok-f">trim</span>() <span class="tok-p">||</span> <span class="tok-s">`Blocked by ${event} hook`</span> <span class="tok-p">}</span><span class="tok-p">;</span>
+<span class="tok-p">}</span>
+<span class="tok-c">// trigger 外层吞掉所有故障：坏 hook 绝不阻断 agent</span>
+<span class="tok-f">trigger</span>(event<span class="tok-p">,</span> args) <span class="tok-p">{</span> <span class="tok-k">return</span> <span class="tok-k">this</span>.<span class="tok-f">triggerInner</span>(event<span class="tok-p">,</span> args).<span class="tok-f">catch</span>(() <span class="tok-p">=&gt;</span> [])<span class="tok-p">;</span> <span class="tok-p">}</span></code></pre>
+      </div>
+
+      <!-- ====== 8. Kaos Local vs SSH ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑧ Kaos：一套 API，本地 / 远程两副实现</h4>
+        <p class="reveal"><code>Kaos</code> 接口把文件系统、进程、路径抽象成一组方法（<code>stat</code> / <code>iterdir</code> / <code>glob</code> / <code>readText</code> / <code>writeText</code> / <code>exec</code> …），让上层 tool（read/write/edit/bash）<strong>对"代码跑在哪"完全无感</strong>。<code>LocalKaos</code> 用 Node <code>fs</code>/<code>child_process</code>，并维护<strong>实例级 <code>_cwd</code></strong> 而非污染全局 <code>process.cwd()</code>——所以同进程里多个 agent 可以各在不同目录。<code>SSHKaos</code> 用 <code>ssh2</code> + SFTP 把同一套 API 投到远端：<code>exec</code> 走 SSH channel，<code>readText</code> 走 SFTP。进程终止的跨平台细节也处理得很细：POSIX 用 <code>process.kill(-pid)</code> 杀整个进程组，Windows 用 <code>taskkill /T /F /PID</code> 递归杀子树；<code>ESRCH</code>（进程组已没）静默成功，<code>EPERM</code> 回退到直接 <code>.kill()</code>。错误体系分两支：本地 <code>KaosError</code> 系列，SSH/SFTP 侧 <code>KaosSSHError</code> 携带 SFTP status code（2=文件不存在、3=权限拒绝）。</p>
+      </div>
+
+      <!-- ====== 横向对比 ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑨ 横向对比：kimi-code vs OpenClaw vs Superpowers</h4>
+        <p class="reveal">三个项目都做「多 agent / 可扩展 agent 平台」，但切入点完全不同：</p>
+        <div class="tablewrap reveal">
+          <table class="cmp">
+            <thead><tr><th>维度</th><th>Kimi Code</th><th>OpenClaw</th><th>Superpowers</th></tr></thead>
+            <tbody>
+              <tr><td>定位</td><td>企业级编程 Agent 引擎</td><td>全渠道个人 AI 助手</td><td>Claude Code 技能/插件市场</td></tr>
+              <tr><td>多 Agent 机制</td><td><strong>Session 持多个独立 Agent 实例</strong>，subagent 完全隔离上下文</td><td><strong>ACP 协议</strong>跨会话/实例通信，subagent 经协议层协调</td><td>不造引擎，复用 Claude Code 的 subagent</td></tr>
+              <tr><td>隔离粒度</td><td>每 Agent 独立 Kaos/Tools/Permission/wire</td><td>每 subagent 独立工具集 + 上下文窗口</td><td>由 Claude Code 宿主决定</td></tr>
+              <tr><td>持久化</td><td><strong>Wire Records JSONL 全量可重放</strong></td><td>记忆插件（LanceDB / wiki / active）</td><td>技能 = markdown 文件，git 管理</td></tr>
+              <tr><td>LLM 接入</td><td>kosong 5 adapter / 6 type，统一抽象</td><td>provider 插件（30+ 渠道侧重）</td><td>跟随 Claude（不抽象多 provider）</td></tr>
+              <tr><td>远程执行</td><td><strong>Kaos：Local / SSH 同一 API</strong></td><td>gateway 多渠道路由</td><td>本地 Claude Code 沙箱</td></tr>
+              <tr><td>扩展面</td><td>MCP 一等公民 + Hooks + Skill + Plugin</td><td>130+ 插件 + 20+ channel</td><td>纯技能/命令，零运行时</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="reveal">一句话总结三者差异：<strong>Superpowers</strong> 是「给 Claude Code 加技能的内容层」，不碰引擎；<strong>OpenClaw</strong> 是「把一个 AI 助手铺到所有聊天平台的网关层」，重在 channel 与协议；<strong>Kimi Code</strong> 是「自带商业模型的 Agent 引擎层」，重在 Session/Agent 隔离、wire 重放、执行环境抽象——它最接近「一个可独立运行、可远程执行、可精确回放的 Agent 操作系统内核」。</p>
+      </div>
+
+      <div class="prose">
         <h4 class="reveal">关键创新</h4>
         <ul class="reveal">
           <li><strong>多 Agent Session 架构</strong>：Session 管理多个 Agent，主 agent + subagent（coder/explore/plan）各在隔离上下文运行，有独立 Kaos、Skill、Permission、Wire Records。</li>
@@ -142,8 +417,13 @@
     </div>
   </div>
 </section>
+
 </div>
 </main>
-<script src="./assets/tabs.js"></script>
+
+<button class="totop" aria-label="返回顶部">↑</button>
+
+<script>if(!location.hash){history.replaceState(null,'','#kc');}</script>
+<script src="./assets/main.js"></script>
 </body>
 </html>
