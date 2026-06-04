@@ -20,7 +20,7 @@ if (toggle && links) {
 }
 
 // ============ TAB SWITCHER ============
-const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od'];
+const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od', 'og', 'mc'];
 const TITLES = {
   cg: 'CodeGraph 源码深度解析 · Agent Infrastructure Teardown',
   ua: 'Understand-Anything 源码深度解析 · Agent Infrastructure Teardown',
@@ -29,6 +29,8 @@ const TITLES = {
   kc: 'Kimi Code 源码深度解析 · Moonshot AI 多 Agent 引擎',
   oc: 'OpenClaw 源码深度解析 · 全渠道个人 AI 助手',
   od: 'Odysseus 源码深度解析 · 自托管的个人 AI 工作台',
+  og: 'Ongrid 源码深度解析 · Ops AI + 根因分析 + 远程执行',
+  mc: 'Multica 源码深度解析 · 把编程 Agent 变成真实队友',
 };
 
 function setActiveTab(name, opts) {
