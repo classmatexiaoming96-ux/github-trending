@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sandboxd · 给 AI app-builder 产品装一个开源后端</title>
+<meta name="description" content="tastyeffectco/sandboxd 源码深度解析 — Go 单二进制控制面 + Docker 隔离沙箱 + 内嵌 coding agent + 零配置预览 URL，单机一键运行。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./assets/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="nav has-tabs">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html#sa"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
+  </div>
+  <div class="tabs-wrap">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="cg">CodeGraph</button>
+      <button role="tab" data-tab="ua">Understand-Anything</button>
+      <button role="tab" data-tab="cp">Claude Plugins</button>
+      <button role="tab" data-tab="oh">OpenHuman Memory Tree</button>
+      <button role="tab" data-tab="kc">Kimi Code</button>
+      <button role="tab" data-tab="oc">OpenClaw</button>
+      <button role="tab" data-tab="sa" class="active"><span class="dot"></span>sandboxd <span class="pill">新建</span></button>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="tab-panel active" data-tab="sa">
+  <section class="hero" style="padding:130px 0 30px">
+  <div class="wrap">
+    <span class="eyebrow reveal"><span class="pulse"></span>tastyeffectco/sandboxd · Go + Docker · MIT</span>
+    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">sandboxd</span> · AI app-builder 的开源后端引擎</h1>
+    <p class="lead reveal" style="margin-bottom:0">一个 Go 单二进制 + Docker，为 AI coding 产品（类似 Lovable / Bolt / v0 / Replit）提供<strong>隔离沙箱 + 内嵌 coding agent + 零配置预览 URL</strong>——自托管、一台机器、一个命令启动。</p>
+    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">528</div><div class="l">Stars</div></div><div class="cell"><div class="n">Go</div><div class="l">控制面语言</div></div><div class="cell"><div class="n">2.3kB</div><div class="l">base 镜像</div></div><div class="cell"><div class="n">0</div><div class="l">配置步骤</div></div></div>
+  </div>
+</section>
+
+  <section id="sa" class="project sa">
+  <div class="wrap">
+    <div class="proj-head reveal">
+      <div class="proj-badge">SA</div>
+      <div class="proj-title">
+        <h2>sandboxd</h2>
+        <a class="repo" href="https://github.com/tastyeffectco/sandboxd" target="_blank" rel="noopener">tastyeffectco/sandboxd · MIT</a>
+      </div>
+    </div>
+    <div class="narrow">
+      <div class="statrow reveal">
+        <div class="chip"><div class="n">528</div><div class="l">Stars</div></div>
+        <div class="chip"><div class="n">Go</div><div class="l">控制面</div></div>
+        <div class="chip"><div class="n">Docker</div><div class="l">隔离</div></div>
+        <div class="chip"><div class="n">runtimed</div><div class="l">沙箱监管</div></div>
+      </div>
+
+      <div class="prose">
+        <p class="reveal"><strong>一句话定位：</strong>"Build me a todo app" → 几秒后 app 出现在自己的预览链接上——sandboxd 把这个流程开源化。它不是给你的 AI coding agent 用的，而是给<strong>做 AI coding 产品的公司</strong>用的：你要集成的是它的 HTTP API，不是跑 agent。</p>
+
+        <h4 class="reveal">核心价值主张</h4>
+        <p class="reveal">当一个产品想让用户描述一句话就生成一个完整 app，它需要三个东西：</p>
+        <ul class="reveal">
+          <li><strong>隔离的环境</strong>：每个用户的代码不能看到别人的——容器级隔离。</li>
+          <li><strong>一个 coding agent</strong>：OpenCode / Claude Code CLI 预装在 base 镜像里。</li>
+          <li><strong>一个可分享的预览 URL</strong>：Traefik 自动路由，<code>&lt;id&gt;.localhost</code> 即时可达。</li>
+        </ul>
+        <p class="reveal">sandboxd 把这三个需求做成了一条管道：<code>POST /sandbox → 创建沙箱 → POST .../tasks → agent 写代码 → http://&lt;id&gt;.localhost → 预览跑起</code>。</p>
+      </div>
+
+      <div class="pipe reveal">
+        <div class="stage"><span class="sn">01</span><div class="st"><b>POST /sandbox</b><small>控制面在 Docker 里创建一个专属容器 + workspace 目录</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">02</span><div class="st"><b>runtimed 启动</b><small>容器 init 进程是 runtimed（in-sandbox supervisor），启动 Vite dev server</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">03</span><div class="st"><b>POST /sandbox/{id}/tasks</b><small>发送 prompt，runtimed 拉起 OpenCode agent 写代码</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">04</span><div class="st"><b>Traefik 路由</b><small>容器内 dev server 通过 sandboxd_net 暴露，&lt;id&gt;.localhost 即可达</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">05</span><div class="st"><b>idle reaper</b><small>35 分钟无活动 → docker stop 释放内存；再次请求时秒级 wake up</small></div></div>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">两进程架构：control-plane + runtimed</h4>
+        <p class="reveal">整个系统的工程复杂度集中在两处：<strong>控制面（sandboxd 主进程）</strong>和<strong>沙箱监管（runtimed 子进程）</strong>。两者通过两种完全不同的通信模式协作：</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">两进程通信设计</span></div>
+        <pre><code>┌─────────────────────────────────────────────────────┐
+│  Host: sandboxd (Go control-plane, port 9000)         │
+│                                                     │
+│  ┌─────────────┐  ┌──────────┐  ┌──────────────┐   │
+│  │ Reconciler  │  │ Wake     │  │ Idle/Pressure │   │
+│  │ (启动时扫   │  │ Handler  │  │ Reaper       │   │
+│  │  描容器状态)│  │ (新请求  │  │ (后台常驻   │   │
+│  │             │  │  唤起)   │  │  35minidle   │   │
+│  └──────┬──────┘  └────┬─────┘  └──────┬───────┘   │
+│         │             │              │            │
+│  ┌──────┴─────────────┴──────────────┴──────┐    │
+│  │  Docker CLI (os/exec)                     │    │
+│  │  · docker run / docker stop / docker rm  │    │
+│  │  · docker exec (runtimed 通信)           │    │
+│  └──────────────────┬──────────────────────┘    │
+│                     │ unix socket / workspace mnt│
+│  ┌──────────────────┴──────────────────────┐    │
+│  │  Container: sandboxd-base (sandboxd-base:1.0.0)│
+│  │                                           │    │
+│  │   /home/sandbox/.runtimed/sock ←→ runtimed│
+│  │      (Unix domain socket, HTTP over it)    │
+│  │                                           │    │
+│  │   runtimed 拉起: pnpm dev                  │
+│  │   Vite dev server → :3000                 │
+│  └───────────────────────────────────────────┘
+└─────────────────────────────────────────────────────┘</code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">控制面：main.go 的系统设计</h4>
+        <p class="reveal">main.go 是系统的心脏。读完它，架构一目了然——它启动了一个完整的<strong>云原生调度系统</strong>：</p>
+        <ul class="reveal">
+          <li><strong>SQLite + WAL</strong>：所有沙箱状态、任务记录持久化。DSN <code>file:...?_journal=WAL&amp;_busy_timeout=5000&amp;_fk=1</code>。</li>
+          <li><strong>Reconciler（启动时一次性）</strong>：扫描所有"孤儿"容器、残留挂载、快照碎片——确保启动状态干净。</li>
+          <li><strong>Idle Reaper（后台 goroutine）</strong>：每 30s 检查一次，35 分钟无活动的容器执行 <code>docker stop</code> 释放内存。</li>
+          <li><strong>Pressure Reaper（后台 goroutine）</strong>：每 10s 检查主机内存，压力过大时拒绝新的 wake 请求（<code>Refused</code> atomic flag）。</li>
+          <li><strong>Access-log tailer</strong>：监听 Traefik access log 更新每个沙箱的 <code>last_active_at</code>——驱动 idle reaper 的精确计时。</li>
+          <li><strong>Connection poller</strong>：若配置了 <code>SANDBOXD_POLLER_METRIC_RE</code>，定时探 Traefik metrics；未配置时退化为 access-log-only 模式。</li>
+        </ul>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">control-plane/cmd/sandboxd/main.go — 启动序列</span></div>
+        <pre><code><span class="tok-c">// Phase 8 — service token auth + audit logger</span>
+auditLog := audit.New(st, log.With(<span class="tok-s">"component"</span>, <span class="tok-s">"audit"</span>))
+authMw   := auth.NewMiddleware(auth.ParseConfig(os.Getenv), auditLog, ...)
+
+<span class="tok-c">// Docker 客户端（直接 os/exec，不依赖 SDK）</span>
+dockerClient := docker.NewClient()
+loopMgr := loopback.New()
+loopMgr.Root = workspacesRoot
+loopMgr.SeedImage = image
+loopMgr.DockerBin = <span class="tok-s">"docker"</span>
+loopMgr.Userns = userns
+
+<span class="tok-c">// Phase 7 — per-id 分布式锁 + 快照子系统</span>
+idLocks := idlock.New()
+snapshotMgr := &snapshot.Manager{...}
+
+<span class="tok-c">// Reconciler once（启动时扫描孤儿资源）</span>
+rcDeps := reconcile.Deps{Store: st, Docker: dockerClient, ...}
+res, err := reconcile.Once(ctx, rcDeps)
+<span class="tok-k">for</span> kind, n := range res.Orphans {
+  metrics.ReconcilerOrphans.WithLabelValues(kind).Set(float64(n))
+}
+
+<span class="tok-c">// Phase 5 — 后台 goroutines（idle reaper / pressure reaper / access-log tailer / poller）</span>
+go func() { idle.Run(gctx) }()
+go func() { pressure.Run(gctx) }()
+go func() { tailer.Run(gctx) }()
+go func() { poller.Run(gctx) }()</code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">runtimed：沙箱内的 supervisor</h4>
+        <p class="reveal">runtimed（<code>cmd/runtimed/main.go</code>）是容器内的 init 进程，负责：</p>
+        <ul class="reveal">
+          <li><strong>启动 Vite dev server</strong>：执行 <code>pnpm dev</code>，管道输出到日志文件。</li>
+          <li><strong>健康探测循环</strong>：每 3s 轮询 <code>localhost:3000</code>，区分 <em>down / starting / ready / error</em> 四种状态。</li>
+          <li><strong>构建错误检测</strong>：HTML shell 能 serve 200 但入口模块编译失败（空白页），runtimed 会捕获这个状态并报告。</li>
+          <li><strong>任务生命周期管理</strong>：<code>POST /tasks</code> 接收 prompt → 拉起 OpenCode agent → SSE 流式输出事件（status / message / tool / build / done）→ 最终结果写入 <code>result.json</code>。</li>
+          <li><strong>Unix domain socket API</strong>：通过 <code>/home/sandbox/.runtimed/sock</code> 对外暴露，路径在 host 侧通过 workspace mnt 同路径可访问。</li>
+        </ul>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">cmd/runtimed/main.go — probeLoop + status 状态机</span></div>
+        <pre><code><span class="tok-k">func</span> <span class="tok-p">(</span>a <span class="tok-k">*</span>app<span class="tok-p">)</span> <span class="tok-f">status</span><span class="tok-p">()</span> runtime.Status <span class="tok-p">{</span>
+  pid, restarts, running := a.dev.snapshot<span class="tok-p">()</span>
+  a.mu.Lock<span class="tok-p">()</span>
+  code, assetErr, checked := a.lastCode, a.lastAssetErr, a.lastChecked
+  a.mu.Unlock<span class="tok-p">()</span>
+
+  ps := runtime.PreviewState<span class="tok-p">{</span>Restarts: restarts, LastHTTPStatus: code<span class="tok-p">}</span>
+  <span class="tok-k">switch</span> <span class="tok-p">{</span>
+  <span class="tok-k">case</span> !running<span class="tok-p">:</span>
+    ps.Status = runtime.PreviewDown
+  <span class="tok-k">case</span> code == <span class="tok-n">200</span> && assetErr == <span class="tok-s">""</span><span class="tok-p">:</span>
+    ps.Status = runtime.PreviewReady
+    ps.Pid = pid
+  <span class="tok-k">case</span> code == <span class="tok-n">200</span> && assetErr != <span class="tok-s">""</span><span class="tok-p">:</span>
+    <span class="tok-c">// shell serves but entry module fails to compile — blank page.</span>
+    ps.Status = runtime.PreviewError
+    ps.BuildErrorMessage = assetErr
+  <span class="tok-k">default</span><span class="tok-p">:</span>
+    ps.Status = runtime.PreviewStarting
+  <span class="tok-p">}</span>
+  <span class="tok-k">return</span> runtime.Status<span class="tok-p">{</span>Runtimed: ..., Preview: ps, ActiveTask: ...<span class="tok-p">}</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">任务子系统：TaskResult + TokenUsage</h4>
+        <p class="reveal"><code>internal/runtime/tasks.go</code> 定义了完整任务生命周期。事件流：</p>
+        <ul class="reveal">
+          <li><code>POST /tasks</code> → <code>StartTaskRequest { task_id, prompt, agent: "opencode", env, timeout_s }</code></li>
+          <li>runtimed 拉起 OpenCode agent，stdout 解析为 SSE 事件流：<code>status / message / tool / build / done</code></li>
+          <li>所有事件带自增 <code>id</code> 和 <code>ts</code>，<code>done</code> 事件携带 <code>TaskResult</code> 是唯一可信的终态</li>
+          <li><code>TaskResult</code> 包含：<code>files_changed</code>、<code>build_ok</code>、<code>build_error_message</code>、<code>preview_error_message</code>（Vite 启动但 app 报 500）、<code>TokenUsage</code>（input/output/reasoning/cache）</li>
+        </ul>
+      </div>
+
+      <div class="callout reveal"><b>资源控制：内存感知的 wake 拒绝</b>——当主机内存压力超过阈值（<code>SANDBOXD_MEM_REFUSE_WAKES_PCT=10%</code>），<code>Refused</code> atomic flag 被 set，新请求的 wake 会被拒绝而非排队。这比简单的最大并发限制更精细——它是<strong>基于系统当前健康状态的动态准入控制</strong>，而不是基于静态配额。</div>
+
+      <div class="prose">
+        <h4 class="reveal">对 coding agent 生态的意义</h4>
+        <p class="reveal">sandboxd 的目标用户是<strong>做 AI coding 产品的公司</strong>，而不是直接给开发者用。但它对生态有直接贡献：</p>
+        <ul class="reveal">
+          <li>它证明了"AI coding product"的backend是可以<strong>自托管、开源、不要专有云</strong>的。</li>
+          <li>它的 base 镜像（sandboxd-base:1.0.0）预装了 OpenCode 和 Claude Code CLI——意味着沙箱里已经有一个 coding agent 可用。</li>
+          <li>任务系统的设计（runtimed 作为 supervisor、通过 Unix socket 对外暴露控制 API）是<strong>多租户沙箱监管</strong>的干净实现参考。</li>
+          <li>Phase 8 加入 service token auth 和 audit log——说明这个项目正在往"企业可部署"方向演进。</li>
+        </ul>
+        <p class="reveal">它与本 index 中其他项目的分工关系：CodeGraph / Understand-Anything 给 agent 提供代码理解基础设施；sandboxd 给 AI coding 产品提供<strong>运行时隔离 + 任务编排</strong>基础设施。</p>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+</main>
+<script src="./assets/main.js"></script>
+</body>
+</html>
