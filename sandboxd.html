@@ -1,236 +1,1345 @@
-<!doctype html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>sandboxd · 给 AI app-builder 产品装一个开源后端</title>
-<meta name="description" content="tastyeffectco/sandboxd 源码深度解析 — Go 单二进制控制面 + Docker 隔离沙箱 + 内嵌 coding agent + 零配置预览 URL，单机一键运行。" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sandboxd Architecture Documentation</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-secondary: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --code-bg: #1c2128;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    pre, code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 13px; }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+    code:not(pre > code) {
+      background: var(--bg-tertiary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    .diagram {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: center;
+      font-size: 13px;
+    }
+    .diagram pre { text-align: left; display: inline-block; margin: 0; }
+    header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      padding: 32px 40px;
+    }
+    header h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+    header p { color: var(--text-muted); font-size: 16px; }
+    nav {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      padding: 0 40px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    nav ul {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 12px 0;
+    }
+    nav a {
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: all 0.15s;
+    }
+    nav a:hover { background: var(--bg-tertiary); color: var(--text); text-decoration: none; }
+    main { max-width: 1100px; margin: 0 auto; padding: 40px 40px 80px; }
+    section { margin-bottom: 56px; }
+    section h2 {
+      font-size: 22px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 20px;
+    }
+    section h3 { font-size: 17px; font-weight: 600; margin: 24px 0 12px; color: var(--accent); }
+    section h4 { font-size: 15px; font-weight: 600; margin: 20px 0 10px; }
+    p { margin: 10px 0; }
+    ul, ol { margin: 10px 0 10px 24px; }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    th {
+      background: var(--bg-tertiary);
+      text-align: left;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      font-weight: 600;
+    }
+    td {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+    }
+    tr:nth-child(even) { background: var(--bg-secondary); }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tag-phase { background: #1f3a5f; color: var(--accent); }
+    .tag-stable { background: #1a3d2a; color: var(--accent-secondary); }
+    .tag-experimental { background: #3d2a1a; color: var(--warning); }
+    .callout {
+      padding: 14px 18px;
+      border-radius: 8px;
+      margin: 16px 0;
+      border-left: 4px solid;
+    }
+    .callout-info { background: #1f2a3d; border-color: var(--accent); }
+    .callout-warn { background: #2d2a1a; border-color: var(--warning); }
+    .callout-danger { background: #2d1a1a; border-color: var(--danger); }
+    .callout-success { background: #1a2d1f; border-color: var(--accent-secondary); }
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .step-num {
+      background: var(--accent);
+      color: var(--bg);
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .step-content { flex: 1; }
+    .color-box {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    .box-cp { background: #58a6ff; }
+    .box-rt { background: #3fb950; }
+    .box-reaper { background: #f85149; }
+    .box-store { background: #d29922; }
+    .box-egress { background: #bc8cff; }
+    footer {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      padding: 24px 40px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+  </style>
 </head>
 <body>
-<div id="progress"></div>
 
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#sa"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" data-tab="cg">CodeGraph</button>
-      <button role="tab" data-tab="ua">Understand-Anything</button>
-      <button role="tab" data-tab="cp">Claude Plugins</button>
-      <button role="tab" data-tab="oh">OpenHuman Memory Tree</button>
-      <button role="tab" data-tab="kc">Kimi Code</button>
-      <button role="tab" data-tab="oc">OpenClaw</button>
-      <button role="tab" data-tab="sa" class="active"><span class="dot"></span>sandboxd <span class="pill">新建</span></button>
-    </div>
-  </div>
+<header>
+  <h1>sandboxd Architecture</h1>
+  <p>Technical documentation — two-process model, Reconciler, Reapers, and TaskResult lifecycle</p>
 </header>
 
+<nav>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#two-processes">Two Processes</a></li>
+    <li><a href="#reconciler">Reconciler</a></li>
+    <li><a href="#orphan-scan">Orphan Scanning</a></li>
+    <li><a href="#idle-reaper">Idle Reaper</a></li>
+    <li><a href="#pressure-reaper">Pressure Reaper</a></li>
+    <li><a href="#task-lifecycle">TaskResult Lifecycle</a></li>
+    <li><a href="#store">SQLite Store</a></li>
+    <li><a href="#wake">Wake Handler</a></li>
+    <li><a href="#runtimed">runtimed</a></li>
+    <li><a href="#startup">Startup Sequence</a></li>
+  </ul>
+</nav>
+
 <main>
-<div class="tab-panel active" data-tab="sa">
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>tastyeffectco/sandboxd · Go + Docker · MIT</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">sandboxd</span> · AI app-builder 的开源后端引擎</h1>
-    <p class="lead reveal" style="margin-bottom:0">一个 Go 单二进制 + Docker，为 AI coding 产品（类似 Lovable / Bolt / v0 / Replit）提供<strong>隔离沙箱 + 内嵌 coding agent + 零配置预览 URL</strong>——自托管、一台机器、一个命令启动。</p>
-    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">528</div><div class="l">Stars</div></div><div class="cell"><div class="n">Go</div><div class="l">控制面语言</div></div><div class="cell"><div class="n">2.3kB</div><div class="l">base 镜像</div></div><div class="cell"><div class="n">0</div><div class="l">配置步骤</div></div></div>
+
+<!-- ============================================================
+     SECTION: Overview
+     ============================================================ -->
+<section id="overview">
+  <h2>Overview</h2>
+  <p>
+    sandboxd is the control plane for ephemeral sandboxed development environments.
+    It runs as a single Go binary (<code>control-plane/cmd/sandboxd/main.go</code>) inside a
+    Docker container and communicates with a second per-sandbox process called
+    <code>runtimed</code> (<code>control-plane/cmd/runtimed/main.go</code>) running inside each
+    sandbox container. The system is designed around a few core principles:
+  </p>
+  <ul>
+    <li><strong>SQLite is the source of truth.</strong> Docker container state is
+      converged toward SQLite, never the reverse.</li>
+    <li><strong>Two-process architecture.</strong> The host-level<code>sandboxd</code> controls
+      lifecycle; the in-sandbox <code>runtimed</code> supervises the dev server and coding tasks.</li>
+    <li><strong>Phase-gated development.</strong> The codebase is organized by roadmap phases;
+      features behind disabled switches are nil-safe so the portable OSS build works without them.</li>
+    <li><strong>Idempotent operations.</strong> Wake, reconcile, and loopback provisioning are all
+      idempotent — safe to call multiple times.</li>
+  </ul>
+
+  <div class="callout callout-info">
+    <strong>Key invariant (CLAUDE.md non-negotiable #6):</strong> The reconciler converges
+    Docker to SQLite. Orphan containers and orphan mounts are <em>logged</em>, not destroyed.
+    A developer mid-debug who runs <code>docker run --name s-test …</code> by hand loses nothing.
   </div>
 </section>
 
-  <section id="sa" class="project sa">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">SA</div>
-      <div class="proj-title">
-        <h2>sandboxd</h2>
-        <a class="repo" href="https://github.com/tastyeffectco/sandboxd" target="_blank" rel="noopener">tastyeffectco/sandboxd · MIT</a>
-      </div>
-    </div>
-    <div class="narrow">
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">528</div><div class="l">Stars</div></div>
-        <div class="chip"><div class="n">Go</div><div class="l">控制面</div></div>
-        <div class="chip"><div class="n">Docker</div><div class="l">隔离</div></div>
-        <div class="chip"><div class="n">runtimed</div><div class="l">沙箱监管</div></div>
-      </div>
+<!-- ============================================================
+     SECTION: Two Processes
+     ============================================================ -->
+<section id="two-processes">
+  <h2>Two-Process Architecture</h2>
 
-      <div class="prose">
-        <p class="reveal"><strong>一句话定位：</strong>"Build me a todo app" → 几秒后 app 出现在自己的预览链接上——sandboxd 把这个流程开源化。它不是给你的 AI coding agent 用的，而是给<strong>做 AI coding 产品的公司</strong>用的：你要集成的是它的 HTTP API，不是跑 agent。</p>
+  <div class="diagram">
+<pre>
+┌─────────────────────────────────────────────────────────┐
+│                    HOST (sandboxd container)            │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  sandboxd (cmd/sandboxd/main.go)                │    │
+│  │  • HTTP API server (127.0.0.1:9000)             │    │
+│  │  • SQLite store (single-writer goroutine)       │    │
+│  │  • Reconciler.Once (boot-time, runs once)        │    │
+│  │  • Idle Reaper (30 s ticker)                     │    │
+│  │  • Pressure Reaper (10 s ticker)                 │    │
+│  │  • Access-log tailer                             │    │
+│  │  • Wake handler                                  │    │
+│  │  • runtime.Client (Unix socket → runtimed)      │    │
+│  └────────────────┬────────────────────────────────┘    │
+│                   │  docker start / docker stop │
+│                   │  docker exec (inflight tracking)       │
+│                   │  docker inspect                       │
+│  ┌────────────────▼────────────────────────────────┐    │
+│  │  sandbox container (sandboxd-base:1.0.0)        │    │
+│  │  ┌──────────────────────────────────────────┐   │    │
+│  │  │  runtimed (cmd/runtimed/main.go)         │   │    │
+│  │  │  • Supervises dev server (pnpm dev) │   │    │
+│  │  │  • GET /status over Unix socket          │   │    │
+│  │  │  • POST /tasks (coding agent runner)     │   │    │
+│  │  │  • SSE /tasks/{id}/events                │   │    │
+│  │  └──────────────────────────────────────────┘   │    │
+│  │ │    │
+│  │  Workspace loopback mount: │    │
+│  │    /home/sandbox/workspace/ ←── host: │    │
+│  │    /var/lib/sandboxed/workspaces/{id}.mnt         │    │
+│  └──────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
+</pre>
+  </div>
 
-        <h4 class="reveal">核心价值主张</h4>
-        <p class="reveal">当一个产品想让用户描述一句话就生成一个完整 app，它需要三个东西：</p>
-        <ul class="reveal">
-          <li><strong>隔离的环境</strong>：每个用户的代码不能看到别人的——容器级隔离。</li>
-          <li><strong>一个 coding agent</strong>：OpenCode / Claude Code CLI 预装在 base 镜像里。</li>
-          <li><strong>一个可分享的预览 URL</strong>：Traefik 自动路由，<code>&lt;id&gt;.localhost</code> 即时可达。</li>
-        </ul>
-        <p class="reveal">sandboxd 把这三个需求做成了一条管道：<code>POST /sandbox → 创建沙箱 → POST .../tasks → agent 写代码 → http://&lt;id&gt;.localhost → 预览跑起</code>。</p>
-      </div>
+  <h3>sandboxd (control-plane main.go)</h3>
+  <p>
+    The host process is the only daemon. It owns the SQLite database, manages all Docker
+    containers, and exposes the HTTP API. Key responsibilities:
+  </p>
+  <ul>
+    <li>Binds to<code>0.0.0.0:9000</code> (OSS default) or an env-configured address.</li>
+    <li>Runs the boot-time <strong>Reconciler</strong> once,<em>before</em> the HTTP listener
+      accepts any requests.</li>
+    <li>Owns the<code>Store</code> — a single-writer goroutine that serializes all writes through
+      a buffered channel (capacity 64) to avoid SQLite "database is locked" errors.</li>
+    <li>Starts the <strong>Idle Reaper</strong> and <strong>Pressure Reaper</strong> as background
+      goroutines after reconciler returns.</li>
+    <li>Builds a<code>runtime.Client</code> on demand for each sandbox using the host-side
+      Unix socket path: <code>&lt;workspaces&gt;/&lt;id&gt;.mnt/.runtimed/sock</code>.</li>
+    <li>Supports SIGHUP to reload auth config without a restart.</li>
+  </ul>
 
-      <div class="pipe reveal">
-        <div class="stage"><span class="sn">01</span><div class="st"><b>POST /sandbox</b><small>控制面在 Docker 里创建一个专属容器 + workspace 目录</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">02</span><div class="st"><b>runtimed 启动</b><small>容器 init 进程是 runtimed（in-sandbox supervisor），启动 Vite dev server</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">03</span><div class="st"><b>POST /sandbox/{id}/tasks</b><small>发送 prompt，runtimed 拉起 OpenCode agent 写代码</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">04</span><div class="st"><b>Traefik 路由</b><small>容器内 dev server 通过 sandboxd_net 暴露，&lt;id&gt;.localhost 即可达</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">05</span><div class="st"><b>idle reaper</b><small>35 分钟无活动 → docker stop 释放内存；再次请求时秒级 wake up</small></div></div>
-      </div>
+  <h3>runtimed (cmd/runtimed/main.go)</h3>
+  <p>
+    runtimed is the in-sandbox supervisor. It runs as the container's main process (PID 1 or
+    a child). It is scoped to slice 1 of the roadmap:
+  </p>
+  <ul>
+    <li>Start and supervise the Vite dev server (<code>pnpm dev</code> by default).</li>
+    <li>Expose <code>GET /status</code> over a Unix domain socket on the workspace loopback
+      (<code>/home/sandbox/.runtimed/sock</code>).</li>
+    <li>Report preview health by polling the dev server's HTTP port.</li>
+    <li>Detect entry-asset compile errors (blank-page detection).</li>
+    <li>Manage coding tasks (POST /tasks, event stream, cancel) — later slice.</li>
+  </ul>
+  <p>
+    The socket is bound under<code>/home/sandbox/.runtimed/</code>, which lives on the loopback
+    workspace image. This means the same socket inode is reachable from inside the container at
+    <code>/home/sandbox/.runtimed/sock</code> and from the host at
+    <code>&lt;workspaces&gt;/&lt;id&gt;.mnt/.runtimed/sock</code>. There is no network port
+    and no cross-tenant reachability.
+  </p>
 
-      <div class="prose">
-        <h4 class="reveal">两进程架构：control-plane + runtimed</h4>
-        <p class="reveal">整个系统的工程复杂度集中在两处：<strong>控制面（sandboxd 主进程）</strong>和<strong>沙箱监管（runtimed 子进程）</strong>。两者通过两种完全不同的通信模式协作：</p>
-      </div>
+  <h4>Communication Protocol</h4>
+  <p>
+    sandboxd and runtimed communicate via HTTP/1.1 over the Unix domain socket.
+    The protocol types are defined in <code>control-plane/internal/runtime/protocol.go</code>
+    and <code>control-plane/internal/runtime/tasks.go</code>, imported by both sides:
+  </p>
+  <ul>
+    <li><code>GET /status</code> →<code>runtime.Status</code> — runtimed snapshot (dev server state + active task)</li>
+    <li><code>POST /tasks</code> → <code>runtime.StartTaskRequest</code> — start a coding task</li>
+    <li><code>GET /tasks/{id}/events</code> → SSE of<code>runtime.Event</code> — task progress stream</li>
+    <li><code>POST /tasks/{id}/cancel</code> — cancel a task</li>
+  </ul>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">两进程通信设计</span></div>
-        <pre><code>┌─────────────────────────────────────────────────────┐
-│  Host: sandboxd (Go control-plane, port 9000)         │
-│                                                     │
-│  ┌─────────────┐  ┌──────────┐  ┌──────────────┐   │
-│  │ Reconciler  │  │ Wake     │  │ Idle/Pressure │   │
-│  │ (启动时扫   │  │ Handler  │  │ Reaper       │   │
-│  │  描容器状态)│  │ (新请求  │  │ (后台常驻   │   │
-│  │             │  │  唤起)   │  │  35minidle   │   │
-│  └──────┬──────┘  └────┬─────┘  └──────┬───────┘   │
-│         │             │              │            │
-│  ┌──────┴─────────────┴──────────────┴──────┐    │
-│  │  Docker CLI (os/exec)                     │    │
-│  │  · docker run / docker stop / docker rm  │    │
-│  │  · docker exec (runtimed 通信)           │    │
-│  └──────────────────┬──────────────────────┘    │
-│                     │ unix socket / workspace mnt│
-│  ┌──────────────────┴──────────────────────┐    │
-│  │  Container: sandboxd-base (sandboxd-base:1.0.0)│
-│  │                                           │    │
-│  │   /home/sandbox/.runtimed/sock ←→ runtimed│
-│  │      (Unix domain socket, HTTP over it)    │
-│  │                                           │    │
-│  │   runtimed 拉起: pnpm dev                  │
-│  │   Vite dev server → :3000                 │
-│  └───────────────────────────────────────────┘
-└─────────────────────────────────────────────────────┘</code></pre>
-      </div>
+  <h4>runtimed status derivation</h4>
+  <p>
+    runtimed's <code>probeLoop</code> polls the dev server's HTTP port every 3 seconds.
+    The <code>status()</code> method derives the <code>runtime.PreviewState</code> from:
+  </p>
+  <table>
+    <tr><th>Dev server state</th><th>PreviewState.Status</th><th>Notes</th></tr>
+    <tr><td>not running</td><td><code>"down"</code></td><td></td></tr>
+    <tr><td>running, HTTP ≠ 200</td><td><code>"starting"</code></td><td></td></tr>
+    <tr><td>HTTP 200, no asset errors</td><td><code>"ready"</code></td><td></td></tr>
+    <tr><td>HTTP 200, asset compile error</td><td><code>"error"</code></td><td>blank page — build error</td></tr>
+  </table>
 
-      <div class="prose">
-        <h4 class="reveal">控制面：main.go 的系统设计</h4>
-        <p class="reveal">main.go 是系统的心脏。读完它，架构一目了然——它启动了一个完整的<strong>云原生调度系统</strong>：</p>
-        <ul class="reveal">
-          <li><strong>SQLite + WAL</strong>：所有沙箱状态、任务记录持久化。DSN <code>file:...?_journal=WAL&amp;_busy_timeout=5000&amp;_fk=1</code>。</li>
-          <li><strong>Reconciler（启动时一次性）</strong>：扫描所有"孤儿"容器、残留挂载、快照碎片——确保启动状态干净。</li>
-          <li><strong>Idle Reaper（后台 goroutine）</strong>：每 30s 检查一次，35 分钟无活动的容器执行 <code>docker stop</code> 释放内存。</li>
-          <li><strong>Pressure Reaper（后台 goroutine）</strong>：每 10s 检查主机内存，压力过大时拒绝新的 wake 请求（<code>Refused</code> atomic flag）。</li>
-          <li><strong>Access-log tailer</strong>：监听 Traefik access log 更新每个沙箱的 <code>last_active_at</code>——驱动 idle reaper 的精确计时。</li>
-          <li><strong>Connection poller</strong>：若配置了 <code>SANDBOXD_POLLER_METRIC_RE</code>，定时探 Traefik metrics；未配置时退化为 access-log-only 模式。</li>
-        </ul>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">control-plane/cmd/sandboxd/main.go — 启动序列</span></div>
-        <pre><code><span class="tok-c">// Phase 8 — service token auth + audit logger</span>
-auditLog := audit.New(st, log.With(<span class="tok-s">"component"</span>, <span class="tok-s">"audit"</span>))
-authMw   := auth.NewMiddleware(auth.ParseConfig(os.Getenv), auditLog, ...)
-
-<span class="tok-c">// Docker 客户端（直接 os/exec，不依赖 SDK）</span>
-dockerClient := docker.NewClient()
-loopMgr := loopback.New()
-loopMgr.Root = workspacesRoot
-loopMgr.SeedImage = image
-loopMgr.DockerBin = <span class="tok-s">"docker"</span>
-loopMgr.Userns = userns
-
-<span class="tok-c">// Phase 7 — per-id 分布式锁 + 快照子系统</span>
-idLocks := idlock.New()
-snapshotMgr := &snapshot.Manager{...}
-
-<span class="tok-c">// Reconciler once（启动时扫描孤儿资源）</span>
-rcDeps := reconcile.Deps{Store: st, Docker: dockerClient, ...}
-res, err := reconcile.Once(ctx, rcDeps)
-<span class="tok-k">for</span> kind, n := range res.Orphans {
-  metrics.ReconcilerOrphans.WithLabelValues(kind).Set(float64(n))
-}
-
-<span class="tok-c">// Phase 5 — 后台 goroutines（idle reaper / pressure reaper / access-log tailer / poller）</span>
-go func() { idle.Run(gctx) }()
-go func() { pressure.Run(gctx) }()
-go func() { tailer.Run(gctx) }()
-go func() { poller.Run(gctx) }()</code></pre>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">runtimed：沙箱内的 supervisor</h4>
-        <p class="reveal">runtimed（<code>cmd/runtimed/main.go</code>）是容器内的 init 进程，负责：</p>
-        <ul class="reveal">
-          <li><strong>启动 Vite dev server</strong>：执行 <code>pnpm dev</code>，管道输出到日志文件。</li>
-          <li><strong>健康探测循环</strong>：每 3s 轮询 <code>localhost:3000</code>，区分 <em>down / starting / ready / error</em> 四种状态。</li>
-          <li><strong>构建错误检测</strong>：HTML shell 能 serve 200 但入口模块编译失败（空白页），runtimed 会捕获这个状态并报告。</li>
-          <li><strong>任务生命周期管理</strong>：<code>POST /tasks</code> 接收 prompt → 拉起 OpenCode agent → SSE 流式输出事件（status / message / tool / build / done）→ 最终结果写入 <code>result.json</code>。</li>
-          <li><strong>Unix domain socket API</strong>：通过 <code>/home/sandbox/.runtimed/sock</code> 对外暴露，路径在 host 侧通过 workspace mnt 同路径可访问。</li>
-        </ul>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">cmd/runtimed/main.go — probeLoop + status 状态机</span></div>
-        <pre><code><span class="tok-k">func</span> <span class="tok-p">(</span>a <span class="tok-k">*</span>app<span class="tok-p">)</span> <span class="tok-f">status</span><span class="tok-p">()</span> runtime.Status <span class="tok-p">{</span>
-  pid, restarts, running := a.dev.snapshot<span class="tok-p">()</span>
-  a.mu.Lock<span class="tok-p">()</span>
-  code, assetErr, checked := a.lastCode, a.lastAssetErr, a.lastChecked
-  a.mu.Unlock<span class="tok-p">()</span>
-
-  ps := runtime.PreviewState<span class="tok-p">{</span>Restarts: restarts, LastHTTPStatus: code<span class="tok-p">}</span>
-  <span class="tok-k">switch</span> <span class="tok-p">{</span>
-  <span class="tok-k">case</span> !running<span class="tok-p">:</span>
-    ps.Status = runtime.PreviewDown
-  <span class="tok-k">case</span> code == <span class="tok-n">200</span> && assetErr == <span class="tok-s">""</span><span class="tok-p">:</span>
-    ps.Status = runtime.PreviewReady
-    ps.Pid = pid
-  <span class="tok-k">case</span> code == <span class="tok-n">200</span> && assetErr != <span class="tok-s">""</span><span class="tok-p">:</span>
-    <span class="tok-c">// shell serves but entry module fails to compile — blank page.</span>
-    ps.Status = runtime.PreviewError
-    ps.BuildErrorMessage = assetErr
-  <span class="tok-k">default</span><span class="tok-p">:</span>
-    ps.Status = runtime.PreviewStarting
-  <span class="tok-p">}</span>
-  <span class="tok-k">return</span> runtime.Status<span class="tok-p">{</span>Runtimed: ..., Preview: ps, ActiveTask: ...<span class="tok-p">}</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">任务子系统：TaskResult + TokenUsage</h4>
-        <p class="reveal"><code>internal/runtime/tasks.go</code> 定义了完整任务生命周期。事件流：</p>
-        <ul class="reveal">
-          <li><code>POST /tasks</code> → <code>StartTaskRequest { task_id, prompt, agent: "opencode", env, timeout_s }</code></li>
-          <li>runtimed 拉起 OpenCode agent，stdout 解析为 SSE 事件流：<code>status / message / tool / build / done</code></li>
-          <li>所有事件带自增 <code>id</code> 和 <code>ts</code>，<code>done</code> 事件携带 <code>TaskResult</code> 是唯一可信的终态</li>
-          <li><code>TaskResult</code> 包含：<code>files_changed</code>、<code>build_ok</code>、<code>build_error_message</code>、<code>preview_error_message</code>（Vite 启动但 app 报 500）、<code>TokenUsage</code>（input/output/reasoning/cache）</li>
-        </ul>
-      </div>
-
-      <div class="callout reveal"><b>资源控制：内存感知的 wake 拒绝</b>——当主机内存压力超过阈值（<code>SANDBOXD_MEM_REFUSE_WAKES_PCT=10%</code>），<code>Refused</code> atomic flag 被 set，新请求的 wake 会被拒绝而非排队。这比简单的最大并发限制更精细——它是<strong>基于系统当前健康状态的动态准入控制</strong>，而不是基于静态配额。</div>
-
-      <div class="prose">
-        <h4 class="reveal">对 coding agent 生态的意义</h4>
-        <p class="reveal">sandboxd 的目标用户是<strong>做 AI coding 产品的公司</strong>，而不是直接给开发者用。但它对生态有直接贡献：</p>
-        <ul class="reveal">
-          <li>它证明了"AI coding product"的backend是可以<strong>自托管、开源、不要专有云</strong>的。</li>
-          <li>它的 base 镜像（sandboxd-base:1.0.0）预装了 OpenCode 和 Claude Code CLI——意味着沙箱里已经有一个 coding agent 可用。</li>
-          <li>任务系统的设计（runtimed 作为 supervisor、通过 Unix socket 对外暴露控制 API）是<strong>多租户沙箱监管</strong>的干净实现参考。</li>
-          <li>Phase 8 加入 service token auth 和 audit log——说明这个项目正在往"企业可部署"方向演进。</li>
-        </ul>
-        <p class="reveal">它与本 index 中其他项目的分工关系：CodeGraph / Understand-Anything 给 agent 提供代码理解基础设施；sandboxd 给 AI coding 产品提供<strong>运行时隔离 + 任务编排</strong>基础设施。</p>
-      </div>
-    </div>
+  <div class="callout callout-info">
+    <strong>Two-client HTTP design:</strong> The<code>runtime.Client</code> maintains two
+    <code>http.Client</code> instances — one with a 5-second timeout for status/start/cancel,
+    and one with no timeout for the SSE task event stream. This avoids the stream being killed
+    by a short timeout while still protecting against hung connections on command operations.
   </div>
 </section>
-</div>
+
+<!-- ============================================================
+     SECTION: Reconciler
+     ============================================================ -->
+<section id="reconciler">
+  <h2>Boot-Time Reconciler</h2>
+  <p>
+    Defined in <code>control-plane/internal/reconcile/reconcile.go</code>. The reconciler runs
+    exactly <strong>once</strong> at process startup, before the HTTP listener accepts any
+    requests. This is a hard ordering requirement: a partial reconcile must never publish a
+    half-populated egress set to clients.
+  </p>
+
+  <h3>What the reconciler does</h3>
+  <p>
+    It converges Docker container state toward SQLite. For every sandbox row with status
+    <code>running</code>, <code>creating</code>, or <code>stopped</code>:
+  </p>
+
+  <ol>
+    <li>
+      <strong>Re-mount loopback</strong> (Phase 5 V11 fix): Kernel mount namespaces don't
+      survive a reboot. If the <code>.img</code> on disk still exists and the row is not in
+      <code>error</code> status, re-provision the loopback mount before deciding container
+      state. <code>Loopback.Provision()</code> is idempotent — existing mounts are a no-op.
+    </li>
+    <li>
+      <strong>Handle stale <code>creating</code> rows:</strong> Any<code>creating</code> row
+      older than 5 minutes is marked <code>error</code> (log, mark error, leave mount alone
+      for human review).
+    </li>
+    <li>
+      <strong>Inspect the Docker container</strong> (<code>s-&lt;id&gt;</code>):
+      <ul>
+        <li>Container absent → <code>MarkStopped</code> (do NOT auto-recreate).</li>
+        <li>Container present but not running → <code>MarkStopped</code>.</li>
+        <li>Container running → re-derive cgroup path and re-write
+          <code>memory.high</code> (idempotent). Update row to <code>running</code>.</li>
+      </ul>
+    </li>
+    <li>
+      <strong>Re-populate egress sources</strong> (Phase 6): Derive the live bridge IP from
+      Docker inspect (the source of truth — Docker can reassign IPs across daemon restart).
+      Tear down any stale entry and re-add with the current IP.
+    </li>
+   <li>
+      <strong>Log legacy rows without<code>external_user_id</code></strong> (Phase 8):
+      A running sandbox should have one. Log a warning suggesting
+      <code>sandboxd backfill-legacy</code>. Never auto-destroy.
+    </li>
+  </ol>
+
+  <h3>Orphan container and mount scanning</h3>
+  <p>
+    After processing all known rows, the reconciler scans for orphans:
+  </p>
+  <ul>
+    <li>
+      <strong>Orphan containers:</strong> Any Docker container with name prefix<code>s-</code>
+      that has no matching SQLite row. These are <em>logged only</em> — never destroyed.
+      The reconciler does not adopt or cull on its own.
+    </li>
+    <li>
+      <strong>Orphan mounts:</strong> Any mount under <code>workspaces/</code> ending in
+      <code>.mnt</code> whose base ID has no SQLite row. Also logged only.
+    </li>
+    <li>
+      <strong>Workspace owner orphans</strong> (Phase 8): Any<code>workspace_owner</code>
+      row whose backing<code>.img</code> is no longer on disk. Logged; disposition is the
+      operator's. A6-hour ticker re-checks after boot.
+    </li>
+  </ul>
+
+  <h3>Result and metrics</h3>
+  <p>
+    <code>reconcile.Once()</code> returns a<code>reconcile.Result</code> struct consumed by
+    main.go for logging and Prometheus metrics:
+  </p>
+  <table>
+    <tr><th>Field</th><th>Meaning</th></tr>
+    <tr><td><code>Duration</code></td><td>Total reconciler wall time.</td></tr>
+    <tr><td><code>Rows</code></td><td>Total sandbox rows processed.</td></tr>
+    <tr><td><code>Reapplied</code></td><td><code>memory.high</code> re-writes that succeeded.</td></tr>
+    <tr><td><code>Stopped</code></td><td>Rows marked stopped (container vanished or not running).</td></tr>
+    <tr><td><code>Errored</code></td><td>Rows marked error (egress repopulation failure).</td></tr>
+    <tr><td><code>EgressAdded</code></td><td>Egress source entries re-installed.</td></tr>
+    <tr><td><code>Orphans</code></td><td>Map of orphan kind → count (container, mount, workspace_owner).</td></tr>
+  </table>
+
+  <h3>Memory.high re-application</h3>
+  <p>
+    When <code>SetMemoryHigh</code> is enabled (off by default in the portable OSS build),
+    the reconciler re-derives the cgroup path from the container's current PID and re-writes
+    <code>memory.high</code>. This addresses the Phase 1 carry-forward: "<code>memory.high</code>
+    is not restored automatically by<code>docker start</code>". The write is idempotent; a
+    write failure is logged but no longer marks the sandbox errored — a running, serving
+    container must not be torn out of service just because a soft throttle couldn't be
+    re-applied.
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: Orphan Scanning
+     ============================================================ -->
+<section id="orphan-scan">
+  <h2>Orphan Scanning Details</h2>
+  <p>
+    Orphan scanning is deliberately non-destructive. The CLAUDE.md invariant is:
+    "SQLite is source of truth. The reconciler converges Docker to SQLite, never the other way."
+    Orphan containers and mounts are <em>logged</em> for operator awareness, but the system
+    never auto-deletes them.
+  </p>
+
+  <h3>Orphan container scan</h3>
+  <p>
+    The reconciler calls<code>Docker.ListByNamePrefix(ctx, "s-")</code> to get all container
+    names with the <code>s-</code> prefix. It builds a <code>knownIDs</code> map from the
+    SQLite rows it processed. Any container whose ID is not in <code>knownIDs</code> is an
+    orphan:
+  </p>
+  <pre>for _, name := range names {
+    id := strings.TrimPrefix(name, "s-")
+    if knownIDs[id] { continue }
+    log.Warn("reconcile: orphan container (no matching sandbox row)",
+        "container", name, "sandbox_id", id)
+    res.Orphans["container"]++
+  }</pre>
+
+  <h3>Orphan mount scan</h3>
+  <p>
+    <code>Loopback.ListMounts()</code> returns all mount paths under
+    <code>&lt;workspacesRoot&gt;/</code> that end in <code>.mnt</code>. The reconciler extracts
+    the base ID (everything before <code>.mnt</code>) and checks against <code>knownIDs</code>:
+  </p>
+  <pre>for _, mnt := range mounts {
+    base := mnt[strings.LastIndexByte(mnt, '/')+1:]
+    id := strings.TrimSuffix(base, ".mnt")
+    if knownIDs[id] { continue }
+    log.Warn("reconcile: orphan mount (no matching sandbox row)",
+        "mount", mnt, "sandbox_id", id)
+    res.Orphans["mount"]++
+  }</pre>
+
+  <h3>Phase 7 crash debris sweep</h3>
+  <p>
+    Before orphan mount scanning, the reconciler calls
+    <code>Snapshot.SweepStale()</code> which removes two classes of crash debris:
+ </p>
+  <ul>
+    <li><code>*.img.zst.tmp</code> — half-written compressed snapshots from an interrupted
+      snapshot operation.</li>
+    <li><code>*.img.bak-*</code> — backup files from an interrupted restore.</li>
+  </ul>
+  <p>
+    Both are logged, not silently deleted. Counts are reported via<code>stale_tmp</code> and
+    <code>stale_bak</code> metrics fields.
+  </p>
+
+  <h3>Workspace owner orphan check (6-hour ticker)</h3>
+  <p>
+    After boot, main.go starts a goroutine with a 6-hour ticker that calls
+    <code>CheckWorkspaceOwnerOrphans()</code>. This iterates all<code>workspace_owner</code>
+    rows and logs any whose backing <code>.img</code> is no longer on disk. The function never
+    deletes — disposition is the operator's. The check runs:
+  </p>
+  <ul>
+    <li>Once at boot from<code>reconcile.Once()</code>.</li>
+    <li>Every 6 hours from the background goroutine.</li>
+  </ul>
+</section>
+
+<!-- ============================================================
+     SECTION: Idle Reaper
+     ============================================================ -->
+<section id="idle-reaper">
+  <h2>Idle Reaper</h2>
+  <p>
+    Defined in <code>control-plane/internal/reaper/idle.go</code>. The idle reaper is a
+    long-lived goroutine that stops sandboxes after a configurable period of inactivity.
+    It is Phase 5 of the roadmap.
+  </p>
+
+  <h3>Configuration (env-tunable)</h3>
+  <table>
+    <tr><th>Env var</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>SANDBOXD_IDLE_THRESHOLD_SECONDS</code></td><td>2100 (35 min)</td><td>Inactivity cutoff — sandbox idle after this without any activity signal.</td></tr>
+    <tr><td><code>SANDBOXD_IDLE_REAP_INTERVAL_SECONDS</code></td><td>30</td><td>How often the reaper ticks to check candidates.</td></tr>
+    <tr><td><code>SANDBOXD_WAKE_GRACE_SECONDS</code></td><td>60</td><td>Post-wake/post-SSE-disconnect grace window before idle clock resumes.</td></tr>
+  </table>
+
+  <h3>Skip rules (in-memory, per candidate)</h3>
+  <p>Before stopping any sandbox, the reaper applies these checks in order:</p>
+  <ol>
+    <li>
+      <strong>In-flight exec:</strong> If<code>activity.InflightExec.Active(sb.ID)</code>
+      returns true, skip. An exec is a direct signal of user activity.
+    </li>
+    <li>
+      <strong>Explicit keepalive:</strong> If <code>sb.KeepaliveUntil</code> is set and
+      <code>keepalive_until &gt; now.Unix()</code>, skip. The upstream can extend
+      the sandbox's life during long-running operations.
+    </li>
+    <li>
+      <strong>Active coding task:</strong> If <code>Store.SandboxHasRunningTask(sb.ID)</code>
+      returns true, skip. Reaping mid-task would interrupt the agent run.
+    </li>
+    <li>
+      <strong>Open connection signal:</strong> Handled by the access-log tailer / poller
+      bumping <code>last_active_at</code> within the WakeGrace window. The DB already
+      reflects it via the <code>ListIdleCandidates</code> cutoff comparison.
+    </li>
+    <li>
+      <strong>Clock-drift double-check:</strong> If <code>!sb.LastActiveAt.IsZero()</code>
+      and <code>sb.LastActiveAt.After(cutoff)</code>, skip. Safety net for clock drift.
+    </li>
+  </ol>
+
+  <h3>The tick loop</h3>
+  <pre>func (i *Idle) tick(ctx context.Context) error {
+  metrics.IdleReaperRuns.Inc()
+  now := time.Now().UTC()
+  cutoff := now.Add(-i.Cfg.Threshold)
+
+  candidates, err := i.Store.ListIdleCandidates(ctx, cutoff)
+  // SQL: ... WHERE status='running' AND last_active_at < cutoff
+  //      ORDER BY last_active_at ASC
+  for _, sb := range candidates {
+    // apply skip rules...
+    // docker stop s-<id>,10s timeout
+    // egress.Remove + Store.ClearContainerIP
+    // Store.MarkStoppedAt
+    metrics.IdleReaperStops.WithLabelValues("idle").Inc()
+  }
+}</pre>
+
+  <h3>Activity signals that prevent idle</h3>
+  <p>
+    <code>last_active_at</code> is bumped by three sources:
+  </p>
+  <ul>
+    <li><strong>Access-log tailer</strong> — watches<code>traefik-access.log</code> for
+      requests matching the preview domain and bumps<code>last_active_at</code> for the
+      matching sandbox.</li>
+    <li><strong>Open-connection poller</strong> — if<code>SANDBOXD_POLLER_METRIC_RE</code>
+      is set, polls a metrics endpoint and bumps last_active_at for sandboxes with active
+      connections. Falls back to tailer-only if the env var is absent.</li>
+    <li><strong>Wake handler</strong> — bumps on every successful wake.</li>
+    <li><strong>In-flight exec tracking</strong> — bumped during active docker exec calls.</li>
+  </ul>
+
+  <h3>Egress cleanup on stop</h3>
+  <p>
+    When the idle reaper stops a container, it also:
+  </p>
+  <ul>
+    <li>Calls <code>Egress.Remove(ctx, sb.ID, sb.ContainerIP.String)</code> to drop the
+      bridge IP from the nftables sandbox_sources_v4 set.</li>
+    <li>Calls <code>Store.ClearContainerIP(ctx, sb.ID)</code> to NULL the
+      <code>container_ip</code> column on the row. This is the "every stopped sandbox has
+      it NULL" rule from roadmap §1 DoD.</li>
+  </ul>
+</section>
+
+<!-- ============================================================
+     SECTION: Pressure Reaper
+     ============================================================ -->
+<section id="pressure-reaper">
+  <h2>Host Memory Pressure Reaper</h2>
+  <p>
+    Defined in <code>control-plane/internal/reaper/pressure.go</code>. The pressure reaper
+    defends host memory in three bands, stopping the oldest idle-running sandbox at each
+    threshold. It is Phase 5 of the roadmap and runs on a 10-second ticker.
+  </p>
+
+  <h3>Configuration (env-tunable)</h3>
+  <table>
+    <tr><th>Env var</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>SANDBOXD_PRESSURE_INTERVAL_SECONDS</code></td><td>10</td><td>Tick interval.</td></tr>
+    <tr><td><code>SANDBOXD_MEM_HEADROOM_PCT</code></td><td>15</td><td>"Healthy" floor — no action above this.</td></tr>
+    <tr><td><code>SANDBOXD_MEM_REFUSE_WAKES_PCT</code></td><td>10</td><td>Below this: stop oldest idle AND refuse new wake requests.</td></tr>
+    <tr><td><code>SANDBOXD_MEM_EMERGENCY_PCT</code></td><td>5</td><td>Emergency — stop heaviest-RSS sandbox regardless of activity.</td></tr>
+  </table>
+
+  <h3>Memory bands</h3>
+  <div class="diagram">
+<pre>
+MemAvailable%
+│
+│  ≥15%  ┌────────────────────────────────────── HEALTHY (no action)
+│         │
+│ 10–15%  │ ┌─────────────────────────────────── STOP oldest idle-running
+│         │ │  (10–15% band — advisory, doesn't refuse wakes)
+│  5–10%  │ │ ┌─────────────────────────────── STOP oldest idle-running
+│         │ │ │  WARN: wakes refused
+│         │ │ │
+│  &lt;5%   │ │ │ ┌─────────────────────────── STOP heaviest RSS
+│         │ │ │ │  CRITICAL: emergency stop, even if active
+└─────────┴─┴─┴───────────────────────────────────────▶0%
+  20 15    10 5     0
+</pre>
+  </div>
+
+  <h3>Hysteresis on wake refusal</h3>
+  <p>
+    The <code>Refused</code> atomic bool is shared with the wake admission code. It uses
+    hysteresis to avoid flapping at the boundary:
+  </p>
+  <ul>
+    <li>Set<code>true</code> when<code>avail &lt; RefuseWakesPct</code> (falling edge into
+      5–10% or &lt;5% bands).</li>
+    <li>Cleared <code>false</code> when <code>avail ≥ RefuseWakesPct + 2</code> (rising edge
+      above 12%, slightly above HeadroomPct's 10% trigger).</li>
+  </ul>
+
+  <h3>stopOldestIdle</h3>
+  <p>
+    Picks the sandbox with the oldest <code>last_active_at</code> from
+    <code>ListIdleCandidates(ctx, now)</code> (cutoff = now means "any row not currently
+    being marked active"). Applies the same skip rules as the idle reaper. One stop per tick
+    — the next tick re-reads MemAvailable and decides again. If no candidate exists, the
+    reaper takes no action this tick.
+  </p>
+
+  <h3>stopHeaviestRSS (emergency &lt;5%)</h3>
+  <p>
+    When MemAvailable falls below 5%, the reaper calls <code>stopHeaviestRSS()</code>:
+  </p>
+  <ol>
+    <li>Lists all <code>running</code> sandboxes.</li>
+    <li>For each sandbox with a valid<code>cgroup_path</code>, reads
+      <code>/sys/fs/cgroup{path}/memory.current</code> via
+      <code>ReadCgroupMemoryCurrent()</code>.</li>
+    <li>Picks the one with the highest<code>memory.current</code> (RSS proxy).</li>
+    <li>Calls <code>docker stop</code> on it <strong>regardless of activity</strong>.</li>
+    <li>Logs a <code>CRITICAL</code> event with full row identity.</li>
+  </ol>
+  <p>
+    This addresses OB9 carry-forward: with<code>memory.high=4G</code> and
+    <code>memory.swap.max=0</code>, the kernel can stall cooperative allocators in D-state
+    before they ever cross <code>memory.max=10G</code>. The pressure reaper does NOT rely on
+    <code>memory.events.oom_kill</code> — it ranks by<code>cgroup.memory.current</code>
+    (RSS, not OOM events). A D-state-stalled allocator counts as a kill candidate purely
+    on those signals.
+  </p>
+
+  <h3>ReadMemInfo and cgroup memory reading</h3>
+  <p>
+    <code>ReadMemInfo()</code> (in <code>control-plane/internal/reaper/meminfo.go</code>)
+    parses<code>/proc/meminfo</code> to compute <code>MemAvailable</code> and its percentage.
+    <code>ReadCgroupMemoryCurrent()</code> (in
+    <code>control-plane/internal/reaper/cgmem.go</code>) reads
+    <code>/sys/fs/cgroup{memory.current</code> for a given cgroup relative path.
+    Returns <code>(0, nil)</code> when the path doesn't exist (stopped sandbox whose cgroup
+    has been torn down).
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: Task Lifecycle
+     ============================================================ -->
+<section id="task-lifecycle">
+  <h2>TaskResult Lifecycle</h2>
+  <p>
+    The coding task subsystem is built on a per-sandbox <code>task</code> table row
+    (defined in <code>control-plane/internal/store/tasks.go</code>) and the SSE event stream
+    from runtimed. The key design goal: a task's canonical result outlives the sandbox.
+  </p>
+
+  <h3>Task statuses</h3>
+  <table>
+    <tr><th>Status</th><th>Meaning</th></tr>
+    <tr><td><code>running</code></td><td>Task is active in runtimed.</td></tr>
+    <tr><td><code>succeeded</code></td><td>Task completed with a clean <code>done</code> event.</td></tr>
+    <tr><td><code>failed</code></td><td>Task completed with an error.</td></tr>
+    <tr><td><code>cancelled</code></td><td>Upstream cancelled the task via <code>POST /tasks/{id}/cancel</code>.</td></tr>
+  </table>
+
+  <h3>Lifecycle flow</h3>
+
+  <div class="flow-step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <strong>POST /v1/sandboxes/{id}/tasks</strong> — upstream submits a task.
+      <p>
+        The API handler checks the sandbox is <code>running</code> (if stopped, delegates to
+        the wake path first — B1 "wake-on-task-submit"). It generates a ULID as
+        <code>taskID</code>, then calls <code>runtimeClientFor(id).StartTask()</code>
+        which sends <code>POST /tasks</code> to runtimed over the Unix socket.
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <strong>runtimed acknowledges</strong> — HTTP 202 Accepted or 409 Conflict.
+      <p>
+        If a task is already running, runtimed returns <code>ErrTaskInProgress</code> and the
+        API returns 409 "task_in_progress". One task at a time is enforced by runtimed's
+        <code>taskMu</code> mutex.
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <strong>Persist the task row</strong> — <code>Store.CreateTask()</code>.
+      <p>
+        sandboxd writes a <code>task</code> row in<code>running</code> state to SQLite.
+        The row's<code>result_json</code> starts as NULL. This ensures the task result
+        survives sandbox stops and destructions.
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">4</div>
+    <div class="step-content">
+      <strong>Start the result watcher</strong> — <code>go s.watchTask(id, taskID)</code>.
+      <p>
+        A background goroutine opens the SSE stream via
+        <code>runtimeClientFor(id).TaskEvents(taskID, 0)</code>. It consumes events and
+        persists the terminal<code>done</code> event's<code>TaskResult</code> to the row via
+        <code>Store.FinishTask()</code>. The watcher closes when the <code>done</code> event
+        arrives or the context is cancelled.
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">5</div>
+    <div class="step-content">
+      <strong>Event stream</strong> — upstream consumes via
+      <code>GET /v1/sandboxes/{id}/tasks/{taskId}/events</code>.
+      <p>
+        sandboxd proxies the SSE stream from runtimed. The client sends
+        <code>Last-Event-ID</code> headers for resume-after-reconnect. sandboxd translates
+        the newline-delimited JSON events from runtimed into SSE format
+        (<code>id: N\nevent: type\ndata: JSON\n\n</code>).
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">6</div>
+    <div class="step-content">
+      <strong>Terminal <code>done</code> event</strong> — carries<code>TaskResult</code>.
+      <p>
+        The <code>done</code> event is the single terminal event. It contains the full
+        <code>TaskResult</code>:<code>status</code>, <code>failure_reason</code>,
+        <code>files_changed</code>, <code>agent_message_final</code>, <code>build_ok</code>,
+        <code>build_error_message</code>, <code>preview_status_after</code>,
+        <code>preview_error_message</code>, <code>checkpoint_id</code>,
+        <code>duration_ms</code>, <code>tokens</code>, and timestamps.
+      </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">7</div>
+    <div class="step-content">
+      <strong>Persist result</strong> — <code>Store.FinishTask()</code>.
+      <p>
+        <code>FinishTask(ctx, taskID, status, resultJSON)</code> updates the row:
+        <code>status</code> → terminal status, <code>result_json</code> → JSON-encoded
+        <code>TaskResult</code>, <code>finished_at</code> → <code>time.Now().Unix()</code>.
+     </p>
+    </div>
+  </div>
+
+  <div class="flow-step">
+    <div class="step-num">8</div>
+    <div class="step-content">
+      <strong>GET /v1/sandboxes/{id}/tasks/{taskId}</strong> — read canonical result.
+      <p>
+        Reads from sandboxd's SQLite — works whether the sandbox is still running, stopped,
+        or destroyed. If<code>result_json</code> is NULL (task still running), returns
+        only the running status.
+      </p>
+    </div>
+  </div>
+
+  <h3>TaskResult fields</h3>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>id</code></td><td>string</td><td>Task ULID.</td></tr>
+    <tr><td><code>status</code></td><td>TaskStatus</td><td><code>succeeded | failed | cancelled</code></td></tr>
+    <tr><td><code>failure_reason</code></td><td>string</td><td>Human-readable reason for failure (agent-level).</td></tr>
+    <tr><td><code>error_message</code></td><td>string</td><td>Structured error from the coding agent.</td></tr>
+    <tr><td><code>files_changed</code></td><td>[]string</td><td>List of files modified during the task.</td></tr>
+    <tr><td><code>agent_message_final</code></td><td>string</td><td>Final agent summary message.</td></tr>
+    <tr><td><code>build_ok</code></td><td>bool</td><td>Whether<code>pnpm build</code> succeeded.</td></tr>
+    <tr><td><code>build_error_message</code></td><td>string</td><td>Output from <code>pnpm build</code>.</td></tr>
+    <tr><td><code>preview_status_after</code></td><td>PreviewStatus</td><td>Dev server state after the task.</td></tr>
+    <tr><td><code>preview_error_message</code></td><td>string</td><td>Live dev-server error when app fails to render despite clean build.</td></tr>
+    <tr><td><code>checkpoint_id</code></td><td>string</td><td>Snapshot ID taken at task end, if any.</td></tr>
+    <tr><td><code>duration_ms</code></td><td>int64</td><td>Wall time of the task in milliseconds.</td></tr>
+    <tr><td><code>tokens</code></td><td>TokenUsage</td><td>Input/output/reasoning/cache token counts and cost.</td></tr>
+    <tr><td><code>created_at / started_at / finished_at</code></td><td>time.Time</td><td>Task timestamps.</td></tr>
+  </table>
+
+  <h3>Event types</h3>
+  <table>
+    <tr><th>Type</th><th>Source</th><th>Reliability</th></tr>
+    <tr><td><code>status</code></td><td>runtimed</td><td>Reliable</td></tr>
+    <tr><td><code>message</code></td><td>provider-derived</td><td>Best-effort</td></tr>
+    <tr><td><code>tool</code></td><td>provider-derived</td><td>Best-effort</td></tr>
+    <tr><td><code>build</code></td><td>runtimed</td><td>Reliable</td></tr>
+    <tr><td><code>done</code></td><td>runtimed</td><td>Reliable — terminal event, carries TaskResult.</td></tr>
+  </table>
+
+  <h3>Cancel flow</h3>
+  <p>
+    <code>POST /v1/sandboxes/{id}/tasks/{taskId}/cancel</code> sends
+    <code>POST /tasks/{taskId}/cancel</code> to runtimed. runtimed's<code>taskMu</code>
+    ensures only one task runs at a time. The cancel is idempotent — calling cancel on
+    an already-finished task returns200 OK.
+  </p>
+
+  <h3>Boot-time task recovery</h3>
+  <p>
+    Both<code>sandboxd main.go</code> and <code>runtimed main.go</code> call
+    <code>recoverInterruptedTasks()</code> at startup. An interrupted task is failed (never
+    resumed). sandboxd calls<code>server.ReconcileTasks(ctx)</code> which calls
+    <code>Store.ListRunningTasks()</code> and marks any stale running tasks as
+    <code>failed</code> before the idle reaper starts.
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: SQLite Store
+     ============================================================ -->
+<section id="store">
+  <h2>SQLite Store</h2>
+  <p>
+    The<code>Store</code> (<code>control-plane/internal/store/store.go</code>) is the
+    SQLite-backed source of truth for the sandbox lifecycle. All sandboxes, tasks, and
+    workspace owners are stored here.
+  </p>
+
+  <h3>Concurrency model</h3>
+  <p>
+    A single writer goroutine reads from a buffered channel of write operations (capacity 64).
+    Readers use <code>db.QueryRow</code> / <code>db.Query</code> directly. This avoids
+    "database is locked" without scattering mutexes across the code. The architecture:
+  </p>
+  <pre>type Store struct {
+  db       *sql.DB
+  writes   chan writeOp // buffered channel, capacity 64
+  doneCh   chan struct{}
+  closeCh  chan struct{}
+}</pre>
+
+  <h3>Sandbox lifecycle states</h3>
+  <table>
+    <tr><th>Status</th><th>Meaning</th></tr>
+    <tr><td><code>creating</code></td><td>Row exists, container being created. If older than 5 min, reconciler marks error.</td></tr>
+    <tr><td><code>running</code></td><td>Container is up and serving.</td></tr>
+    <tr><td><code>stopped</code></td><td>Container stopped (by reaper, wake, or operator). <code>container_ip</code> must be NULL.</td></tr>
+    <tr><td><code>error</code></td><td>Irrecoverable error. Operator must investigate manually.</td></tr>
+  </table>
+
+  <h3>Key read queries</h3>
+  <ul>
+    <li><code>Get(ctx, id)</code> — single sandbox by ID.</li>
+    <li><code>List(ctx)</code> — all sandboxes, ordered by <code>created_at DESC</code>.</li>
+    <li><code>ListByStatuses(ctx, statuses...)</code> — used by the reconciler.</li>
+    <li><code>ListIdleCandidates(ctx, cutoff)</code> — <code>WHERE status='running' AND last_active_at &lt; cutoff ORDER BY last_active_at ASC</code>. Ports are NOT loaded here (hot path optimization).</li>
+    <li><code>ListFiltered(ctx, externalUserID, externalProjectID)</code> — Phase 8 external identity filtering.</li>
+    <li><code>ListAllWorkspaceOwners(ctx)</code> — used by orphan check.</li>
+    <li><code>GetTask / CreateTask / FinishTask / ListRunningTasks</code> — task table.</li>
+    <li><code>SandboxHasRunningTask(ctx, sandboxID)</code> — used by idle reaper skip rule.</li>
+  </ul>
+
+  <h3>Key write operations</h3>
+  <p>
+    All writes are funnelled through the single writer goroutine via the
+    <code>writes</code> channel. Each write is a <code>writeOp</code> closure executed inside
+    the writer loop against the single DB connection. This serializes all mutations while
+    allowing concurrent reads.
+  </p>
+
+  <h3>Activity columns (Phase 5)</h3>
+  <p>
+    <code>last_active_at</code> (unix seconds, 0 = never observed) is bumped by tailer/poller.
+    <code>stopped_at</code> (unix seconds, NULL while running) records when the reaper stopped
+    the sandbox. <code>keepalive_until</code> (unix seconds, NULL = no override) is the
+    idle-reaper skip signal from the upstream.
+  </p>
+
+  <h3>Workspace owner binding (Phase 8)</h3>
+  <p>
+    <code>workspace_owner</code> is a separate table that survives <code>DELETE /sandbox/{id}</code>.
+    It holds the <code>sandbox_id → external_user_id</code> binding for per-user purge and
+    the Phase 8 orphan check.
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: Wake Handler
+     ============================================================ -->
+<section id="wake">
+  <h2>Wake Handler</h2>
+  <p>
+    The wake handler (<code>control-plane/internal/wake/handler.go</code>) brings a
+    stopped sandbox back to life. It has two entry points:
+  </p>
+  <ul>
+    <li>
+      <strong>Traefik catch-all:</strong> HTTP request with Host header matching
+      <code>s-&lt;id&gt;-&lt;port&gt;.preview.&lt;domain&gt;</code>. Returns an HTML
+      meta-refresh that keeps the browser retrying until the sandbox is ready.
+    </li>
+    <li>
+      <strong>Programmatic JSON:</strong> <code>POST /wake/{id}</code> on the loopback API.
+      Returns JSON. Used by task submission (wake-on-task-submit).
+    </li>
+  </ul>
+
+  <h3>Wake flow (step by step)</h3>
+  <ol>
+    <li>
+      <strong>Per-id mutex dedup:</strong> If a wake for the same ID is already in flight,
+      the second caller waits and reuses the first caller's outcome. This prevents
+      double-start races.
+    </li>
+    <li>
+      <strong>Per-id lock (Phase 7):</strong> The shared <code>idlock.Registry</code> is
+      acquired for the entire wake. This excludes a concurrent snapshot/restore/destroy of
+      the same sandbox.
+    </li>
+    <li>
+      <strong>Row lookup + status guard:</strong> <code>running</code> → success (no-op).
+      <code>error</code> → error response. <code>creating</code> → refuse (half-built row).
+      <code>stopped</code> → proceed.
+    </li>
+    <li>
+      <strong>Private sandbox gate (Phase 8):</strong> For HTML-path wakes of a
+      <code>visibility='private'</code> sandbox, the preview token cookie is validated
+      before anything else. Service/operator-authenticated callers bypass this gate.
+    </li>
+    <li>
+      <strong>Admission check:</strong> <code>Admit()</code> reads host memory. If denied,
+      returns 503 with <code>Retry-After: 30</code>. The wake is refused in the 5–10% or
+      &lt;5% bands.
+    </li>
+    <li>
+      <strong>docker start:</strong>15-second timeout. Idempotent — safe to call on an
+      already-running container (though the status guard above usually catches that case).
+    </li>
+    <li>
+      <strong>Inspect + memory.high re-apply:</strong> Re-derive cgroup path from the
+      container's PID and re-write <code>memory.high</code>. Failure is logged but doesn't
+      fail the wake — the <code>--memory</code> ceiling still applies.
+    </li>
+    <li>
+      <strong>Egress policy (Phase 6):</strong> Register the (possibly new) bridge IP with
+      the nftables sandbox_sources_v4 set. Tear down any stale entry first. If nftables
+      fails, abort the row update rather than running without egress policy.
+    </li>
+    <li>
+      <strong>TCP-ready probe:</strong> For the catch-all path (which knows the port),
+      poll the dev server until HTTP 200 or timeout. Timeout is informational, not a
+      hard failure — the meta-refresh keeps retrying.
+    </li>
+    <li>
+      <strong>Row update:</strong> <code>Store.MarkRunningWoke()</code> updates the row
+      to <code>running</code>, sets<code>container_id</code>, <code>cgroup_path</code>,
+      and bumps <code>last_active_at</code>.
+    </li>
+  </ol>
+
+  <h3>Egress registration</h3>
+  <p>
+    Egress (<code>nftables</code>) is disabled in the portable OSS build
+    (<code>egressMgr == nil</code>). Every consumer (reconciler, reapers, wake, API)
+    treats a nil egress manager as "no egress policy" — exactly the default-allow
+    behaviour. This is the single switch that keeps all of that off.
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: runtimed
+     ============================================================ -->
+<section id="runtimed">
+  <h2>runtimed Details</h2>
+  <p>
+    <code>runtimed</code> is the in-sandbox supervisor. It is a single Go binary started
+    as the container's main process. Its responsibilities in the current slice:
+  </p>
+  <ul>
+    <li>Supervise the dev server process (<code>pnpm dev</code> by default).</li>
+    <li>Probe the dev server HTTP port every 3 seconds.</li>
+    <li>Detect entry-asset compile errors (blank-page detection).</li>
+    <li>Expose <code>GET /status</code> over a Unix domain socket.</li>
+    <li>Recover interrupted tasks on startup.</li>
+  </ul>
+
+  <h3>app struct</h3>
+  <pre>type app struct {
+  dev         *devServer     // supervisored dev server
+  previewPort int
+  appDir      string // /home/sandbox/workspace/app
+  runtimeDir  string         // /home/sandbox/.runtimed
+  log         *slog.Logger
+  bootedAt    time.Time
+
+  mu           sync.Mutex
+  lastCode     int           // last HTTP status from probe
+  lastAssetErr string // entry-asset compile error
+  lastChecked  time.Time
+
+  taskMu sync.Mutex         // guards task; serializes start (one task at a time)
+  task   *task             // current / last task, or nil
+}</pre>
+
+  <h3>devServer supervision</h3>
+  <p>
+    <code>devServer.supervise()</code> starts the dev server process, watches for exits,
+    and restarts it with exponential back-off (capped). Each restart increments the
+    <code>restarts</code> counter in<code>PreviewState</code>.
+  </p>
+
+  <h3>Startup guarantees</h3>
+  <ul>
+    <li><code>runtimeDir</code> (<code>/home/sandbox/.runtimed</code>) is created with 0o755.</li>
+    <li><code>appDir</code> (<code>/home/sandbox/workspace/app</code>) is created with 0o755.
+      This self-heals sandboxes provisioned before this fix (they may have had only
+      <code>~/workspace</code>).</li>
+    <li><code>recoverInterruptedTasks()</code> is called before accepting new work. Any
+      stale task state from a previous stop/crash is cleaned up.</li>
+  </ul>
+
+  <h3>Signal handling</h3>
+  <p>
+    runtimed uses<code>signal.NotifyContext</code> for SIGTERM/SIGINT. On signal receipt,
+    the dev server is stopped cleanly before runtimed exits. The context is also used to
+    cancel the probe loop and dev server supervision.
+  </p>
+</section>
+
+<!-- ============================================================
+     SECTION: Startup Sequence
+     ============================================================ -->
+<section id="startup">
+  <h2>Startup Sequence (sandboxd main.go)</h2>
+  <p>
+    The startup sequence is carefully ordered to ensure invariants hold from the first
+    request accepted.
+  </p>
+
+  <div class="flow-step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <strong>Env + dirs</strong> — parse env vars, create<code>stateDir</code>.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <strong>Open SQLite</strong> — <code>store.Open()</code> applies migrations,
+      starts the single-writer goroutine.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <strong>Backfill <code>last_active_at</code></strong> — for legacy running rows
+      where the migration default (0) would make every existing row an idle candidate.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">4</div>
+    <div class="step-content">
+      <strong>Build collaborators</strong> — docker client, loopback manager,
+      snapshot manager, idlock registry, egress manager (nil in OSS build).
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">5</div>
+    <div class="step-content">
+      <strong>Reconciler.Once</strong> — runs to completion before the listener opens.
+      All container state is converged to SQLite. Orphan mounts/containers are logged.
+      Metrics are published.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">6</div>
+    <div class="step-content">
+      <strong>Pressure reaper pre-check</strong> — if MemAvailable is already below
+      <code>headroomPct</code>, run one synchronous <code>pressure.Tick()</code> before
+      opening the listener.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">7</div>
+    <div class="step-content">
+      <strong>Task reconciliation</strong> — <code>server.ReconcileTasks(ctx)</code>
+      marks any stale running tasks as failed before the idle reaper starts.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">8</div>
+    <div class="step-content">
+      <strong>Start background goroutines</strong> — idle reaper, pressure reaper,
+      access-log tailer, connection poller, workspace_owner orphan ticker.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">9</div>
+    <div class="step-content">
+      <strong>HTTP listener</strong> — <code>httpSrv.ListenAndServe()</code>.
+      The reconciler has already completed, so the first request sees a fully
+      converged state.
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="step-num">10</div>
+    <div class="step-content">
+      <strong>Signal handling</strong> — SIGHUP reloads auth config; SIGINT/SIGTERM
+      triggers graceful shutdown (drain HTTP server, cancel background context,
+      close store).
+    </div>
+  </div>
+
+  <h3>Graceful shutdown</h3>
+  <ol>
+    <li>Signal handler sets<code>gcancel()</code> — stops all background goroutines.</li>
+    <li><code>httpSrv.Shutdown(shutCtx)</code> with 10-second timeout.</li>
+    <li><code>store.Close()</code> — drains the write channel, closes the DB.</li>
+  </ol>
+</section>
+
+<!-- ============================================================
+     SECTION: Architecture Diagram
+     ============================================================ -->
+<section id="architecture">
+  <h2>Full System Architecture</h2>
+
+  <div class="diagram">
+<pre>
+                                   ┌──────────────────────────────────────┐
+                                   │         sandboxd (host container)      │
+                                   │                                      │
+                                   │  HTTP API (127.0.0.1:9000) │
+                                   │    ├── /v1/sandboxes                  │
+                                   │    ├── /v1/sandboxes/{id}/tasks       │
+                                   │    ├── /wake/{id}                     │
+                                   │    └── catch-all (preview domain)     │
+                                   │                                      │
+                                   │  ┌──────────── Store ───────────────┐  │
+                                   │  │  Single-writer goroutine │  │
+                                   │  │  SQLite (WAL mode, FK enabled)    │  │
+                                   │  └─────────────────────────────────│  │
+                                   │                                      │
+                                   │  ┌──────── Reconciler.Once ────────┐  │
+                                   │  │  Boot-time, runs once          │  │
+                                   │  │  Converges Docker → SQLite     │  │
+                                   │  │  Orphan scan (logged, not del)  │  │
+                                   │  └────────────────────────────────│  │
+                                   │                                      │
+                                   │  ┌──────────── Idle Reaper ───────┐  │
+                                   │  │  30 s ticker                  │  │
+                                   │  │  last_active_at < threshold │  │
+                                   │  │  Skip: inflight, keepalive,    │  │
+                                   │  │         running task          │  │
+                                   │  └────────────────────────────────│  │
+                                   │                                      │
+                                   │  ┌──────── Pressure Reaper ───────┐  │
+                                   │  │  10 s ticker                  │  │
+                                   │  │  Bands: ≥15% / 10-15% /       │  │
+                                   │  │         5-10% / <5%           │  │
+                                   │  │  Emergency: heaviest RSS │  │
+                                   │  └────────────────────────────────│  │
+                                   │                                      │
+                                   │  ┌──────── Wake Handler ──────────┐  │
+                                   │  │  docker start + inspect │  │
+                                   │  │  egress.Add (Phase 6)          │  │
+                                   │  │  memory.high re-apply          │  │
+                                   │  │  TCP-ready probe              │  │
+                                   │  └────────────────────────────────│  │
+                                   │                                      │
+                                   │  ┌──── Activity ─────────────────┐  │
+                                   │  │  Access-log tailer │  │
+                                   │  │  Connection poller (optional) │  │
+                                   │  │  Inflight exec tracker │  │
+                                   │  └────────────────────────────────│  │
+                                   └──────────────────────────────────────┘
+                                                      │
+                                         docker start/stop/exec/inspect
+                                                      │
+                                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    sandbox container (sandboxd-base) │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  runtimed (cmd/runtimed/main.go)                                     │    │
+│  │  ├── Dev server supervisor (pnpm dev)                                 │    │
+│  │  ├── Health probe loop (3 s, HTTP port3000)                         │    │
+│  │  ├── GET /status  → PreviewState                                    │    │
+│  │  ├── POST /tasks  → Start coding task                                │    │
+│  │  ├── GET  /tasks/{id}/events → SSE event stream                      │    │
+│  │  └── POST /tasks/{id}/cancel                                        │    │
+│  └────────────────────────────┬────────────────────────────────────────┘    │
+│ │  Unix domain socket                         │
+│                               │ /home/sandbox/.runtimed/sock              │
+│                               ▼ │
+│                   ┌──────────────────────────┐                             │
+│                    │  Workspace loopback      │                             │
+│                    │  /home/sandbox/workspace│                             │
+│                    │   ↕ mount │                             │
+│                    │  &lt;workspaces&gt;/{id}.mnt   │                             │
+│                    └──────────────────────────┘                             │
+│                                                                             │
+│  Workspace image (.img):                                                   │
+│    /var/lib/sandboxed/workspaces/{id}.img │
+└─────────────────────────────────────────────────────────────────────────────┘
+</pre>
+  </div>
+</section>
+
+<!-- ============================================================
+     SECTION: Key Design Decisions
+     ============================================================ -->
+<section id="design-decisions">
+  <h2>Key Design Decisions</h2>
+
+  <h3>SQLite as source of truth</h3>
+  <p>
+    Every mutation (create, wake, stop, error) goes through sandboxd and SQLite.
+    Docker is the execution engine, not the source of truth. The reconciler's job is
+    to detect drift (containers that exist without rows, or rows whose container vanished)
+    and correct the row state. It never deletes Docker objects it didn't create.
+  </p>
+
+  <h3>Single-writer SQLite</h3>
+  <p>
+    SQLite handles one connection at the file level. The single-writer goroutine
+    serializes all writes through a buffered channel, avoiding "database is locked"
+    without scattering mutexes across the codebase. Reads go directly to the read
+    connection pool.
+  </p>
+
+  <h3>Idempotent everything</h3>
+  <p>
+    <code>docker start</code> is idempotent. <code>Loopback.Provision()</code> is idempotent.
+    Egress <code>Add</code>/<code>Remove</code> handles stale entries gracefully.
+    The reconciler re-writes <code>memory.high</code> on every boot. Concurrent wakes
+    for the same sandbox are deduped by an in-memory mutex.
+  </p>
+
+  <h3>No auto-delete on orphan scan</h3>
+  <p>
+    The reconciler logs orphan containers, orphan mounts, and workspace_owner orphans
+    rather than deleting them. This preserves developer debug workflows and makes the
+    system safer to run in development alongside manual Docker usage.
+  </p>
+
+  <h3>Reaper skip rules prevent mid-task interruption</h3>
+  <p>
+    The idle reaper and pressure reaper both check <code>Store.SandboxHasRunningTask()</code>
+    before stopping a container. The activity tailer and poller bump
+    <code>last_active_at</code> so a connected browser doesn't get reaped mid-session.
+    Explicit keepalives can extend a sandbox's life during long-running operations.
+  </p>
+
+  <h3>Task result outlives sandbox</h3>
+  <p>
+    The <code>task</code> row is in sandboxd's SQLite, not in runtimed. The result is
+    written by the result watcher goroutine before the SSE stream closes. Upstream can
+    read the canonical result via<code>GET /tasks/{id}</code> even after the sandbox
+    has been stopped and destroyed.
+  </p>
+
+  <h3>Phase-gated features are nil-safe</h3>
+  <p>
+    Egress (nftables), the snapshot subsystem, and the nginx hot-reloader are all
+    disabled in the portable OSS build. Every consumer checks<code>if egressMgr != nil</code>
+    before calling methods. The system functions correctly (with the default-allow
+    behaviour) without any of these wired.
+  </p>
+</section>
+
 </main>
-<script src="./assets/main.js"></script>
+
+<footer>
+  <p>sandboxd architecture documentation — source:
+    <a href="https://github.com/tastyeffectco/sandboxd">github.com/tastyeffectco/sandboxd</a>
+  </p>
+</footer>
+
 </body>
 </html>

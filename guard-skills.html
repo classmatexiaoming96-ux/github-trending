@@ -1,217 +1,763 @@
-<!doctype html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>guard-skills · coding agent 的二道质量门</title>
-<meta name="description" content="amElnagdy/guard-skills 源码解析 — 给 AI coding agent 装上 Clean Code / SOLID / LLM 失败模式检测的二道质量门，npx skills add 一键安装。" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>guard-skills — LLM Code Quality Gates</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #21253a;
+    --border: #2a2f45;
+    --accent: #6e56cf;
+    --accent2: #9b8fff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --code-bg: #161b22;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* HEADER */
+  header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  .badge-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    background: var(--accent); color: #fff;
+    font-size: 0.75rem; font-weight: 600;
+    padding: 0.2rem 0.65rem; border-radius: 999px;
+    letter-spacing: 0.03em;
+  }
+  .badge.green { background: var(--green); color: #000; }
+  h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; color: #fff; margin-bottom: 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 1rem; }
+
+  /* NAV */
+  nav { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  nav a {
+    padding: 0.35rem 0.75rem; border-radius: 6px;
+    background: var(--surface); color: var(--text); font-size: 0.85rem;
+    border: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  nav a:hover { background: var(--surface2); text-decoration: none; }
+
+  /* SECTION */
+  h2 {
+    font-size: 1.3rem; font-weight: 700; color: #fff;
+    margin-bottom: 0.75rem; padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  h3 { font-size: 1.05rem; font-weight: 600; color: var(--accent2); margin: 1.5rem 0 0.5rem; }
+
+  /* MODE CARDS */
+  .mode-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem; margin: 1.5rem 0;
+  }
+  .mode-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem;
+  }
+  .mode-card h3 { margin: 0 0 0.5rem; color: #fff; font-size: 1rem; }
+  .mode-card .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 0.15rem 0.5rem; border-radius: 4px; margin-bottom: 0.6rem;
+  }
+  .mode-card .tag.pass { background: rgba(63,185,80,0.2); color: var(--green); }
+  .mode-card .tag.live { background: rgba(218,140,40,0.2); color: var(--yellow); }
+  .mode-card .tag.review { background: rgba(88,166,255,0.2); color: var(--blue); }
+  .mode-card p { font-size: 0.875rem; color: var(--muted); }
+  .mode-card ul { margin: 0.5rem 0 0 1rem; font-size: 0.85rem; }
+  .mode-card li { margin-bottom: 0.25rem; }
+
+  /* FAILURE MODE TABLE */
+  .fm-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.875rem; }
+  .fm-table th {
+    text-align: left; padding: 0.6rem 0.75rem;
+    background: var(--surface2); color: var(--muted);
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+  }
+  .fm-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .fm-table tr:last-child td { border-bottom: none; }
+  .fm-table .num { color: var(--accent2); font-weight: 700; min-width: 2rem; }
+  .fm-table .pattern { color: #fff; font-weight: 500; }
+  .fm-table .rule { color: var(--muted); }
+  .fm-table .source { color: var(--blue); font-size: 0.8rem; }
+
+  /* 8-STEP SELF-CHECK */
+  .steps { counter-reset: steps; }
+  .step {
+    display: flex; gap: 1rem; margin-bottom: 1rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem 1.25rem;
+  }
+  .step::before {
+    counter-increment: steps;
+    content: counter(steps);
+    flex-shrink: 0; width: 2rem; height: 2rem;
+    background: var(--accent); color: #fff;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem;
+  }
+  .step-body { flex: 1; }
+  .step-title { font-weight: 600; color: #fff; margin-bottom: 0.25rem; }
+  .step-desc { font-size: 0.875rem; color: var(--muted); }
+
+  /* IMPERATIVES */
+  .imp-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 0.75rem; margin: 1rem 0;
+  }
+  .imp-item {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.85rem 1rem;
+    font-size: 0.875rem;
+  }
+  .imp-item strong { color: var(--accent2); }
+  .imp-item span { color: var(--muted); }
+
+  /* CODE BLOCK */
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1rem; overflow-x: auto;
+    font-size: 0.82rem; line-height: 1.5; margin: 0.75rem 0;
+  }
+  code { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; color: #e6edf3; }
+  .bad { color: var(--red); }
+  .good { color: var(--green); }
+  .comment { color: var(--muted); }
+
+  /* CROSS-CUTTING */
+  .callout {
+    background: rgba(110,86,207,0.1); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0;
+    font-size: 0.9rem;
+  }
+  .callout strong { color: var(--accent2); }
+
+  /* COMPARISON TABLE */
+  .compare-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.875rem; }
+  .compare-table th {
+    text-align: left; padding: 0.6rem 0.75rem;
+    background: var(--surface2); color: var(--muted);
+    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+  }
+  .compare-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
+  .compare-table tr:last-child td { border-bottom: none; }
+
+  /* SKILL GRID */
+  .skill-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem; margin: 1rem 0;
+  }
+  .skill-chip {
+    display: flex; align-items: center; gap: 0.6rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.75rem 1rem;
+  }
+  .skill-chip .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .skill-chip .dot.green { background: var(--green); }
+  .skill-chip .dot.yellow { background: var(--yellow); }
+  .skill-chip .dot.blue { background: var(--blue); }
+  .skill-chip .dot.purple { background: var(--accent); }
+
+  /* FOOTER */
+  footer {
+    margin-top: 3rem; padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 0.8rem;
+  }
+</style>
 </head>
 <body>
-<div id="progress"></div>
+<div class="container">
 
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#gu"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
+<!-- ============================================================
+     HEADER
+     ============================================================ -->
+<header>
+  <div class="badge-row">
+    <span class="badge green">skills.sh</span>
+    <span class="badge">v1.0</span>
+    <span class="badge">AI Code Quality</span>
   </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" data-tab="cg">CodeGraph</button>
-      <button role="tab" data-tab="ua">Understand-Anything</button>
-      <button role="tab" data-tab="cp">Claude Plugins</button>
-      <button role="tab" data-tab="oh">OpenHuman Memory Tree</button>
-      <button role="tab" data-tab="kc">Kimi Code</button>
-      <button role="tab" data-tab="oc">OpenClaw</button>
-      <button role="tab" data-tab="gu" class="active"><span class="dot"></span>guard-skills <span class="pill">新建</span></button>
-    </div>
-  </div>
+  <h1>guard-skills</h1>
+  <p class="subtitle">Reactive second-pass quality gates that catch systematic LLM failure modes before they ship.</p>
 </header>
 
-<main>
-<div class="tab-panel active" data-tab="gu">
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>amElnagdy/guard-skills · SKILL.md + references · MIT</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">guard-skills</span> · coding agent 的二道质量门</h1>
-    <p class="lead reveal" style="margin-bottom:0">把<strong>Clean Code / SOLID / LLM 特异性失败模式</strong>打包成可插入 SKILL.md 的质量门——让 agent 在呈现、提交、合并前做一次系统性自检。</p>
-    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">498</div><div class="l">Stars</div></div><div class="cell"><div class="n">5</div><div class="l">个 Guard</div></div><div class="cell"><div class="n">14</div><div class="l">AI 失败模式</div></div><div class="cell"><div class="n">npx</div><div class="l">一键安装</div></div></div>
-  </div>
-</section>
+<nav>
+  <a href="#modes">Three Modes</a>
+  <a href="#14failures">14 LLM Failure Modes</a>
+  <a href="#imperatives">23 Imperatives</a>
+  <a href="#selfcheck">8-Step Delivery Check</a>
+  <a href="#skills">Skill Reference</a>
+  <a href="#sources">Sources</a>
+</nav>
 
-  <section id="gu" class="project gu">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">GU</div>
-      <div class="proj-title">
-        <h2>guard-skills</h2>
-        <a class="repo" href="https://github.com/amElnagdy/guard-skills" target="_blank" rel="noopener">amElnagdy/guard-skills · MIT</a>
-      </div>
-    </div>
-    <div class="narrow">
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">498</div><div class="l">Stars</div></div>
-        <div class="chip"><div class="n">5</div><div class="l">个 Guard</div></div>
-        <div class="chip"><div class="n">14</div><div class="l">AI 失败模式</div></div>
-        <div class="chip"><div class="n">0</div><div class="l">网络依赖</div></div>
-      </div>
+<!-- ============================================================
+     SECTION 1: THREE MODES
+     ============================================================ -->
+<section id="modes">
+<h2>Three Trigger Modes</h2>
+<p style="color:var(--muted); margin-bottom:1.25rem;">Every guard skill (clean-code-guard, test-guard, docs-guard, wp-guard, woo-guard) operates in one of three modes. The user's request determines which mode activates.</p>
 
-      <div class="prose">
-        <p class="reveal"><strong>一句话定位：</strong>"让 agent 先干，但让它在提交前过一道质量门"。guard-skills 不是帮你写代码的——它是帮你<strong>在 AI 代码输出后、进入正式流程前</strong>做系统性检查的。</p>
+<div class="mode-grid">
 
-        <div class="callout reveal"><em>"Focused guard skills for coding agents: second-pass quality gates that catch the systematic failure modes of AI-generated code, tests, and docs before they ship."</em> — README</div>
-
-        <h4 class="reveal">五个 Guard：专注单一领域</h4>
-        <p class="reveal">guard-skills 的设计哲学是<strong>一个 skill 只干一件事，干透</strong>。每个 guard 是独立的 SKILL.md + references/ 目录：</p>
-      </div>
-
-      <div class="grid2">
-        <div class="card reveal"><span class="ico">🧹</span><h5 class="accent">clean-code-guard</h5><p>通用 Clean Code + SOLID + DRY/KISS/YAGNI + 14 个 LLM 失败模式。覆盖所有语言。</p></div>
-        <div class="card reveal"><span class="ico">🧪</span><h5 class="accent">test-guard</h5><p>测试质量门：pytest / Jest / PHPUnit 最佳实践，LLM 测试生成失败模式。</p></div>
-        <div class="card reveal"><span class="ico">📝</span><h5 class="accent">docs-guard</h5><p>文档质量门：docstrings / code samples / API docs / README 一致性。</p></div>
-        <div class="card reveal"><span class="ico">🔒</span><h5 class="accent">wp-guard</h5><p>WordPress 插件专项：安全 / 性能 / i18n / 审查清单。</p></div>
-        <div class="card reveal"><span class="ico">🛒</span><h5 class="accent">woo-guard</h5><p>WooCommerce 专项：checkout / money 处理 / HPOS / CRUD 审查。</p></div>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">clean-code-guard：最有技术含量的一个</h4>
-        <p class="reveal"><code>skills/clean-code-guard/SKILL.md</code> 是整个仓库的旗舰。读完之后你会发现它不是一个"建议列表"，而是一个<strong>带研究背书的规则系统</strong>——每条规则都有来源，每条规则都回答了"这个问题为什么在 LLM 输出里特别容易出现"。</p>
-        <p class="reveal">它的核心贡献是<strong>14 个 LLM 特异性失败模式</strong>（定义在 <code>references/ai-failure-modes.md</code>），这是其他规则集所没有的：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">references/ai-failure-modes.md — 14 个系统性 LLM 代码失败模式</span></div>
-        <pre><code>01. Catch-all error handling that swallows failures
-       → Karpathy: LLM 害怕异常，会抑制它们以避免 reward 惩罚
-
-02. Defensive guards for impossible cases
-       → arXiv 2409.19182: 对类型系统/调用图已经排除的情况做运行时检查
-
-03. Premature abstraction
-       → Sandi's "Wrong Abstraction": 抽象积累了一个调用者的特殊 case 时要 inline
-
-04. Comment pollution
-       → 注释解释 what 而非 why，或删除后价值更高的注释
-
-05. Code duplication instead of reuse
-       → GitClear 2025: AI 辅助代码库中重复的知识（而非文本）增长了 8x
-
-06. Hallucinated APIs and packages
-       → Spracklen et al., USENIX Security '25: 16 个模型平均 19.6% 包幻觉率
-
-07. Generic, intent-less naming
-       → data/result/item/temp/utils/manager — 这些名字不回答"为什么存在"
-
-08. Long functions doing many things
-       → Clean Code Ch.3: 目标 ≤20 行，一层抽象，一件事
-
-09. Parameter explosion
-       → 四参为硬上限，五参引入 config/request 对象
-
-10. Inconsistency with surrounding code
-       → "Read the file you're editing + one neighbor before writing"
-
-11. Dead code, unused imports, half-implementations
-       → 删除，不要等"someday"
-
-12. Declares success with mock fallbacks in production code
-       → Fowler: AI agent "在测试失败时返回硬编码 fixture 值"
-
-13. Plausible-but-wrong code
-       → copy-from-similar 引入的 off-by-one 和错误 null 语义
-
-14. YAGNI violations through speculative configurability
-       → enable_*/use_*_v2/*_mode → 删除并交付具体行为</code></pre>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">三模式：guard-pass / live / review</h4>
-        <p class="reveal">SKILL.md 定义了三种使用场景，每种对应不同的触发条件和行为：</p>
-        <ul class="reveal">
-          <li><strong>Guard-pass（推荐）</strong>：agent 完成工作后，对 diff 做规则检查，修复后再呈现/提交/合并。</li>
-          <li><strong>Live（显式调用）</strong>：用户明确要求"在写这段代码时用 clean-code-guard"，规则在写的时候就生效，交付前跑一遍 self-check。</li>
-          <li><strong>Review（用户触发）</strong>：用户问"review this PR"、"should I merge this"，按 <code>references/review-checklist.md</code> 走结构化报告，不改代码（除非被要求）。</li>
-        </ul>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">SKILL.md — 始终应用的命令式规则（23 条）</span></div>
-        <pre><code>Functions and names:
-  1. Names reveal intent. (无 data/result/item/temp/manager/handle_*)  ← 14 种禁止名
-  2. Functions ≤20 lines, one level of abstraction, one thing.
-  3. ≤4 parameters hard cap. ≥5 → request/config object.
-  4. No output arguments. (CQS: Command/Query Separation)
-
-Comments and structure:
-  5. Comments explain WHY, never WHAT. Delete paraphrasing comments.
-  6. Match the file's existing style.
-
-SOLID:
-  7. One actor per module (SRP).
-  8. Extension via new code, not edits (OCP). Registry/Strategy first.
-  9. No LSP violation: no override to signal "not implemented" (LSP).
-  10. Abstractions live with the client, not the implementation (DIP).
-
-DRY, KISS, YAGNI:
-  11. Delete duplicated KNOWLEDGE, not duplicated text.
-  12. The wrong abstraction is worse than duplication. (Sandi Metz)
-  13. Complexity ceiling: cyclomatic ≤10, nesting depth ≤5.
-  14. No speculative anything. (YAGNI — 删除 enable_*/use_*_v2)
-
-AI-specific guardrails:
-  15. Catch only the specific error type you can recover from.
-  16. No defensive guards for impossible cases. (Trust the contract)
-  17. Verify every import and external call before calling it.
-  18. No hardcoded "success" returns or mock fixtures in production code.
-  19. Re-derive, do not copy-from-similar.
-  20. Enumerate boundary cases before writing them.
-  21. Strip dead code before delivery.
-  22. Read the file you're editing + one neighbor + project rules file.
-
-Refactoring discipline:
-  23. Preserve observable behavior when refactoring.</code></pre>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">Self-check before delivery：8 步交付检查</h4>
-        <p class="reveal">每条规则最后都有一个<strong>强制 self-check</strong>——在 agent 展示结果之前必须回答的问题清单：</p>
-        <ul class="reveal">
-          <li>函数行数 ≤20？参数 ≤4？复杂度感觉 ≤10？</li>
-          <li>注释解释 why？如果解释 what，删除。</li>
-          <li>错误捕获具体？不静默返回？</li>
-          <li>新抽象有第二个 concrete 用户吗？没有 → inline。</li>
-          <li>读了编辑的文件 + 一个 neighbor？风格匹配？</li>
-          <li>有 hardcoded "ok" return 或 fixture 数据？</li>
-          <li>refactor 改变了 observable behavior？→ 分拆 bug fix，单独问用户。</li>
-        </ul>
-      </div>
-
-      <div class="callout reveal"><b>零网络依赖：</b>guard-skills 完全不需要 API key、MCP server、shell 命令或本地可执行文件。它是纯文本的 SKILL.md + references/，可以在任何支持 SKILL.md 的 runtime 里跑。这意味着它是 <strong>100% offline-capable 的质量门</strong>——团队可以在隔离环境里用，可以用 self-hosted 模型跑。</div>
-
-      <div class="prose">
-        <h4 class="reveal">安装与分发</h4>
-        <p class="reveal">通过 <code>npx skills add amElnagdy/guard-skills</code> 一键安装，支持 per-agent 安装：</p>
-        <ul class="reveal">
-          <li><code>npx skills add amElnagdy/guard-skills --agent codex</code></li>
-          <li><code>npx skills add amElnagdy/guard-skills --agent claude-code --skill clean-code-guard</code></li>
-          <li><code>npx skills add amElnagdy/guard-skills --global</code></li>
-        </ul>
-        <p class="reveal">工作方式：把 skill 名字当命令调用，如 <code>Use $clean-code-guard on the diff you just produced.</code>。</p>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal">对 coding agent 生态的意义</h4>
-        <p class="reveal">guard-skills 回答了一个根本问题：<strong>AI 生成的代码和人类写的代码有不同的失败模式吗？</strong> 它的答案是"是的，有 14 个是 LLM 特异的"，而且这些模式已经被研究验证了。</p>
-        <p class="reveal">它与 Claude Plugins Official 的关系：在 plugin 的 Hooks 里注册一个 post-tool hook 做 guard-pass 检查，是完全可行的——这相当于给官方的 plugin 市场增加了一个<strong>内建的质量门验证</strong>。</p>
-      </div>
-    </div>
-  </div>
-</section>
+<!-- GUARD-PASS -->
+<div class="mode-card">
+  <span class="tag pass">Guard-Pass</span>
+  <h3>Recommended — Reactive Review</h3>
+  <p>Run after code has been generated, edited, refactored, or fixed. Check the diff or target files against all <em>Always-applied imperatives</em> before presenting, committing, or merging.</p>
+  <ul>
+    <li>After a coding agent writes or edits implementation</li>
+    <li>After a refactor — preserve behavior exactly</li>
+    <li>Before a PR is presented or a commit is made</li>
+  </ul>
+  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "review this PR", "is this safe to merge?", "check this diff", "should I commit this?"</p>
 </div>
-</main>
-<script src="./assets/main.js"></script>
+
+<!-- LIVE -->
+<div class="mode-card">
+  <span class="tag live">Live</span>
+  <h3>Explicit — Constrained Writing</h3>
+  <p>When the user explicitly invokes the guard before a risky code edit, apply the same imperatives <em>while writing</em>, then run the <em>Self-check before delivery</em> before showing the result.</p>
+  <ul>
+    <li>User says "use clean-code-guard while implementing this"</li>
+    <li>Risky structural changes (extraction, abstraction, rewrite)</li>
+    <li>When you want the constraint active during generation</li>
+  </ul>
+  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "use $clean-code-guard while you write", "implement this endpoint using clean-code-guard"</p>
+</div>
+
+<!-- REVIEW -->
+<div class="mode-card">
+  <span class="tag review">Review</span>
+  <h3>Triggered — Structured Audit</h3>
+  <p>When the user asks to review, audit, critique, or rate code, walk the full <em>Review-Mode Checklist</em> against the target files and produce a structured findings report. Do not edit code unless asked.</p>
+  <ul>
+    <li>User asks "review this PR" or "audit this code"</li>
+    <li>Code-review for correctness — behavior changes in scope</li>
+    <li>Structured output with severity ratings (Critical / Important / Nit)</li>
+  </ul>
+  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "review", "audit", "critique", "rate this code", "assess this"</p>
+</div>
+
+</div>
+
+<div class="callout">
+  <strong>Decision tree:</strong> Did code get written or changed → <em>guard-pass</em>. Did you invoke before writing → <em>live</em>. Did the user ask to review/audit → <em>review</em>. Never blend modes: a review does not edit; a guard-pass does not produce a findings report.
+</div>
+</section>
+
+<!-- ============================================================
+     SECTION 2: 14 LLM FAILURE MODES
+     ============================================================ -->
+<section id="14failures">
+<h2>14 Systematic LLM Failure Modes</h2>
+<p style="color:var(--muted); margin-bottom:1rem;">These are the highest-leverage checks. Eight of the 14 trace to one root cause: the model is biased toward emitting more code, more parameters, more guards, more abstractions — anything but the minimum required by the spec. Walk these before every delivery.</p>
+
+<table class="fm-table">
+<thead>
+<tr>
+  <th>#</th>
+  <th>Pattern</th>
+  <th>Rule (Self-Check)</th>
+  <th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td class="num">1</td>
+  <td class="pattern">Catch-all error handling that swallows failures</td>
+  <td class="rule">Catch only the specific error type you can recover from. Never use broad <code>catch any</code> or return null/empty success from a handler unless the contract documents it.</td>
+  <td class="source">Karpathy; field reports on LLM error suppression</td>
+</tr>
+<tr>
+  <td class="num">2</td>
+  <td class="pattern">Defensive guards for impossible cases</td>
+  <td class="rule">Do not add null checks or runtime type checks for values whose type annotation or caller contract already excludes that case. Trust the contract.</td>
+  <td class="source">arXiv 2409.19182</td>
+</tr>
+<tr>
+  <td class="num">3</td>
+  <td class="pattern">Premature abstraction</td>
+  <td class="rule">Do not introduce an interface, abstract class, factory, registry, strategy, or plugin pattern unless two or more concrete implementations exist today. One implementation = inline it.</td>
+  <td class="source">Fowler, "Patterns for Reducing Friction"</td>
+</tr>
+<tr>
+  <td class="num">4</td>
+  <td class="pattern">Comment pollution</td>
+  <td class="rule">Comments explain <em>why</em>, never <em>what</em>. Strip restating-code comments, step-number scaffolding, and docstrings that paraphrase the signature.</td>
+  <td class="source">HN #43929768; arXiv 2402.13013</td>
+</tr>
+<tr>
+  <td class="num">5</td>
+  <td class="pattern">Code duplication instead of reuse</td>
+  <td class="rule">Before writing a block of ≥5 lines, search the codebase for a similar existing function. Duplicated knowledge is a violation; duplicated text matching existing helpers is also a violation.</td>
+  <td class="source">GitClear 2025 — 211M-LoC, 8× growth 2021–2024</td>
+</tr>
+<tr>
+  <td class="num">6</td>
+  <td class="pattern">Hallucinated APIs and packages</td>
+  <td class="rule">Every import and external API call must be verified against the actual installed version. Read the package, check the lockfile, or import and inspect. Do not call a method based on what "should" exist.</td>
+  <td class="source">USENIX Security '25 — 16 models, 19.6% avg hallucination rate</td>
+</tr>
+<tr>
+  <td class="num">7</td>
+  <td class="pattern">Generic, intent-less naming</td>
+  <td class="rule">Ban <code>data</code>, <code>result</code>, <code>item</code>, <code>temp</code>, <code>value</code>, <code>obj</code>, <code>info</code>, <code>helper</code>, <code>manager</code>, <code>handle_*</code>, <code>process_*</code>, <code>do_*</code> unless qualified. Names must reveal intent.</td>
+  <td class="source">arXiv 2512.01141; arXiv 2510.03178</td>
+</tr>
+<tr>
+  <td class="num">8</td>
+  <td class="pattern">Long functions doing many things</td>
+  <td class="rule">A function does one thing. Hard caps: ≤50 lines, ≤4 parameters, cyclomatic complexity ≤8. If the prompt asked for N things, produce N functions and a small composer.</td>
+  <td class="source">GitClear 2025 — file size 142→267 LoC; arXiv 2512.11922</td>
+</tr>
+<tr>
+  <td class="num">9</td>
+  <td class="pattern">Parameter explosion</td>
+  <td class="rule">When a function reaches 5 parameters, stop and introduce a typed request/config object (record, struct, DTO). Do not keep adding positional args.</td>
+  <td class="source">arXiv 2304.10778; Fowler's overeagerness pattern</td>
+</tr>
+<tr>
+  <td class="num">10</td>
+  <td class="pattern">Inconsistency with surrounding code</td>
+  <td class="rule">Before writing in a file, read the file and at least one neighbor. Match casing, import style, error handling pattern, and logging style. Reuse existing utilities.</td>
+  <td class="source">Pullflow "The Context Illusion"; Honeycomb field reports</td>
+</tr>
+<tr>
+  <td class="num">11</td>
+  <td class="pattern">Dead code, unused imports, half-implementations</td>
+  <td class="rule">Run a linter or grep pass for unused imports, unused symbols, unreachable branches, and "just in case" exports. Remove them before delivery.</td>
+  <td class="source">arXiv 2411.01414; GitClear "added-code dominates deleted"</td>
+</tr>
+<tr>
+  <td class="num">12</td>
+  <td class="pattern">Declares success — mock fallbacks in production code</td>
+  <td class="rule">Never return hardcoded "success" values or fixture data from a function the spec says should perform real work. If you cannot implement, fail explicitly and say what is missing.</td>
+  <td class="source">Fowler "Patterns for Reducing Friction"; Claude Code #6984</td>
+</tr>
+<tr>
+  <td class="num">13</td>
+  <td class="pattern">Plausible-but-wrong code</td>
+  <td class="rule">For any boundary, range, off-by-one, or null-semantic question, write the case enumeration in a comment first. Never copy a similar function and adapt — re-derive from the spec.</td>
+  <td class="source">arXiv 2411.01414; Katanaquant "Plausible Code"</td>
+</tr>
+<tr>
+  <td class="num">14</td>
+  <td class="pattern">YAGNI violations — speculative configurability</td>
+  <td class="rule">No optional parameter, config flag, env var, or feature toggle without a present-day caller. If you find yourself adding <code>enable_*</code>, <code>use_*</code>, or <code>*_mode</code>, delete it and ship the concrete behavior.</td>
+  <td class="source">Fowler "YAGNI"; HN defensive-code thread</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <strong>Cross-cutting root cause:</strong> Eight of the 14 failure modes (1, 2, 3, 9, 12, 14, plus pieces of 8 and 11) come from one bias — the model is rewarded for emitting more code. The cure is restraint. Before writing each line, ask: <em>does the spec require this, today?</em> If no, do not write it.
+</div>
+</section>
+
+<!-- ============================================================
+     SECTION 3: 23 ALWAYS-APPLIED IMPERATIVES
+     ============================================================ -->
+<section id="imperatives">
+<h2>23 Always-Applied Imperatives</h2>
+<p style="color:var(--muted); margin-bottom:1rem;">These rules apply to every code change in guard-pass and live modes. They are imperative, not suggestions.</p>
+
+<div class="imp-grid">
+
+<div class="imp-item"><strong>1.</strong> <span><strong>Names reveal intent.</strong> Never use <code>data</code>, <code>result</code>, <code>item</code>, <code>temp</code>, <code>value</code>, <code>obj</code>, <code>info</code>, <code>helper</code>, <code>manager</code>, <code>utils</code>, or <code>handle_*</code>/<code>process_*</code>/<code>do_*</code> without a qualifier. A name must answer <em>why it exists and what it does</em>. (Clean Code Ch. 2)</span></div>
+
+<div class="imp-item"><strong>2.</strong> <span><strong>Functions stay small.</strong> Target ≤20 lines, one level of abstraction, one thing. If you can extract a function with a name that doesn't restate the body, the parent was doing more than one thing. (Clean Code Ch. 3)</span></div>
+
+<div class="imp-item"><strong>3.</strong> <span><strong>Four arguments is the hard ceiling.</strong> At five, stop and introduce a request/config object (record, struct, DTO). Never use boolean flag arguments — split into two functions instead.</span></div>
+
+<div class="imp-item"><strong>4.</strong> <span><strong>No output arguments.</strong> A function either returns a value (query) or has a side effect (command). Never both. Command names use verbs; query names use nouns or getter-style names. (CQS)</span></div>
+
+<div class="imp-item"><strong>5.</strong> <span><strong>Comments explain why, never what.</strong> Delete any comment that paraphrases the line below it. Delete step-number scaffolding. Delete commented-out code — version control exists. (Clean Code Ch. 4)</span></div>
+
+<div class="imp-item"><strong>6.</strong> <span><strong>Match the file's existing style.</strong> Read the file you're editing and at least one neighbor before writing. Mirror casing, import order, error handling, logging, and HTTP/DB client choices. Do not introduce a second pattern.</span></div>
+
+<div class="imp-item"><strong>7.</strong> <span><strong>One actor per module.</strong> A class should be answerable to one stakeholder group (Accounting, Auth, Reporting). If two unrelated subsystems both reach into the same class, split it. (SRP, Uncle Bob 2014)</span></div>
+
+<div class="imp-item"><strong>8.</strong> <span><strong>Extension via new code, not edits.</strong> If adding a new variant requires another type-tag branch in an existing function, refactor to a registry, strategy, or polymorphic dispatch first. (OCP)</span></div>
+
+<div class="imp-item"><strong>9.</strong> <span><strong>No subclass refuses its parent's contract.</strong> Never override a method to signal "not implemented" or "unsupported operation." Never strengthen preconditions or weaken postconditions in an override. If you need to do that, the inheritance is wrong. (LSP)</span></div>
+
+<div class="imp-item"><strong>10.</strong> <span><strong>Abstractions live with the client, not the implementation.</strong> When you introduce an interface, protocol, or abstract contract, put it in the package that consumes it, not next to the concrete class. (DIP)</span></div>
+
+<div class="imp-item"><strong>11.</strong> <span><strong>Delete duplicated knowledge, not duplicated text.</strong> Two functions that look alike but encode different rules are not a DRY violation. One rule expressed in code + docs + schema is. (Pragmatic Programmer, "DRY")</span></div>
+
+<div class="imp-item"><strong>12.</strong> <span><strong>The wrong abstraction is worse than duplication.</strong> If an abstraction has accumulated branches for each caller's special case, re-inline it back into callers, then delete the dead branches before re-abstracting. (Sandi Metz, "The Wrong Abstraction")</span></div>
+
+<div class="imp-item"><strong>13.</strong> <span><strong>Complexity ceiling: cyclomatic ≤10, nesting depth ≤5.</strong> Refactor before exceeding. (McCabe 1976)</span></div>
+
+<div class="imp-item"><strong>14.</strong> <span><strong>No speculative anything.</strong> No optional parameter, config flag, env var, feature toggle, interface, factory, or base class without a present-day caller. If you find yourself adding <code>enable_*</code>, <code>use_*_v2</code>, or <code>*_mode</code>, delete it and ship the concrete behavior. (Fowler, "YAGNI")</span></div>
+
+<div class="imp-item"><strong>15.</strong> <span><strong>Never swallow errors with broad catch-all handling.</strong> Catch only the specific error type you can recover from. If you cannot recover, let the error propagate. Returning null/none/empty success from a catch handler is forbidden unless the function contract documents that behavior. (Karpathy)</span></div>
+
+<div class="imp-item"><strong>16.</strong> <span><strong>No defensive guards for impossible cases.</strong> Do not add null checks or runtime type checks for values whose declared type or caller contract already excludes that case. Trust the contract. (arXiv 2409.19182)</span></div>
+
+<div class="imp-item"><strong>17.</strong> <span><strong>Verify every import and external call.</strong> Before calling a method on a library, confirm it exists in the version installed (read the package, check the lockfile, or import and inspect). Do not generate code based on what the API "should" look like. (USENIX Security '25)</span></div>
+
+<div class="imp-item"><strong>18.</strong> <span><strong>No hardcoded "success" returns or mock fixtures in production code.</strong> Never return <code>{"status": "ok", ...}</code> or canned data from a function whose spec says it does real work. If you cannot implement, fail explicitly with the language's unimplemented or unsupported-operation mechanism and say so. Never disable, skip, or weaken a test to make it pass. (Fowler, Claude Code #6984)</span></div>
+
+<div class="imp-item"><strong>19.</strong> <span><strong>Re-derive, do not copy from similar.</strong> When tempted to copy a function and modify it, stop. Re-derive from the spec. Off-by-one and wrong-null-semantic bugs almost always enter through copy-from-similar. (arXiv 2411.01414)</span></div>
+
+<div class="imp-item"><strong>20.</strong> <span><strong>Enumerate boundary cases before writing them.</strong> For any range, off-by-one, null/empty/one/many, even/odd, or unicode/byte boundary, write the case list in a comment first. Cover each case in code before moving on.</span></div>
+
+<div class="imp-item"><strong>21.</strong> <span><strong>Strip dead code before delivery.</strong> Run a linter or grep pass for unused imports, unused symbols, unreachable branches, and "just in case" exports. Remove them. A function that nothing calls today does not get to live for "someday."</span></div>
+
+<div class="imp-item"><strong>22.</strong> <span><strong>Read before write.</strong> Before writing in an unfamiliar repo, read the file you'll edit, one neighbor, and any project rules file (CLAUDE.md, AGENTS.md, README's "conventions" section). Use the project's existing helpers, error types, and logging.</span></div>
+
+<div class="imp-item"><strong>23.</strong> <span><strong>Preserve observable behavior when refactoring.</strong> Same inputs produce the same outputs, same exceptions raised, same side effects, same ordering guarantees. If you spot a bug while refactoring, flag it separately and ask before changing it. Refactoring is defined as <em>a change to internal structure to make it easier to understand without changing observable behavior</em> (Fowler, <em>Refactoring</em>). Bug fixes and refactors are two operations — never bundle them.</span></div>
+
+</div>
+</section>
+
+<!-- ============================================================
+     SECTION 4: 8-STEP SELF-CHECK BEFORE DELIVERY
+     ============================================================ -->
+<section id="selfcheck">
+<h2>8-Step Self-Check Before Delivery</h2>
+<p style="color:var(--muted); margin-bottom:1.25rem;">Run this checklist before showing the user any code you wrote or edited. If you cannot answer yes to every step, fix before shipping.</p>
+
+<div class="steps">
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">Walk imperatives 1–23 against your diff. Fix every violation.</div>
+    <div class="step-desc">Every rule in the Always-Applied Imperatives section applies to every change. Scan the full diff and confirm none of the 23 are violated.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">For new functions, count: lines ≤ 20? params ≤ 4? complexity feels ≤ 10? names reveal intent?</div>
+    <div class="step-desc">Apply the hard caps from imperatives 1–3. A function that exceeds these limits almost certainly does more than one thing or carries a hidden abstraction.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">For new comments, ask: does this explain why? If it explains what, delete it.</div>
+    <div class="step-desc">Imperative 5 is the filter. If a comment paraphrases the line below it, it adds noise, not signal. If a step-number scaffold remains, remove it.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">For new error handling: is the caught error type specific? Does the handler do something other than silently return?</div>
+    <div class="step-desc">Imperatives 15 and 18. A catch handler that returns null or empty success without a documented recovery path is a failure. Catch only what you can act on.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">For new abstractions (interface, factory, base class, registry): is there a second concrete user today? If no, inline it.</div>
+    <div class="step-desc">Imperative 3 and 12. An abstraction with a single implementation is premature. An abstraction with per-caller branches accumulating is the wrong abstraction.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">Did you read the file you edited and at least one neighbor? Did your style match?</div>
+    <div class="step-desc">Imperative 6 and 22. Style inconsistency is one of the top three findings in LLM code reviews. Read the file before writing in it.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">Is there any hardcoded "ok" return or fixture data? If yes, replace with real implementation or an explicit unimplemented/unsupported-operation failure.</div>
+    <div class="step-desc">Imperative 18. This is the most dangerous AI pattern — it makes the code appear to work while shipping fiction. It must be caught before delivery.</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <div class="step-title">If this is a refactor: did you change observable behavior? If yes, you bundled a bug fix — split it out and ask the user.</div>
+    <div class="step-desc">Imperative 23. Refactoring and bug fixing are two separate operations. Combining them in a single diff means neither can be reviewed cleanly.</div>
+  </div>
+</div>
+
+</div>
+</section>
+
+<!-- ============================================================
+     SECTION 5: REVIEW MODE — STRUCTURED FINDINGS REPORT
+     ============================================================ -->
+<section id="review">
+<h2>Review-Mode Output Template</h2>
+<p style="color:var(--muted); margin-bottom:1rem;">When the user asks to review/audit/critique code, produce this exact output format. Do not edit code in review mode unless asked. Walk all five sections before delivering findings.</p>
+
+<pre><code># Code review: &lt;file or scope&gt;
+
+## Summary
+&lt;2–3 sentence verdict: ship / needs work / rewrite&gt;
+
+## Critical findings
+&lt;must-fix before merge&gt;
+- **&lt;short title&gt;** — `&lt;file&gt;:&lt;line&gt;`
+  Evidence: &lt;quoted code or behavior&gt;
+  Principle violated: &lt;e.g., LSP, catch-all error swallowing&gt;
+  Suggested fix: &lt;concrete&gt;
+
+## Important findings
+&lt;should fix but not blocking&gt;
+- ...
+
+## Nits
+&lt;style, naming, minor structure&gt;
+- ...
+
+## What's good
+&lt;at least 2–3 specific positives — naming, structure, test coverage&gt;
+
+## Self-check coverage
+- [ ] Walked Section A (naming & functions)
+- [ ] Walked Section B (comments & formatting)
+- [ ] Walked Section C (SOLID)
+- [ ] Walked Section D (DRY/KISS/YAGNI)
+- [ ] Walked Section E (AI failure modes)</code></pre>
+
+<h3>Severity definitions</h3>
+<table class="compare-table">
+<thead>
+<tr><th>Severity</th><th>Examples</th></tr>
+</thead>
+<tbody>
+<tr><td><strong style="color:var(--red)">Critical</strong></td><td>Security flaw, correctness bug, data loss, swallowed exceptions, hardcoded "success" returns</td></tr>
+<tr><td><strong style="color:var(--yellow)">Important</strong></td><td>SOLID violations, premature abstractions, parameter explosion, generic naming, DRY violations</td></tr>
+<tr><td><strong style="color:var(--muted)">Nit</strong></td><td>Style inconsistencies, single-letter names outside loops, missing docstring contracts on public APIs</td></tr>
+</tbody>
+</table>
+
+<h3>Section walk order (review mode)</h3>
+<table class="compare-table">
+<thead>
+<tr><th>Section</th><th>Checks</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>A — Naming & Functions</strong></td><td>Generic names, function size, parameter count, CQS violations, boolean flags</td></tr>
+<tr><td><strong>B — Comments & Formatting</strong></td><td>Restating comments, step-number scaffolds, commented-out code, style inconsistencies</td></tr>
+<tr><td><strong>C — SOLID</strong></td><td>SRP: multi-actor modules; OCP: type-tag dispatch growth; LSP: unsupported-operation overrides; ISP:fat interfaces; DIP: wrong-layer imports</td></tr>
+<tr><td><strong>D — DRY/KISS/YAGNI</strong></td><td>Knowledge duplication, wrong abstraction branches, cyclomatic >10, nesting >5, speculative configurability</td></tr>
+<tr><td><strong>E — AI Failure Modes</strong></td><td>All 14 patterns. Cross-check with Sections A–D. Highest leverage section.</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     SECTION 6: SKILL REFERENCE
+     ============================================================ -->
+<section id="skills">
+<h2>Skill Reference</h2>
+<p style="color:var(--muted); margin-bottom:1rem;">Each guard skill targets a specific type of agent output. They layer on top of each other: platform-specific guards (wp-guard, woo-guard) run after clean-code-guard.</p>
+
+<div class="skill-grid">
+  <div class="skill-chip">
+    <span class="dot purple"></span>
+    <div>
+      <strong>clean-code-guard</strong> — any language<br>
+      <span style="color:var(--muted); font-size:0.8rem;">LLM smells, SOLID/DRY/KISS/YAGNI, 14 AI failure modes</span>
+    </div>
+  </div>
+  <div class="skill-chip">
+    <span class="dot green"></span>
+    <div>
+      <strong>test-guard</strong> — pytest, PHPUnit, Jest, Go, WP/Woo<br>
+      <span style="color:var(--muted); font-size:0.8rem;">Mock abuse, duplicate tests, implementation-detail assertions</span>
+    </div>
+  </div>
+  <div class="skill-chip">
+    <span class="dot blue"></span>
+    <div>
+      <strong>docs-guard</strong> — READMEs, docstrings, API docs, changelogs<br>
+      <span style="color:var(--muted); font-size:0.8rem;">Hallucinated symbols, broken samples, docs-vs-code drift</span>
+    </div>
+  </div>
+  <div class="skill-chip">
+    <span class="dot yellow"></span>
+    <div>
+      <strong>wp-guard</strong> — WordPress plugins, themes, REST, AJAX<br>
+      <span style="color:var(--muted); font-size:0.8rem;">Escaping, sanitization, nonces, capabilities, prepared queries, i18n</span>
+    </div>
+  </div>
+  <div class="skill-chip">
+    <span class="dot yellow"></span>
+    <div>
+      <strong>woo-guard</strong> — WooCommerce extensions, checkout, orders<br>
+      <span style="color:var(--muted); font-size:0.8rem;">HPOS-safe access, CRUD over meta, money errors, server-side validation</span>
+    </div>
+  </div>
+</div>
+
+<h3>Pairing guide</h3>
+<table class="compare-table">
+<thead>
+<tr><th>Guard</th><th>Catches</th><th>Pair with</th></tr>
+</thead>
+<tbody>
+<tr><td><code>clean-code-guard</code></td><td>LLM code smells, over-abstraction, broad error swallowing, bad names, SOLID/DRY violations</td><td>Platform-specific guards</td></tr>
+<tr><td><code>test-guard</code></td><td>Mock abuse, duplicate tests, implementation-detail assertions, tests that catch nothing</td><td><code>clean-code-guard</code> when test helpers contain real logic</td></tr>
+<tr><td><code>docs-guard</code></td><td>Hallucinated symbols, broken samples, docs-vs-code drift, unverifiable claims</td><td>Any guard whose behavior is documented</td></tr>
+<tr><td><code>wp-guard</code></td><td>Escaping, sanitization, nonces, capabilities, prepared queries, i18n, query/caching mistakes</td><td><code>clean-code-guard</code>; <code>woo-guard</code> when Woo APIs appear</td></tr>
+<tr><td><code>woo-guard</code></td><td>Direct order meta, HPOS breakage, missing compatibility declarations, checkout bypasses, money errors</td><td><code>wp-guard</code> for the WordPress layer</td></tr>
+</tbody>
+</table>
+</section>
+
+<!-- ============================================================
+     SECTION 7: QUICK REFERENCE — BAD / GOOD EXAMPLES
+     ============================================================ -->
+<section id="examples">
+<h2>Quick-Reference Bad / Good Examples</h2>
+<p style="color:var(--muted); margin-bottom:1rem;">The most common failure patterns with concrete before/after.</p>
+
+<h3>Failure Mode 1 — Catch-all error swallowing</h3>
+<pre><code class="bad"># BAD — a database outage is now indistinguishable from "user has no email"
+getEmail(userId):
+  attempt:
+    user = userStore.get(userId)
+    return user.email
+  catch anyError:
+    return null</code></pre>
+<pre><code class="good"># GOOD — storage errors propagate; null only means the user has no email
+getEmail(userId):
+  user = userStore.get(userId)  # errors propagate
+  return user.email</code></pre>
+
+<h3>Failure Mode 2 — Defensive guards for impossible cases</h3>
+<pre><code class="bad"># BAD — the contract says orderItems is a collection; none of these guards can fire
+total(orderItems):
+  if orderItems is null: return 0
+  if orderItems is not a collection: return 0
+  return sum(order.amount for each non-null order in orderItems)</code></pre>
+<pre><code class="good"># GOOD — trust the contract
+total(orderItems):
+  return sum(order.amount for each order in orderItems)</code></pre>
+
+<h3>Failure Mode 3 — Premature abstraction</h3>
+<pre><code class="bad"># BAD — exactly one payment processor; the abstract interface and factory are pure ceremony
+PaymentProcessor interface
+  charge(amount)
+CardPaymentProcessor implements PaymentProcessor
+  charge(amount):
+    return paymentProvider.createCharge(amount).id
+PaymentProcessorFactory
+  create():
+    return new CardPaymentProcessor()</code></pre>
+<pre><code class="good"># GOOD — one concrete function, no ceremony
+charge(amount):
+  return paymentProvider.createCharge(amount).id</code></pre>
+
+<h3>Failure Mode 7 — Generic, intent-less naming</h3>
+<pre><code class="bad"># BAD — none of these names reveal intent
+processData(data):
+  result = []
+  for item in data:
+    temp = item.value * 2
+    result.add(temp)
+  return result</code></pre>
+<pre><code class="good"># GOOD — names answer why the function exists and what it does
+doublePrices(orders):
+  return orders.map(order -> order.priceCents * 2)</code></pre>
+
+<h3>Failure Mode 9 — Parameter explosion</h3>
+<pre><code class="bad"># BAD — should be a typed config object
+sendEmail(to, subject, body, retry=true, backoff="exp",
+          html=false, fromAddress=null, encoding="utf-8",
+          internal=false, verbose=false)</code></pre>
+<pre><code class="good"># GOOD — a typed request object scales cleanly
+EmailRequest
+  to
+  subject
+  body
+  html = false
+
+sendEmail(request: EmailRequest)</code></pre>
+
+<h3>Failure Mode 12 — Declares success with mock fallback</h3>
+<pre><code class="bad"># BAD — shipped as the implementation, function body is fiction
+getUserBalance(userId):
+  return 1000  # TODO: actual provider call</code></pre>
+<pre><code class="good"># GOOD — explicit failure, clearly states what is missing
+getUserBalance(userId):
+  raise NotImplemented("Wire to billing.getBalance() after auth is available")</code></pre>
+
+<h3>Failure Mode 13 — Plausible-but-wrong (copy-from-similar)</h3>
+<pre><code class="bad"># BAD — off-by-one for odd-length arrays
+median = (values[values.length / 2] + values[values.length / 2 + 1]) / 2
+
+# BAD — silently drops items[0]
+for index from 1 to items.length - 1:
+  ...</code></pre>
+<pre><code class="good"># GOOD — case enumeration first, then code
+# cases: empty / one / even / odd
+median(values):
+  sorted = values.sort()
+  mid = sorted.length / 2
+  return sorted.length % 2 == 0
+    ? (sorted[mid-1] + sorted[mid]) / 2
+    : sorted[mid]</code></pre>
+</section>
+
+<!-- ============================================================
+     SECTION 8: SOURCES
+     ============================================================ -->
+<section id="sources">
+<h2>Sources</h2>
+<table class="compare-table">
+<thead>
+<tr><th>Source</th><th>Claims supported</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://www.gitness.com/h/repos/clear/pulls/1171">GitClear 2025 — AI Copilot Code Quality</a></td><td>Code duplication grew 8× between 2021–2024; function size 142→267 LoC; complexity 4.2→8.1</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2409.19182">arXiv 2409.19182 — AI-Generated Code Considered Harmful</a></td><td>Defensive code overuse; runtime type checks for impossible cases</td></tr>
+<tr><td><a href="https://www.usenix.org/conference/usenixsecurity25">USENIX Security '25 — Package Hallucinations</a></td><td>16 models, 19.6% average package hallucination rate; commercial ~5%, open source ~21%</td></tr>
+<tr><td><a href="https://martinfowler.com/articles/patterns-for-reducing-llm-friction.html">Fowler — Patterns for Reducing Friction in AI-Assisted Development</a></td><td>Overeagerness, declaring success despite failing tests, brute-force fixes</td></tr>
+<tr><td><a href="https://martinfowler.com/bliki/Yagni.html">Fowler — YAGNI</a></td><td>Speculative configurability cost; optional parameters without callers</td></tr>
+<tr><td><a href="https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction">Metz — The Wrong Abstraction</a></td><td>Re-inline rule; branches accumulating per caller in shared abstractions</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2411.01414">arXiv 2411.01414 — LLM Code Generation Mistakes</a></td><td>7-category taxonomy; copy-from-similar semantic errors; half-implementations</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2402.13013">arXiv 2402.13013 — Code Needs Comments</a></td><td>LLM comments average ~5 words vs 19-word author comments; answer "what?" not "why?"</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2512.01141">arXiv 2512.01141 — Neural Variable Name Repair</a></td><td>Generic identifiers are explicit target of name-repair models; LLM code over-produces them</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2510.03178">arXiv 2510.03178 — When Names Disappear</a></td><td>Semantic names act as anchors during generation; generic names degrade code quality</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2512.11922">arXiv 2512.11922 — Vibe Coding in Practice</a></td><td>Canonical symptom: 300-line functions handling four unrelated concerns from AI-generated fragments</td></tr>
+<tr><td><a href="https://arxiv.org/abs/2304.10778">arXiv 2304.10778 — Copilot/CodeWhisperer/ChatGPT comparison</a></td><td>Parameter explosion, function complexity growth in LLM-assisted commits</td></tr>
+<tr><td><a href="https://news.ycombinator.com/item?id=43929768">HN #43929768</a></td><td>Comment pollution is the most common thing making agentic code ugly</td></tr>
+<tr><td><a href="https://github.com/anthropic/claude-code/issues/6984">Claude Code #6984 — Systematic Mock Data Generation Bias</a></td><td>Hardcoded "success" returns and fixture data in production code</td></tr>
+</tbody>
+</table>
+</section>
+
+<footer>
+  <p>guard-skills &mdash; Reactive quality gates for AI-generated code, tests, and docs.</p>
+  <p style="margin-top:0.4rem;">Install: <code>npx skills add amElnagdy/guard-skills</code> &nbsp;|&nbsp; 
+  Repo: <a href="https://github.com/amElnagdy/guard-skills">github.com/amElnagdy/guard-skills</a> &nbsp;|&nbsp; 
+  License: MIT</p>
+</footer>
+
+</div><!-- .container -->
 </body>
 </html>
