@@ -20,7 +20,7 @@ if (toggle && links) {
 }
 
 // ============ TAB SWITCHER ============
-const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od', 'og', 'mc', 'mo', 'sa', 'gu', 'al'];
+const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od', 'og', 'mc', 'mo', 'sa', 'gu', 'al', 'pi'];
 const TITLES = {
   cg: 'CodeGraph 源码深度解析 · Agent Infrastructure Teardown',
   ua: 'Understand-Anything 源码深度解析 · Agent Infrastructure Teardown',
@@ -35,6 +35,7 @@ const TITLES = {
   sa: 'sandboxd 源码深度解析 · AI 沙箱运行时',
   gu: 'guard-skills 源码深度解析 · 二道质量门',
   al: 'AlignDev 源码深度解析 · 前端约定工程师',
+  pi: 'PI Dynamic Workflows 源码深度解析 · 让模型写脚本编排子 Agent',
 };
 
 function setActiveTab(name, opts) {
