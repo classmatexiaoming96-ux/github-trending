@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN" class="has-tabs">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PI Dynamic Workflows · Claude-Code 式动态工作流编排 · 源码深度解析</title>
+<meta name="description" content="Michaelliv/pi-dynamic-workflows 源码级深度解析——让模型写 JavaScript 脚本编排多个隔离子 Agent：acorn AST 双层校验、node:vm 确定性沙箱、agent()/parallel()/pipeline() 原语、terminate:true 结构化输出、内存态 Pi 子会话。" />
+<meta property="og:title" content="PI Dynamic Workflows · Claude-Code 式动态工作流编排" />
+<meta property="og:description" content="一个 1100 行的 Pi 扩展：模型写脚本 → AST 校验 → vm 沙箱执行 → fan-out 隔离子 Agent → 结构化合成。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./assets/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body class="tabs-active">
+<div id="progress"></div>
+
+<!-- 站点索引：顶部导航 -->
+<nav class="site-index">
+  <div class="wrap">
+    <span class="site-index-label">📂 项目索引</span>
+    <div class="site-index-links">
+      <a href="index.html#cg">🗂 CodeGraph<br><span>索引层 · 代码语义后端</span></a>
+      <a href="index.html#ua">🗂 Understand-Anything<br><span>认知层 · 代码地图</span></a>
+      <a href="index.html#cp">🗂 Claude Plugins<br><span>能力层 · 官方插件生态</span></a>
+      <a href="index.html#oh">🗂 OpenHuman Memory Tree<br><span>记忆层 · 本地知识库</span></a>
+      <a href="index.html#kc">🗂 Kimi Code<br><span>模型层 · 多 Agent 引擎</span></a>
+      <a href="index.html#oc">🗂 OpenClaw<br><span>全渠道 · 个人 AI 助手</span></a>
+      <a href="index.html#od">🗂 Odysseus<br><span>Agent 层 · 自托管工作台</span></a>
+      <a href="index.html#og">🗂 Ongrid<br><span>运维层 · AIOps Agent</span></a>
+      <a href="index.html#mc">🗂 Multica<br><span>多 Agent · 全端协作台</span></a>
+      <a href="index.html#mo">🗂 Memory OS<br><span>记忆层 · 七层记忆系统</span></a>
+      <a href="index.html#sa">🗂 sandboxd<br><span>运行时 · AI 沙箱引擎</span></a>
+      <a href="index.html#gu">🗂 guard-skills<br><span>质量层 · 二道质量门</span></a>
+      <a href="index.html#al">🗂 AlignDev<br><span>约定层 · 前端约定工程师</span></a>
+      <a href="index.html#pi">🗂 PI Dynamic Workflows<br><span>编排层 · 动态工作流</span></a>
+    </div>
+  </div>
+</nav>
+
+<header class="nav has-tabs">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html#pi"><span class="dot"></span><span>Agent&nbsp;Infrastructure&nbsp;Teardown</span></a>
+  </div>
+  <div class="tabs-wrap">
+    <div class="tabs" role="tablist">
+      <button role="tab" class="active" data-tab="pi"><span class="dot"></span>PI Workflows <span class="pill">编排层</span></button>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="tab-panel active" data-tab="pi">
+  <style>.tab-panel[data-tab="pi"] section{--accent:#7fcf9e}.tab-panel[data-tab="pi"] .hero{--accent:#7fcf9e}</style>
+  <section class="hero" style="padding:130px 0 30px">
+  <div class="wrap">
+    <span class="eyebrow reveal"><span class="pulse"></span>Michaelliv/pi-dynamic-workflows · TypeScript · MIT · 895 Stars</span>
+    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">PI Dynamic Workflows</span> · 让模型写脚本编排子 Agent</h1>
+    <p class="lead reveal" style="margin-bottom:0">复刻 Claude Code「动态工作流」的 Pi 扩展——模型不再逐条执行任务，而是<strong>写一段 JavaScript 脚本</strong>，由 acorn AST 双层校验 + <code>node:vm</code> 确定性沙箱执行，<code>agent()/parallel()/pipeline()</code> 把工作 fan-out 到多个<strong>内存态隔离 Pi 子会话</strong>，最后合成结构化结果。上线 13 天 895 Stars。</p>
+    <div class="statstrip reveal" style="max-width:820px;margin:38px auto 0"><div class="cell"><div class="n">895</div><div class="l">Stars</div></div><div class="cell"><div class="n">~1.1k</div><div class="l">src 行数</div></div><div class="cell"><div class="n">1</div><div class="l">运行时依赖 (acorn)</div></div><div class="cell"><div class="n">13 天</div><div class="l">仓库年龄</div></div></div>
+  </div>
+</section>
+
+  <section id="pi" class="project pi">
+  <div class="wrap">
+    <div class="proj-head reveal">
+      <div class="proj-badge">PI</div>
+      <div class="proj-title">
+        <h2>PI Dynamic Workflows</h2>
+        <a class="repo" href="https://github.com/Michaelliv/pi-dynamic-workflows" target="_blank" rel="noopener">Michaelliv/pi-dynamic-workflows · TypeScript · MIT</a>
+      </div>
+    </div>
+    <div class="narrow">
+
+      <div class="statrow reveal">
+        <div class="chip"><div class="n">895</div><div class="l">Stars</div></div>
+        <div class="chip"><div class="n">TypeScript</div><div class="l">技术栈</div></div>
+        <div class="chip"><div class="n">acorn</div><div class="l">唯一运行时依赖</div></div>
+        <div class="chip"><div class="n">node:vm</div><div class="l">脚本沙箱</div></div>
+      </div>
+
+      <div class="prose">
+        <p class="reveal"><strong>一句话定位：</strong>pi-dynamic-workflows 是开源 coding agent <a href="https://github.com/earendil-works/pi" target="_blank" rel="noopener">Pi</a>（earendil-works）的一个扩展，给 Pi 注册一个 <code>workflow</code> 工具，对标 Anthropic 在 Claude Code 中发布的「dynamic workflows」能力：<strong>模型自己写一段编排脚本，决定开多少个子 Agent、怎么分阶段、怎么汇总</strong>。每个 <code>agent()</code> 调用都会 spawn 一个全新的内存态 Pi 会话（带完整 coding 工具，能读文件、跑 shell），适合代码库审计、多视角 review、大型重构和 fan-out 研究。</p>
+        <p class="reveal">整个项目惊人地小：<code>src/</code> 仅约 1100 行 TypeScript，运行时依赖只有 acorn（JS parser）一个，Pi 三件套（pi-ai / pi-coding-agent / pi-tui）全部走 peerDependencies。它不发明新引擎，而是把「编排原语」干净地嫁接到宿主 agent 已有的会话/工具/模型设施上——这是它和自建多 Agent 引擎的项目（如 Kimi Code）最本质的区别。</p>
+
+        <h4 class="reveal">数据流：从一句话到一支 Agent 舰队</h4>
+      </div>
+
+      <div class="pipe reveal">
+        <div class="stage"><span class="sn">01</span><div class="st"><b>用户一句话请求</b><small>"Run a workflow to inspect this repo and summarize the main modules."</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">02</span><div class="st"><b>Pi 模型写出 workflow 脚本</b><small>15 条 promptGuidelines 教会模型脚本契约：meta 头 + phase/agent/parallel/pipeline</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">03</span><div class="st"><b>workflow 工具解析 + 校验</b><small>acorn AST：剥 Markdown 围栏 → 确定性检查 → meta 字面量求值 → 切出脚本体</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">04</span><div class="st"><b>node:vm 沙箱执行</b><small>async IIFE + 白名单 globals + 并发限流器 min(cores-2, 16) + token budget</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">05</span><div class="st"><b>agent() → 内存态 Pi 子会话</b><small>SessionManager.inMemory + createCodingTools，跑完 dispose；schema 时走 structured_output</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">06</span><div class="st"><b>快照流式回显 + 结构化结果</b><small>WorkflowSnapshot 增量更新 TUI 进度树，最终 result 必须可 structuredClone</small></div></div>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">核心模块拆解</h4>
+        <p class="reveal">六个源码文件各管一段，职责切割得非常干净：</p>
+      </div>
+
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead><tr><th>模块 / 路径</th><th>作用</th></tr></thead>
+          <tbody>
+            <tr><td class="c-cg"><code>src/workflow.ts</code> (455 行)</td><td>心脏：acorn AST 解析 + 确定性校验 + meta 字面量求值器 + vm 沙箱运行时，agent/parallel/pipeline/phase/log/budget 全部在这里闭包实现</td></tr>
+            <tr><td class="c-cg"><code>src/workflow-tool.ts</code> (209 行)</td><td>Pi 工具定义：TypeBox schema、15 条 promptGuidelines（教模型写脚本的"说明书"）、围栏剥离、快照回调装配、abort 时把 running agent 翻成 skipped</td></tr>
+            <tr><td class="c-cg"><code>src/agent.ts</code> (131 行)</td><td><code>WorkflowAgent</code>：每次 run() 用 <code>createAgentSession + SessionManager.inMemory</code> 起一个全新 Pi 会话，标准 coding 工具齐备，结束必 dispose</td></tr>
+            <tr><td class="c-cg"><code>src/structured-output.ts</code> (47 行)</td><td>终结型工具：Pi 先按 schema 验参再执行，<code>terminate: true</code> 让子 Agent 在这次调用上直接收口，省一轮 assistant 回复</td></tr>
+            <tr><td class="c-cg"><code>src/display.ts</code> (235 行)</td><td>快照模型 + 纯文本渲染器：◆ 头行 / phase 分组 / ✓●✗- 状态图标 / maxAgents 截断 / 日志尾巴</td></tr>
+            <tr><td class="c-cg"><code>extensions/workflow.ts</code> (14 行)</td><td>扩展入口：registerTool + session_start 时自动 setActiveTools 激活</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ======================= 深度源码拆解 ======================= -->
+      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
+      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>src/</code> 全部六个文件 + 测试的逐行阅读，把上面的模块展开到「关键代码段 + 算法 + 失败模式」的粒度。</p>
+
+      <!-- ====== 1. 解析器 ====== -->
+      <div class="prose">
+        <h4 class="reveal">① 双层防线的脚本解析器：AST 字面量求值 + 确定性检查</h4>
+        <p class="reveal"><code>parseWorkflowScript</code>（workflow.ts:228）对模型生成的脚本做两层静态校验。<strong>第一层是 meta 契约</strong>：脚本第一条语句必须是 <code>export const meta = {...}</code>，且 meta 的值由 <code>evaluateLiteral</code> 用<strong>纯 AST 求值</strong>——不是 eval。它只接受 ObjectExpression / ArrayExpression / Literal / 无插值 TemplateLiteral / 负数 UnaryExpression 五种节点，spread、computed key、方法、稀疏数组全部抛错；连 <code>__proto__ / constructor / prototype</code> 三个保留键名都显式封死，防原型污染。求值完成后，meta export 被从源码里<strong>切掉</strong>（<code>script.slice(0, first.start) + script.slice(first.end)</code>），剩下的才是要执行的脚本体。</p>
+        <p class="reveal"><strong>第二层是确定性检查</strong>：<code>assertDeterministicAst</code> 递归遍历整棵 AST，命中 <code>Date.now()</code> / <code>Math.random()</code> / <code>new Date()</code> 即拒绝。有意思的是它对抗绕过的细节——<code>staticStringOf</code> 会做静态字符串折叠，所以 <code>Date['no'+'w']()</code>、<code>Math[`random`]()</code> 这类 computed member 写法同样被抓（git log 里专门有一个 "Fix determinism checks for prompt mentions" 的 PR #23 修过这块的误报/漏报边界）。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/workflow.ts — evaluateLiteral 的拒绝面</span></div>
+        <pre><code><span class="tok-k">case</span> <span class="tok-s">"ObjectExpression"</span><span class="tok-p">:</span> <span class="tok-p">{</span>
+  <span class="tok-k">for</span> (<span class="tok-k">const</span> prop <span class="tok-k">of</span> node.properties) <span class="tok-p">{</span>
+    <span class="tok-k">if</span> (prop.type <span class="tok-p">===</span> <span class="tok-s">"SpreadElement"</span>) <span class="tok-k">throw</span> <span class="tok-k">new</span> <span class="tok-t">Error</span>(<span class="tok-s">`spread not allowed in ${path}`</span>)<span class="tok-p">;</span>
+    <span class="tok-k">if</span> (prop.computed) <span class="tok-k">throw</span> <span class="tok-k">new</span> <span class="tok-t">Error</span>(<span class="tok-s">`computed keys not allowed in ${path}`</span>)<span class="tok-p">;</span>
+    <span class="tok-k">const</span> key <span class="tok-p">=</span> <span class="tok-f">propertyKey</span>(prop.key<span class="tok-p">,</span> path)<span class="tok-p">;</span>
+    <span class="tok-k">if</span> (key <span class="tok-p">===</span> <span class="tok-s">"__proto__"</span> <span class="tok-p">||</span> key <span class="tok-p">===</span> <span class="tok-s">"constructor"</span> <span class="tok-p">||</span> key <span class="tok-p">===</span> <span class="tok-s">"prototype"</span>) <span class="tok-p">{</span>
+      <span class="tok-k">throw</span> <span class="tok-k">new</span> <span class="tok-t">Error</span>(<span class="tok-s">`reserved key name not allowed in ${path}: ${key}`</span>)<span class="tok-p">;</span>  <span class="tok-c">// 防原型污染</span>
+    <span class="tok-p">}</span>
+    out[key] <span class="tok-p">=</span> <span class="tok-f">evaluateLiteral</span>(prop.value<span class="tok-p">,</span> <span class="tok-s">`${path}.${key}`</span>)<span class="tok-p">;</span>
+  <span class="tok-p">}</span>
+<span class="tok-p">}</span>
+<span class="tok-c">// staticStringOf 折叠 'no'+'w'，让 Date['no'+'w']() 也逃不掉确定性检查</span></code></pre>
+      </div>
+
+      <!-- ====== 2. vm 沙箱 ====== -->
+      <div class="prose">
+        <h4 class="reveal">② node:vm 沙箱运行时：白名单 globals + async IIFE</h4>
+        <p class="reveal"><code>runWorkflow</code>（workflow.ts:63）把脚本体包成 <code>(async () =&gt; {...})()</code>，丢进 <code>vm.createContext</code> 的隔离上下文执行。上下文里只有<strong>白名单 globals</strong>：编排原语（agent/parallel/pipeline/phase/log）、注入数据（args/cwd/budget）、以及一组安全内建（JSON/Math/Array/Object/Set/Map/Promise…）。<code>process</code> 被替换成 <code>Object.freeze({ cwd: () =&gt; ... })</code>——脚本能问"在哪个目录"，但拿不到 env、拿不到 exit。<code>console.log</code> 被重定向到 workflow 的 <code>log()</code>，所以模型习惯性写的 console.log 也会变成进度条上的日志行而不是黑洞。</p>
+        <p class="reveal"><strong>并发控制</strong>是一个 17 行的手写信号量 <code>createLimiter</code>：并发上限 <code>min(max(1, hardwareConcurrency - 2), 16)</code>，超出的 agent() 调用排队等 slot。<strong>token budget</strong> 则是个冻结对象 <code>{total, spent(), remaining()}</code>——每个 agent 跑完用 <code>JSON.stringify(result).length / 4</code> 粗估消耗记账，预算耗尽后下一次 <code>agent()</code> 直接 throw。这给"loop-until-budget"模式（<code>while (budget.remaining() &gt; 50_000) {...}</code>）提供了硬护栏。</p>
+        <p class="reveal">收尾有两个容易被忽略但很关键的动作：① <code>await Promise.allSettled([...pendingAgentRuns])</code>——脚本主体 return 了，但若有忘记 await 的 agent 还在跑，runtime 会等它们全部落地，<strong>不留孤儿 agent</strong>；② <code>assertStructuredCloneable(result)</code>——结果必须能 structuredClone，clone 失败时抛出的错误消息直接点名最常见的病因：<em>"did you forget to await agent(), parallel(), or pipeline()?"</em>（返回值里藏着 Promise 就是这个错）。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/workflow.ts — vm 上下文：能看到的就这么多</span></div>
+        <pre><code><span class="tok-k">const</span> context <span class="tok-p">=</span> vm.<span class="tok-f">createContext</span>(<span class="tok-p">{</span>
+  agent<span class="tok-p">,</span> parallel<span class="tok-p">,</span> pipeline<span class="tok-p">,</span> log<span class="tok-p">,</span> phase<span class="tok-p">,</span>          <span class="tok-c">// 编排原语</span>
+  args<span class="tok-p">:</span> options.args<span class="tok-p">,</span> budget<span class="tok-p">,</span>                      <span class="tok-c">// 注入数据</span>
+  cwd<span class="tok-p">:</span> options.cwd ?? process.<span class="tok-f">cwd</span>()<span class="tok-p">,</span>
+  process<span class="tok-p">:</span> <span class="tok-t">Object</span>.<span class="tok-f">freeze</span>(<span class="tok-p">{</span> cwd<span class="tok-p">:</span> () <span class="tok-p">=&gt;</span> options.cwd ?? process.<span class="tok-f">cwd</span>() <span class="tok-p">}</span>)<span class="tok-p">,</span>  <span class="tok-c">// 阉割版 process</span>
+  console<span class="tok-p">:</span> <span class="tok-p">{</span> log<span class="tok-p">,</span> info<span class="tok-p">:</span> log<span class="tok-p">,</span> warn<span class="tok-p">,</span> error <span class="tok-p">}</span><span class="tok-p">,</span>      <span class="tok-c">// console → 工作流日志</span>
+  JSON<span class="tok-p">,</span> Math<span class="tok-p">,</span> Array<span class="tok-p">,</span> Object<span class="tok-p">,</span> String<span class="tok-p">,</span> Number<span class="tok-p">,</span> Boolean<span class="tok-p">,</span> Set<span class="tok-p">,</span> Map<span class="tok-p">,</span> Promise<span class="tok-p">,</span>
+<span class="tok-p">}</span>)<span class="tok-p">;</span>
+<span class="tok-k">const</span> wrapped <span class="tok-p">=</span> <span class="tok-s">`(async () =&gt; {\n${body}\n})()`</span><span class="tok-p">;</span>
+<span class="tok-k">const</span> result <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">new</span> vm.<span class="tok-t">Script</span>(wrapped<span class="tok-p">,</span> <span class="tok-p">{</span> filename<span class="tok-p">:</span> <span class="tok-s">`${meta.name}.js`</span> <span class="tok-p">}</span>).<span class="tok-f">runInContext</span>(context)<span class="tok-p">;</span>
+<span class="tok-k">await</span> <span class="tok-t">Promise</span>.<span class="tok-f">allSettled</span>([...pendingAgentRuns])<span class="tok-p">;</span>   <span class="tok-c">// 不留孤儿 agent</span>
+<span class="tok-f">assertStructuredCloneable</span>(result<span class="tok-p">,</span> <span class="tok-s">"workflow result"</span>)<span class="tok-p">;</span> <span class="tok-c">// 抓"忘了 await"</span></code></pre>
+      </div>
+
+      <!-- ====== 3. agent() 错误策略 ====== -->
+      <div class="prose">
+        <h4 class="reveal">③ agent()/parallel()/pipeline() 的错误哲学：失败 = null，绝不连坐</h4>
+        <p class="reveal">三个原语共享同一条纪律：<strong>单点失败降级为 null + 日志，整个工作流继续跑</strong>；只有用户 abort 才向上抛。<code>agent()</code> 内部 catch 到错误时写一行 <code>agent &lt;label&gt; failed: ...</code> 日志、回调 onAgentEnd(result: null)、返回 null——displaу 层据此把该 agent 标成 ✗。<code>parallel()</code> 对每个 thunk 单独 try/catch，<code>pipeline()</code> 对每个 item 的每个 stage 单独 try/catch，某个 item 在 stage 2 挂了只会让<strong>这一条流水线</strong>变 null，其他 item 照常流过全部 stage。promptGuidelines 里相应地教模型："Check for nulls before synthesizing conclusions."</p>
+        <p class="reveal"><code>parallel()</code> 还有一个针对模型高频错误的<strong>防呆校验</strong>：传入数组里只要有一个元素不是函数（典型病例：<code>parallel(items.map(item =&gt; agent(...)))</code>，map 时 promise 已经全部起跑，限流器形同虚设），立刻抛出带修复示例的 TypeError：<em>"parallel() expects an array of functions, not promises. Wrap each call: () =&gt; agent(...)"</em>。pipeline 的 stage 回调签名是 <code>(prev, originalItem, index)</code>——后段 stage 不需要让前段刻意透传上下文，原始 item 永远在第二个参数里。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/workflow.ts — agent() 的 fail-soft 与 abort 的 fail-hard</span></div>
+        <pre><code><span class="tok-k">const</span> run <span class="tok-p">=</span> <span class="tok-f">limiter</span>(<span class="tok-k">async</span> () <span class="tok-p">=&gt;</span> <span class="tok-p">{</span>
+  state.agentCount<span class="tok-p">++;</span>
+  options.onAgentStart?.(<span class="tok-p">{</span> label<span class="tok-p">,</span> phase<span class="tok-p">:</span> assignedPhase<span class="tok-p">,</span> prompt<span class="tok-p">:</span> taskPrompt <span class="tok-p">}</span>)<span class="tok-p">;</span>
+  <span class="tok-k">try</span> <span class="tok-p">{</span>
+    <span class="tok-k">const</span> result <span class="tok-p">=</span> <span class="tok-k">await</span> agentRunner.<span class="tok-f">run</span>(taskPrompt<span class="tok-p">,</span> <span class="tok-p">{</span> label<span class="tok-p">,</span> schema<span class="tok-p">,</span> signal<span class="tok-p">,</span> instructions <span class="tok-p">}</span>)<span class="tok-p">;</span>
+    state.spent <span class="tok-p">+=</span> <span class="tok-f">estimateTokens</span>(result)<span class="tok-p">;</span>          <span class="tok-c">// JSON 长度 / 4 粗估记账</span>
+    <span class="tok-k">return</span> result<span class="tok-p">;</span>
+  <span class="tok-p">}</span> <span class="tok-k">catch</span> (error) <span class="tok-p">{</span>
+    <span class="tok-k">if</span> (options.signal?.aborted) <span class="tok-k">throw</span> error<span class="tok-p">;</span>       <span class="tok-c">// abort → fail-hard，向上传播</span>
+    <span class="tok-f">log</span>(<span class="tok-s">`agent ${label} failed: ${error.message}`</span>)<span class="tok-p">;</span> <span class="tok-c">// 其他错误 → fail-soft</span>
+    options.onAgentEnd?.(<span class="tok-p">{</span> label<span class="tok-p">,</span> phase<span class="tok-p">,</span> result<span class="tok-p">:</span> <span class="tok-k">null</span> <span class="tok-p">}</span>)<span class="tok-p">;</span>
+    <span class="tok-k">return</span> <span class="tok-k">null</span><span class="tok-p">;</span>                                    <span class="tok-c">// 失败 = null，不连坐</span>
+  <span class="tok-p">}</span>
+<span class="tok-p">}</span>)<span class="tok-p">;</span>
+pendingAgentRuns.<span class="tok-f">add</span>(run)<span class="tok-p">;</span>  <span class="tok-c">// 登记在册，收尾时 allSettled 兜底</span></code></pre>
+      </div>
+
+      <!-- ====== 4. WorkflowAgent ====== -->
+      <div class="prose">
+        <h4 class="reveal">④ WorkflowAgent：一次 agent() = 一个完整的内存态 Pi 会话</h4>
+        <p class="reveal">子 Agent 不是轻量 prompt 调用，而是<strong>真正的 Pi 会话</strong>。<code>WorkflowAgent.run()</code>（agent.ts:49）每次都 <code>createAgentSession</code>，关键参数是 <code>SessionManager.inMemory(cwd)</code>——会话不落盘、不进历史列表、跑完即焚；工具集是 <code>createCodingTools(cwd)</code>，read/write/edit/bash 一应俱全，所以子 Agent 能像正常 Pi 一样读仓库、跑命令。abort 走标准 AbortSignal 链：父信号 addEventListener('abort') → <code>session.abort()</code>，finally 里必 <code>session.dispose()</code>。父子之间的通信带宽被压到最小：<strong>进去一段 prompt，出来一段文本或一个 schema 对象</strong>，子会话塞满的上下文不会污染父窗口——和 Claude Code subagent 的隔离哲学一致。</p>
+        <p class="reveal"><strong>结构化输出</strong>是这个项目里性价比最高的 47 行（structured-output.ts）：传了 <code>opts.schema</code> 时，子会话被注入一个 <code>structured_output</code> 工具 + 四条"最终输出契约"指令。Pi 框架先按 JSON Schema 验参才会调 execute，所以参数即是<strong>已验证的返回值</strong>；execute 返回 <code>terminate: true</code>，子 Agent 在这次工具调用上直接终止——<strong>省掉一整轮 assistant 收尾回复的 token</strong>。如果子 Agent 跑完都没调 structured_output，则抛错（fail-soft 规则接手变 null）。没传 schema 时，返回值是从消息列表<strong>从后往前</strong>找的第一段非空 assistant 文本。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/structured-output.ts — terminate:true 的终结型工具</span></div>
+        <pre><code><span class="tok-k">return</span> <span class="tok-f">defineTool</span>(<span class="tok-p">{</span>
+  name<span class="tok-p">:</span> <span class="tok-s">"structured_output"</span><span class="tok-p">,</span>
+  parameters<span class="tok-p">:</span> schema<span class="tok-p">,</span>                <span class="tok-c">// Pi 先验参，参数即已验证的返回值</span>
+  <span class="tok-k">async</span> <span class="tok-f">execute</span>(_toolCallId<span class="tok-p">,</span> params) <span class="tok-p">{</span>
+    capture.value <span class="tok-p">=</span> params<span class="tok-p">;</span>
+    capture.called <span class="tok-p">=</span> <span class="tok-k">true</span><span class="tok-p">;</span>
+    <span class="tok-k">return</span> <span class="tok-p">{</span>
+      content<span class="tok-p">:</span> [<span class="tok-p">{</span> type<span class="tok-p">:</span> <span class="tok-s">"text"</span><span class="tok-p">,</span> text<span class="tok-p">:</span> <span class="tok-s">"Structured output received."</span> <span class="tok-p">}</span>]<span class="tok-p">,</span>
+      terminate<span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span>               <span class="tok-c">// 子 Agent 就此收口，省一轮 assistant 回复</span>
+    <span class="tok-p">}</span><span class="tok-p">;</span>
+  <span class="tok-p">}</span><span class="tok-p">,</span>
+<span class="tok-p">}</span>)<span class="tok-p">;</span></code></pre>
+      </div>
+
+      <!-- ====== 5. 进度渲染 ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑤ 动态 phase 与进度树：声明是文档，运行才是真相</h4>
+        <p class="reveal">一个挺有味道的设计决策（PR #19 "Support dynamic workflow phases"）：<code>meta.phases</code> 只是<strong>文档性质的预告</strong>，真正驱动进度展示的是运行时的 <code>phase(title)</code> 调用。phase 在循环里动态创建、在条件分支里跳过，都是合法的——被跳过的分支不会留下一行空进度。agent 归组的优先级是 <code>opts.phase ?? state.currentPhase</code>：并发场景下（pipeline 的后段 stage 跑起来时全局 currentPhase 早就变了）用显式 <code>opts.phase</code> 避免归组错乱。渲染端（display.ts）按 phase 聚合出 <code>done/running/errors/skipped</code> 计数，每组最多显示 maxAgents 个，更早的折叠成 "… N earlier agents"，每行一个状态图标：○ queued ● running ✓ done ✗ error - skipped。</p>
+        <p class="reveal">abort 路径在 workflow-tool.ts 里收尾得很整齐：捕获到 abort 后，把快照里所有 <code>running</code> 的 agent 翻成 <code>skipped</code>（error 字段标 "aborted"），重算计数，最后再渲染一次完成态——用户按下 Esc 看到的不是僵死的进度条，而是一棵明确标注了"谁被中断"的树。另一条硬规则在成功路径上：<code>result.agentCount === 0</code> 时直接抛错——workflow 必须至少调一次 agent()，禁止模型拿它当"摆造型的进度条"。</p>
+      </div>
+
+      <div class="tree reveal">  ◆ Workflow: audit_repo (5/7 done, 2 running)
+  ✓ Scan 2/2
+    #1 ✓ repo inventory
+    #2 ✓ entry points
+  ▶ Review 3/5 · 2 running
+    #3 ✓ src/workflow.ts review
+    #4 ✓ src/agent.ts review
+    #5 ✓ display review
+    #6 ● tool definition review
+    #7 ● tests review
+    … 0 earlier agents
+
+  log: 12 findings so far, deduping…</div>
+
+      <!-- ====== 6. 对照 Claude Code ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑥ 对照原版：复刻了什么，没复刻什么，"假装"复刻了什么</h4>
+        <p class="reveal">把它和 Anthropic 原版 Claude Code 的 Workflow 工具逐项对照，可以清楚看到一个 prototype 的取舍——<strong>核心编排原语高保真复刻，重运维特性整体缺席，还有三个参数处于"API 兼容但实现为提示词"的灰色地带</strong>：</p>
+      </div>
+
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead><tr><th>能力</th><th>Claude Code 原版</th><th>pi-dynamic-workflows</th></tr></thead>
+          <tbody>
+            <tr><td>meta 纯字面量契约</td><td>✅</td><td>✅ AST 求值，连原型污染键都封了</td></tr>
+            <tr><td>agent / parallel / pipeline / phase / log / args / budget</td><td>✅</td><td>✅ 签名与语义对齐（含 stage 的 (prev, original, index)）</td></tr>
+            <tr><td>确定性禁令（Date.now / Math.random / new Date）</td><td>✅</td><td>✅ AST 层拦截，含 computed-member 绕过</td></tr>
+            <tr><td>失败 → null + 日志，abort → 抛</td><td>✅</td><td>✅ 同款错误哲学</td></tr>
+            <tr><td>schema 结构化输出</td><td>✅ StructuredOutput 工具</td><td>✅ terminate:true 终结型工具，还省一轮收尾</td></tr>
+            <tr><td>恢复执行（resumeFromRunId / journal 缓存）</td><td>✅</td><td>❌ 未实现（README 明示 prototype 边界）</td></tr>
+            <tr><td>workflow() 嵌套子工作流 / 命名工作流库</td><td>✅</td><td>❌ 未实现</td></tr>
+            <tr><td>/workflows 实时管理面板</td><td>✅</td><td>❌ 未实现（TUI 内联进度树替代）</td></tr>
+            <tr><td>isolation: 'worktree'（git 隔离副本）</td><td>✅ 真实创建 worktree</td><td>⚠️ 参数接受，但只变成一行提示词</td></tr>
+            <tr><td>model / agentType 覆盖</td><td>✅ 真实切换模型/子 Agent 类型</td><td>⚠️ 参数接受，但只变成提示词指令</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/workflow.ts — buildAgentInstructions：⚠️ 行的真相</span></div>
+        <pre><code><span class="tok-k">function</span> <span class="tok-f">buildAgentInstructions</span>(phase<span class="tok-p">,</span> options) <span class="tok-p">{</span>
+  <span class="tok-k">const</span> lines <span class="tok-p">=</span> []<span class="tok-p">;</span>
+  <span class="tok-k">if</span> (phase) lines.<span class="tok-f">push</span>(<span class="tok-s">`Workflow phase: ${phase}`</span>)<span class="tok-p">;</span>
+  <span class="tok-k">if</span> (options.agentType) lines.<span class="tok-f">push</span>(<span class="tok-s">`Act as workflow subagent type: ${options.agentType}`</span>)<span class="tok-p">;</span>
+  <span class="tok-k">if</span> (options.isolation) lines.<span class="tok-f">push</span>(<span class="tok-s">`Requested isolation: ${options.isolation}`</span>)<span class="tok-p">;</span>  <span class="tok-c">// 没有真 worktree！</span>
+  <span class="tok-k">if</span> (options.model) lines.<span class="tok-f">push</span>(<span class="tok-s">`Requested model: ${options.model}`</span>)<span class="tok-p">;</span>          <span class="tok-c">// 没有真切模型！</span>
+  <span class="tok-k">return</span> lines.<span class="tok-f">join</span>(<span class="tok-s">"\n"</span>)<span class="tok-p">;</span>  <span class="tok-c">// isolation/model/agentType 都只是注入子 Agent 的提示词</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <!-- ====== 失败模式 ====== -->
+      <div class="prose">
+        <h4 class="reveal">⑦ 失败模式总览</h4>
+        <div class="tablewrap reveal">
+          <table class="cmp">
+            <thead><tr><th>场景 / 边界</th><th>触发条件</th><th>处理方式</th></tr></thead>
+            <tbody>
+              <tr><td>模型输出带 Markdown 围栏</td><td>```js ... ``` 包裹脚本</td><td><code>normalizeWorkflowScript</code> 正则剥离围栏再解析</td></tr>
+              <tr><td>meta 不是纯字面量</td><td>spread / computed key / 插值模板 / 函数调用</td><td>AST 求值器抛带路径的错误（如 <code>meta.phases[0]</code>）</td></tr>
+              <tr><td>非确定性 API</td><td>Date.now / Math.random / new Date（含 computed 写法）</td><td>AST 遍历直接拒绝整个脚本</td></tr>
+              <tr><td>parallel 传了 promise</td><td><code>parallel(items.map(i =&gt; agent(...)))</code></td><td>TypeError 带修复示例："Wrap each call: () =&gt; agent(...)"</td></tr>
+              <tr><td>单个 agent 失败</td><td>LLM/工具异常</td><td>fail-soft：null + 日志 + ✗ 图标，工作流继续</td></tr>
+              <tr><td>用户按 Esc</td><td>AbortSignal 触发</td><td>fail-hard：级联 session.abort()，running → skipped("aborted")</td></tr>
+              <tr><td>忘记 await</td><td>返回值里藏 Promise</td><td>structuredClone 检查抛错，消息直接点名病因</td></tr>
+              <tr><td>孤儿 agent</td><td>脚本 return 时仍有未 await 的 run</td><td>pendingAgentRuns 集合 + Promise.allSettled 兜底等待</td></tr>
+              <tr><td>预算耗尽</td><td>spent ≥ tokenBudget</td><td>下一次 agent() 抛 "workflow token budget exhausted"</td></tr>
+              <tr><td>schema 子 Agent 没交差</td><td>跑完未调 structured_output</td><td>抛 "finished without calling structured_output" → fail-soft 变 null</td></tr>
+              <tr><td>装样子的工作流</td><td>只声明 phase 不调 agent()</td><td>agentCount === 0 时整体抛错拒收</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ====== 生态意义 ====== -->
+      <div class="prose">
+        <h4 class="reveal">与现有 Trending 项目的差异化：第一个「编排原语」项目</h4>
+        <p class="reveal">本站此前拆解的项目，要么自建多 Agent 引擎（Kimi Code 的 Session 多 Agent、Ongrid 的 Coordinator+Specialist），要么做记忆/索引/质量等配套层。pi-dynamic-workflows 是第一个<strong>纯编排原语</strong>项目：它不造 Agent、不管模型、不碰记忆，只回答一个问题——<em>"当模型决定要 fan-out 时，让它用什么语言表达编排逻辑？"</em> 答案是：用真正的编程语言（JavaScript），配真正的解释器约束（AST 校验 + vm 沙箱），而不是又一层 YAML/JSON DSL。<strong>控制流是确定性的代码，智能在叶子节点的子 Agent 里</strong>——这个分工把"LLM 驱动的编排"（每一步都问模型下一步干嘛）换成了"模型一次性写出编排程序"，可审查、可测试（160 行 parser 单测覆盖接受/拒绝形状）、可复现。</p>
+        <p class="reveal">它同时是一个值得注意的生态信号：Claude Code 在 2026 年发布 dynamic workflows 后，<strong>13 天内社区就在另一个开源 agent（Pi）上完成了高保真复刻并收获近 900 stars</strong>——头部 agent 的交互范式正在以周为单位向开源生态扩散，而 Pi 的扩展机制（registerTool + peerDependencies）让这种移植只需要 1100 行代码。</p>
+
+        <h4 class="reveal">技术亮点</h4>
+        <div class="grid2">
+          <div class="card reveal"><span class="ico">🧬</span><h5 class="accent">脚本即编排</h5><p>模型写 JS 而非 DSL：循环、条件、loop-until-budget 全是原生语法；meta 用 AST 字面量求值保证可静态解析，连原型污染键都封死。</p></div>
+          <div class="card reveal"><span class="ico">📦</span><h5 class="accent">极简依赖面</h5><p>运行时依赖只有 acorn 一个；Pi 三件套全走 peerDependencies。1100 行 src 完成解析、沙箱、编排、渲染四件事。</p></div>
+          <div class="card reveal"><span class="ico">🛑</span><h5 class="accent">fail-soft 错误哲学</h5><p>单 agent 失败 → null + 日志，绝不连坐；abort → 级联 fail-hard。structuredClone 检查把"忘了 await"变成一条人话错误。</p></div>
+          <div class="card reveal"><span class="ico">⚡</span><h5 class="accent">terminate:true 省一轮</h5><p>结构化输出走终结型工具：schema 验参即返回值，子 Agent 在工具调用上直接收口，每个子 Agent 省一轮 assistant 回复的 token。</p></div>
+        </div>
+      </div>
+
+      <!-- ====== 待确认 ====== -->
+      <div class="callout reveal">
+        <h5>附：待确认项</h5>
+        <ul>
+          <li><strong>vm 沙箱的安全边界：</strong><code>node:vm</code> 不是安全沙箱（官方文档明示可逃逸）。此处用它约束 API 面与确定性是合理的——毕竟子 Agent 本身就有完整 shell 权限——但"沙箱"一词不应理解为安全隔离。</li>
+          <li><strong>budget 记账精度：</strong><code>JSON.stringify(result).length / 4</code> 只估算了结果文本，子 Agent 中间消耗的 input/output token 完全未计入，实际开销可能远大于账面值。</li>
+          <li><strong>isolation / model / agentType：</strong>三个参数均只注入提示词（见 ⑥），并发写文件的工作流在 Pi 上仍会互相冲突，待上游支持。</li>
+          <li><strong>Stars 时效：</strong>895 stars / 45 forks 为 2026-06-10 快照，仓库创建于 2026-05-28，数据变化较快。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
+</main>
+
+<button class="totop" aria-label="返回顶部">↑</button>
+
+<script>if(!location.hash){history.replaceState(null,'','#pi');}</script>
+<script src="./assets/main.js"></script>
+</body>
+</html>
