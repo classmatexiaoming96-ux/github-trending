@@ -148,6 +148,14 @@
 <span class="tok-c">// staticStringOf 折叠 'no'+'w'，让 Date['no'+'w']() 也逃不掉确定性检查</span></code></pre>
       </div>
 
+      <!-- ====== 1b. 双层 AST 防线 ====== -->
+      <div class="prose">
+        <h4 class="reveal">①补充：双层 AST 防线的完整闭环</h4>
+        <p class="reveal">两层 AST 检查形成了一个明确的分工：<strong>第一层 <code>evaluateLiteral</code> 只管 meta 对象本身</strong>——它负责把 meta 从 AST 节点变成真实的 JS 值，任何不是纯字面量的构造（spread、method、插值模板）都会触发明确路径的错误。<strong>第二层 <code>assertDeterministicAst</code> 遍历整棵 AST（脚本体 + meta）</strong>——它只管确定性，任何 Date.now/Math.random/new Date 都会导致整个脚本被拒绝。两层各司其职，互不干扰，也不需要彼此的信息。</p>
+        <p class="reveal">一个值得注意的细节是 meta 求值和确定性检查的<strong>顺序</strong>：先<code>assertDeterministicAst(ast)</code>（第 237 行），再 <code>evaluateLiteral(declarator.init, "meta")</code>（第 258 行）。这意味着如果脚本体里有<code>Date.now()</code>，整个脚本在 meta 求值之前就被拒绝——这保证了<strong>meta 求值过程中不会触发副作用</strong>（因为确定性检查已经完成）。这个顺序也防止了"meta 里写了 Date.now 但脚本体里没有"这种边界情况漏网。</p>
+        <p class="reveal">再看<code>staticStringOf</code>（workflow.ts:357）如何实现字符串折叠攻击：它处理 BinaryExpression 的<code>+</code> 操作符——如果左操作数和右操作数都能静态求出一个字符串，就把它们拼接起来。这意味着 <code>'Da' + 'te' + '.no' + 'w'()</code> 理论上会被展开成<code>'Date.now()'</code> 然后被 <code>isMemberExpression</code> 捕获。但实际上 acorn 解析后每个<code>'Da'</code>、<code>'te'</code> 都是独立的 Literal 节点，staticStringOf 会把它们逐级拼接——而<code>Date.now()</code> 的 callee 是一个 MemberExpression，property 是<code>'now'</code> 这个静态字符串，所以这个 case 能被正确识别。</p>
+      </div>
+
       <!-- ====== 2. vm 沙箱 ====== -->
       <div class="prose">
         <h4 class="reveal">② node:vm 沙箱运行时：白名单 globals + async IIFE</h4>
@@ -167,23 +175,42 @@
   JSON<span class="tok-p">,</span> Math<span class="tok-p">,</span> Array<span class="tok-p">,</span> Object<span class="tok-p">,</span> String<span class="tok-p">,</span> Number<span class="tok-p">,</span> Boolean<span class="tok-p">,</span> Set<span class="tok-p">,</span> Map<span class="tok-p">,</span> Promise<span class="tok-p">,</span>
 <span class="tok-p">}</span>)<span class="tok-p">;</span>
 <span class="tok-k">const</span> wrapped <span class="tok-p">=</span> <span class="tok-s">`(async () =&gt; {\n${body}\n})()`</span><span class="tok-p">;</span>
-<span class="tok-k">const</span> result <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">new</span> vm.<span class="tok-t">Script</span>(wrapped<span class="tok-p">,</span> <span class="tok-p">{</span> filename<span class="tok-p">:</span> <span class="tok-s">`${meta.name}.js`</span> <span class="tok-p">}</span>).<span class="tok-f">runInContext</span>(context)<span class="tok-p">;</span>
+<span class="tok-k">const</span> result<span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">new</span> vm.<span class="tok-t">Script</span>(wrapped<span class="tok-p">,</span> <span class="tok-p">{</span> filename<span class="tok-p">:</span> <span class="tok-s">`${meta.name}.js`</span> <span class="tok-p">}</span>).<span class="tok-f">runInContext</span>(context)<span class="tok-p">;</span>
 <span class="tok-k">await</span> <span class="tok-t">Promise</span>.<span class="tok-f">allSettled</span>([...pendingAgentRuns])<span class="tok-p">;</span>   <span class="tok-c">// 不留孤儿 agent</span>
 <span class="tok-f">assertStructuredCloneable</span>(result<span class="tok-p">,</span> <span class="tok-s">"workflow result"</span>)<span class="tok-p">;</span> <span class="tok-c">// 抓"忘了 await"</span></code></pre>
+      </div>
+
+      <!-- ====== 2b. 白名单上下文细节 ====== -->
+      <div class="prose">
+        <h4 class="reveal">② 补充：白名单上下文的完整清单与安全边界</h4>
+        <p class="reveal">白名单上下文的完整清单（workflow.ts:186-212）共16 个白名单项，分四类：</p>
+        <div class="tablewrap reveal">
+          <table class="cmp">
+            <thead><tr><th>类别</th><th>白名单项</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td><strong>编排原语</strong></td><td><code>agent, parallel, pipeline, phase, log</code></td><td>5 个——脚本的核心 API</td></tr>
+              <tr><td><strong>注入数据</strong></td><td><code>args, cwd, budget, process</code></td><td>4 个——外部数据的只读入口，process 被冻结到只剩 cwd()</td></tr>
+              <tr><td><strong>重定向 I/O</strong></td><td><code>console</code></td><td>log/info/warn/error 全部指向 workflow 的 log()，不是真正的 stdout</td></tr>
+              <tr><td><strong>安全内建</strong></td><td><code>JSON, Math, Array, Object, String, Number, Boolean, Set, Map, Promise</code></td><td>10 个——全是只读内置对象引用，无 __proto__ 链可探索</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="reveal">注意<code>node:vm</code> 本身<strong>不是安全沙箱</strong>（Node.js 官方文档明确说明可被逃逸）。项目用它的目的有二：① <strong>确定性约束</strong>（vm上下文中没有 Date/Math.random 等全局）和② <strong>API 面限制</strong>（脚本只能访问白名单上的16 个符号）。真正的安全边界是宿主 Pi 本身提供的——子 Agent 跑在独立的 Pi 会话里，而这个会话本身并没有额外的沙箱包装。</p>
+        <p class="reveal">一个容易被忽视的边界是<code>budget</code> 对象：它被<code>Object.freeze()</code> 冻结，但<code>spent()</code> 和 <code>remaining()</code> 是函数，会捕获外层的<code>state.spent</code>。如果脚本把<code>budget</code> 传来传去，不会有问题——因为冻结的是外层对象引用。但如果脚本试图<code>budget.total = 999999</code>，freeze 会静默失败（严格模式下抛 TypeError，非严格模式下静默失败），所以 budget 的硬性上限不会被子 Agent 篡改。</p>
       </div>
 
       <!-- ====== 3. agent() 错误策略 ====== -->
       <div class="prose">
         <h4 class="reveal">③ agent()/parallel()/pipeline() 的错误哲学：失败 = null，绝不连坐</h4>
-        <p class="reveal">三个原语共享同一条纪律：<strong>单点失败降级为 null + 日志，整个工作流继续跑</strong>；只有用户 abort 才向上抛。<code>agent()</code> 内部 catch 到错误时写一行 <code>agent &lt;label&gt; failed: ...</code> 日志、回调 onAgentEnd(result: null)、返回 null——displaу 层据此把该 agent 标成 ✗。<code>parallel()</code> 对每个 thunk 单独 try/catch，<code>pipeline()</code> 对每个 item 的每个 stage 单独 try/catch，某个 item 在 stage 2 挂了只会让<strong>这一条流水线</strong>变 null，其他 item 照常流过全部 stage。promptGuidelines 里相应地教模型："Check for nulls before synthesizing conclusions."</p>
-        <p class="reveal"><code>parallel()</code> 还有一个针对模型高频错误的<strong>防呆校验</strong>：传入数组里只要有一个元素不是函数（典型病例：<code>parallel(items.map(item =&gt; agent(...)))</code>，map 时 promise 已经全部起跑，限流器形同虚设），立刻抛出带修复示例的 TypeError：<em>"parallel() expects an array of functions, not promises. Wrap each call: () =&gt; agent(...)"</em>。pipeline 的 stage 回调签名是 <code>(prev, originalItem, index)</code>——后段 stage 不需要让前段刻意透传上下文，原始 item 永远在第二个参数里。</p>
+        <p class="reveal">三个原语共享同一条纪律：<strong>单点失败降级为 null + 日志，整个工作流继续跑</strong>；只有用户 abort 才向上抛。<code>agent()</code> 内部 catch 到错误时写一行 <code>agent &lt;label&gt; failed: ...</code> 日志、回调 onAgentEnd(result: null)、返回 null——displaу 层据此把该 agent 标成 ✗。<code>parallel()</code> 对每个 thunk 单独 try/catch，<code>pipeline()</code> 对每个 item 的每个 stage 单独 try/catch，某个 item 在 stage 2 挂了只会让<strong>这一条流水线</strong>变 null，其他 item 照常流过全部 stage。promptGuidelines 里相应地教模型：\"Check for nulls before synthesizing conclusions.\"</p>
+        <p class="reveal"><code>parallel()</code> 还有一个针对模型高频错误的<strong>防呆校验</strong>：传入数组里只要有一个元素不是函数（典型病例：<code>parallel(items.map(item =&gt; agent(...)))</code>，map 时 promise 已经全部起跑，限流器形同虚设），立刻抛出带修复示例的 TypeError：<em>"parallel() expects an array of functions, not promises. Wrap each call: () =&gt; agent(...)\"</em>。pipeline 的 stage 回调签名是 <code>(prev, originalItem, index)</code>——后段 stage 不需要让前段刻意透传上下文，原始 item 永远在第二个参数里。</p>
       </div>
 
       <div class="code reveal">
         <div class="bar"><i></i><i></i><i></i><span class="fname">src/workflow.ts — agent() 的 fail-soft 与 abort 的 fail-hard</span></div>
-        <pre><code><span class="tok-k">const</span> run <span class="tok-p">=</span> <span class="tok-f">limiter</span>(<span class="tok-k">async</span> () <span class="tok-p">=&gt;</span> <span class="tok-p">{</span>
+        <pre><code><span class="tok-k">const</span> run <span class="tok-p">=</span> <span class="tok-f">limiter</span>(<span class="tok-k">async</span> ()<span class="tok-p">=&gt;</span> <span class="tok-p">{</span>
   state.agentCount<span class="tok-p">++;</span>
-  options.onAgentStart?.(<span class="tok-p">{</span> label<span class="tok-p">,</span> phase<span class="tok-p">:</span> assignedPhase<span class="tok-p">,</span> prompt<span class="tok-p">:</span> taskPrompt <span class="tok-p">}</span>)<span class="tok-p">;</span>
+  options.onAgentStart?.(<span class="tok-p">{</span> label<span class="tok-p">,</span> phase<span class="tok-p">:</span> assignedPhase<span class="tok-p">,</span> prompt<span class="tok-p">:</span> taskPrompt<span class="tok-p">}</span>)<span class="tok-p">;</span>
   <span class="tok-k">try</span> <span class="tok-p">{</span>
     <span class="tok-k">const</span> result <span class="tok-p">=</span> <span class="tok-k">await</span> agentRunner.<span class="tok-f">run</span>(taskPrompt<span class="tok-p">,</span> <span class="tok-p">{</span> label<span class="tok-p">,</span> schema<span class="tok-p">,</span> signal<span class="tok-p">,</span> instructions <span class="tok-p">}</span>)<span class="tok-p">;</span>
     state.spent <span class="tok-p">+=</span> <span class="tok-f">estimateTokens</span>(result)<span class="tok-p">;</span>          <span class="tok-c">// JSON 长度 / 4 粗估记账</span>
@@ -198,10 +225,43 @@
 pendingAgentRuns.<span class="tok-f">add</span>(run)<span class="tok-p">;</span>  <span class="tok-c">// 登记在册，收尾时 allSettled 兜底</span></code></pre>
       </div>
 
+      <!-- ====== 3b. agent() 生命周期 ====== -->
+      <div class="prose">
+        <h4 class="reveal">③ 补充：agent() 生命周期的完整状态机</h4>
+        <p class="reveal">一次<code>agent()</code> 调用经历以下状态转换（完整链路在 workflow.ts + agent.ts 中闭环）：</p>
+        <div class="pipe reveal">
+          <div class="stage"><span class="sn">A1</span><div class="st"><b>limiter 排队</b><small>createLimiter 检查当前 active 数量，超过上限则等待队列</small></div></div>
+          <div class="arrow">→</div>
+          <div class="stage"><span class="sn">A2</span><div class="st"><b>onAgentStart 回调</b><small>快照 push agent，状态 = "running"，UI 开始渲染</small></div></div>
+          <div class="arrow">→</div>
+          <div class="stage"><span class="sn">A3</span><div class="st"><b>WorkflowAgent.run()</b><small>创建内存态 Pi 会话 +注入 structured_output 工具（如有 schema）</small></div></div>
+          <div class="arrow">→</div>
+          <div class="stage"><span class="sn">A4</span><div class="st"><b>session.prompt()</b><small>子 Agent 执行，完成后 structured_output 被调用或取最后 assistant 文本</small></div></div>
+          <div class="arrow">→</div>
+          <div class="stage"><span class="sn">A5</span><div class="st"><b>token记账</b><small>estimateTokens(result) 累加到 state.spent，检查 budget.remaining()</small></div></div>
+          <div class="arrow">→</div>
+          <div class="stage"><span class="sn">A6</span><div class="st"><b>onAgentEnd 回调</b><small>快照 agent status = result === null ? "error" : "done"，渲染结果预览</small></div></div>
+        </div>
+        <p class="reveal">关键路径的异常处理细节：</p>
+        <div class="tablewrap reveal">
+          <table class="cmp">
+            <thead><tr><th>异常来源</th><th>检测位置</th><th>处理策略</th><th>返回值</th></tr></thead>
+            <tbody>
+              <tr><td>LLM 调用失败</td><td>agent.ts:79 session.prompt()</td><td>catch → 写日志 → fail-soft</td><td>null + 错误日志</td></tr>
+              <tr><td>schema 子 Agent 未调用 structured_output</td><td>agent.ts:83 capture.called 检查</td><tdtd>throw "Subagent finished without calling structured_output" → fail-soft 变 null</td></tr>
+              <tr><td>token budget 耗尽</td><td>workflow.ts:103 budget.remaining() 检查</td><td>throw "workflow token budget exhausted"</td><td>整个 workflow abort</td></tr>
+              <tr><td>用户按 Esc（AbortSignal）</td><td>workflow.ts:125 signal?.aborted 检查</td><td>throw error → fail-hard 向外层传播</td><td>running agents → skipped("aborted")</td></tr>
+              <tr><td>返回值里藏 Promise（忘 await）</td><td>workflow.ts:217 assertStructuredCloneable</td><td>structuredClone 抛错 → 错误消息直接点名病因</td><td>整个 workflow abort</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="reveal">值得特别关注的是 A3 到 A5 的<strong>两次 abort 检查点</strong>（workflow.ts:113 和 workflow.ts:120）：在 agentRunner.run() 执行前后各放一次 throwIfAborted()，意味着子 Agent 执行过程中用户按 Esc，两次检查之间会等 LLM 调用返回，然后才检测到 abort 并抛错。这个设计比"随时中断 LLM 调用"简单得多——它依赖的是子 Agent 自己响应 AbortSignal（通过 session.abort()），而不是在 vm沙箱层面中断。</p>
+      </div>
+
       <!-- ====== 4. WorkflowAgent ====== -->
       <div class="prose">
         <h4 class="reveal">④ WorkflowAgent：一次 agent() = 一个完整的内存态 Pi 会话</h4>
-        <p class="reveal">子 Agent 不是轻量 prompt 调用，而是<strong>真正的 Pi 会话</strong>。<code>WorkflowAgent.run()</code>（agent.ts:49）每次都 <code>createAgentSession</code>，关键参数是 <code>SessionManager.inMemory(cwd)</code>——会话不落盘、不进历史列表、跑完即焚；工具集是 <code>createCodingTools(cwd)</code>，read/write/edit/bash 一应俱全，所以子 Agent 能像正常 Pi 一样读仓库、跑命令。abort 走标准 AbortSignal 链：父信号 addEventListener('abort') → <code>session.abort()</code>，finally 里必 <code>session.dispose()</code>。父子之间的通信带宽被压到最小：<strong>进去一段 prompt，出来一段文本或一个 schema 对象</strong>，子会话塞满的上下文不会污染父窗口——和 Claude Code subagent 的隔离哲学一致。</p>
+        <p class="reveal">子 Agent 不是轻量 prompt 调用，而是<strong>真正的 Pi 会话</strong>。<code>WorkflowAgent.run()</code>（agent.ts:49）每次都 <code>createAgentSession</code>，关键参数是 <code>SessionManager.inMemory(cwd)</code>——会话不落盘、不进历史列表、跑完即焚；工具集是 <code>createCodingTools(cwd)</code>，read/write/edit/bash 一应俱全，所以子 Agent 能像正常 Pi 一样读仓库、跑命令。abort走标准 AbortSignal 链：父信号 addEventListener('abort') → <code>session.abort()</code>，finally 里必 <code>session.dispose()</code>。父子之间的通信带宽被压到最小：<strong>进去一段 prompt，出来一段文本或一个 schema 对象</strong>，子会话塞满的上下文不会污染父窗口——和 Claude Code subagent 的隔离哲学一致。</p>
         <p class="reveal"><strong>结构化输出</strong>是这个项目里性价比最高的 47 行（structured-output.ts）：传了 <code>opts.schema</code> 时，子会话被注入一个 <code>structured_output</code> 工具 + 四条"最终输出契约"指令。Pi 框架先按 JSON Schema 验参才会调 execute，所以参数即是<strong>已验证的返回值</strong>；execute 返回 <code>terminate: true</code>，子 Agent 在这次工具调用上直接终止——<strong>省掉一整轮 assistant 收尾回复的 token</strong>。如果子 Agent 跑完都没调 structured_output，则抛错（fail-soft 规则接手变 null）。没传 schema 时，返回值是从消息列表<strong>从后往前</strong>找的第一段非空 assistant 文本。</p>
       </div>
 
@@ -219,6 +279,14 @@ pendingAgentRuns.<span class="tok-f">add</span>(run)<span class="tok-p">;</span>
     <span class="tok-p">}</span><span class="tok-p">;</span>
   <span class="tok-p">}</span><span class="tok-p">,</span>
 <span class="tok-p">}</span>)<span class="tok-p">;</span></code></pre>
+      </div>
+
+      <!-- ====== 4b. 内存态子会话隔离细节 ====== -->
+      <div class="prose">
+        <h4 class="reveal">④ 补充：内存态子会话的隔离边界</h4>
+        <p class="reveal"><code>SessionManager.inMemory(cwd)</code> 的"内存态"具体意味着：会话数据存在内存 Map 里，不落盘，不与其他会话共享，也不会被持久化。这意味着即使用户在子 Agent 里跑了危险的 shell 命令（<code>rm -rf /</code>），影响也只局限在那个 in-memory 的 SessionManager 实例里，不会影响父会话或磁盘状态——当然，子 Agent 跑的命令本身（如果真的执行了）是没有额外沙箱的，因为 Pi 的 shell 工具本身并不做命令过滤。</p>
+        <p class="reveal">abort 链的设计（agent.ts:74-76）值得细看：父 AbortSignal 通过<code>addEventListener('abort', onAbort, { once: true })</code> 注册一个一次性监听器，onAbort 调用<code>session.abort()</code>。这个链是<strong>单向的</strong>：子会话收到 abort 后不会反向通知父，父在 finally 块里通过<code>removeAbortListener</code> 主动移除监听器，防止内存泄漏。子会话 dispose 后，任何后续的 abort事件都不会再触发已经不存在的监听器。</p>
+        <p class="reveal">子会话的 prompt 构建（agent.ts:96-117）有个微妙之处：<code>this.instructions</code>（来自 WorkflowAgent 构造时的全局指令）和 <code>options.instructions</code>（来自单个 agent() 调用的 per-call指令）是<strong>拼接关系</code>，不是后者覆盖前者。这意味着 workflow 级别注入的全局上下文（比如"你是代码审查 Agent"）会和具体 agent 调用的任务指令共存。但<code>options.label</code> 是单独一行加在 prompt 前面的，而不是拼进 parts数组——这样 label 始终出现在 prompt 的最开头，保证子 Agent 第一眼就看到自己的身份。</p>
       </div>
 
       <!-- ====== 5. 进度渲染 ====== -->
@@ -287,14 +355,14 @@ pendingAgentRuns.<span class="tok-f">add</span>(run)<span class="tok-p">;</span>
             <tbody>
               <tr><td>模型输出带 Markdown 围栏</td><td>```js ... ``` 包裹脚本</td><td><code>normalizeWorkflowScript</code> 正则剥离围栏再解析</td></tr>
               <tr><td>meta 不是纯字面量</td><td>spread / computed key / 插值模板 / 函数调用</td><td>AST 求值器抛带路径的错误（如 <code>meta.phases[0]</code>）</td></tr>
-              <tr><td>非确定性 API</td><td>Date.now / Math.random / new Date（含 computed 写法）</td><td>AST 遍历直接拒绝整个脚本</td></tr>
-              <tr><td>parallel 传了 promise</td><td><code>parallel(items.map(i =&gt; agent(...)))</code></td><td>TypeError 带修复示例："Wrap each call: () =&gt; agent(...)"</td></tr>
+              <tr><td>非确定性 API</td><td>Date.now / Math.random / new Date（含 computed 写法）</td><td>AST遍历直接拒绝整个脚本</td></tr>
+              <tr><td>parallel 传了 promise</td><td><code>parallel(items.map(i =&gt; agent(...)))</code></td><td>TypeError 带修复示例：\"Wrap each call: () =&gt; agent(...)\"</td></tr>
               <tr><td>单个 agent 失败</td><td>LLM/工具异常</td><td>fail-soft：null + 日志 + ✗ 图标，工作流继续</td></tr>
-              <tr><td>用户按 Esc</td><td>AbortSignal 触发</td><td>fail-hard：级联 session.abort()，running → skipped("aborted")</td></tr>
+              <tr><td>用户按 Esc</td><td>AbortSignal 触发</td><td>fail-hard：级联 session.abort()，running → skipped(\"aborted\")</td></tr>
               <tr><td>忘记 await</td><td>返回值里藏 Promise</td><td>structuredClone 检查抛错，消息直接点名病因</td></tr>
               <tr><td>孤儿 agent</td><td>脚本 return 时仍有未 await 的 run</td><td>pendingAgentRuns 集合 + Promise.allSettled 兜底等待</td></tr>
-              <tr><td>预算耗尽</td><td>spent ≥ tokenBudget</td><td>下一次 agent() 抛 "workflow token budget exhausted"</td></tr>
-              <tr><td>schema 子 Agent 没交差</td><td>跑完未调 structured_output</td><td>抛 "finished without calling structured_output" → fail-soft 变 null</td></tr>
+              <tr><td>预算耗尽</td><td>spent ≥ tokenBudget</td><td>下一次 agent() 抛 \"workflow token budget exhausted\"</td></tr>
+              <tr><td>schema 子 Agent 没交差</td><td>跑完未调 structured_output</td><td>抛 \"finished without calling structured_output\" → fail-soft 变 null</td></tr>
               <tr><td>装样子的工作流</td><td>只声明 phase 不调 agent()</td><td>agentCount === 0 时整体抛错拒收</td></tr>
             </tbody>
           </table>
