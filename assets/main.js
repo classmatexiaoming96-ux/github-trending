@@ -20,7 +20,7 @@ if (toggle && links) {
 }
 
 // ============ TAB SWITCHER ============
-const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od', 'og', 'mc', 'mo', 'sa', 'gu', 'al', 'pi'];
+const VALID = ['cg', 'ua', 'cp', 'oh', 'kc', 'oc', 'od', 'og', 'mc', 'mo', 'sa', 'gu', 'al', 'pi', 'by'];
 const TITLES = {
   cg: 'CodeGraph 源码深度解析 · Agent Infrastructure Teardown',
   ua: 'Understand-Anything 源码深度解析 · Agent Infrastructure Teardown',
@@ -36,10 +36,17 @@ const TITLES = {
   gu: 'guard-skills 源码深度解析 · 二道质量门',
   al: 'AlignDev 源码深度解析 · 前端约定工程师',
   pi: 'PI Dynamic Workflows 源码深度解析 · 让模型写脚本编排子 Agent',
+  by: 'baoyu-design 源码深度解析 · Harness 无关的设计 Skill',
 };
 
 function setActiveTab(name, opts) {
   if (!VALID.includes(name)) name = 'oh';
+  // standalone detail pages carry a single panel whose tab name may differ
+  // from the requested one — fall back to a panel that actually exists
+  if (!document.querySelector('.tab-panel[data-tab="' + name + '"]')) {
+    const fallback = document.querySelector('.tab-panel.active') || document.querySelector('.tab-panel');
+    if (fallback) name = fallback.dataset.tab;
+  }
   opts = opts || {};
   document.querySelectorAll('.tabs button').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === name);
@@ -53,6 +60,10 @@ function setActiveTab(name, opts) {
   // re-run reveal observer for newly visible elements
   setupReveal();
   setupBench();
+  // highlight matching project link in a tab-list nav-toc (index page)
+  document.querySelectorAll('.nav-toc a[data-tab-link]').forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + name);
+  });
   // re-run scroll position once to recalc progress
   onScroll();
 }
@@ -109,7 +120,33 @@ function setupBench() {
   if (panel) panel.querySelectorAll('.bench').forEach(el => benchObserver.observe(el));
 }
 
+// ============ NAV-TOC SCROLLSPY ============
+// Highlights the section currently in view for in-page TOC sidebars.
+// Links whose target id is a tab name (data-tab-link) are handled by the
+// tab router in setActiveTab instead.
+function setupTocSpy() {
+  document.querySelectorAll('.nav-toc').forEach(toc => {
+    const links = Array.from(toc.querySelectorAll('a[href^="#"]:not([data-tab-link])'));
+    const pairs = links
+      .map(a => [a, document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)))])
+      .filter(p => p[1]);
+    if (!pairs.length) return;
+    function spy() {
+      let current = pairs[0][0];
+      for (const [a, el] of pairs) {
+        if (el.getBoundingClientRect().top <= 160) current = a;
+      }
+      links.forEach(a => a.classList.toggle('active', a === current));
+    }
+    document.addEventListener('scroll', spy, { passive: true });
+    spy();
+  });
+}
+
 // init on load
-const initialTab = tabFromHash() || 'oh';
+// fall back to the page's own hardcoded active panel (standalone detail
+// pages have a single panel whose tab name differs from the global default)
+const initialTab = tabFromHash() || document.querySelector('.tab-panel.active')?.dataset.tab || 'oh';
 setActiveTab(initialTab, { scroll: false });
+setupTocSpy();
 onScroll();

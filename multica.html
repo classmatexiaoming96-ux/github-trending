@@ -46,6 +46,21 @@
 
 <main>
 <div class="tab-panel active" data-tab="mc">
+  <!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
+  <nav class="nav-toc" aria-label="页面目录">
+    <h3>目录</h3>
+    <ul>
+      <li><a href="#layered-architecture">① 分层架构</a></li>
+      <li><a href="#core-modules">② 核心模块一览</a></li>
+      <li><a href="#headless-core">③ Headless core</a></li>
+      <li><a href="#package-boundaries">④ 包边界强制</a></li>
+      <li><a href="#agent-management">⑤ Agent 管理</a></li>
+      <li><a href="#web-desktop-shared">⑥ 双端共享架构</a></li>
+      <li><a href="#monorepo-organization">⑦ Monorepo 组织</a></li>
+      <li><a href="#failure-modes">⑧ 失败模式</a></li>
+      <li><a href="#ecosystem-significance">⑨ 生态意义对比</a></li>
+    </ul>
+  </nav>
   <style>.tab-panel[data-tab="mc"] section{--accent:#9b8cf0}.tab-panel[data-tab="mc"] .hero{--accent:#9b8cf0}</style>
   <section class="hero" style="padding:130px 0 30px">
   <div class="wrap">
@@ -78,7 +93,7 @@
         <p class="reveal"><strong>一句话定位：</strong>Multica 把<em>编程 Agent 当成真实队友</em>——你像给同事派活一样把 issue 指派给 Agent（或在评论里 @ 它），它会自己接活、写代码、报阻塞、改状态，并在过程中累积可复用的 skill。后端是 <strong>Go</strong>（Chi + pgx/sqlc + gorilla/websocket），Web 端是 <strong>Next.js</strong>（App Router），桌面端是 <strong>Electron</strong>（electron-vite + react-router-dom），移动端是 Expo/RN，数据库 <strong>PostgreSQL</strong>（pgvector/pg17）。Web 与 Desktop 通过 <code>@multica/core</code>、<code>@multica/ui</code>、<code>@multica/views</code> 三个共享包复用全部业务逻辑与 UI。</p>
         <p class="reveal" style="color:var(--text-dim);font-size:14.5px">本文基于对 <code>server/</code>、<code>apps/web/</code>、<code>apps/desktop/</code>、<code>packages/core|ui|views|eslint-config</code>、<code>CLAUDE.md</code>、各 <code>package.json</code>、<code>turbo.json</code>、<code>pnpm-workspace.yaml</code> 的源码级阅读，所有引用均来自实际读到的文件。</p>
 
-        <h4 class="reveal">① 分层架构</h4>
+        <h4 class="reveal" id="layered-architecture">① 分层架构</h4>
         <p class="reveal">从 PostgreSQL 到双端 app，依赖方向严格单向：<code>views → core + ui</code>，而 <code>core</code> 与 <code>ui</code> 彼此独立、互不导入。所有共享包以<strong>原始 <code>.ts/.tsx</code> 源码导出</strong>（无预编译），由消费端 app 的打包器直接编译——这就是 “Internal Packages” 模式，换取零配置 HMR 与即时跳转定义。</p>
       </div>
 
@@ -141,7 +156,7 @@
       <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于对 <code>server/</code> 与 <code>packages/*</code> 的逐文件阅读，把上面的分层展开到「关键文件 + 关键代码段 + 设计 + 失败模式」的粒度。</p>
 
       <div class="prose">
-        <h4 class="reveal">② 核心模块一览</h4>
+        <h4 class="reveal" id="core-modules">② 核心模块一览</h4>
       </div>
 
       <div class="tablewrap reveal">
@@ -174,7 +189,7 @@
 
       <!-- ====== 专题 1：Headless core ====== -->
       <div class="prose">
-        <h4 class="reveal">③ Headless core：Zustand（客户端状态）+ React Query（服务端状态）严格分离</h4>
+        <h4 class="reveal" id="headless-core">③ Headless core：Zustand（客户端状态）+ React Query（服务端状态）严格分离</h4>
         <p class="reveal"><code>CLAUDE.md</code> 把这条定为“架构保持连贯的根本约束”：<strong>TanStack Query 拥有全部服务端状态，Zustand 拥有全部客户端状态，二者绝不混用</strong>。<strong>服务端状态</strong>用 <code>queryOptions</code> 描述，键以 <code>wsId</code> 开头——工作区切换即换 key、自动出对数据，无需手动失效。</p>
       </div>
 
@@ -225,7 +240,7 @@
 
       <!-- ====== 专题 2：包边界 ====== -->
       <div class="prose">
-        <h4 class="reveal">④ packages 边界规则（core 零 react-dom、ui 零 core）—— 如何被强制</h4>
+        <h4 class="reveal" id="package-boundaries">④ packages 边界规则（core 零 react-dom、ui 零 core）—— 如何被强制</h4>
         <p class="reveal">本仓库最反直觉的发现：<strong>边界不是靠 ESLint <code>no-restricted-imports</code> 或 dependency-cruiser 强制的</strong>（全仓搜索 <code>no-restricted-imports</code>/<code>dependency-cruiser</code>/<code>no-restricted-paths</code> 均无命中）。强制手段是<strong>依赖声明 + TypeScript 解析失败 + phantom-dep lint</strong> 三者叠加：</p>
         <p class="reveal"><strong>1) 包的 <code>package.json</code> 决定它能 import 什么。</strong><code>@multica/ui</code> 的 deps 里<strong>根本没有</strong> <code>@multica/core</code>；<code>@multica/views</code> 的 deps/peer 里<strong>根本没有</strong> <code>next</code> 或 <code>react-router-dom</code>；<code>@multica/core</code> 把 <code>react-dom</code> 只放在 <code>devDependencies</code>（测试用），生产代码无法依赖它。<strong>2) phantom-dep 规则把“偷用未声明依赖”变成 CI 报错</strong>（<code>eslint-plugin-import-x/no-extraneous-dependencies</code>）：</p>
       </div>
@@ -246,7 +261,7 @@
 
       <!-- ====== 专题 3：Agent 管理 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑤ Agent 管理：任务分配、进度跟踪、技能积累</h4>
+        <h4 class="reveal" id="agent-management">⑤ Agent 管理：任务分配、进度跟踪、技能积累</h4>
         <p class="reveal"><strong>任务分配——polymorphic assignee。</strong>Issue 的 assignee 可以是 member 或 agent（<code>assignee_type</code> + <code>assignee_id</code>）。把 issue 指派给 Agent（或在评论里 @ 它）即触发入队：</p>
       </div>
 
@@ -309,7 +324,7 @@
 
       <!-- ====== 专题 4：双端共享 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑥ Web + Desktop 双端共享 packages 架构</h4>
+        <h4 class="reveal" id="web-desktop-shared">⑥ Web + Desktop 双端共享 packages 架构</h4>
         <p class="reveal">两端都把根组件包进 <code>&lt;CoreProvider&gt;</code>（初始化 api/auth/chat store + QueryClient + WS），并各自提供 <code>NavigationAdapter</code>——一个共享抽象接口：</p>
       </div>
 
@@ -345,7 +360,7 @@
 
       <!-- ====== 专题 5：Monorepo ====== -->
       <div class="prose">
-        <h4 class="reveal">⑦ Turbo + pnpm workspace 的 monorepo 组织</h4>
+        <h4 class="reveal" id="monorepo-organization">⑦ Turbo + pnpm workspace 的 monorepo 组织</h4>
         <p class="reveal"><code>pnpm-workspace.yaml</code> 声明 workspace（<code>apps/*</code>、<code>packages/*</code>）并用 <strong>catalog 钉版本</strong>——所有共享依赖写 <code>"pkg": "catalog:"</code>，保证全仓单一版本：</p>
       </div>
 
@@ -386,7 +401,7 @@
 
       <!-- ====== 失败模式表 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑧ 关键技术与失败模式 / 边界规则违例</h4>
+        <h4 class="reveal" id="failure-modes">⑧ 关键技术与失败模式 / 边界规则违例</h4>
         <p class="reveal">下表汇总从源码与 <code>CLAUDE.md</code> 提炼的边界场景、触发条件与处理方式——多数源于真实事故编号（GH issue）：</p>
         <div class="tablewrap reveal">
           <table class="cmp">
@@ -412,7 +427,7 @@
 
       <!-- ====== 生态意义 + 对比 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑨ 对 managed-agents 生态的意义：vs Manus / Cursor Agent / Windsurf</h4>
+        <h4 class="reveal" id="ecosystem-significance">⑨ 对 managed-agents 生态的意义：vs Manus / Cursor Agent / Windsurf</h4>
         <p class="reveal">Multica 在“把 Agent 当队友”的赛道上有几处区别于现有产品的取舍。它的工程重心<strong>不在“更强的单个 Agent”，而在让一群 Agent 像团队成员一样被管理</strong>：可指派、可观测、可累积技能、人机同板协作。</p>
         <div class="grid2">
           <div class="card reveal"><span class="ico">🧩</span><h5 class="accent">Vendor-neutral 任务系统</h5><p>不绑定单一模型——可对接 Claude Code、Codex、Copilot CLI、OpenCode、Gemini、Cursor Agent、Kimi、Kiro CLI。对比 <strong>Cursor Agent / Windsurf</strong>（深度耦合各自编辑器与模型、以单人 IDE 回合为中心），Multica 把执行下放给 daemon/云 runtime，自身只做<strong>项目管理层</strong>——更像“给 Agent 用的 Linear”。</p></div>

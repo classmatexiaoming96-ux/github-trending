@@ -46,6 +46,23 @@
 
 <main>
 <div class="tab-panel active" data-tab="og">
+<!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
+<nav class="nav-toc" aria-label="页面目录">
+  <h3>目录</h3>
+  <ul>
+    <li><a href="#layered-architecture">分层架构</a></li>
+    <li><a href="#core-modules">核心模块拆解</a></li>
+    <li><a href="#source-teardown">源码级深度拆解</a></li>
+    <li class="toc-sub"><a href="#multi-agent">① 多 Agent 协作</a></li>
+    <li class="toc-sub"><a href="#reverse-tunnel">② 反向隧道/SSH</a></li>
+    <li class="toc-sub"><a href="#rca">③ 根因 RCA</a></li>
+    <li class="toc-sub"><a href="#im-bridge">④ IM 集成</a></li>
+    <li class="toc-sub"><a href="#specialist-boundaries">⑤ Specialist 边界</a></li>
+    <li class="toc-sub"><a href="#failure-modes">⑥ 失败模式总览</a></li>
+    <li><a href="#ecosystem-significance">生态意义</a></li>
+    <li><a href="#tech-highlights">技术亮点</a></li>
+  </ul>
+</nav>
   <style>.tab-panel[data-tab="og"] section{--accent:#e0954a}.tab-panel[data-tab="og"] .hero{--accent:#e0954a}</style>
   <section class="hero" style="padding:130px 0 30px">
   <div class="wrap">
@@ -78,7 +95,7 @@
         <p class="reveal"><strong>一句话定位：</strong>ongrid 是一个 <strong>Ops AI + 根因分析（RCA）+ 远程执行平台</strong>，把"运维 AI"拆成三个互不 import 的 Bounded Context（BC）：<code>iam</code>（用户/鉴权）、<code>manager</code>（控制面 + AIOps 大脑）、<code>edgeagent</code>（装在每台主机上的只读探针 + 执行器）。三者通过 <code>.go-arch-lint.yml</code> 强制隔离，只能借 <code>internal/pkg/**</code>（业务无关共享层）和 <code>api/</code> 通信。</p>
         <p class="reveal">技术栈：Go（Chi router + cloudwego/eino agent 框架 + singchia/geminio 反向隧道）+ TypeScript/React SPA + MySQL/SQLite + frontier broker + Docker Compose。整个系统的设计哲学是：<strong>深度数据查询和高危执行能力都下沉到 edge 和 specialist，coordinator 只做"派给谁/直接答/直接拒"的调度</strong>，并通过 cmdpolicy 沙箱 + ReviewGate 二审把"AI 误操作"的爆炸半径压到最小。</p>
 
-        <h4 class="reveal">分层架构</h4>
+        <h4 class="reveal" id="layered-architecture">分层架构</h4>
         <p class="reveal">边缘 agent 永远是发起方（dial-out）。manager 想调用 edge 的能力（取负载、跑 skill、开 webshell），是通过 frontier broker <strong>反向调用</strong>边缘已注册的 RPC handler，而不是 manager 主动连边缘的端口。AIOps 大脑全在 manager 进程内（<code>chatruntime.Runtime</code>），基于 cloudwego/eino 的 ReAct 图——Coordinator 与 Specialist 是同一个 Runtime 里的不同 persona，靠 toolBag 过滤来划定能力边界。</p>
       </div>
 
@@ -132,7 +149,7 @@
                  Prometheus  ◄── remote_write ──  Loki ◄── push ──  Tempo</div>
 
       <div class="prose">
-        <h4 class="reveal">核心模块拆解</h4>
+        <h4 class="reveal" id="core-modules">核心模块拆解</h4>
         <p class="reveal">系统由两个二进制（<code>cmd/ongrid</code> 云端主进程 + <code>cmd/ongrid-edge</code> 边缘 agent）和五大业务域组成。下表是逐文件阅读后梳理出的模块职责映射：</p>
       </div>
 
@@ -156,12 +173,12 @@
       </div>
 
       <!-- ======================= 深度源码拆解 ======================= -->
-      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
+      <h4 class="reveal" id="source-teardown" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
       <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>cmd/</code>、<code>internal/manager/biz/aiops</code>、<code>internal/edgeagent</code>、<code>internal/pkg/tunnel</code> 的逐文件阅读，把五大主题展开到「关键代码段 + 算法 + 失败模式」的粒度。</p>
 
       <!-- ====== 1. Coordinator + Specialist ====== -->
       <div class="prose">
-        <h4 class="reveal">① Coordinator + Specialist 多 Agent 协作机制</h4>
+        <h4 class="reveal" id="multi-agent">① Coordinator + Specialist 多 Agent 协作机制</h4>
         <p class="reveal"><strong>模型</strong>：Coordinator 和 Specialist 是同一个 <code>chatruntime.Runtime</code> 实例里的不同 persona，区别只在 toolBag 和 system prompt。Coordinator = <code>sess.AgentID</code> 为空/"default"；其余 <code>agents/*.md</code> 里定义的都是 worker。<code>buildAIOpsRuntime</code>（main.go:2376）是整个 AIOps 装配的咽喉——它把每个依赖恰好穿过一次。Coordinator 的 <code>coordinatorToolNames</code>（main.go:2362）被刻意收窄成只读定位 + 知识工具，注释直言这是 "rule 1 的物理执行"：coordinator 的 toolBag 里<strong>根本没有</strong> <code>query_promql / host_bash</code> 这类深度工具，所以 LLM 即使想 inline 查也调不到，只能走 <code>AgentTool</code> 派给 specialist。</p>
       </div>
 
@@ -216,7 +233,7 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 2. 反向隧道 / Browser SSH ====== -->
       <div class="prose">
-        <h4 class="reveal">② 零入站端口的反向隧道 / Browser SSH</h4>
+        <h4 class="reveal" id="reverse-tunnel">② 零入站端口的反向隧道 / Browser SSH</h4>
         <p class="reveal"><strong>dial-out</strong>（tunnel/client.go）：边缘 agent 用 <code>gclient.NewRetryEndWithDialer</code> 主动连 frontier broker。首次拨号指数退避 1s→2s→…封顶 60s；连上后断线由 geminio RetryEnd 透明重连。手柄 blob <code>Meta{AccessKey, SecretKey}</code> 在 connect 时塞进 geminio 不透明 Meta，server 端解码后做 AuthFunc。主机上<strong>不开 22/80/443 任何入站口</strong>。manager 想调边缘能力时，是反向 Call：<code>tunnel.Caller.Call(edgeID, method, body)</code> 经 broker 路由到该 edge 已注册的 handler。一个微妙坑——manager 重启会清掉 broker 路由表但 edge 的 TCP 还活着，所以 client 额外检测 broker 路由失效错误重连：</p>
       </div>
 
@@ -247,7 +264,7 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 3. RCA ====== -->
       <div class="prose">
-        <h4 class="reveal">③ 根因 RCA：拓扑 + metrics/logs/traces 关联</h4>
+        <h4 class="reveal" id="rca">③ 根因 RCA：拓扑 + metrics/logs/traces 关联</h4>
         <p class="reveal">RCA 由两条路组成：被动（用户在 /chat 问）和主动（<code>investigator</code> 告警触发）。两者都吃同一个核心工具 <strong><code>correlate_incident</code></strong>（tools/correlate_incident.go）——一次性把告警周围的四类信号打成一个 bundle，让 LLM 不用 chain 十次工具：</p>
       </div>
 
@@ -274,7 +291,7 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 4. IM 集成 ====== -->
       <div class="prose">
-        <h4 class="reveal">④ IM 集成（飞书/Telegram/Slack）双向消息</h4>
+        <h4 class="reveal" id="im-bridge">④ IM 集成（飞书/Telegram/Slack）双向消息</h4>
         <p class="reveal"><strong>inbound</strong>（imbridge/bridge.go <code>HandleInbound</code>）：provider 各自的 webhook/stream handler 先验签 + 解密，归一化成 <code>InboundMessage</code>，bridge 保持平台无关。流程：去重（provider:app_id:event_id，防长轮询 replay 重复应答）→ 解析 app/thread 映射（按 <code>(im_app_id, im_chat_id, thread_id)</code> 一聊一 session，群里所有人共享）→ <code>/new</code> 等命令重置 session → 发 "✦ 思考中…" placeholder → 跑 agent + 节流编辑器渐进编辑 IM 消息。<strong>outbound 渐进编辑</strong>：<code>newStreamEditor</code> 把 agent SSE 的 assistant chunk 节流后不断 edit 同一条 IM 消息。</p>
         <p class="reveal"><strong>飞书验签/解密</strong>（provider/feishu/verify.go）有个反直觉点——飞书 v2 events 用的是 <strong>SHA-256 拼接而非 HMAC</strong>：</p>
       </div>
@@ -298,7 +315,7 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 5. specialist 能力边界 + mutating 纪律 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑤ SRE / Network / DB specialist 的能力边界</h4>
+        <h4 class="reveal" id="specialist-boundaries">⑤ SRE / Network / DB specialist 的能力边界</h4>
         <p class="reveal">能力边界由 <code>agents/*.md</code> frontmatter 的 <code>tools</code> 白名单 + <code>permission_mode</code> + <code>max_turns</code> + worker.go 的 <code>filterToolsForAgent</code> 共同物理约束。所有 specialist 都 <code>permission_mode: read-only</code>、<code>max_turns: 15</code>、第 0 步强制 <code>query_knowledge</code>：</p>
       </div>
 
@@ -339,7 +356,7 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 关键技术与失败模式 ====== -->
       <div class="prose">
-        <h4 class="reveal">⑥ 关键技术与失败模式总览</h4>
+        <h4 class="reveal" id="failure-modes">⑥ 关键技术与失败模式总览</h4>
         <div class="tablewrap reveal">
           <table class="cmp">
             <thead><tr><th>场景 / 边界</th><th>触发条件</th><th>处理方式</th></tr></thead>
@@ -365,10 +382,10 @@ res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <
 
       <!-- ====== 生态意义 ====== -->
       <div class="prose">
-        <h4 class="reveal">对 Ops AI / SRE 生态的意义</h4>
+        <h4 class="reveal" id="ecosystem-significance">对 Ops AI / SRE 生态的意义</h4>
         <p class="reveal"><strong>"调度优于全能"的多 Agent 范式</strong>：coordinator 不是更强的 specialist，而是更克制的——它的 toolBag 被物理收窄到只能"派/答/拒"，深度能力强制下沉到 specialist。这把"一个大 prompt 干所有事"的脆弱性换成了"小而专的子 agent + 明确边界"，并用 dedupe/MaxTurns/dynamicHints 一整套护栏对抗弱模型的死循环——这是把 SOTA agent 套路（claude-code 的 AgentTool/system-reminder）落到生产 SRE 场景的实践样本。</p>
 
-        <h4 class="reveal">技术亮点</h4>
+        <h4 class="reveal" id="tech-highlights">技术亮点</h4>
         <div class="grid2">
           <div class="card reveal"><span class="ico">🛡</span><h5 class="accent">零信任执行面</h5><p>双层闸（edge cmdpolicy 只读白名单 + manager ReviewGate 二审）让"AI 远程跑命令"从不可接受变成可审计、可回滚、爆炸半径可控。reviewer 用最强模型、default-reject、三门控。</p></div>
           <div class="card reveal"><span class="ico">🔌</span><h5 class="accent">零入站端口 + Browser SSH</h5><p>边缘只出站拨号，主机不开任何入站口，却仍能被远程巡检/执行/开 shell。SSH 栈收在 manager 侧让审计/并发/踢人单点可控。</p></div>
