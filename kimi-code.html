@@ -1,452 +1,1328 @@
-<!doctype html>
-<html lang="zh-CN" class="has-tabs">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Kimi Code · Moonshot AI Coding Agent · 源码深度解析</title>
-<meta name="description" content="Moonshot AI 开源的 TypeScript Monorepo 编程 Agent——多 Agent Session、Wire Records 重放、MCP 一等公民、统一 LLM 抽象层，源码级深度解析。" />
-<meta property="og:title" content="Kimi Code · Moonshot AI Coding Agent" />
-<meta property="og:description" content="TypeScript Monorepo 多 Agent 架构：Session 管理、Wire Records 重放、MCP 一等公民、统一 LLM 抽象层。" />
-<meta property="og:type" content="article" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kimi Code · 多 Agent 引擎 · 源码观测台</title>
+<meta name="description" content="MoonshotAI/kimi-code 的交互式源码解析：Session 多 Agent、Wire Records 可重放、Kosong 统一 LLM、Kaos 执行环境、MCP 一等公民。" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   pi · agent · core — Observatory / Mission Control
+   ============================================================ */
+:root{
+  --ink:        #070a12;
+  --ink-1:      #0b1020;
+  --ink-2:      #10172a;
+  --ink-3:      #161f38;
+  --panel:      rgba(18, 26, 46, 0.62);
+  --panel-2:    rgba(13, 19, 35, 0.85);
+
+  --star:       #f2b14a;   /* amber — Eärendil */
+  --star-soft:  #f6cd86;
+  --star-deep:  #c98a2c;
+  --signal:     #4fd8d0;   /* cyan — data / signal */
+  --signal-soft:#8df0ea;
+  --phosphor:   #7fe6a6;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(242,177,74,0.32);
+  --line-cyan:  rgba(79,216,208,0.30);
+
+  --glow-amber: rgba(242,177,74,0.22);
+  --glow-cyan:  rgba(79,216,208,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 256px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(242,177,74,0.13), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(79,216,208,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(35,30,70,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:30px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.22em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(242,177,74,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13.5px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(242,177,74,0.10), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.28em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(30px,4.4vw,50px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:21px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:62ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:68ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(242,177,74,0.08); border:1px solid rgba(242,177,74,0.16);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(79,216,208,0.08); border-color:rgba(79,216,208,0.16); }
+
+/* ---- panels (instrument readouts) ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,230,166,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:13px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.14em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(48px,8.5vw,108px); line-height:0.92;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(17px,1.7vw,21px); color:var(--text-2); max-width:54ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#1a1206; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(242,177,74,0.14); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.08em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ============================================================
+   MESSAGE FLOW (pipeline)
+   ============================================================ */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:130px; padding:18px 16px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 56px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(48px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+.flow-stage.req b{ color:var(--rose); }
+
+/* ============================================================
+   ARCHITECTURE LAYERS
+   ============================================================ */
+.layers{ display:flex; flex-direction:column; gap:10px; }
+.layer{
+  position:relative; border:1px solid var(--line); border-radius:12px; padding:18px 22px;
+  background:var(--panel); cursor:pointer; transition:all .3s var(--ease); overflow:hidden;
+  display:flex; align-items:center; gap:18px;
+}
+.layer::after{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); opacity:.6; transition:width .3s var(--ease); }
+.layer:hover{ border-color:var(--accent-line); transform:translateX(4px); }
+.layer.active{ border-color:var(--accent-line); background:linear-gradient(90deg, var(--accent-bg), var(--panel) 55%); }
+.layer.active::after{ width:5px; opacity:1; box-shadow:0 0 16px var(--accent-bg); }
+.layer .lv{ font-family:var(--mono); font-size:11px; color:var(--accent); width:34px; flex:none; letter-spacing:0.06em; }
+.layer .nm{ font-family:var(--mono); font-size:14px; color:var(--text); font-weight:500; }
+.layer .nm span{ color:var(--text-dim); font-weight:400; font-size:12px; }
+.layer .tag{ margin-left:auto; font-size:12px; color:var(--text-dim); text-align:right; }
+.layer[data-l="0"]{ --accent:var(--text-dim); --accent-line:var(--line); --accent-bg:rgba(255,255,255,0.04); }
+.layer[data-l="1"]{ --accent:var(--phosphor); --accent-line:rgba(127,230,166,0.3); --accent-bg:rgba(127,230,166,0.07); }
+.layer[data-l="2"]{ --accent:var(--signal); --accent-line:var(--line-cyan); --accent-bg:rgba(79,216,208,0.07); }
+.layer[data-l="3"]{ --accent:var(--star); --accent-line:var(--line-amber); --accent-bg:rgba(242,177,74,0.07); }
+.layer-detail{
+  margin-top:14px; border:1px solid var(--line); border-radius:12px; padding:24px 26px;
+  background:var(--panel-2); display:none; animation:fadeUp .4s var(--ease);
+}
+.layer-detail.show{ display:block; }
+.layer-detail h3{ display:flex; align-items:center; gap:10px; }
+.layer-detail h3 .badge{ font-family:var(--mono); font-size:10px; padding:2px 8px; border-radius:5px; letter-spacing:0.05em; }
+.ld-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:16px; }
+.ld-grid .col h4{ font-family:var(--mono); font-size:10.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-dim); margin:0 0 8px; }
+.ld-grid .col ul{ margin:0; padding-left:0; list-style:none; }
+.ld-grid .col li{ font-size:13.5px; color:var(--text-2); padding:3px 0 3px 16px; position:relative; }
+.ld-grid .col li::before{ content:"›"; position:absolute; left:0; color:var(--star); }
+
+/* ============================================================
+   EVENT STREAM PLAYER
+   ============================================================ */
+.player{ display:grid; grid-template-columns:1.05fr 0.95fr; gap:24px; align-items:start; }
+.player-controls{ display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
+.seg{ display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+.seg button{
+  font-family:var(--mono); font-size:11.5px; padding:8px 14px; background:none; border:none; cursor:pointer;
+  color:var(--text-dim); transition:all .2s var(--ease); letter-spacing:0.02em;
+}
+.seg button.on{ background:rgba(79,216,208,0.12); color:var(--signal-soft); }
+.seg button:hover:not(.on){ color:var(--text); }
+.pbtn{
+  font-family:var(--mono); font-size:11.5px; padding:8px 16px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--line-amber); background:rgba(242,177,74,0.08); color:var(--star);
+  transition:all .2s var(--ease); display:inline-flex; align-items:center; gap:7px;
+}
+.pbtn:hover{ background:rgba(242,177,74,0.16); }
+.pbtn.sec{ border-color:var(--line); background:none; color:var(--text-dim); }
+.pbtn.sec:hover{ color:var(--text); border-color:var(--line-cyan); }
+
+.timeline{
+  position:relative; border:1px solid var(--line); border-radius:14px; background:var(--panel-2);
+  padding:14px 8px 14px 0; max-height:560px; overflow-y:auto;
+}
+.timeline::before{ content:""; position:absolute; left:84px; top:14px; bottom:14px; width:1px; background:var(--line); }
+.ev{
+  display:flex; align-items:center; gap:14px; padding:5px 16px 5px 0; position:relative;
+  opacity:.32; transition:opacity .35s var(--ease), transform .35s var(--ease);
+}
+.ev .t{ font-family:var(--mono); font-size:9.5px; color:var(--text-faint); width:70px; text-align:right; flex:none; }
+.ev .node{ width:11px; height:11px; border-radius:50%; flex:none; border:2px solid var(--lane); background:var(--ink-1); position:relative; z-index:1; transition:all .3s var(--ease); }
+.ev .ename{ font-family:var(--mono); font-size:13px; color:var(--text-2); transition:color .3s var(--ease); }
+.ev .ename .ph{ color:var(--text-faint); font-size:11px; }
+.ev[data-lane="life"]{ --lane:var(--star); }
+.ev[data-lane="turn"]{ --lane:var(--signal); }
+.ev[data-lane="msg"]{ --lane:var(--text-2); }
+.ev[data-lane="tool"]{ --lane:var(--phosphor); }
+.ev.fired{ opacity:1; }
+.ev.fired .ename{ color:var(--text); }
+.ev.fired .node{ background:var(--lane); box-shadow:0 0 14px var(--lane); }
+.ev.now{ transform:translateX(5px); }
+.ev.now .node{ transform:scale(1.5); }
+.ev.now .ename{ color:var(--lane); font-weight:500; }
+.ev.indent .ename{ padding-left:0; }
+.ev.indent .t{ color:var(--text-faint); }
+
+.readout{ position:sticky; top:24px; }
+.readout .scr{
+  font-family:var(--mono); font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-dim);
+  margin-bottom:14px; display:flex; justify-content:space-between;
+}
+.readout .scr b{ color:var(--signal); }
+.rd-card{ border:1px solid var(--line); border-radius:14px; background:var(--panel); padding:26px; min-height:230px; }
+.rd-card .ev-type{ font-family:var(--mono); font-size:18px; color:var(--star); margin-bottom:6px; word-break:break-all; }
+.rd-card .ev-lane{ font-family:var(--mono); font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:18px; }
+.rd-card .ev-desc{ font-size:15px; color:var(--text-2); line-height:1.65; }
+.rd-card .ev-desc code{ font-family:var(--mono); font-size:0.85em; color:var(--signal-soft); }
+.rd-progress{ height:3px; background:var(--line); border-radius:2px; margin-top:22px; overflow:hidden; }
+.rd-progress i{ display:block; height:100%; width:0; background:linear-gradient(90deg,var(--signal),var(--star)); transition:width .3s var(--ease); }
+.legend{ display:flex; gap:16px; flex-wrap:wrap; margin-top:16px; font-family:var(--mono); font-size:10.5px; color:var(--text-dim); }
+.legend span{ display:inline-flex; align-items:center; gap:6px; }
+.legend i{ width:9px; height:9px; border-radius:50%; }
+
+/* ============================================================
+   FEATURE CARDS / generic
+   ============================================================ */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.1em; margin-bottom:10px; }
+.card h3{ font-size:18px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* compare table */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* steering diagram */
+.steer-track{ position:relative; border:1px solid var(--line); border-radius:14px; background:var(--panel-2); padding:34px 26px 26px; margin-top:10px; }
+.steer-line{ position:relative; height:2px; background:linear-gradient(90deg,var(--signal),var(--star)); border-radius:2px; margin:30px 0; }
+.steer-line .tick{ position:absolute; top:50%; transform:translate(-50%,-50%); width:13px; height:13px; border-radius:50%; background:var(--ink-1); border:2px solid var(--text-dim); }
+.steer-pt{ position:absolute; transform:translateX(-50%); text-align:center; width:150px; }
+.steer-pt .arr{ font-size:16px; line-height:1; }
+.steer-pt .nm{ font-family:var(--mono); font-size:12px; margin-top:4px; }
+.steer-pt .ds{ font-size:11px; color:var(--text-dim); margin-top:3px; line-height:1.4; }
+.steer-pt.up{ bottom:calc(50% + 20px); } .steer-pt.dn{ top:calc(50% + 20px); }
+.steer-pt.s1{ left:24%; } .steer-pt.s1 .nm{ color:var(--rose); }
+.steer-pt.s2{ left:58%; } .steer-pt.s2 .nm{ color:var(--star); }
+.steer-pt.s3{ left:88%; } .steer-pt.s3 .nm{ color:var(--signal-soft); }
+
+/* phases */
+.phases{ display:flex; gap:10px; flex-wrap:wrap; margin:18px 0; }
+.phase{ font-family:var(--mono); font-size:12px; padding:9px 15px; border-radius:9px; border:1px solid var(--line); color:var(--text-2); background:var(--panel); }
+.phase.idle{ border-color:var(--line-cyan); color:var(--signal-soft); }
+.phase b{ color:var(--text-faint); font-weight:400; font-size:10px; display:block; }
+
+/* state model 4 quadrants */
+.states{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+.state{ border:1px solid var(--line); border-radius:12px; padding:18px 20px; background:var(--panel); }
+.state .h{ font-family:var(--mono); font-size:13px; color:var(--star); margin-bottom:6px; }
+.state.cy .h{ color:var(--signal); }
+.state p{ font-size:13px; color:var(--text-2); margin:0; }
+
+/* cheat sheet */
+.cheat{ display:grid; grid-template-columns:repeat(2,1fr); gap:18px; }
+.cheat .blk{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:20px 22px; }
+.cheat .blk h4{ font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--signal); margin:0 0 14px; }
+.cheat dl{ margin:0; display:grid; grid-template-columns:auto 1fr; gap:8px 16px; align-items:baseline; }
+.cheat dt{ font-family:var(--mono); font-size:12px; color:var(--star-soft); white-space:nowrap; }
+.cheat dd{ margin:0; font-size:13px; color:var(--text-2); }
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(28px,4vw,46px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .player{ grid-template-columns:1fr; }
+  .readout{ position:static; }
+  .ld-grid{ grid-template-columns:1fr; }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.states,.cheat{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
 </head>
-<body class="tabs-active">
-<div id="progress"></div>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
 
-<!-- 站点索引：顶部导航 -->
-<nav class="site-index">
-  <div class="wrap">
-    <span class="site-index-label">📂 项目索引</span>
-    <div class="site-index-links">
-      <a href="index.html#cg">🗂 CodeGraph<br><span>索引层 · 代码语义后端</span></a>
-      <a href="index.html#ua">🗂 Understand-Anything<br><span>认知层 · 代码地图</span></a>
-      <a href="index.html#cp">🗂 Claude Plugins<br><span>能力层 · 官方插件生态</span></a>
-      <a href="index.html#oh">🗂 OpenHuman Memory Tree<br><span>记忆层 · 本地知识库</span></a>
-      <a href="index.html#kc">🗂 Kimi Code<br><span>模型层 · 多 Agent 引擎</span></a>
-      <a href="index.html#oc">🗂 OpenClaw<br><span>全渠道 · 个人 AI 助手</span></a>
-      <a href="index.html#od">🗂 Odysseus<br><span>Agent 层 · 自托管工作台</span></a>
+<div class="mobile-bar">
+  <div class="glyph">kimi · <b>code</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">kimi · <b>code</b></div>
+      <div class="sub">源码观测台 · field guide</div>
     </div>
-  </div>
-</nav>
-
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#kc"><span class="dot"></span><span>Agent&nbsp;Infrastructure&nbsp;Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="active" data-tab="kc"><span class="dot"></span>Kimi Code <span class="pill">模型层</span></button>
+    <span class="nav-ver">TS Monorepo</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#model"><span class="idx">01</span>心智模型</a></li>
+        <li><a href="#layers"><span class="idx">02</span>架构分层</a></li>
+        <li><a href="#events"><span class="idx">03</span>Turn Loop</a></li>
+        <li><a href="#tools"><span class="idx">04</span>工具调度</a></li>
+        <li><a href="#subagent"><span class="idx">05</span>多 Agent</a></li>
+        <li><a href="#kosong"><span class="idx">06</span>Kosong</a></li>
+        <li><a href="#hooks"><span class="idx">07</span>Hooks</a></li>
+        <li><a href="#wire"><span class="idx">08</span>Wire 与压缩</a></li>
+        <li><a href="#observability"><span class="idx">09</span>可观测性</a></li>
+        <li><a href="#quickstart"><span class="idx">10</span>快速开始</a></li>
+        <li><a href="#cheatsheet"><span class="idx">11</span>速查表</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      MoonshotAI/kimi-code<br/>
+      TypeScript Monorepo · MIT<br/>
+      <a href="https://github.com/MoonshotAI/kimi-code" target="_blank" rel="noopener">github.com/MoonshotAI/kimi-code ↗</a>
     </div>
-  </div>
-</header>
+  </aside>
 
-<main>
-<div class="tab-panel active" data-tab="kc">
+  <main class="main">
 
-<!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
-<nav class="nav-toc" aria-label="页面目录">
-  <h3>目录</h3>
-  <ul>
-    <li><a href="#pipeline">分层流水线架构</a></li>
-    <li><a href="#core-modules">核心模块解析</a></li>
-    <li><a href="#source-teardown">源码级深度拆解</a></li>
-    <li class="toc-sub"><a href="#multi-agent-session">① 多 Agent Session</a></li>
-    <li class="toc-sub"><a href="#turn-loop">② Turn Loop</a></li>
-    <li class="toc-sub"><a href="#kosong">③ Kosong 抽象层</a></li>
-    <li class="toc-sub"><a href="#wire-records">④ Wire Records</a></li>
-    <li class="toc-sub"><a href="#mcp-oauth">⑤ MCP + OAuth</a></li>
-    <li class="toc-sub"><a href="#compaction">⑥ Context Compaction</a></li>
-    <li class="toc-sub"><a href="#lifecycle-hooks">⑦ Lifecycle Hooks</a></li>
-    <li class="toc-sub"><a href="#kaos">⑧ Kaos 执行环境</a></li>
-    <li class="toc-sub"><a href="#comparison">⑨ 横向对比</a></li>
-    <li><a href="#innovations">关键创新</a></li>
-    <li><a href="#highlights">技术亮点</a></li>
-    <li><a href="#ecosystem">生态意义</a></li>
-  </ul>
-</nav>
-
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>MoonshotAI/kimi-code · TypeScript Monorepo · MIT</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">Kimi Code</span> · 多 Agent 引擎与商业模型集成</h1>
-    <p class="lead reveal" style="margin-bottom:0">Moonshot AI 出品的<strong>TypeScript Monorepo 编程 Agent</strong>——多 Agent Session、Wire Records 重放、MCP 一等公民、统一 LLM 抽象层。</p>
-    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0"><div class="cell"><div class="n">836</div><div class="l">Stars</div></div><div class="cell"><div class="n">7</div><div class="l">Packages</div></div><div class="cell"><div class="n">3</div><div class="l">Apps</div></div><div class="cell"><div class="n">5+</div><div class="l">LLM Providers</div></div></div>
-  </div>
-</section>
-
-  <section id="kc" class="project kc">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">KC</div>
-      <div class="proj-title">
-        <h2>Kimi Code</h2>
-        <a class="repo" href="https://github.com/MoonshotAI/kimi-code" target="_blank" rel="noopener">MoonshotAI/kimi-code · TypeScript Monorepo · MIT</a>
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>多 Agent 编程引擎</span>
+        <span class="pill">TypeScript <b>Monorepo</b> · MIT</span>
       </div>
-    </div>
-    <div class="narrow">
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">可重放的</span>
+            <span class="l2"><em>多 agent</em> <span class="core">内核</span></span>
+          </h1>
+          <p class="hero-sub">Kimi Code 是 Moonshot AI 开源的 <b>TypeScript Monorepo 编程 agent</b>：一个 Session 持多个隔离 Agent、每个动作写成可重放的 Wire Record、MCP 一等公民、Kosong 把 6 类 LLM 协议压平成一个接口。</p>
+          <p class="hero-pkg"># <b>curl -fsSL https://kimi.moonshot.cn/install.sh | bash</b> · Node ≥ 24</p>
+          <div class="hero-cta">
+            <a href="#events" class="btn primary">▸ 播放 Turn Loop</a>
+            <a href="#model" class="btn ghost">从 wire-first 说起</a>
+          </div>
+        </div>
 
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">836</div><div class="l">Stars</div></div>
-        <div class="chip"><div class="n">7</div><div class="l">Packages</div></div>
-        <div class="chip"><div class="n">5+</div><div class="l">LLM Providers</div></div>
-        <div class="chip"><div class="n">Node ≥24</div><div class="l">Runtime</div></div>
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#f2b14a" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#f2b14a" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#f2b14a" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#f2b14a" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#4fd8d0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fe6a6" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#4fd8d0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#f2b14a" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="30" fill="rgba(242,177,74,0.08)" stroke="rgba(242,177,74,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#f2b14a" font-size="14">Session</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">N agents</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">agent-core</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">kosong</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">kaos</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">mcp</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">wire</text>
+          </svg>
+        </div>
       </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
 
-      <div class="prose">
-        <p class="reveal"><strong>一句话定位：</strong>Moonshot AI 推出的企业级编程 Agent，核心是一个<strong>TypeScript Monorepo</strong>，把 CLI/TUI、Agent 引擎、LLM 抽象、执行环境分成了 7 个包。它的设计哲学强调<em>多 Agent Session、MCP 一等公民、Wire Records 可重放</em>，以及商业模型（Kimi、Claude、OpenAI、 Gemini）的统一接入。</p>
-
-        <h4 class="reveal" id="pipeline">分层流水线架构</h4>
-        <p class="reveal">kimi-code 的架构是一条清晰的单向依赖链，从 CLI 应用到底层执行环境，每一层都只依赖它下面的那一层：</p>
-      </div>
-
-      <div class="pipe reveal">
-        <div class="stage"><span class="sn">01</span><div class="st"><b>apps/kimi-code CLI</b><small>TUI + Commander.js 命令入口，单 Binary 发布</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">02</span><div class="st"><b>node-sdk (@moonshot-ai/kimi-code-sdk)</b><small>KimiHarness 工厂 → Session 封装 → RPC 双向通道</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">03</span><div class="st"><b>agent-core (@moonshot-ai/agent-core)</b><small>Agent turn loop · Session 生命周期 · ToolManager · MCP</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">04</span><div class="st"><b>kosong (@moonshot-ai/kosong)</b><small>ChatProvider 接口 → 5+ LLM 适配器（Kimi/Anthropic/OpenAI/Gemini…）</small></div></div>
-        <div class="arrow">↓</div>
-        <div class="stage"><span class="sn">05</span><div class="st"><b>kaos (@moonshot-ai/kaos)</b><small>Kaos 抽象 → LocalKaos（本地）/ SSH 远程执行</small></div></div>
+    <!-- ---------- 01 心智模型 ---------- -->
+    <section id="model">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">心智模型 · the mental model</div>
+        <h2>事实是<em>日志</em>，状态是重演</h2>
+        <p class="lead">理解 kimi-code 的支点：系统里<strong>没有一个可变的「会话状态对象」被直接持久化</strong>。每个状态变化都先写成一行结构化 JSONL，内存状态是把日志重演出来的结果。</p>
       </div>
 
-      <div class="prose">
-        <h4 class="reveal" id="core-modules">核心模块解析</h4>
-
-        <h5 class="reveal">Agent / TurnFlow —— Agent 的心跳</h5>
-        <p class="reveal"><code>packages/agent-core/src/agent/</code> 里的 <code>Agent</code> 类是 turn loop 的核心。每次 LLM 响应被切分成 text / tool_call / tool_result / steering 事件，<code>TurnFlow</code> 负责把它们路由到正确的 handler。<code>KosongLLM</code> 封装了底层 provider 的流式调用，加上 system prompt 和 capability-aware 的 completion budget。</p>
-
-        <h5 class="reveal">Session —— 多 Agent 的容器</h5>
-        <p class="reveal"><code>Session</code> 类是整个系统的"会话大脑"。它拥有多个 <code>Agent</code> 实例（main + subagents），负责创建 / 恢复 / fork / 关闭会话生命周期。子 agent（coder / explore / plan）通过 <code>SessionSubagentHost</code> 在隔离上下文里 spawn，各有各的 Kaos 实例、Skill 注册表、Permission 链和 Wire Records。</p>
-
-        <h5 class="reveal">Wire Records —— 完整的会话重放</h5>
-        <p class="reveal">这是 kimi-code 最独特的能力之一。每个 agent 操作都写成结构化的 JSONL（<code>wire.jsonl</code>），包含：config updates、tool calls/results、user input、steering、compaction events。重启时 <code>ReplayBuilder</code> 从 wire 恢复完整状态包括 pending turns。<code>apps/vis</code> 就是用这个格式做可视化调试器的。</p>
-
-        <h5 class="reveal">MCP 一等公民</h5>
-        <p class="reveal">MCP 在 kimi-code 里不是插件，而是核心能力。<code>McpConnectionManager</code> 通过 stdio 或 HTTP 连接 MCP 服务器，处理 OAuth 流程。<code>/mcp-config</code> 是用户友好的斜杠命令——用户可以直接在对话里添加 / 编辑 / 删除 MCP 服务器，不需要改 JSON 文件。</p>
-
-        <h5 class="reveal">Kosong —— 统一 LLM 抽象</h5>
-        <p class="reveal"><code>ChatProvider</code> 接口统一了流式、工具调用、视频上传、thinking effort、context 大小、capability matrix。适配器包括：<code>kimi.ts</code>（Moonshot AI）、<code>anthropic.ts</code>（Claude）、<code>openai-common.ts</code>（Azure 等）、<code>openai-responses.ts</code>（OpenAI Responses）、<code>google-genai.ts</code>（Gemini）。Model catalog 支持运行时 provider/model 别名解析。</p>
-
-        <h5 class="reveal">Kaos —— 执行环境抽象</h5>
-        <p class="reveal"><code>Kaos</code> 把文件系统 / 进程 / 路径抽象成一个统一接口。<code>LocalKaos</code> 用 Node.js <code>fs</code>/<code>child_process</code> 实现；<code>ssh.ts</code> 提供远程执行——同一套 API surface 既能跑本地也能跑远程。</p>
-      </div>
-
-      <!-- ======================= 深度源码拆解 ======================= -->
-      <h4 class="reveal" id="source-teardown" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
-      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>packages/agent-core</code>、<code>packages/kosong</code>、<code>packages/kaos</code> 的逐文件阅读，把上面六个模块展开到「关键代码段 + 算法 + 失败模式」的粒度。</p>
-
-      <!-- ====== 1. 多 Agent Session 与 Subagent 隔离 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="multi-agent-session">① 多 Agent Session 架构：一个 Session，N 个隔离 Agent</h4>
-        <p class="reveal">kimi-code 的「多 Agent」不是把一个大上下文切片，而是<strong>真正实例化多个独立 <code>Agent</code> 对象</strong>。<code>Session</code> 是容器，持有一张 <code>agents: Map&lt;string, Agent&gt;</code>；主 agent（<code>type:'main'</code>）启动时创建，subagent（<code>type:'sub'</code>）则在运行期由 <code>SessionSubagentHost</code> 按需 spawn。每个 Agent 都自带<strong>独立的</strong> <code>Kaos</code> 执行环境、<code>ToolManager</code>、<code>PermissionManager</code>、<code>AgentRecords</code>（独立 wire.jsonl）、以及独立的 <code>context.history</code>——所以子 agent 探索时塞满的上下文，<em>不会污染</em>主 agent 的窗口。这正是「explore 子代理读 50 个文件，主 agent 只收到一段 200 字摘要」的实现基础。</p>
-        <p class="reveal">关键在于<strong>父子之间只通过「一次 prompt 进、一段 summary 出」通信</strong>。<code>spawn()</code> 先解析 profile（coder / explore / plan），用父 agent 的 <code>rawGenerate</code> 创建子 agent，再用 <code>linkAbortSignal</code> 把父信号挂到子 <code>AbortController</code>——父一旦中断，子立即级联 abort。子 agent 跑完后只回传 <code>lastAssistantText</code>，且有一条<strong>「摘要太短就重跑」</strong>的兜底：少于 200 字符触发一次 <code>SUMMARY_CONTINUATION_PROMPT</code> 续写。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">session/subagent-host.ts — spawn() 隔离创建</span></div>
-        <pre><code><span class="tok-k">async</span> <span class="tok-f">spawn</span>(profileName<span class="tok-p">,</span> options)<span class="tok-p">:</span> <span class="tok-t">Promise</span>&lt;<span class="tok-t">SubagentHandle</span>&gt; <span class="tok-p">{</span>
-  options.signal.<span class="tok-f">throwIfAborted</span>()<span class="tok-p">;</span>
-  <span class="tok-k">const</span> parent <span class="tok-p">=</span> <span class="tok-k">this</span>.session.agents.<span class="tok-f">get</span>(<span class="tok-k">this</span>.ownerAgentId)<span class="tok-p">;</span>
-  <span class="tok-k">const</span> profile <span class="tok-p">=</span> <span class="tok-k">this</span>.<span class="tok-f">resolveProfile</span>(parent<span class="tok-p">,</span> profileName)<span class="tok-c">;  // coder|explore|plan</span>
-
-  <span class="tok-c">// ① 创建一个全新的 Agent 实例（独立 Kaos / Tools / Records / context）</span>
-  <span class="tok-k">const</span> <span class="tok-p">{</span> id<span class="tok-p">,</span> agent <span class="tok-p">}</span> <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">this</span>.session.<span class="tok-f">createAgent</span>(
-    <span class="tok-p">{</span> type<span class="tok-p">:</span> <span class="tok-s">'sub'</span><span class="tok-p">,</span> generate<span class="tok-p">:</span> parent.rawGenerate <span class="tok-p">}</span><span class="tok-p">,</span> <span class="tok-k">undefined</span><span class="tok-p">,</span> <span class="tok-k">this</span>.ownerAgentId<span class="tok-p">,</span>
-  )<span class="tok-p">;</span>
-
-  <span class="tok-c">// ② 父信号 → 子 controller，父 abort 时子级联 abort</span>
-  <span class="tok-k">const</span> controller <span class="tok-p">=</span> <span class="tok-k">new</span> <span class="tok-t">AbortController</span>()<span class="tok-p">;</span>
-  <span class="tok-k">const</span> unlink <span class="tok-p">=</span> <span class="tok-f">linkAbortSignal</span>(options.signal<span class="tok-p">,</span> controller)<span class="tok-p">;</span>
-
-  <span class="tok-k">const</span> completion <span class="tok-p">=</span> <span class="tok-k">this</span>.<span class="tok-f">runChild</span>(parent<span class="tok-p">,</span> id<span class="tok-p">,</span> agent<span class="tok-p">,</span> profile.name<span class="tok-p">,</span>
-    <span class="tok-p">{</span> ...options<span class="tok-p">,</span> signal<span class="tok-p">:</span> controller.signal <span class="tok-p">}</span><span class="tok-p">,</span>
-    () <span class="tok-p">=&gt;</span> <span class="tok-k">this</span>.<span class="tok-f">configureChild</span>(parent<span class="tok-p">,</span> agent<span class="tok-p">,</span> profile)<span class="tok-p">,</span> <span class="tok-c">// 继承 cwd/model/thinking</span>
-  ).<span class="tok-f">finally</span>(() <span class="tok-p">=&gt;</span> <span class="tok-p">{</span> <span class="tok-f">unlink</span>()<span class="tok-p">;</span> <span class="tok-k">this</span>.activeChildren.<span class="tok-f">delete</span>(id)<span class="tok-p">;</span> <span class="tok-p">}</span>)<span class="tok-p">;</span>
-  <span class="tok-k">return</span> <span class="tok-p">{</span> agentId<span class="tok-p">:</span> id<span class="tok-p">,</span> profileName<span class="tok-p">:</span> profile.name<span class="tok-p">,</span> resumed<span class="tok-p">:</span> <span class="tok-k">false</span><span class="tok-p">,</span> completion <span class="tok-p">}</span><span class="tok-p">;</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>explore 子代理的冷启动优化：</strong>因为 explore agent 从空上下文出发，<code>runChild</code> 会在 prompt 前注入一段 <code>collectGitContext()</code> 的仓库快照（当前分支、最近 commit、改动文件），让它「落地即知身在何处」。这是个很小但很关键的细节——别的 subagent 没有这个待遇。</p>
-      </div>
-
-      <div class="tree reveal">  <span class="h">Session</span> (一个会话大脑)
-  │  agents: Map&lt;id, Agent&gt;          metadata.agents[id] = {type, parentAgentId}
-  │
-  ├── <span class="d">Agent#main</span>  ── Kaos · Tools · Permission · Records(wire.jsonl) · context.history
-  │      │  turn.prompt("重构鉴权模块")
-  │      │
-  │      ├─▶ <span class="d">Agent#sub-1 (explore)</span>  ← 注入 gitContext，读 40 个文件
-  │      │      └─ 独立 context（40 文件不回传父）→ 只回 200+ 字摘要 ───┐
-  │      │                                                              │
-  │      ├─▶ <span class="d">Agent#sub-2 (coder)</span>   ← 独立 Permission 链，写文件      │
-  │      │      └─ 返回 diff 摘要 ──────────────────────────────────┐ │
-  │      │                                                          ▼ ▼
-  │      └─◀ 父 agent 的 context 只追加两段 summary（窗口零污染）  &lt;tool_result&gt;</div>
-
-      <div class="prose">
-        <h5 class="reveal">失败模式</h5>
-        <ul class="reveal">
-          <li><strong>子在 max_tokens 处停：</strong><code>throwIfSubagentStoppedAtMaxTokens</code> 直接抛 <code>Subagent turn failed before completing its final summary: reason=max_tokens</code>——拒绝把半截结果当成功交回。</li>
-          <li><strong>并发 resume 同一子：</strong><code>activeChildren.has(id) || child.turn.hasActiveTurn</code> 命中即抛 <code>already running ... cannot be resumed concurrently</code>。</li>
-          <li><strong>归属校验：</strong>resume 时 <code>metadata.parentAgentId !== ownerAgentId</code> 抛 <code>does not belong to this parent</code>——子 agent 不能被别的父「认领」。</li>
-          <li><strong>resume 模型对齐：</strong>子永远跟随父<em>当前</em>模型——resume 时强制 <code>child.config.update({ modelAlias: parent.config.modelAlias })</code>，即使 spawn 后父换了模型。</li>
-        </ul>
-      </div>
-
-      <!-- ====== 2. Turn Loop 双层设计 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="turn-loop">② Agent Turn Loop：runTurn / executeLoopStep 双层收敛</h4>
-        <p class="reveal">turn loop 被刻意拆成<strong>两层无状态函数</strong>，状态全部外置到 Agent，所以 loop 本身可独立单测。外层 <code>runTurn()</code> 管「turn 级收敛」：循环边界 abort、max-step 保护、usage 聚合，以及一个微妙的「非工具停止后是否继续」决策；内层 <code>executeLoopStep()</code> 管「单 step 原子操作」：pre/post hook、构建消息、原子 step envelope、LLM 调用 + retry、工具批处理。两者的分界点是 <code>stopReason === 'tool_use'</code>——它不是终止信号，而是<strong>循环控制信号</strong>：有工具调用就 <code>continue</code> 进下一 step，没有才进入「要不要收尾」判断。</p>
-        <p class="reveal">一个容易被忽略但很重要的设计：<strong>usage 在 LLM 返回后<em>立即</em>记账</strong>，而不是等工具执行完。这样即使工具执行期间用户 abort，已经消费的 token 也不会丢——计费/预算永远准确。<code>TurnFlow</code> 是对外的发射器，持有 <code>activeTurn</code> 状态和一个 <code>steerBuffer</code>：当一个 turn 正在跑时，新输入走 <code>steer()</code> 被 buffer 起来（而非并发启动），turn 间隙再注入；如果没有活跃 turn，<code>steer</code> 等价于 <code>prompt</code> 直接 launch。<code>launch</code> 里那句 <code>turn.agent_busy</code> 错误就是并发 turn 的硬防线。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">loop/run-turn.ts — 外层 turn 收敛（精简）</span></div>
-        <pre><code><span class="tok-k">while</span> (<span class="tok-k">true</span>) <span class="tok-p">{</span>
-  signal.<span class="tok-f">throwIfAborted</span>()<span class="tok-p">;</span>                 <span class="tok-c">// 循环边界 abort 检查</span>
-  <span class="tok-k">if</span> (steps &gt;= maxSteps) <span class="tok-k">throw</span> <span class="tok-f">createMaxStepsExceededError</span>(maxSteps)<span class="tok-p">;</span>
-  steps<span class="tok-p">++;</span>
-
-  <span class="tok-k">const</span> stepResult <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-f">executeLoopStep</span>(<span class="tok-p">{</span>
-    turnId<span class="tok-p">,</span> signal<span class="tok-p">,</span> buildMessages<span class="tok-p">,</span> dispatchEvent<span class="tok-p">,</span> llm<span class="tok-p">,</span> tools<span class="tok-p">,</span> hooks<span class="tok-p">,</span>
-    <span class="tok-f">recordUsage</span><span class="tok-p">:</span> (u) <span class="tok-p">=&gt;</span> <span class="tok-p">{</span> usage <span class="tok-p">=</span> <span class="tok-f">addUsage</span>(usage<span class="tok-p">,</span> u)<span class="tok-p">;</span> <span class="tok-p">}</span><span class="tok-p">,</span> <span class="tok-c">// 立即记账</span>
-  <span class="tok-p">}</span>)<span class="tok-p">;</span>
-
-  <span class="tok-k">if</span> (stepResult.stopReason <span class="tok-p">===</span> <span class="tok-s">'tool_use'</span>) <span class="tok-k">continue</span><span class="tok-p">;</span>  <span class="tok-c">// ← 控制信号，非终止</span>
-  stopReason <span class="tok-p">=</span> stepResult.stopReason<span class="tok-p">;</span>
-
-  <span class="tok-c">// 非工具停止：问 host hook「要不要再说一轮」</span>
-  <span class="tok-k">if</span> (!(<span class="tok-k">await</span> hooks?.<span class="tok-f">shouldContinueAfterStop</span>?.(<span class="tok-p">{</span> turnId<span class="tok-p">,</span> stopReason<span class="tok-p">,</span> ... <span class="tok-p">}</span>))?.continue) <span class="tok-k">break</span><span class="tok-p">;</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="tree reveal">  用户输入 ─▶ TurnFlow.prompt() ──▶ runTurn()
-                                       │
-              ┌────────────────────────┴───────────────────────────┐
-              ▼                                                     │
-        executeLoopStep()   beforeStep hook → buildMessages →       │
-          step.begin ─▶ LLM(chatWithRetry) ─▶ recordUsage(立即) ─▶  │
-          deriveStopReason                                          │
-              │                                                     │
-       tool_use? ──yes──▶ runToolCallBatch(并行/冲突调度) ──────────┘ (continue)
-              │
-              no ──▶ shouldContinueAfterStop? ──yes──▶ 再循环
-                                              └─no──▶ TurnResult{stopReason,steps,usage}</div>
-
-      <div class="prose">
-        <p class="reveal"><strong>并行工具调度（<code>ToolScheduler</code>）：</strong>同一 step 里 LLM 可能一次发多个 tool_call。调度器不是无脑全并行，而是基于 <code>ToolAccesses.conflict()</code> 做<strong>资源冲突检测</strong>——读同一文件可并行，写同一文件则排队（<code>queuedTasks</code>），任务完成后 <code>startQueuedTasks()</code> 重新唤醒被挡住的任务。这避免了两个工具同时写一个文件的竞态。</p>
-        <div class="tablewrap reveal">
-          <table class="cmp">
-            <thead><tr><th>失败场景</th><th>表现 / 归一</th><th>处理</th></tr></thead>
-            <tbody>
-              <tr><td>LLM 网络抖动</td><td><code>isRetryableGenerateError</code></td><td><code>chatWithRetry</code> 指数退避（300ms→5s，×2，≤3 次）</td></tr>
-              <tr><td>turn 中途 abort</td><td><code>signal.aborted</code></td><td>返回 <code>{stopReason:'aborted'}</code>，usage 已记不丢</td></tr>
-              <tr><td>步数超限</td><td><code>max_steps</code></td><td><code>createMaxStepsExceededError</code> → <code>turn.interrupted</code></td></tr>
-              <tr><td>安全过滤</td><td><code>filtered</code></td><td>非工具停止，不继续循环</td></tr>
-              <tr><td>截断</td><td><code>max_tokens</code></td><td>同上，提前收尾</td></tr>
-              <tr><td>step.end 前 abort</td><td>envelope 不完整</td><td><code>runTurn</code> 捕获 → 发 <code>turn.interrupted</code></td></tr>
-            </tbody>
-          </table>
+      <div class="grid g2 reveal">
+        <div class="card cy">
+          <div class="ic">// 唯一事实源</div>
+          <h3>AgentRecord（wire.jsonl）</h3>
+          <p>每个动作 append 一条记录：<code class="k">turn.prompt</code> / <code class="k">config.update</code> / <code class="k">usage.record</code> / <code class="k">context.append_message</code> / <code class="k">full_compaction.complete</code> … 20+ 种类型，每行一个 JSON。这是真正落盘的东西。</p>
+        </div>
+        <div class="card">
+          <div class="ic">// 重演产物</div>
+          <h3>内存状态</h3>
+          <p>重启时 <code class="kc">AgentRecords.restore()</code> 把 <code class="k">_restoring</code> 置 true，逐行回放 <code class="kc">restoreAgentRecord</code>。<strong>恢复期硬契约：不得有任何副作用</strong>——不调 LLM、不跑工具、不碰文件，纯粹把日志重演成内存状态。</p>
         </div>
       </div>
 
-      <!-- ====== 3. Kosong 多 Provider ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="kosong">③ Kosong：把 5 类 LLM 协议压平成一个 ChatProvider</h4>
-        <p class="reveal"><code>kosong</code> 是纯粹的<strong>数据转换层</strong>，不含任何业务逻辑——这是它能被独立发布、独立测试的原因。<code>createProvider(config)</code> 是工厂，按 <code>config.type</code> 分发到六种实现，注意 <code>vertexai</code> 复用了 <code>GoogleGenAIChatProvider</code>，所以代码里其实是 5 个 adapter 服务 6 种 provider type。每个 adapter 干的是同一件事：把自家 SDK 的流式事件，翻译成 kosong 统一的 <code>StreamedMessagePart</code> 序列，并把自家的 <code>finish_reason</code> 归一到 6 值枚举。</p>
-        <p class="reveal"><code>generate()</code> 的核心难点是<strong>并行工具调用的参数 delta 会交错</strong>：provider 流里 tool-call A 的参数片段和 tool-call B 的可能交替到达，所以维护了一张 <code>toolCallIndexMap: Map&lt;index, arrayIdx&gt;</code> 把碎片路由回正确的 toolCall。也因此，<code>onToolCall</code> 回调只在<strong>流完全结束、参数合并完成后</strong>才触发——delta 期间只更新 UI，不当真。最后一道闸是 <code>isEmptyMessage</code>：既无 text 又无 tool_calls 就抛 <code>APIEmptyResponseError</code>（reasoning 模型把预算全耗在 <code>reasoning_content</code> 上、content 为空，正是这个坑）。</p>
+      <div class="panel pad tick reveal" style="margin-top:24px">
+        <div class="kicker" style="margin-bottom:30px">图 01 · 一个动作如何成为可重放的事实</div>
+        <div class="flow">
+          <div class="flow-node"><div class="ttl">agent 动作</div><div class="meta">prompt / tool / usage</div></div>
+          <div class="flow-arr"><span class="flow-stage req">append</span>
+            <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+          <div class="flow-node"><div class="ttl am">AgentRecord</div><div class="meta">结构化一行</div></div>
+          <div class="flow-arr"><span class="flow-stage">wire.jsonl</span>
+            <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.6s"/></svg></div>
+          <div class="flow-node"><div class="ttl cy">restore()</div><div class="meta">逐行回放</div></div>
+          <div class="flow-arr cy"><svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:1.1s"/></svg></div>
+          <div class="flow-node"><div class="ttl cy">内存状态</div><div class="meta">可恢复 pending turn</div></div>
+        </div>
+        <div class="note cy" style="margin-top:30px"><b>三个直接好处：</b>① 崩溃后能精确恢复到包括 pending turn 的状态；② 跨客户端重放同一会话；③ 协议升级用 <code class="kc">migrateWireRecord</code> 逐条迁移（<code class="k">v1.1</code> / <code class="k">v1.2</code> 迁移器在 <code class="k">records/migration/</code>）。<code class="kc">apps/vis</code> 调试器就吃这个格式。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 02 架构分层 ---------- -->
+    <section id="layers">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">架构分层 · the stack</div>
+        <h2>一条单向<em>依赖链</em></h2>
+        <p class="lead">kimi-code 是清晰的单向依赖：从 CLI 到执行环境，每层只依赖它下面那层。<strong>点击任意一层</strong>看它的职责与边界。</p>
+      </div>
+
+      <div class="layers reveal">
+        <div class="layer" data-l="0">
+          <span class="lv">L0</span>
+          <span class="nm">@moonshot-ai/kaos <span>· 执行环境</span></span>
+          <span class="tag">FS / 进程 / 路径 · Local / SSH</span>
+        </div>
+        <div class="layer" data-l="1">
+          <span class="lv">L1</span>
+          <span class="nm">@moonshot-ai/kosong <span>· LLM 抽象</span></span>
+          <span class="tag">ChatProvider · 5 adapter / 6 type</span>
+        </div>
+        <div class="layer active" data-l="2">
+          <span class="lv">L2</span>
+          <span class="nm">@moonshot-ai/agent-core <span>· agent 引擎</span></span>
+          <span class="tag">Session · turn loop · MCP · wire · hooks</span>
+        </div>
+        <div class="layer" data-l="3">
+          <span class="lv">L3</span>
+          <span class="nm">node-sdk + apps <span>· SDK / CLI</span></span>
+          <span class="tag">KimiHarness · TUI · apps/vis</span>
+        </div>
+      </div>
+      <div class="layer-detail" id="ldetail"></div>
+    </section>
+
+    <!-- ---------- 03 Turn Loop ---------- -->
+    <section id="events">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">回合循环 · the turn loop</div>
+        <h2>把一次 <em>turn</em> 拆给你看</h2>
+        <p class="lead">turn loop 被刻意拆成<strong>两层无状态函数</strong>，状态全部外置到 Agent，所以 loop 本身可独立单测。按下播放，看 <code class="kc">runTurn</code> / <code class="kc">executeLoopStep</code> 逐帧收敛。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="player-controls">
+          <div class="seg" id="scenario">
+            <button data-s="simple" class="on">单 agent</button>
+            <button data-s="tools">工具 + subagent</button>
+          </div>
+          <button class="pbtn" id="play">▸ 播放</button>
+          <button class="pbtn sec" id="step">⊳ 单步</button>
+          <button class="pbtn sec" id="reset">↺ 重置</button>
+        </div>
+
+        <div class="player">
+          <div class="timeline" id="timeline"></div>
+          <div class="readout">
+            <div class="scr"><span>READOUT</span><span><b id="evcount">0</b> / <span id="evtotal">0</span></span></div>
+            <div class="rd-card">
+              <div class="ev-type" id="rdType">待机</div>
+              <div class="ev-lane" id="rdLane">按「播放」开始</div>
+              <div class="ev-desc" id="rdDesc">事件会逐条点亮。左侧时间线展示完整序列，右侧解读当前正在发生的事件。</div>
+              <div class="rd-progress"><i id="rdBar"></i></div>
+            </div>
+            <div class="legend">
+              <span><i style="background:var(--star)"></i>Session / Turn 生命周期</span>
+              <span><i style="background:var(--signal)"></i>Turn Loop</span>
+              <span><i style="background:var(--text-2)"></i>消息 / 流式</span>
+              <span><i style="background:var(--phosphor)"></i>工具 / subagent / wire</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g3 reveal" style="margin-top:26px">
+        <div class="card"><div class="ic">tool_use = 控制信号</div><h3>不是终止</h3><p><code class="kc">stopReason==='tool_use'</code> 时 <code class="k">continue</code> 进下一 step；只有非工具停止才进入「要不要收尾」判断。这是两层 loop 的分界点。</p></div>
+        <div class="card cy"><div class="ic">recordUsage</div><h3>立即记账</h3><p>usage 在 LLM 返回后<strong>立即</strong>记账，而不是等工具跑完——即使工具执行期间 abort，已消费 token 也不丢，计费/预算永远准确。</p></div>
+        <div class="card"><div class="ic">steerBuffer</div><h3>turn 进行中插话</h3><p>turn 正在跑时新输入走 <code class="kc">steer()</code> 被 buffer，turn 间隙注入；无活跃 turn 时 <code class="kc">steer</code> 等价 <code class="kc">prompt</code> 直接 launch。</p></div>
+      </div>
+    </section>
+
+    <!-- ---------- 04 工具调度 ---------- -->
+    <section id="tools">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">工具 · tools & scheduler</div>
+        <h2>并行，但不<em>无脑</em>并行</h2>
+        <p class="lead">同一 step 里 LLM 可能一次发多个 tool_call。<code class="kc">ToolScheduler</code> 不是全并行，而是基于 <strong>资源冲突检测</strong>——读同一文件可并行，写同一文件排队。</p>
+      </div>
+
+      <div class="grid g2 reveal" style="align-items:start">
+        <div>
+          <div class="code">
+            <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">tools/scheduler.ts — 冲突感知调度</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// 同 step 多个 tool_call：按资源冲突决定并行 / 排队</span>
+<span class="t-key">for</span> (<span class="t-key">const</span> call <span class="t-key">of</span> batch) {
+  <span class="t-key">const</span> conflict = <span class="t-typ">ToolAccesses</span>.<span class="t-fn">conflict</span>(call.access, running);
+  <span class="t-key">if</span> (conflict) {
+    queuedTasks.<span class="t-fn">push</span>(call);        <span class="t-com">// 写同一文件 → 排队</span>
+  } <span class="t-key">else</span> {
+    running.<span class="t-fn">add</span>(call.access);
+    <span class="t-fn">runToolCall</span>(call).<span class="t-fn">finally</span>(() => {
+      running.<span class="t-fn">delete</span>(call.access);
+      <span class="t-fn">startQueuedTasks</span>();         <span class="t-com">// 唤醒被挡住的任务</span>
+    });
+  }
+}</code></pre>
+          </div>
+          <div class="note"><b>错误处理：</b>工具失败要 <b>throw</b>，被捕获后作为 <code class="k">isError: true</code> 的 tool result 回给 LLM——而不是把错误塞进正常 content。</div>
+        </div>
+        <div>
+          <h3 style="margin-bottom:14px">ToolManager 关注点</h3>
+          <table class="tbl">
+            <tr><th>字段 / 能力</th><th>作用</th></tr>
+            <tr><td><code>name</code></td><td>模型可见的工具名（唯一）</td></tr>
+            <tr><td><code>parameters</code></td><td>schema 自动校验入参</td></tr>
+            <tr><td><code>execute</code></td><td>干活；带 <span class="mono">signal</span> 与流式 <span class="mono">onUpdate</span></td></tr>
+            <tr><td><code class="cy">access</code></td><td>声明读/写资源，供冲突检测</td></tr>
+            <tr><td><code class="cy">ToolScheduler</code></td><td>无冲突并行、有冲突排队唤醒</td></tr>
+          </table>
+          <div class="note cy"><b>顺序保证：</b><code>tool_execution_end</code> 按完成顺序发出，但持久化的 toolResult 消息仍按 assistant 源顺序——UI 看到的进度与落盘的事实分离。</div>
+        </div>
+      </div>
+
+      <div class="panel pad tick reveal" style="margin-top:24px">
+        <div class="kicker">表 01 · turn 的失败场景与归一</div>
+        <table class="tbl">
+          <tr><th>失败场景</th><th>表现 / 归一</th><th>处理</th></tr>
+          <tr><td>LLM 网络抖动</td><td><code class="cy">isRetryableGenerateError</code></td><td><code>chatWithRetry</code> 指数退避（300ms→5s，×2，≤3 次）</td></tr>
+          <tr><td>turn 中途 abort</td><td><code>signal.aborted</code></td><td>返回 <code class="ro">{stopReason:'aborted'}</code>，usage 已记不丢</td></tr>
+          <tr><td>步数超限</td><td><code>max_steps</code></td><td><code>createMaxStepsExceededError</code> → <code>turn.interrupted</code></td></tr>
+          <tr><td>安全过滤 / 截断</td><td><code>filtered</code> / <code>max_tokens</code></td><td>非工具停止，不继续循环，提前收尾</td></tr>
+          <tr><td>step.end 前 abort</td><td>envelope 不完整</td><td><code>runTurn</code> 捕获 → 发 <code>turn.interrupted</code></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- 05 多 Agent ---------- -->
+    <section id="subagent">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">多 Agent · session & subagent</div>
+        <h2>一个 Session，N 个<em>隔离</em> Agent</h2>
+        <p class="lead">kimi-code 的「多 agent」不是切一个大上下文，而是<strong>真正实例化多个独立 <code class="k">Agent</code> 对象</strong>。Session 是容器，持有一张 <code class="k">agents: Map&lt;id, Agent&gt;</code>。</p>
+      </div>
+
+      <div class="steer-track reveal">
+        <div class="kicker" style="margin-bottom:0">一次 spawn 的时间线 →</div>
+        <div class="steer-line">
+          <span class="tick" style="left:24%"></span>
+          <span class="tick" style="left:58%"></span>
+          <span class="tick" style="left:88%"></span>
+          <div class="steer-pt up s1"><div class="arr" style="color:var(--rose)">↓</div><div class="nm">spawn()</div><div class="ds">解析 profile（coder / explore / plan），创建全新 Agent 实例</div></div>
+          <div class="steer-pt dn s2"><div class="arr" style="color:var(--star)">↑</div><div class="nm">linkAbortSignal</div><div class="ds">父信号挂到子 controller，父 abort 时子级联 abort</div></div>
+          <div class="steer-pt up s3"><div class="arr" style="color:var(--signal-soft)">↓</div><div class="nm">summary 回传</div><div class="ds">子只回 lastAssistantText；不足 200 字触发续写</div></div>
+        </div>
+      </div>
+
+      <div class="grid g2 reveal" style="margin-top:24px">
+        <div class="card"><div class="ic">独立上下文</div><h3>窗口零污染</h3><p>每个 Agent 自带独立 <code class="k">Kaos</code> / <code class="k">ToolManager</code> / <code class="k">PermissionManager</code> / <code class="k">AgentRecords</code>（独立 wire.jsonl）/ <code class="k">context.history</code>。子 agent 读 50 个文件，<strong>不污染</strong>主 agent 窗口——主只收一段摘要。</p></div>
+        <div class="card cy"><div class="ic">冷启动优化</div><h3>explore 注入仓库快照</h3><p>explore agent 从空上下文出发，<code class="kc">runChild</code> 在 prompt 前注入 <code class="kc">collectGitContext()</code>（当前分支、最近 commit、改动文件），让它「落地即知身在何处」。别的 subagent 没有这个待遇。</p></div>
+      </div>
+
+      <div class="note reveal" style="margin-top:8px"><b>四道防线：</b>子在 <code class="k">max_tokens</code> 处停 → 拒绝把半截结果当成功；并发 resume 同一子 → 抛 <code class="k">already running</code>；归属校验 <code class="k">parentAgentId !== ownerAgentId</code> → 子不能被别的父认领；resume 时强制子模型对齐父<em>当前</em>模型。</div>
+    </section>
+
+    <!-- ---------- 06 Kosong ---------- -->
+    <section id="kosong">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">LLM 抽象 · kosong</div>
+        <h2>把 6 类协议压成<em>一个</em>接口</h2>
+        <p class="lead"><code class="k">kosong</code> 是纯粹的<strong>数据转换层</strong>，不含业务逻辑——这是它能独立发布、独立测试的原因。每个 adapter 把自家 SDK 的流式事件，翻译成统一的 <code class="kc">StreamedMessagePart</code> 序列。</p>
       </div>
 
       <div class="tablewrap reveal">
-        <table class="cmp">
-          <thead><tr><th>Provider</th><th>底层 SDK</th><th>关键差异 / 坑</th></tr></thead>
-          <tbody>
-            <tr><td class="c-cg">kimi.ts</td><td>openai (Moonshot 兼容端点)</td><td>支持 <code>uploadVideo()</code>；强制只发 <code>max_completion_tokens</code>（发 <code>max_tokens</code> 会被 reasoning 预算吃掉 → 200 空响应）</td></tr>
-            <tr><td class="c-cg">anthropic.ts</td><td>@anthropic-ai/sdk</td><td>原生 thinking block；多一个 <code>pause_turn</code> → 归一为 <code>paused</code>；<code>refusal</code> → <code>filtered</code></td></tr>
-            <tr><td class="c-cg">openai-common.ts</td><td>openai (共享转换)</td><td>承载 <code>convertContentPart</code> / <code>toolToOpenAI</code> / finish_reason 归一，被 kimi & legacy 复用</td></tr>
-            <tr><td class="c-cg">openai-legacy.ts</td><td>openai (Chat Completions)</td><td>标准/Azure Chat Completions；旧版 function-calling 形状</td></tr>
-            <tr><td class="c-cg">openai-responses.ts</td><td>openai (Responses API)</td><td>新 Responses 协议，事件流形状与 Chat Completions 不同</td></tr>
-            <tr><td class="c-cg">google-genai.ts</td><td>@google/genai</td><td>同时服务 <code>google-genai</code> 与 <code>vertexai</code> 两种 type；Gemini 专用 <code>STOP/MAX_TOKENS</code> 归一</td></tr>
-          </tbody>
+        <table class="tbl">
+          <tr><th>Provider</th><th>底层 SDK</th><th>关键差异 / 坑</th></tr>
+          <tr><td><code class="cy">kimi.ts</code></td><td>openai（Moonshot 兼容端点）</td><td>支持 <code>uploadVideo()</code>；强制只发 <code>max_completion_tokens</code>（发 <code>max_tokens</code> 会被 reasoning 预算吃掉 → 空响应）</td></tr>
+          <tr><td><code class="cy">anthropic.ts</code></td><td>@anthropic-ai/sdk</td><td>原生 thinking block；<code>pause_turn</code> → 归一为 <code>paused</code>；<code>refusal</code> → <code>filtered</code></td></tr>
+          <tr><td><code class="cy">openai-common.ts</code></td><td>openai（共享转换）</td><td>承载 convertContentPart / toolToOpenAI / finish_reason 归一，被 kimi &amp; legacy 复用</td></tr>
+          <tr><td><code class="cy">openai-responses.ts</code></td><td>openai（Responses API）</td><td>新 Responses 协议，事件流形状与 Chat Completions 不同</td></tr>
+          <tr><td><code class="cy">google-genai.ts</code></td><td>@google/genai</td><td>同时服务 <code>google-genai</code> 与 <code>vertexai</code> 两种 type；Gemini 专用 <code>STOP/MAX_TOKENS</code> 归一</td></tr>
         </table>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">kosong/src/provider.ts — finish_reason 6 值归一</span></div>
-        <pre><code><span class="tok-k">export type</span> <span class="tok-t">FinishReason</span> <span class="tok-p">=</span>
-  <span class="tok-p">|</span> <span class="tok-s">'completed'</span>   <span class="tok-c">// OpenAI 'stop' · Anthropic 'end_turn'/'stop_sequence' · Gemini 'STOP'</span>
-  <span class="tok-p">|</span> <span class="tok-s">'tool_calls'</span>  <span class="tok-c">// Anthropic 'tool_use' · Chat Completions 'tool_calls'</span>
-  <span class="tok-p">|</span> <span class="tok-s">'truncated'</span>   <span class="tok-c">// OpenAI 'length' · Anthropic 'max_tokens' · Gemini 'MAX_TOKENS'</span>
-  <span class="tok-p">|</span> <span class="tok-s">'filtered'</span>    <span class="tok-c">// Anthropic 'refusal' / 安全策略</span>
-  <span class="tok-p">|</span> <span class="tok-s">'paused'</span>      <span class="tok-c">// Anthropic 'pause_turn'（仅此家有）</span>
-  <span class="tok-p">|</span> <span class="tok-s">'other'</span><span class="tok-p">;</span>     <span class="tok-c">// 未分类的 provider 原生值</span></code></pre>
+      <div class="grid g2 reveal" style="align-items:start; margin-top:8px">
+        <div>
+          <div class="code">
+            <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">kosong/src/provider.ts — finish_reason 6 值</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export type</span> <span class="t-typ">FinishReason</span> =
+  | <span class="t-str">'completed'</span>   <span class="t-com">// stop · end_turn · STOP</span>
+  | <span class="t-str">'tool_calls'</span>  <span class="t-com">// tool_use · tool_calls</span>
+  | <span class="t-str">'truncated'</span>   <span class="t-com">// length · max_tokens · MAX_TOKENS</span>
+  | <span class="t-str">'filtered'</span>    <span class="t-com">// refusal / 安全策略</span>
+  | <span class="t-str">'paused'</span>      <span class="t-com">// Anthropic pause_turn（仅此家）</span>
+  | <span class="t-str">'other'</span>;      <span class="t-com">// 未分类原生值</span></code></pre>
+          </div>
+        </div>
+        <div>
+          <h3 style="margin-bottom:12px">交错 delta 的难点</h3>
+          <p style="font-size:14px"><code class="kc">generate()</code> 的核心难点是<strong>并行工具调用的参数 delta 会交错</strong>：tool-call A 的参数片段和 B 的可能交替到达。</p>
+          <ul class="files">
+            <li><b>toolCallIndexMap</b><span>碎片路由回正确 toolCall</span></li>
+            <li><b>onToolCall</b><span>仅在流结束、参数合并后触发</span></li>
+            <li><b>isEmptyMessage</b><span>无 text 无 tool → APIEmptyResponseError</span></li>
+          </ul>
+          <div class="note cy"><b>reasoning 模型的坑：</b>把预算全耗在 <code class="k">reasoning_content</code> 上、content 为空 → 正是 <code class="kc">isEmptyMessage</code> 这道闸要拦的 200 空响应。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 07 Hooks ---------- -->
+    <section id="hooks">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">扩展机制 · hooks</div>
+        <h2>13 种事件 × 外部<em>命令</em>门控</h2>
+        <p class="lead"><code class="k">HookEngine</code> 把<strong>外部 shell 命令</strong>挂到 agent 生命周期。注册时按 event 归桶，每个 HookDef 带可选 <code class="k">matcher</code> 正则，触发时过滤。</p>
       </div>
 
-      <!-- ====== 4. Wire Records / Replay ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="wire-records">④ Wire Records / Replay：每个动作都是一行 JSONL</h4>
-        <p class="reveal">这是 kimi-code 最有辨识度的能力。系统里<strong>没有可变的"会话状态对象"被直接持久化</strong>——取而代之，每个状态变化都被记成一条结构化 <code>AgentRecord</code>，append 进 <code>wire.jsonl</code>（每行一个 JSON）。记录类型有 20+ 种：<code>turn.prompt</code> / <code>turn.steer</code> / <code>config.update</code> / <code>permission.set_mode</code> / <code>usage.record</code> / <code>context.append_message</code> / <code>context.append_loop_event</code> / <code>full_compaction.begin</code> / <code>full_compaction.complete</code> / <code>tools.register_user_tool</code> …。重启恢复时，<code>AgentRecords.restore()</code> 把 <code>_restoring</code> 置 true，逐行回放 <code>restoreAgentRecord</code>，每种类型映射到对应的 agent 内部方法。</p>
-        <p class="reveal"><strong>恢复期的硬契约：restore 不得产生任何副作用</strong>——不调 LLM、不执行工具、不碰文件系统。它纯粹是「把日志重演成内存状态」。<code>ReplayBuilder</code> 只在 <code>restoring</code> 模式下收集记录用于可视化（<code>apps/vis</code> 调试器就吃这个格式）。这套 wire-first 设计带来三个直接好处：① 崩溃后能精确恢复到包括 pending turn 的状态；② 跨客户端重放同一会话；③ 协议版本升级时用 <code>migrateWireRecord</code> 做逐条迁移（<code>v1.1</code> / <code>v1.2</code> 迁移器就在 <code>records/migration/</code>）。</p>
+      <div class="grid g2 reveal" style="align-items:start; margin-bottom:24px">
+        <div class="card cy"><div class="ic">triggerBlock</div><h3>阻塞型</h3><p>任一命令返回 <code class="ro">action:'block'</code> 就否决该操作——这是权限门控、危险命令拦截的实现。</p></div>
+        <div class="card"><div class="ic">fireAndForget</div><h3>通知型</h3><p>用于 <code class="k">PostCompact</code> / <code class="k">SubagentStop</code> 这类不要结果的场景，promise 进 pendingTriggers 但不 await。</p></div>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">~/.kimi/sessions/&lt;id&gt;/agent-&lt;id&gt;/wire.jsonl（示意）</span></div>
-        <pre><code><span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"metadata"</span><span class="tok-p">,</span><span class="tok-s">"protocol_version"</span><span class="tok-p">:</span><span class="tok-s">"1.2"</span><span class="tok-p">,</span><span class="tok-s">"created_at"</span><span class="tok-p">:</span><span class="tok-n">1717200000</span><span class="tok-p">}</span>
-<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"config.update"</span><span class="tok-p">,</span><span class="tok-s">"modelAlias"</span><span class="tok-p">:</span><span class="tok-s">"kimi-k2"</span><span class="tok-p">,</span><span class="tok-s">"cwd"</span><span class="tok-p">:</span><span class="tok-s">"/repo"</span><span class="tok-p">}</span>
-<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"turn.prompt"</span><span class="tok-p">,</span><span class="tok-s">"input"</span><span class="tok-p">:</span><span class="tok-p">[{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"text"</span><span class="tok-p">,</span><span class="tok-s">"text"</span><span class="tok-p">:</span><span class="tok-s">"修复登录 bug"</span><span class="tok-p">}]</span><span class="tok-p">}</span>
-<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"context.append_loop_event"</span><span class="tok-p">,</span><span class="tok-s">"event"</span><span class="tok-p">:</span><span class="tok-p">{</span><span class="tok-s">"kind"</span><span class="tok-p">:</span><span class="tok-s">"tool.call"</span><span class="tok-p">,</span><span class="tok-s">"name"</span><span class="tok-p">:</span><span class="tok-s">"edit"</span><span class="tok-p">}}</span>
-<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"usage.record"</span><span class="tok-p">,</span><span class="tok-s">"model"</span><span class="tok-p">:</span><span class="tok-s">"kimi-k2"</span><span class="tok-p">,</span><span class="tok-s">"usage"</span><span class="tok-p">:</span><span class="tok-p">{</span><span class="tok-s">"input"</span><span class="tok-p">:</span><span class="tok-n">8200</span><span class="tok-p">,</span><span class="tok-s">"output"</span><span class="tok-p">:</span><span class="tok-n">410</span><span class="tok-p">}}</span>
-<span class="tok-p">{</span><span class="tok-s">"type"</span><span class="tok-p">:</span><span class="tok-s">"full_compaction.complete"</span><span class="tok-p">,</span><span class="tok-s">"compactedCount"</span><span class="tok-p">:</span><span class="tok-n">42</span><span class="tok-p">,</span><span class="tok-s">"tokensBefore"</span><span class="tok-p">:</span><span class="tok-n">95000</span><span class="tok-p">,</span><span class="tok-s">"tokensAfter"</span><span class="tok-p">:</span><span class="tok-n">31000</span><span class="tok-p">}</span></code></pre>
+      <div class="panel pad tick reveal">
+        <div class="kicker">表 02 · HOOK_EVENT_TYPES（13 种）</div>
+        <table class="tbl">
+          <tr><th>事件</th><th>语义</th><th>归约</th></tr>
+          <tr><td><code class="cy">PreToolUse</code></td><td>工具执行前，可拦截</td><td>block / 放行</td></tr>
+          <tr><td><code class="cy">PostToolUse · PostToolUseFailure</code></td><td>工具完成 / 失败后</td><td>观察</td></tr>
+          <tr><td><code class="cy">UserPromptSubmit</code></td><td>用户提交 prompt</td><td>观察 / 注入</td></tr>
+          <tr><td><code class="cy">Stop · StopFailure</code></td><td>turn 收尾 / 失败收尾</td><td>观察</td></tr>
+          <tr><td><code class="cy">SessionStart · SessionEnd</code></td><td>会话首尾</td><td>观察</td></tr>
+          <tr><td><code class="cy">SubagentStart · SubagentStop</code></td><td>子 agent 首尾</td><td>fire-and-forget</td></tr>
+          <tr><td><code class="cy">PreCompact · PostCompact</code></td><td>压缩前后</td><td>观察</td></tr>
+          <tr><td><code>Notification</code></td><td>桌面通知等</td><td><span style="color:var(--text-faint)">—</span></td></tr>
+        </table>
+        <div class="note" style="margin-top:18px"><b>对自身故障极度宽容：</b><code>trigger</code> 外层 <code class="kc">.catch(() =&gt; [])</code>、matcher 正则编译失败返回 false、监听器异常被吞——hook 是「增强」而非关键路径，绝不能因为一个坏 hook 让 agent 卡死。匹配命令并行执行（<code>Promise.all</code>），默认 30s 超时。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 08 Wire 与压缩 ---------- -->
+    <section id="wire">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">持久化 · wire records & compaction</div>
+        <h2>每个动作都是一行 <em>JSONL</em></h2>
+        <p class="lead">Wire Records 是全部<strong>持久化的 agent 状态</strong>——append-only。配上自动压缩：用量逼近上限时把旧消息总结成 summary，保留最近若干步。</p>
       </div>
 
-      <!-- ====== 5. MCP + OAuth ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="mcp-oauth">⑤ McpConnectionManager + OAuth：401 不是错误，是"该登录了"</h4>
-        <p class="reveal"><code>McpConnectionManager</code> 为每个 Session 持有全部 MCP server 的生命周期。<code>connectAll</code> 用 <code>Promise.allSettled</code> <strong>并行连接、故障隔离</strong>——一个崩掉的 server 绝不阻塞 Session 启动。每个 entry 有五态机：<code>pending → connected / failed / disabled / needs-auth</code>，状态变化通过 <code>onStatusChange</code> 推给 TUI。stdio 走 <code>StdioMcpClient</code>（子进程 + stderr 快照用于报错），HTTP 走 <code>HttpMcpClient</code>。还有一个 <code>attemptId</code> 单调递增的<strong>陈旧回调防护</strong>：reconnect 期间老连接的 <code>onUnexpectedClose</code> 回来时，<code>isCurrent()</code> 发现 attemptId 不匹配就丢弃，避免老连接的事件污染新状态。</p>
-        <p class="reveal"><strong>OAuth 的精髓在「何时<em>不</em>挂 provider」：</strong>对没有静态 bearer token 的 HTTP server，首次连接<strong>故意不挂 OAuth provider</strong>，让 401 干净地冒成 <code>UnauthorizedError</code>，从而把 entry 翻成 <code>needs-auth</code>（而不是 <code>failed</code>）——这样用户能看到 <code>run /mcp-config login &lt;name&gt;</code> 的可操作提示。只有当 <code>hasTokens()</code> 已经有盘上 token 时，才把 provider 挂上去让 SDK 在 401 时自动刷新。真正的浏览器授权由 <code>McpOAuthService.beginAuthorization</code> 驱动：起一个一次性 localhost 回调监听 → 推进 SDK <code>auth()</code> 拿到授权 URL → 用户浏览器完成 → <code>complete()</code> 校验 <code>state</code>（防 CSRF）后换 token。整条流程通过一个<strong>合成工具</strong> <code>mcp__&lt;server&gt;__authenticate</code> 暴露给对话，授权成功后 <code>reconnect</code> 把合成工具替换成真正的 MCP 工具。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">mcp/connection-manager.ts — 401 → needs-auth 的判定</span></div>
-        <pre><code><span class="tok-k">private</span> <span class="tok-f">resolveOAuthProvider</span>(config<span class="tok-p">,</span> name) <span class="tok-p">{</span>
-  <span class="tok-k">if</span> (config.transport <span class="tok-p">!==</span> <span class="tok-s">'http'</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
-  <span class="tok-k">if</span> (config.bearerTokenEnvVar <span class="tok-p">!==</span> <span class="tok-k">undefined</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
-  <span class="tok-c">// 关键：没 token 时不挂 provider，让 401 干净冒出 → needs-auth</span>
-  <span class="tok-k">if</span> (!oauthService.<span class="tok-f">hasTokens</span>(name<span class="tok-p">,</span> config.url)) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
-  <span class="tok-k">return</span> oauthService.<span class="tok-f">getProvider</span>(name<span class="tok-p">,</span> config.url)<span class="tok-p">;</span>
-<span class="tok-p">}</span>
-
-<span class="tok-c">// connectOne 的 catch 分支：</span>
-<span class="tok-k">if</span> (<span class="tok-k">this</span>.<span class="tok-f">shouldMarkNeedsAuth</span>(entry<span class="tok-p">,</span> error)) <span class="tok-p">{</span>
-  entry.status <span class="tok-p">=</span> <span class="tok-s">'needs-auth'</span><span class="tok-p">;</span>
-  entry.error <span class="tok-p">=</span> <span class="tok-s">`${entry.name} requires OAuth — run /mcp-config login ${entry.name}`</span><span class="tok-p">;</span>
-<span class="tok-p">}</span> <span class="tok-k">else</span> <span class="tok-p">{</span> entry.status <span class="tok-p">=</span> <span class="tok-s">'failed'</span><span class="tok-p">;</span> <span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="tree reveal">  /mcp-config login github
-       │
-       ├─▶ beginAuthorization()
-       │      ├─ startCallbackServer()         一次性 localhost:&lt;port&gt;/callback
-       │      ├─ auth(provider) ── 'REDIRECT' ─▶ 返回 authorizationUrl ──▶ 浏览器打开
-       │      └─ 返回 { authorizationUrl, complete(), cancel() }
-       │
-  用户在浏览器授权 ──▶ 重定向回 localhost callback（携带 code & state）
-       │
-       └─▶ complete()
-              ├─ state 校验（不匹配 → 拒绝换 token，防 CSRF）
-              ├─ auth(provider, { authorizationCode }) ── 'AUTHORIZED'
-              └─ token 落盘 → manager.reconnect() → 合成 auth 工具换成真 MCP 工具</div>
-
-      <!-- ====== 6. Context Compaction ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="compaction">⑥ Context Compaction：0.85 触发、保留近 3 步、每 turn 最多 3 次</h4>
-        <p class="reveal">压缩策略 <code>DefaultCompactionStrategy</code> 的阈值全部是可读的常量：<code>triggerRatio = 0.85</code>（用量达到 max_context 的 85% 触发）、<code>reservedContextSize = 50_000</code>（再留 5 万 token 余量，<code>used + reserved ≥ max</code> 也触发）、<code>maxCompactionPerTurn = 3</code>（一个 turn 内最多压 3 次，超了抛 <code>CONTEXT_OVERFLOW</code>）。<code>blockRatio</code> 默认等于 <code>triggerRatio</code>——这是个有意的开关：两者相等时<code>checkAfterStep</code> 为 false，<strong>禁用异步压缩</strong>，压缩只在 <code>beforeStep</code> 同步阻塞式发生（<code>block()</code> await 压缩 worker 完成），保证下一步 LLM 调用一定在安全窗口内。</p>
-        <p class="reveal"><code>computeCompactCount</code> 是算法核心：从尾部往前扫，<strong>保护最近 3 步 + 尾部连续的 user 消息 + 占比不超过 20% 的近期内容</strong>，找一个「角色边界」作为 splitAt——只在 <code>m1.role !== m2.role</code> 且不会切断 user→assistant 配对、且 <code>m2</code> 不是 tool 消息处切分，避免把一个 tool_call 和它的 tool_result 拆散。被切走的前半段连同一条 <code>COMPACTION_INSTRUCTION</code> 喂给 LLM 生成摘要，摘要 + 保留的近期消息构成新 history。压缩 worker 跑完还会<strong>逐条比对 history 是否被改过</strong>（比如用户中途 undo），变了就 <code>cancel()</code> 放弃这次压缩结果——绝不把摘要套到一个已经变化的历史上。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">agent/compaction/config.ts + full.ts — 阈值与触发</span></div>
-        <pre><code><span class="tok-k">export const</span> <span class="tok-t">DEFAULT_COMPACTION_CONFIG</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
-  triggerRatio<span class="tok-p">:</span> <span class="tok-n">0.85</span><span class="tok-p">,</span>          <span class="tok-c">// ≥85% 触发压缩</span>
-  blockRatio<span class="tok-p">:</span> <span class="tok-n">0.85</span><span class="tok-p">,</span>            <span class="tok-c">// == trigger → 禁用异步压缩，纯同步阻塞</span>
-  reservedContextSize<span class="tok-p">:</span> <span class="tok-n">50_000</span><span class="tok-p">,</span>  <span class="tok-c">// used+5万≥max 也触发</span>
-  maxCompactionPerTurn<span class="tok-p">:</span> <span class="tok-n">3</span><span class="tok-p">,</span>       <span class="tok-c">// 超 3 次 → throw CONTEXT_OVERFLOW</span>
-  maxRecentSteps<span class="tok-p">:</span> <span class="tok-n">3</span><span class="tok-p">,</span>             <span class="tok-c">// 最近 3 步永远保留</span>
-  maxRecentSizeRatio<span class="tok-p">:</span> <span class="tok-n">0.2</span><span class="tok-p">,</span>       <span class="tok-c">// 近期内容上限 20% 窗口</span>
-<span class="tok-p">}</span><span class="tok-p">;</span>
-
-<span class="tok-f">shouldCompact</span>(used<span class="tok-p">,</span> max) <span class="tok-p">{</span>
-  <span class="tok-k">return</span> used <span class="tok-p">&gt;=</span> max <span class="tok-p">*</span> triggerRatio <span class="tok-p">||</span> <span class="tok-f">shouldUseReservedContext</span>(max<span class="tok-p">,</span> used)<span class="tok-p">;</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <!-- ====== 7. Lifecycle Hooks ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="lifecycle-hooks">⑦ Lifecycle Hooks：13 种事件 × 外部命令门控</h4>
-        <p class="reveal"><code>HookEngine</code> 是一个把<strong>外部 shell 命令</strong>挂到 agent 生命周期的引擎。<code>HOOK_EVENT_TYPES</code> 定义了 13 种事件：<code>PreToolUse</code> / <code>PostToolUse</code> / <code>PostToolUseFailure</code> / <code>UserPromptSubmit</code> / <code>Stop</code> / <code>StopFailure</code> / <code>SessionStart</code> / <code>SessionEnd</code> / <code>SubagentStart</code> / <code>SubagentStop</code> / <code>PreCompact</code> / <code>PostCompact</code> / <code>Notification</code>。注册时按 event 归桶（<code>byEvent: Map&lt;event, HookDef[]&gt;</code>），每个 <code>HookDef</code> 带一个可选的 <code>matcher</code>（正则字符串）——触发时用 <code>new RegExp(matcher).test(matcherValue)</code> 过滤，比如只对 <code>edit|write</code> 工具跑某个 hook。匹配的命令并行执行（<code>Promise.all</code>），默认 30s 超时。</p>
-        <p class="reveal">Hook 有两种语义：<strong>阻塞型</strong>（<code>triggerBlock</code>）任一命令返回 <code>action:'block'</code> 就否决该操作——这是权限门控、危险命令拦截的实现；<strong>fire-and-forget</strong>（<code>fireAndForgetTrigger</code>）用于 <code>PostCompact</code>、<code>SubagentStop</code> 这类不需要结果的通知场景，promise 进 <code>pendingTriggers</code> 集合但不 await。注意整个引擎<strong>对自身故障极度宽容</strong>：<code>trigger</code> 外层 <code>.catch(() =&gt; [])</code>、matcher 正则编译失败返回 false、监听器回调异常被吞——hook 是「增强」而非「关键路径」，绝不能因为一个坏 hook 让 agent 卡死。上面 ⑤⑥ 里 <code>PreCompact</code>/<code>SubagentStart</code> 的触发点，正是这套引擎的实际调用方。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">agent/hooks/engine.ts — 阻塞决策聚合</span></div>
-        <pre><code><span class="tok-k">async</span> <span class="tok-f">triggerBlock</span>(event<span class="tok-p">,</span> args) <span class="tok-p">{</span>
-  <span class="tok-k">return</span> <span class="tok-f">blockDecision</span>(event<span class="tok-p">,</span> <span class="tok-k">await</span> <span class="tok-k">this</span>.<span class="tok-f">trigger</span>(event<span class="tok-p">,</span> args))<span class="tok-p">;</span>
-<span class="tok-p">}</span>
-<span class="tok-k">function</span> <span class="tok-f">blockDecision</span>(event<span class="tok-p">,</span> results) <span class="tok-p">{</span>
-  <span class="tok-k">const</span> block <span class="tok-p">=</span> results.<span class="tok-f">find</span>((r) <span class="tok-p">=&gt;</span> r.action <span class="tok-p">===</span> <span class="tok-s">'block'</span>)<span class="tok-p">;</span>  <span class="tok-c">// 任一 block 即否决</span>
-  <span class="tok-k">if</span> (block <span class="tok-p">===</span> <span class="tok-k">undefined</span>) <span class="tok-k">return</span> <span class="tok-k">undefined</span><span class="tok-p">;</span>
-  <span class="tok-k">return</span> <span class="tok-p">{</span> block<span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span> reason<span class="tok-p">:</span> block.reason?.<span class="tok-f">trim</span>() <span class="tok-p">||</span> <span class="tok-s">`Blocked by ${event} hook`</span> <span class="tok-p">}</span><span class="tok-p">;</span>
-<span class="tok-p">}</span>
-<span class="tok-c">// trigger 外层吞掉所有故障：坏 hook 绝不阻断 agent</span>
-<span class="tok-f">trigger</span>(event<span class="tok-p">,</span> args) <span class="tok-p">{</span> <span class="tok-k">return</span> <span class="tok-k">this</span>.<span class="tok-f">triggerInner</span>(event<span class="tok-p">,</span> args).<span class="tok-f">catch</span>(() <span class="tok-p">=&gt;</span> [])<span class="tok-p">;</span> <span class="tok-p">}</span></code></pre>
-      </div>
-
-      <!-- ====== 8. Kaos Local vs SSH ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="kaos">⑧ Kaos：一套 API，本地 / 远程两副实现</h4>
-        <p class="reveal"><code>Kaos</code> 接口把文件系统、进程、路径抽象成一组方法（<code>stat</code> / <code>iterdir</code> / <code>glob</code> / <code>readText</code> / <code>writeText</code> / <code>exec</code> …），让上层 tool（read/write/edit/bash）<strong>对"代码跑在哪"完全无感</strong>。<code>LocalKaos</code> 用 Node <code>fs</code>/<code>child_process</code>，并维护<strong>实例级 <code>_cwd</code></strong> 而非污染全局 <code>process.cwd()</code>——所以同进程里多个 agent 可以各在不同目录。<code>SSHKaos</code> 用 <code>ssh2</code> + SFTP 把同一套 API 投到远端：<code>exec</code> 走 SSH channel，<code>readText</code> 走 SFTP。进程终止的跨平台细节也处理得很细：POSIX 用 <code>process.kill(-pid)</code> 杀整个进程组，Windows 用 <code>taskkill /T /F /PID</code> 递归杀子树；<code>ESRCH</code>（进程组已没）静默成功，<code>EPERM</code> 回退到直接 <code>.kill()</code>。错误体系分两支：本地 <code>KaosError</code> 系列，SSH/SFTP 侧 <code>KaosSSHError</code> 携带 SFTP status code（2=文件不存在、3=权限拒绝）。</p>
-      </div>
-
-      <!-- ====== 横向对比 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="comparison">⑨ 横向对比：kimi-code vs OpenClaw vs Superpowers</h4>
-        <p class="reveal">三个项目都做「多 agent / 可扩展 agent 平台」，但切入点完全不同：</p>
-        <div class="tablewrap reveal">
-          <table class="cmp">
-            <thead><tr><th>维度</th><th>Kimi Code</th><th>OpenClaw</th><th>Superpowers</th></tr></thead>
-            <tbody>
-              <tr><td>定位</td><td>企业级编程 Agent 引擎</td><td>全渠道个人 AI 助手</td><td>Claude Code 技能/插件市场</td></tr>
-              <tr><td>多 Agent 机制</td><td><strong>Session 持多个独立 Agent 实例</strong>，subagent 完全隔离上下文</td><td><strong>ACP 协议</strong>跨会话/实例通信，subagent 经协议层协调</td><td>不造引擎，复用 Claude Code 的 subagent</td></tr>
-              <tr><td>隔离粒度</td><td>每 Agent 独立 Kaos/Tools/Permission/wire</td><td>每 subagent 独立工具集 + 上下文窗口</td><td>由 Claude Code 宿主决定</td></tr>
-              <tr><td>持久化</td><td><strong>Wire Records JSONL 全量可重放</strong></td><td>记忆插件（LanceDB / wiki / active）</td><td>技能 = markdown 文件，git 管理</td></tr>
-              <tr><td>LLM 接入</td><td>kosong 5 adapter / 6 type，统一抽象</td><td>provider 插件（30+ 渠道侧重）</td><td>跟随 Claude（不抽象多 provider）</td></tr>
-              <tr><td>远程执行</td><td><strong>Kaos：Local / SSH 同一 API</strong></td><td>gateway 多渠道路由</td><td>本地 Claude Code 沙箱</td></tr>
-              <tr><td>扩展面</td><td>MCP 一等公民 + Hooks + Skill + Plugin</td><td>130+ 插件 + 20+ channel</td><td>纯技能/命令，零运行时</td></tr>
-            </tbody>
+      <div class="grid g2 reveal" style="align-items:start">
+        <div>
+          <h3 style="margin-bottom:12px">AgentRecord 记录类型（节选）</h3>
+          <table class="tbl">
+            <tr><th>type</th><th>记录什么</th></tr>
+            <tr><td><code>turn.prompt · turn.steer</code></td><td>一次用户输入 / 插话</td></tr>
+            <tr><td><code>config.update</code></td><td>model / cwd / thinking 变更</td></tr>
+            <tr><td><code>context.append_message</code></td><td>一条消息入 history</td></tr>
+            <tr><td><code>context.append_loop_event</code></td><td>tool.call / tool.result</td></tr>
+            <tr><td><code>usage.record</code></td><td>一次 LLM 用量（立即记账）</td></tr>
+            <tr><td><code class="cy">full_compaction.begin / complete</code></td><td>压缩起止 + 前后 token</td></tr>
+            <tr><td><code>permission.set_mode · tools.register_user_tool</code></td><td>权限 / 工具注册</td></tr>
           </table>
         </div>
-        <p class="reveal">一句话总结三者差异：<strong>Superpowers</strong> 是「给 Claude Code 加技能的内容层」，不碰引擎；<strong>OpenClaw</strong> 是「把一个 AI 助手铺到所有聊天平台的网关层」，重在 channel 与协议；<strong>Kimi Code</strong> 是「自带商业模型的 Agent 引擎层」，重在 Session/Agent 隔离、wire 重放、执行环境抽象——它最接近「一个可独立运行、可远程执行、可精确回放的 Agent 操作系统内核」。</p>
-      </div>
-
-      <div class="prose">
-        <h4 class="reveal" id="innovations">关键创新</h4>
-        <ul class="reveal">
-          <li><strong>多 Agent Session 架构</strong>：Session 管理多个 Agent，主 agent + subagent（coder/explore/plan）各在隔离上下文运行，有独立 Kaos、Skill、Permission、Wire Records。</li>
-          <li><strong>Wire Records / Replay</strong>：结构化 JSONL 记录完整会话，支持恢复、可视化调试、跨客户端重放。</li>
-          <li><strong>MCP 一等公民</strong>：不只是"支持 MCP"，而是在 TUI 里用 <code>/mcp-config</code> 做 MCP 服务器的增删改查，带 OAuth。</li>
-          <li><strong>单 Binary 发布</strong>：Node.js 嵌入式打包，macOS/Linux 用 <code>curl | bash</code>，Windows 用 PowerShell <code>irm</code>，零配置。</li>
-          <li><strong>Context Compaction</strong>：<code>FullCompaction</code> 监听 token 消耗，超阈值时自动摘要压缩历史。</li>
-          <li><strong>Lifecycle Hooks</strong>：HookEngine 在 SessionStart/ToolCall/ToolResult 等事件触发，支持权限门控、审计日志、桌面通知。</li>
-        </ul>
-
-        <h4 class="reveal" id="highlights">技术亮点</h4>
-        <div class="grid2">
-          <div class="card reveal"><span class="ico">🔁</span><h5 class="accent">Session Forking</h5><p><code>Session.forkSession()</code> 复制状态创建新会话；wire 格式支持 fork 追踪。</p></div>
-          <div class="card reveal"><span class="ico">🎬</span><h5 class="accent">Video Input</h5><p>Provider 支持视频时可用 <code>uploadVideo()</code>；统一序列为 <code>VideoURLPart</code>。</p></div>
-          <div class="card reveal"><span class="ico">🧠</span><h5 class="accent">Thinking Effort</h5><p>标准化 <code>off→max</code> 量表；按 provider 支持范围 clamp。</p></div>
-          <div class="card reveal"><span class="ico">🔐</span><h5 class="accent">Permission Model</h5><p>yolo（批准所有）/ auto（批准安全模式）/ manual（每次问询）；父链继承。</p></div>
+        <div>
+          <h3 style="margin-bottom:12px">压缩阈值（DefaultCompactionStrategy）</h3>
+          <div class="card" style="margin-bottom:14px"><div class="ic">triggerRatio = 0.85</div><h3 style="font-size:16px">何时压</h3><p>用量达上下文 85% 触发；<code class="k">reserved = 50_000</code>，<code>used + reserved ≥ max</code> 也触发；一个 turn 内最多压 <code class="k">3</code> 次，超了抛 <code class="ro">CONTEXT_OVERFLOW</code>。</p></div>
+          <div class="card cy"><div class="ic">computeCompactCount</div><h3 style="font-size:16px">怎么切</h3><p>保护最近 3 步 + 尾部连续 user 消息；只在<strong>角色边界</strong>切分，绝不拆散 tool_call 与它的 tool_result。压缩 worker 跑完逐条比对 history 是否被改过，变了就 <code class="kc">cancel()</code> 放弃。</p></div>
         </div>
-
-        <h4 class="reveal" id="ecosystem">对 coding agent 生态的意义</h4>
-        <p class="reveal">Kimi Code 是第一个把<strong>商业模型（Moonshot Kimi）和企业级 Agent 工程</strong>做成 TypeScript Monorepo 的开源项目。它示范了一种新的可能：<em>Agent 引擎不需要自己训模型，只需要做好"接入 + 编排"</em>。它的 Session 多 Agent 架构、Wire Records 可重放、MCP 一等公民，是这个方向上最完整的一次工程实践。</p>
       </div>
-    </div>
-  </div>
-</section>
 
+      <div class="grid g3 reveal" style="margin-top:24px">
+        <div class="card"><div class="ic">replay</div><h3>精确恢复</h3><p>恢复到包括 pending turn 的状态；恢复期零副作用。</p></div>
+        <div class="card"><div class="ic">migrate</div><h3>协议演进</h3><p><code class="kc">migrateWireRecord</code> 逐条迁移；v1.1 / v1.2 迁移器在 records/migration/。</p></div>
+        <div class="card cy"><div class="ic">vis</div><h3>可视化调试</h3><p><code class="k">apps/vis</code> 直接吃 wire 格式，回放一次会话的全过程。</p></div>
+      </div>
+    </section>
+
+    <!-- ---------- 09 可观测性 ---------- -->
+    <section id="observability">
+      <div class="sec-head reveal">
+        <div class="sec-num">09</div>
+        <div class="kicker">可观测性 · observability</div>
+        <h2>会话即<em>遥测</em></h2>
+        <p class="lead">因为每个动作都已是结构化 wire 记录，可观测性几乎是「免费」的：wire.jsonl 本身就是一条完整的、可重放的执行轨迹。</p>
+      </div>
+
+      <div class="grid g2 reveal" style="align-items:start">
+        <div>
+          <div class="code">
+            <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">~/.kimi/sessions/&lt;id&gt;/agent-&lt;id&gt;/wire.jsonl</span><button class="copy">复制</button></div>
+<pre><code><span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"config.update"</span>,<span class="t-str">"modelAlias"</span>:<span class="t-str">"kimi-k2"</span><span class="t-pun">}</span>
+<span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"turn.prompt"</span>,<span class="t-str">"input"</span>:[<span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"text"</span>,<span class="t-str">"text"</span>:<span class="t-str">"修复登录 bug"</span><span class="t-pun">}</span>]<span class="t-pun">}</span>
+<span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"context.append_loop_event"</span>,<span class="t-str">"event"</span>:<span class="t-pun">{</span><span class="t-str">"kind"</span>:<span class="t-str">"tool.call"</span>,<span class="t-str">"name"</span>:<span class="t-str">"edit"</span><span class="t-pun">}</span><span class="t-pun">}</span>
+<span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"usage.record"</span>,<span class="t-str">"usage"</span>:<span class="t-pun">{</span><span class="t-str">"input"</span>:<span class="t-num">8200</span>,<span class="t-str">"output"</span>:<span class="t-num">410</span><span class="t-pun">}</span><span class="t-pun">}</span>
+<span class="t-pun">{</span><span class="t-str">"type"</span>:<span class="t-str">"full_compaction.complete"</span>,<span class="t-str">"tokensBefore"</span>:<span class="t-num">95000</span>,<span class="t-str">"tokensAfter"</span>:<span class="t-num">31000</span><span class="t-pun">}</span></code></pre>
+          </div>
+        </div>
+        <div>
+          <h3 style="margin-bottom:12px">一份 wire = 一条轨迹</h3>
+          <p style="font-size:14px">不需要外接 APM 也能回答「这次会话花了多少 token、调了哪些工具、何时压缩」。</p>
+          <ul class="files">
+            <li><b>turn.prompt</b><span>一次用户输入</span></li>
+            <li><b>context.append_loop_event</b><span>每次工具调用 / 结果</span></li>
+            <li><b>usage.record</b><span>每次 LLM 用量</span></li>
+            <li><b>full_compaction.*</b><span>每次压缩前后</span></li>
+            <li><b>config.update</b><span>每次配置变更</span></li>
+          </ul>
+          <div class="note cy"><b>apps/vis：</b>把同一份 wire 喂给可视化调试器，逐帧回看 turn / step / tool / 压缩——线上线下用同一份事实。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 10 快速开始 ---------- -->
+    <section id="quickstart">
+      <div class="sec-head reveal">
+        <div class="sec-num">10</div>
+        <div class="kicker">快速开始 · quick start</div>
+        <h2>三十秒跑起<em>第一个</em>会话</h2>
+        <p class="lead">单 Binary 发布，零配置起步。装好就能在 TUI 里对话，并用 <code class="kc">/mcp-config</code> 管理 MCP 服务器。</p>
+      </div>
+
+      <div class="grid g2 reveal" style="align-items:start">
+        <div>
+          <div class="code">
+            <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">install.sh · 单 Binary</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com"># macOS / Linux</span>
+curl -fsSL https://kimi.moonshot.cn/install.sh | bash
+
+<span class="t-com"># Windows (PowerShell)</span>
+irm https://kimi.moonshot.cn/install.ps1 | iex
+
+<span class="t-com"># 启动 TUI</span>
+kimi-code            <span class="t-com"># 进入交互式会话</span>
+kimi-code --resume   <span class="t-com"># 从 wire 恢复上次会话</span></code></pre>
+          </div>
+        </div>
+        <div>
+          <div class="code">
+            <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">会话内 · MCP 一等公民</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com"># 在对话里直接管理 MCP 服务器</span>
+/mcp-config add github   <span class="t-com"># 添加</span>
+/mcp-config login github <span class="t-com"># 触发 OAuth 浏览器授权</span>
+/mcp-config list         <span class="t-com"># 查看五态：connected /</span>
+                         <span class="t-com"># needs-auth / failed / …</span>
+
+<span class="t-com"># 切模型（写入 wire: config.update）</span>
+/model kimi-k2</code></pre>
+          </div>
+          <div class="note"><b>OAuth 精髓：</b>没 token 时<b>故意不挂 provider</b>，让 401 干净冒成 <code class="kc">needs-auth</code>，用户即可见 <code class="k">/mcp-config login</code> 的可操作提示。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 11 速查表 ---------- -->
+    <section id="cheatsheet">
+      <div class="sec-head reveal">
+        <div class="sec-num">11</div>
+        <div class="kicker">速查表 · cheat sheet</div>
+        <h2>随手翻的<em>一页纸</em></h2>
+        <p class="lead">把高频概念、记录类型、provider 与源码位置压在一处——卡壳时回这里。</p>
+      </div>
+
+      <div class="cheat reveal">
+        <div class="blk">
+          <h4>核心概念</h4>
+          <dl>
+            <dt>Session</dt><dd>会话容器，持 N 个 Agent</dd>
+            <dt>Agent</dt><dd>独立 Kaos/Tools/Permission/wire</dd>
+            <dt>TurnFlow</dt><dd>activeTurn + steerBuffer</dd>
+            <dt>runTurn</dt><dd>外层 turn 收敛</dd>
+            <dt>executeLoopStep</dt><dd>内层单 step 原子操作</dd>
+            <dt>SubagentHost</dt><dd>spawn coder/explore/plan</dd>
+          </dl>
+        </div>
+        <div class="blk">
+          <h4>Wire 记录类型</h4>
+          <dl>
+            <dt>turn.prompt / steer</dt><dd>用户输入 / 插话</dd>
+            <dt>config.update</dt><dd>model / cwd / thinking</dd>
+            <dt>context.append_*</dt><dd>消息 / loop event</dd>
+            <dt>usage.record</dt><dd>LLM 用量（立即）</dd>
+            <dt>full_compaction.*</dt><dd>压缩起止</dd>
+            <dt>permission.set_mode</dt><dd>权限模式</dd>
+          </dl>
+        </div>
+        <div class="blk">
+          <h4>Kosong Provider</h4>
+          <dl>
+            <dt>kimi.ts</dt><dd>Moonshot（uploadVideo）</dd>
+            <dt>anthropic.ts</dt><dd>thinking / pause_turn</dd>
+            <dt>openai-common</dt><dd>共享转换</dd>
+            <dt>openai-responses</dt><dd>Responses API</dd>
+            <dt>google-genai</dt><dd>genai + vertexai</dd>
+          </dl>
+          <h4 style="margin-top:18px">压缩阈值</h4>
+          <dl>
+            <dt>triggerRatio</dt><dd>0.85</dd>
+            <dt>reserved</dt><dd>50_000</dd>
+            <dt>maxRecentSteps</dt><dd>3</dd>
+          </dl>
+        </div>
+        <div class="blk">
+          <h4>源码地图 · packages/</h4>
+          <ul class="files">
+            <li><b>agent-core/agent/</b><span>turn loop · Agent</span></li>
+            <li><b>agent-core/session/</b><span>Session · subagent</span></li>
+            <li><b>agent-core/records/</b><span>wire · migration</span></li>
+            <li><b>agent-core/mcp/</b><span>connection · oauth</span></li>
+            <li><b>agent-core/hooks/</b><span>HookEngine</span></li>
+            <li><b>kosong/src/</b><span>ChatProvider</span></li>
+            <li><b>kaos/src/</b><span>Local / SSH</span></li>
+          </ul>
+          <div style="font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:14px; line-height:1.7;">
+            apps/ · kimi-code (TUI) · vis (调试器)
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <div class="big">现在，去<b>读源码</b>吧。</div>
+        <div class="meta">
+          MoonshotAI/kimi-code · TypeScript Monorepo<br/>
+          “Multi-agent Session · Wire Records · MCP first-class.”<br/>
+          MIT · Moonshot AI
+        </div>
+      </div>
+    </section>
+
+  </main>
 </div>
-</main>
 
-<button class="totop" aria-label="返回顶部">↑</button>
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  const ctx = cv.getContext('2d');
+  let stars = [], w, h, dpr = Math.min(window.devicePixelRatio||1, 2);
+  function resize(){
+    w = cv.width = innerWidth*dpr; h = cv.height = innerHeight*dpr;
+    cv.style.width = innerWidth+'px'; cv.style.height = innerHeight+'px';
+    const n = Math.floor((innerWidth*innerHeight)/9000);
+    stars = Array.from({length:n}, ()=>({
+      x:Math.random()*w, y:Math.random()*h,
+      r:(Math.random()*1.2+0.3)*dpr,
+      a:Math.random()*0.6+0.15, t:Math.random()*Math.PI*2,
+      sp:Math.random()*0.015+0.004,
+      amber: Math.random()<0.14
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(242,177,74,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
 
-<script>if(!location.hash){history.replaceState(null,'','#kc');}</script>
-<script src="./assets/main.js"></script>
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+
+/* ============================================================
+   architecture layers
+   ============================================================ */
+(function(){
+    const data = {
+    "0":{ badge:"foundation", color:"var(--text-dim)", bg:"rgba(255,255,255,0.05)",
+      title:"@moonshot-ai/kaos", sub:"执行环境抽象 · Local / SSH",
+      cols:[
+        {h:"提供什么", li:["统一 FS / 进程 / 路径 接口","LocalKaos：Node fs / child_process","SSHKaos：ssh2 + SFTP 远程","实例级 _cwd，不污染 process.cwd()"]},
+        {h:"关键细节", li:["exec 走 SSH channel，read 走 SFTP","跨平台杀进程组 (kill -pid / taskkill)","KaosError / KaosSSHError 双错误体系","ESRCH 静默成功、EPERM 回退 .kill()"]},
+        {h:"何时关心", li:["工具要跑在远端机器","同进程多 agent 各在不同目录","把执行能力可移植化"]},
+      ]},
+    "1":{ badge:"transport", color:"var(--phosphor)", bg:"rgba(127,230,166,0.08)",
+      title:"@moonshot-ai/kosong", sub:"LLM 抽象 · ChatProvider",
+      cols:[
+        {h:"提供什么", li:["ChatProvider 统一接口","5 个 adapter 服务 6 种 provider type","流式事件 → StreamedMessagePart","finish_reason 归一为 6 值枚举"]},
+        {h:"难点", li:["并行工具调用的参数 delta 交错","toolCallIndexMap 路由碎片","onToolCall 只在流结束后触发","isEmptyMessage → APIEmptyResponseError"]},
+        {h:"涵盖的 provider", li:["kimi / anthropic / openai-*","google-genai + vertexai","纯数据转换层，可独立发布"]},
+      ]},
+    "2":{ badge:"engine", color:"var(--signal)", bg:"rgba(79,216,208,0.08)",
+      title:"@moonshot-ai/agent-core", sub:"agent 引擎 · 核心",
+      cols:[
+        {h:"提供什么", li:["Session 持多个隔离 Agent 实例","runTurn / executeLoopStep 双层收敛","ToolManager + ToolScheduler 冲突调度","McpConnectionManager 一等公民"]},
+        {h:"独有能力", li:["Wire Records：每个动作一行 JSONL","Subagent：独立上下文 / 只回摘要","FullCompaction：0.85 触发、保留近 3 步","HookEngine：13 事件 × 外部命令"]},
+        {h:"何时用", li:["需要可重放 / 可恢复会话","多 agent 协作与隔离","企业级编程 agent 产品"]},
+      ]},
+    "3":{ badge:"surface", color:"var(--star)", bg:"rgba(242,177,74,0.08)",
+      title:"node-sdk + apps/kimi-code", sub:"SDK 封装 + CLI / TUI",
+      cols:[
+        {h:"提供什么", li:["KimiHarness 工厂 → Session 封装","RPC 双向通道","apps/kimi-code：TUI + Commander.js","apps/vis：wire 驱动的可视化调试器"]},
+        {h:"发布", li:["单 Binary，Node 嵌入式打包","macOS/Linux：curl | bash","Windows：PowerShell irm","零配置起步"]},
+        {h:"何时用", li:["直接上手的 CLI 体验","在自己的 app 里嵌 agent","用 vis 回放排查会话"]},
+      ]},
+  };
+  const layers = [...document.querySelectorAll('.layer')];
+  const box = document.getElementById('ldetail');
+  function render(l){
+    const d = data[l];
+    box.style.setProperty('--x', d.color);
+    box.innerHTML = `
+      <h3><span class="badge" style="background:${d.bg}; color:${d.color}; border:1px solid ${d.color}">L${l}</span>
+        <span style="font-family:var(--mono); font-size:17px; color:${d.color}">${d.title}</span></h3>
+      <p style="font-size:13.5px; color:var(--text-dim); margin:6px 0 0">${d.sub}</p>
+      <div class="ld-grid">
+        ${d.cols.map(c=>`<div class="col"><h4>${c.h}</h4><ul>${c.li.map(x=>`<li>${x}</li>`).join('')}</ul></div>`).join('')}
+      </div>`;
+    box.classList.add('show');
+  }
+  layers.forEach(L=>{
+    L.addEventListener('click', ()=>{
+      layers.forEach(x=>x.classList.remove('active'));
+      L.classList.add('active');
+      render(L.dataset.l);
+    });
+  });
+  // default open L2
+  render("2");
+})();
+
+/* ============================================================
+   EVENT STREAM PLAYER
+   ============================================================ */
+(function(){
+  const L = {life:"Session / Turn 生命周期", turn:"Turn Loop", msg:"消息 / 流式", tool:"工具 / subagent / wire"};
+    const scenarios = {
+    simple: [
+      {t:"TurnFlow.prompt()", lane:"life", d:"用户输入进入 TurnFlow；无活跃 turn 时，prompt 直接 launch 一次 runTurn。"},
+      {t:"runTurn 开始", lane:"turn", d:"外层 turn 收敛循环启动：steps=0，usage=0，边界 abort 检查就位。"},
+      {t:"executeLoopStep", lane:"turn", ph:"step 1", d:"单 step 原子操作：beforeStep hook → buildMessages → 原子 step envelope。"},
+      {t:"chatWithRetry", lane:"msg", ph:"assistant", d:"经 kosong 调 LLM；网络抖动走指数退避（300ms→5s，≤3 次）。"},
+      {t:"message_delta", lane:"msg", ph:"× N", d:"流式增量，TUI 做打字机效果；delta 期间只更新 UI。"},
+      {t:"recordUsage", lane:"tool", ph:"usage.record", d:"LLM 返回后立即记账并写入 wire.jsonl——即使后续 abort，已消费 token 也不丢。"},
+      {t:"stopReason=completed", lane:"turn", d:"非 tool_use 停止；shouldContinueAfterStop 返回 false，跳出循环。"},
+      {t:"TurnResult", lane:"life", ph:"{stopReason,steps,usage}", d:"一次 turn 结算；状态全部外置到 Agent，loop 本身可独立单测。"},
+    ],
+    tools: [
+      {t:"TurnFlow.prompt()", lane:"life", d:"prompt：“重构鉴权模块并跑测试”；launch 一次 runTurn。"},
+      {t:"runTurn 开始", lane:"turn", d:"外层循环启动。"},
+      {t:"executeLoopStep", lane:"turn", ph:"step 1", d:"第一个 step：buildMessages → LLM。"},
+      {t:"chatWithRetry", lane:"msg", ph:"assistant · toolCall", d:"LLM 返回一批 tool_call（可能多个）。"},
+      {t:"ToolScheduler", lane:"tool", ph:"conflict()", d:"基于 ToolAccesses.conflict() 检测资源冲突：读同一文件可并行，写同一文件排队。"},
+      {t:"SubagentHost.spawn", lane:"tool", ph:"explore", d:"派生一个全新 Agent 实例：独立 Kaos / Tools / Permission / context。"},
+      {t:"linkAbortSignal", lane:"tool", ph:"父→子", d:"父信号挂到子 AbortController；父一旦 abort，子立即级联。"},
+      {t:"子 wire.jsonl", lane:"tool", ph:"独立记录", d:"子 agent 读 40 个文件，上下文不回传父，只写自己的 wire。"},
+      {t:"子 summary 回传", lane:"tool", ph:"≥200 字", d:"子只回传 lastAssistantText；不足 200 字触发一次 “摘要太短就重跑” 续写。"},
+      {t:"executeLoopStep", lane:"turn", ph:"step 2", d:"tool_use 是控制信号而非终止：continue 进下一 step。"},
+      {t:"message_delta", lane:"msg", ph:"× N", d:"主 agent 基于子 agent 摘要流式产出最终回答。"},
+      {t:"full_compaction", lane:"tool", ph:"0.85", d:"若用量 ≥ 85% 上下文，同步阻塞式压缩：保留近 3 步，其余总结成 summary。"},
+      {t:"TurnResult", lane:"life", d:"本回合无新工具调用，循环收尾。"},
+    ],
+  };
+  const tl = document.getElementById('timeline');
+  const rdType = document.getElementById('rdType');
+  const rdLane = document.getElementById('rdLane');
+  const rdDesc = document.getElementById('rdDesc');
+  const rdBar = document.getElementById('rdBar');
+  const evCount = document.getElementById('evcount');
+  const evTotal = document.getElementById('evtotal');
+  const playBtn = document.getElementById('play');
+
+  let cur = "simple", idx = -1, timer = null, rows = [];
+
+  function build(){
+    const data = scenarios[cur];
+    tl.innerHTML = "";
+    rows = data.map((e,i)=>{
+      const row = document.createElement('div');
+      row.className = 'ev'; row.dataset.lane = e.lane;
+      row.innerHTML = `<span class="t">t+${String(i).padStart(2,'0')}</span>
+        <span class="node"></span>
+        <span class="ename">${e.t}${e.ph?` <span class="ph">${e.ph}</span>`:''}</span>`;
+      row.addEventListener('click', ()=>{ stop(); seek(i); });
+      tl.appendChild(row);
+      return row;
+    });
+    evTotal.textContent = data.length;
+    idx = -1; evCount.textContent = 0; rdBar.style.width = "0%";
+    rdType.textContent = "待机"; rdLane.textContent = cur==="simple"?'场景：单 agent 一次 turn':'场景：工具 + subagent';
+    rdDesc.textContent = "按「播放」或「单步」开始；也可以直接点左侧任意事件跳转。";
+  }
+  function seek(i){
+    const data = scenarios[cur];
+    idx = i;
+    rows.forEach((r,k)=>{ r.classList.toggle('fired', k<=i); r.classList.toggle('now', k===i); });
+    const e = data[i];
+    rdType.textContent = e.t;
+    rdLane.textContent = L[e.lane] + (e.ph?` · ${e.ph}`:'');
+    rdDesc.innerHTML = e.d;
+    evCount.textContent = i+1;
+    rdBar.style.width = ((i+1)/data.length*100)+"%";
+    const r = rows[i];
+    const rb = r.getBoundingClientRect(), tb = tl.getBoundingClientRect();
+    if(rb.bottom>tb.bottom || rb.top<tb.top) r.scrollIntoView({block:'center', behavior:'smooth'});
+  }
+  function step(){
+    if(idx >= scenarios[cur].length-1){ stop(); return false; }
+    seek(idx+1); return true;
+  }
+  function play(){
+    if(timer){ stop(); return; }
+    if(idx >= scenarios[cur].length-1){ build(); }  // at end → restart
+    playBtn.textContent = "⏸ 暂停";
+    step();                                          // advance one immediately
+    timer = setInterval(step, 900);
+  }
+  function stop(){
+    if(timer){ clearInterval(timer); timer=null; }
+    playBtn.textContent = "▸ 播放";
+  }
+
+  playBtn.addEventListener('click', play);
+  document.getElementById('step').addEventListener('click', ()=>{ stop(); step(); });
+  document.getElementById('reset').addEventListener('click', ()=>{ stop(); build(); });
+  document.querySelectorAll('#scenario button').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      stop();
+      document.querySelectorAll('#scenario button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); cur = b.dataset.s; build();
+    });
+  });
+
+  build();
+})();
+</script>
 </body>
 </html>
