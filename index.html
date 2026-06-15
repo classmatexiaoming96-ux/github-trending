@@ -1466,9 +1466,218 @@ Worried about the API rate limit during the burst window...</code></pre>
       </div>
       <!-- /OPENCLAW_DEEP_DIVE -->
 
+      <!-- OPENCLAW_SOURCE_DEEP_DIVE -->
+      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · src/ 逐模块解析</h4>
+      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>src/entry.ts</code>、<code>src/agents/acp-spawn.ts</code>（1708行）、<code>src/agents/harness/types.ts</code>、<code>src/agents/agent-bundle-mcp-runtime.ts</code>、<code>src/plugins/manifest.ts</code>、<code>src/plugins/api-builder.ts</code>、<code>src/plugins/runtime.ts</code>、<code>src/agents/sandbox/runtime-status.ts</code> 的逐文件阅读，含实际函数签名与类型定义。所有结论来自源码文本。</p>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/entry.ts — Gateway 入口与主循环</span></div>
+        <pre><code><span class="tok-c">// entry.ts:92-94 — 解析安装根目录</span>
+<span class="tok-k">const</span> entryFile <span class="tok-p">=</span> fileURLToPath<span class="tok-p">(</span>import.meta.url<span class="tok-p">);</span>
+<span class="tok-k">const</span> installRoot <span class="tok-p">=</span> resolveEntryInstallRoot<span class="tok-p">(</span>entryFile<span class="tok-p">);</span>
+
+<span class="tok-c">// entry.ts:285 — 主函数</span>
+<span class="tok-k">async function</span> <span class="tok-f">runMainOrRootHelp</span><span class="tok-p">(</span>argv<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">[]):</span> <span class="tok-t">Promise</span><span class="tok-p">&lt;</span><span class="tok-t">void</span><span class="tok-p">&gt;</span> <span class="tok-p">{</span>
+  <span class="tok-k">const</span> <span class="tok-p">{</span> runCli <span class="tok-p">}</span> <span class="tok-p">=</span> <span class="tok-k">await</span> gatewayEntryStartupTrace.<span class="tok-f">measure</span><span class="tok-p">(</span>
+    <span class="tok-s">"cli"</span><span class="tok-p">,</span> <span class="tok-k">async</span> <span class="tok-p">() =&gt;</span> <span class="tok-p">{</span>
+      <span class="tok-k">const</span> parsed <span class="tok-p">=</span> parseCliProfileArgs<span class="tok-p">(</span>parsedContainer.argv<span class="tok-p">);</span>
+      <span class="tok-k">await</span> runCli<span class="tok-p">({</span> argv<span class="tok-p">:</span> parsed.argv <span class="tok-p">});</span>
+    <span class="tok-p">}</span>
+  <span class="tok-p">);</span>
+<span class="tok-p">}</span>
+
+<span class="tok-c">// 编译缓存优化 — 重 spawn 时不带缓存标志避免递归</span>
+<span class="tok-k">const</span> <span class="tok-p">{</span>
+  enableOpenClawCompileCache<span class="tok-p">,</span>
+  resolveEntryInstallRoot<span class="tok-p">,</span>
+  respawnWithoutOpenClawCompileCacheIfNeeded<span class="tok-p">,</span>
+<span class="tok-p">}</span> <span class="tok-p">=</span> <span class="tok-k">await</span> <span class="tok-k">import</span><span class="tok-p">(</span><span class="tok-s">"./entry.compile-cache.js"</span><span class="tok-p">);</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">Gateway 启动链路</h4>
+        <p class="reveal"><code>entry.ts</code> → <code>resolveEntryInstallRoot()</code> → <code>respawnWithoutOpenClawCompileCacheIfNeeded()</code>（编译缓存优化，重 spawn 时去掉缓存标志防止递归）→ <code>parseCliProfileArgs()</code>（profile 环境变量注入）→ <code>runCli()</code> → gateway 子命令。编译缓存路径由 <code>OPENCLAW_COMPILE_CACHE_DIR</code> 控制。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agents/acp-spawn.ts — ACP 会话生成（核心文件，1708行）</span></div>
+        <pre><code><span class="tok-c">// acp-spawn.ts 关键导入</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span> getAcpSessionManager <span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"../acp/control-plane/manager.js"</span><span class="tok-p">;</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span>
+  cleanupFailedAcpSpawn<span class="tok-p">,</span> <span class="tok-k">type</span> AcpSpawnRuntimeCloseHandle<span class="tok-p">,</span>
+<span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"../acp/control-plane/spawn.js"</span><span class="tok-p">;</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span> isAcpEnabledByPolicy<span class="tok-p">,</span> resolveAcpAgentPolicyError <span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"../acp/policy.js"</span><span class="tok-p">;</span>
+<span class="tok-k">import</span> <span class="tok-k">type</span> <span class="tok-p">{</span> AcpRuntimeSessionMode <span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"@openclaw/acp-core/runtime/types"</span><span class="tok-p">;</span>
+
+<span class="tok-c">// 导入 session 限制配置</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span>
+  DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT<span class="tok-p">,</span>
+  DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH<span class="tok-p">,</span>
+<span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"../config/agent-limits.js"</span><span class="tok-p">;</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">ACP 会话生成流程</h4>
+        <p class="reveal"><code>acp-spawn.ts</code> 的 <code>getAcpSessionManager()</code> 从 <code>acp/control-plane/manager.js</code> 获取会话管理器 → <code>spawn.js</code> 中的 <code>cleanupFailedAcpSpawn()</code> 处理失败清理 → <code>policy.js</code> 的 <code>isAcpEnabledByPolicy()</code> 做策略检查。父进程通过 <code>acp-spawn-parent-stream.ts</code> 做 stdout relay，把 ACP harness 的输出流打回到 OpenClaw 会话。<code>AcpRuntimeSessionMode</code> 定义了三种会话类型（交互式/一次性/持久），由 <code>@openclaw/acp-core/runtime/types.ts</code> 约束。</p>
+        <p class="reveal">会话限制：<code>DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT</code> 控制每 agent 最大子会话数；<code>DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</code> 控制最大 spawn 深度，防止嵌套失控。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agents/harness/types.ts — AgentHarness 接口定义</span></div>
+        <pre><code><span class="tok-c">// 所有外部 harness（Claude Code / Codex / Cursor 等）必须实现的统一接口</span>
+<span class="tok-k">export type</span> <span class="tok-t">AgentHarness</span> <span class="tok-p">=</span> AgentHarnessRunCapability <span class="tok-p">&amp;</span>
+  AgentHarnessSideQuestionCapability <span class="tok-p">&amp;</span>
+  AgentHarnessClassificationCapability <span class="tok-p">&amp;</span>
+  AgentHarnessCompactionCapability <span class="tok-p">&amp;</span>
+  AgentHarnessSessionLifecycleCapability<span class="tok-p">;</span>
+
+<span class="tok-k">export type</span> <span class="tok-t">AgentHarnessRunCapability</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  <span class="tok-f">run</span><span class="tok-p">(</span>params<span class="tok-p">:</span> AgentHarnessAttemptParams<span class="tok-p">):</span> <span class="tok-t">Promise</span><span class="tok-p">&lt;</span>AgentHarnessAttemptResult<span class="tok-p">&gt;;</span>
+<span class="tok-p">};</span>
+
+<span class="tok-k">export type</span> <span class="tok-t">AgentHarnessSideQuestionCapability</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  <span class="tok-f">sideQuestion</span><span class="tok-p">(</span>params<span class="tok-p">:</span> AgentHarnessSideQuestionParams<span class="tok-p">):</span>
+    <span class="tok-t">Promise</span><span class="tok-p">&lt;</span>AgentHarnessSideQuestionResult<span class="tok-p">&gt;;</span>
+<span class="tok-p">};</span>
+
+<span class="tok-k">export type</span> <span class="tok-t">AgentHarnessCompactionCapability</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  <span class="tok-f">compact</span><span class="tok-p">(</span>params<span class="tok-p">:</span> AgentHarnessCompactParams<span class="tok-p">):</span>
+    <span class="tok-t">Promise</span><span class="tok-p">&lt;</span>AgentHarnessCompactResult<span class="tok-p">&gt;;</span>
+<span class="tok-p">};</span>
+
+<span class="tok-k">export type</span> <span class="tok-t">AgentHarnessSessionLifecycleCapability</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  <span class="tok-f">reset</span><span class="tok-p">?(</span>params<span class="tok-p">:</span> AgentHarnessResetParams<span class="tok-p">):</span> <span class="tok-t">Promise</span><span class="tok-p">&lt;</span><span class="tok-t">void</span><span class="tok-p">&gt;;</span>
+<span class="tok-p">};</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">AgentHarness — ACP 外部 harness 的统一抽象</h4>
+        <p class="reveal"><code>AgentHarness</code> 是 OpenClaw 接入外部编程工具（Claude Code、Cursor、Gemini CLI、Codex 等）的核心协议。<code>run()</code> 是必须实现的，其余 <code>sideQuestion()</code>（侧提问，需用户确认）、<code>compact()</code>（压缩会话历史）、<code>reset()</code>（重置会话）都是可选扩展。OpenClaw 通过这个接口把所有外部 harness 统一成一种调用模式，无需关心具体实现。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agents/agent-bundle-mcp-runtime.ts — MCP Client 实现</span></div>
+        <pre><code><span class="tok-c">// 基于 @modelcontextprotocol/sdk 的 MCP Client</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span> Client <span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"@modelcontextprotocol/sdk/client/index.js"</span><span class="tok-p">;</span>
+<span class="tok-k">import</span> <span class="tok-p">{</span> StreamableHTTPClientTransport <span class="tok-p">}</span> <span class="tok-k">from</span> <span class="tok-s">"@modelcontextprotocol/sdk/client/streamableHttp.js"</span><span class="tok-p">;</span>
+
+<span class="tok-k">type</span> <span class="tok-t">BundleMcpSession</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  serverName<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+  client<span class="tok-p">:</span> Client<span class="tok-p">;</span>
+  transport<span class="tok-p">:</span> Transport<span class="tok-p">;</span>
+  transportType<span class="tok-p">:</span> <span class="tok-s">"stdio"</span> <span class="tok-p">|</span> <span class="tok-s">"sse"</span> <span class="tok-p">|</span> <span class="tok-s">"streamable-http"</span><span class="tok-p">;</span>
+  requestTimeoutMs<span class="tok-p">:</span> <span class="tok-t">number</span><span class="tok-p">;</span>
+  supportsParallelToolCalls<span class="tok-p">:</span> <span class="tok-t">boolean</span><span class="tok-p">;</span>
+<span class="tok-p">};</span>
+
+<span class="tok-k">const</span> SESSION_MCP_RUNTIME_MANAGER_KEY <span class="tok-p">=</span>
+  Symbol.<span class="tok-f">for</span><span class="tok-p">(</span><span class="tok-s">"openclaw.sessionMcpRuntimeManager"</span><span class="tok-p">);</span>  <span class="tok-c">// 进程单例</span>
+
+<span class="tok-k">const</span> BUNDLE_MCP_CATALOG_LIST_TIMEOUT_MS <span class="tok-p">=</span> <span class="tok-n">1500</span><span class="tok-p">;</span>   <span class="tok-c">// 工具列表超时</span>
+<span class="tok-k">const</span> BUNDLE_MCP_FAILURE_COOLDOWN_MS <span class="tok-p">=</span> <span class="tok-n">60000</span><span class="tok-p">;</span>     <span class="tok-c">// 失败重试冷却</span>
+<span class="tok-k">const</span> DEFAULT_SESSION_MCP_RUNTIME_IDLE_TTL_MS <span class="tok-p">=</span> <span class="tok-n">10</span> <span class="tok-p">*</span> <span class="tok-n">60</span> <span class="tok-p">*</span> <span class="tok-n">1000</span><span class="tok-p">;</span>  <span class="tok-c">// 10分钟 idle TTL</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">MCP Client — 三种传输协议 + 故障恢复</h4>
+        <p class="reveal">OpenClaw 的 MCP 实现基于官方 <code>@modelcontextprotocol/sdk</code>，支持 <code>stdio</code>（本地进程）、<code>sse</code>（Server-Sent Events）、<code>streamable-http</code>（流式 HTTP）三种传输类型。每个会话持有一个 <code>Client</code> 实例，工具列表用 <code>Client.listTools()</code> 获取，超时 1500ms；工具调用走 <code>Client.callTool()</code>。失败用指数退避（60s cooldown），3 次失败后标记不可用。Session idle TTL 默认 10 分钟，超时自动销毁释放资源。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/plugins/manifest.ts — openclaw.plugin.json 解析</span></div>
+        <pre><code><span class="tok-c">// manifest.ts — 插件元数据文件解析</span>
+<span class="tok-k">export const</span> PLUGIN_MANIFEST_FILENAME <span class="tok-p">=</span> <span class="tok-s">"openclaw.plugin.json"</span><span class="tok-p">;</span>
+<span class="tok-k">export const</span> MAX_PLUGIN_MANIFEST_BYTES <span class="tok-p">=</span> <span class="tok-n">256</span> <span class="tok-p">*</span> <span class="tok-n">1024</span><span class="tok-p">;</span>  <span class="tok-c">// 256KB 上限</span>
+
+<span class="tok-k">const</span> pluginManifestLoadCache <span class="tok-p">=</span> <span class="tok-k">new</span> PluginLruCache<span class="tok-p">&lt;</span>PluginManifestLoadCacheEntry<span class="tok-p">&gt;(</span>
+  <span class="tok-n">512</span>  <span class="tok-c">// SLRU 缓存，512 条目</span>
+<span class="tok-p">);</span>
+
+<span class="tok-k">export function</span> <span class="tok-f">clearPluginManifestLoadCache</span><span class="tok-p">():</span> <span class="tok-t">void</span> <span class="tok-p">{</span>
+  <span class="tok-c">// 测试用或显式刷新时清除缓存</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/plugins/api-builder.ts — PluginApi 构建器</span></div>
+        <pre><code><span class="tok-c">// api-builder.ts — BuildPluginApiParams 定义了所有可注册项</span>
+<span class="tok-k">export type</span> <span class="tok-t">BuildPluginApiParams</span> <span class="tok-p">=</span> <span class="tok-p">{</span>
+  id<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+  name<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+  registrationMode<span class="tok-p">:</span> <span class="tok-t">OpenClawPluginApi</span><span class="tok-p">[</span><span class="tok-s">"registrationMode"</span><span class="tok-p">];</span>
+  config<span class="tok-p">:</span> <span class="tok-t">OpenClawConfig</span><span class="tok-p">;</span>
+  runtime<span class="tok-p">:</span> <span class="tok-t">PluginRuntime</span><span class="tok-p">;</span>
+  logger<span class="tok-p">:</span> <span class="tok-t">PluginLogger</span><span class="tok-p">;</span>
+  handlers?<span class="tok-p">:</span> <span class="tok-t">Partial</span><span class="tok-p">&lt;</span><span class="tok-t">Pick</span><span class="tok-p">&lt;</span><span class="tok-t">OpenClawPluginApi</span><span class="tok-p">,</span>
+    <span class="tok-s">"registerTool"</span>        <span class="tok-c">// 注册工具</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerHook"</span>       <span class="tok-c">// 生命周期钩子</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerHttpRoute"</span>   <span class="tok-c">// HTTP 路由</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerChannel"</span>    <span class="tok-c">// 消息渠道</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerGatewayMethod"</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerProvider"</span>    <span class="tok-c">// 模型/语音/图像 Provider</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerAgentHarness"</span> <span class="tok-c">// ACP 外部 harness</span>
+    <span class="tok-p">|</span> <span class="tok-s">"registerMcpServer"</span>    <span class="tok-c">// MCP 服务器</span>
+    <span class="tok-c">// … 共 30+ 注册方法</span>
+  <span class="tok-p">&gt;&gt;</span>
+<span class="tok-p">};</span></code></pre>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/plugins/runtime.ts — PluginRegistry 运行时协调器</span></div>
+        <pre><code><span class="tok-c">// runtime.ts — 全局 RegistryState 保存在 globalThis 上</span>
+<span class="tok-k">const</span> state<span class="tok-p">:</span> <span class="tok-t">RegistryState</span> <span class="tok-p">=</span> <span class="tok-p">(() =&gt; {</span>
+  <span class="tok-k">const</span> globalState <span class="tok-p">=</span> globalThis <span class="tok-k">as</span> <span class="tok-t">typeof</span> globalThis <span class="tok-p">&amp;</span> <span class="tok-p">{</span>
+    <span class="tok-p">[</span>PLUGIN_REGISTRY_STATE<span class="tok-p">]?:</span> <span class="tok-t">RegistryState</span><span class="tok-p">;</span>
+  <span class="tok-p">};</span>
+  <span class="tok-k">if</span> <span class="tok-p">(!</span>registryState<span class="tok-p">) {</span>
+    registryState <span class="tok-p">=</span> <span class="tok-p">{</span>
+      activeRegistry<span class="tok-p">:</span> <span class="tok-k">null</span><span class="tok-p">,</span>
+      activeVersion<span class="tok-p">:</span> <span class="tok-n">0</span><span class="tok-p">,</span>
+      httpRoute<span class="tok-p">:</span> <span class="tok-p">{</span> registry<span class="tok-p">:</span> <span class="tok-k">null</span><span class="tok-p">,</span> pinned<span class="tok-p">:</span> <span class="tok-k">false</span><span class="tok-p">,</span> version<span class="tok-p">:</span> <span class="tok-n">0</span> <span class="tok-p">},</span>
+      channel<span class="tok-p">:</span> <span class="tok-p">{</span> registry<span class="tok-p">:</span> <span class="tok-k">null</span><span class="tok-p">,</span> pinned<span class="tok-p">:</span> <span class="tok-k">false</span><span class="tok-p">,</span> version<span class="tok-p">:</span> <span class="tok-n">0</span> <span class="tok-p">},</span>
+      importedPluginIds<span class="tok-p">:</span> <span class="tok-t">new</span> <span class="tok-t">Set</span><span class="tok-p">&lt;</span><span class="tok-t">string</span><span class="tok-p">&gt;(),</span>
+      runtimeSubagentMode<span class="tok-p">:</span> <span class="tok-s">"default"</span><span class="tok-p">,</span>
+    <span class="tok-p">};</span>
+  <span class="tok-p">}</span>
+  <span class="tok-k">return</span> registryState<span class="tok-p">;</span>
+<span class="tok-p">})();</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">Plugin 运行时 — globalThis 上的单例 Registry</h4>
+        <p class="reveal">OpenClaw 的插件运行时用 <code>globalThis</code> 存储全局 registry 状态，保证每个进程只有一个 plugin registry 实例。<code>httpRoute</code> 和 <code>channel</code> 是同一 registry 的两个"视角"，分别用于 HTTP 路由和消息渠道。<code>pinned</code> 标记防止正在使用的 registry 被意外清理。插件按需懒加载，只在首次注册时实例化 runtime。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agents/sandbox/runtime-status.ts — 沙箱隔离模型</span></div>
+        <pre><code><span class="tok-c">// sandbox/runtime-status.ts — 三种沙箱模式</span>
+<span class="tok-k">function</span> <span class="tok-f">shouldSandboxSession</span><span class="tok-p">(</span>
+  cfg<span class="tok-p">:</span> <span class="tok-t">SandboxConfig</span><span class="tok-p">,</span>
+  sessionKey<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">,</span>
+  mainSessionKey<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">,</span>
+<span class="tok-p">)</span> <span class="tok-p">{</span>
+  <span class="tok-k">if</span> <span class="tok-p">(</span>cfg.mode <span class="tok-p">===</span> <span class="tok-s">"off"</span><span class="tok-p">)</span> <span class="tok-k">return</span> <span class="tok-k">false</span><span class="tok-p">;</span>   <span class="tok-c">// 关闭沙箱</span>
+  <span class="tok-k">if</span> <span class="tok-p">(</span>cfg.mode <span class="tok-p">===</span> <span class="tok-s">"all"</span><span class="tok-p">)</span> <span class="tok-k">return</span> <span class="tok-k">true</span><span class="tok-p">;</span>    <span class="tok-c">// 全部沙箱</span>
+  <span class="tok-k">return</span> sessionKey.<span class="tok-f">trim</span><span class="tok-p">() !==</span> mainSessionKey.<span class="tok-f">trim</span><span class="tok-p">();</span>  <span class="tok-c">// non-main session 沙箱</span>
+<span class="tok-p">}</span>
+
+<span class="tok-k">export function</span> <span class="tok-f">resolveSandboxRuntimeStatus</span><span class="tok-p">(</span>params<span class="tok-p">:</span> <span class="tok-p">{</span>
+  cfg?<span class="tok-p">:</span> <span class="tok-t">OpenClawConfig</span><span class="tok-p">;</span>
+  sessionKey?<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+  agentId<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span>
+<span class="tok-p">}):</span> <span class="tok-t">SandboxRuntimeStatus</span> <span class="tok-p">{</span>
+  <span class="tok-c">// ...返回 sandbox mode + 工具策略</span>
+<span class="tok-p">}</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <h4 class="reveal">沙箱三种模式 — off / all / non-main</h4>
+        <p class="reveal"><code>sandbox.mode</code>：<code>"off"</code>（主 session 不隔离，直接在宿主机执行）、<code>"all"</code>（所有 session 都进 Docker/SSH 隔离）、<code>"non-main"</code>（默认，主 session 保持本地执行，非主 session 隔离）。工具策略由 <code>tool-policy.ts</code> 的 <code>classifyToolAgainstSandboxToolPolicy()</code> 在每次工具调用前检查，决定是否放行。</p>
+      </div>
+
       <div class="prose">
         <h4 class="reveal">对 coding agent 生态的意义</h4>
-        <p class="reveal">OpenClaw 的核心价值在于<strong>把"个人 AI"从"某个平台的 AI 工具"里解放出来</strong>。你的 AI 助手不需要存在于每个消息平台——它只需要存在一次，通过 channel 适配器连接到所有平台。OpenClaw 的 subagent 系统和 ACP 协议，也为 multi-agent 协作提供了可复用的基础设施。</p>
+        <p class="reveal">OpenClaw 的核心价值在于<strong>把"个人 AI"从"某个平台的 AI 工具"里解放出来</strong>——你的 AI 助手只需要存在一次，通过 channel 适配器连接到所有平台。OpenClaw 的 subagent 系统、ACP 协议和 AgentHarness 接口，也为 multi-agent 协作提供了可复用的基础设施。</p>
       </div>
     </div>
   </div>
