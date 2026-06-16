@@ -1,139 +1,559 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>baoyu-design · 源码深度解析 · Agent Infrastructure Teardown</title>
-<meta name="description" content="JimLiu/baoyu-design 源码级深度解析：把 Claude Design 包装成跨 harness 的 portable Agent Skill，在 Claude Code / Cursor / Codex / OpenCode 上本地运行设计引擎。" />
-<meta property="og:title" content="baoyu-design · 把 Claude Design 装进你的 coding agent" />
-<meta property="og:description" content="Portable design skill for Claude Code · Cursor · Codex · OpenCode — 零 API，本地生成 UI mockups、交互原型、线框图、PPT。" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>baoyu-design · 源码级架构解析 · Portable Design Skill / Harness / ds-core</title>
+<meta name="description" content="JimLiu/baoyu-design 源码级深度解析——把 claude.ai/design 的设计引擎封装成跨 harness 的 portable Agent Skill：harness 抽象层、compile/check/import 三段式设计系统管道、ds-core 读-only 解析器、_ds_bundle 双作用域 fail-soft、Babel 剥离插件、token 分类器、adherence lint、命名空间三级解析、fork-verifier 验证探针。基于 skills/baoyu-design/ 源码撰写，含真实函数名与代码片段。" />
+<meta property="og:title" content="baoyu-design · 把 Claude Design 装进本地 coding agent" />
 <meta property="og:type" content="article" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   baoyu-design — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* gold accent — baoyu-design */
+  --star:       #e9b873;
+  --star-soft:  #f3d2a0;
+  --star-deep:  #cf9a52;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(233,184,115,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(233,184,115,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(233,184,115,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(233,184,115,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; overflow-y:auto; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(233,184,115,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-list a.sub-link{ padding-left:28px; font-size:12.5px; }
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:22px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(233,184,115,0.09); border:1px solid rgba(233,184,115,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- deep-read link ---- */
+.deep-link{
+  display:inline-flex; align-items:center; gap:8px; margin-top:16px;
+  font-family:var(--mono); font-size:11.5px; letter-spacing:0.06em;
+  color:var(--star); text-decoration:none; border:1px solid var(--line-amber);
+  border-radius:99px; padding:6px 15px; background:rgba(233,184,115,0.06);
+  transition:background .25s var(--ease), transform .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover{ background:rgba(233,184,115,0.15); border-color:var(--star); }
+.deep-link .arr{ transition:transform .25s var(--ease); }
+.deep-link:hover .arr{ transform:translateX(4px); }
+.deep-link b{ color:var(--star-soft); font-weight:500; }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; flex-wrap:wrap; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.12em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(44px,7.5vw,98px); line-height:0.94;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(16px,1.6vw,20px); color:var(--text-2); max-width:56ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#1a1206; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+.hero-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:54px; }
+.hero-stats .cell{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; }
+.hero-stats .n{ font-family:var(--mono); font-size:15px; color:var(--star-soft); word-break:break-all; }
+.hero-stats .l{ font-size:12px; color:var(--text-dim); margin-top:5px; }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(233,184,115,0.16); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.06em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ============================================================
+   FLOW (pipeline)
+   ============================================================ */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files / cheat ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .hero-stats{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.hero-stats{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
 </head>
-<body class="tabs-active">
+<body>
 
-<div id="progress"></div>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
 
-<nav class="site-index">
-  <div class="wrap">
-    <span class="site-index-label">📂 项目索引</span>
-    <div class="site-index-links">
-      <a href="index.html#cg">🗂 CodeGraph<span>索引层</span></a>
-      <a href="index.html#ua">🗂 Understand-Anything<span>认知层</span></a>
-      <a href="index.html#cp">🗂 Claude Plugins<span>能力层</span></a>
-      <a href="index.html#oh">🗂 OpenHuman Memory Tree<span>记忆层</span></a>
-      <a href="index.html#kc">🗂 Kimi Code<span>模型层</span></a>
-      <a href="index.html#oc">🗂 OpenClaw<span>全渠道</span></a>
-      <a href="index.html#by">🗂 baoyu-design<span>设计层</span></a>
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">baoyu<b>design</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">baoyu<b>design</b></div>
+      <div class="sub">源码级架构解析 · skills/baoyu-design/</div>
     </div>
-  </div>
-</nav>
-
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" data-tab="cg"><span class="dot"></span>CodeGraph <span class="pill">索引层</span></button>
-      <button role="tab" data-tab="ua"><span class="dot"></span>Understand-Anything <span class="pill">认知层</span></button>
-      <button role="tab" data-tab="cp"><span class="dot"></span>Claude Plugins <span class="pill">能力层</span></button>
-      <button role="tab" data-tab="oh"><span class="dot"></span>OpenHuman Memory Tree <span class="pill">记忆层</span></button>
-      <button role="tab" data-tab="kc"><span class="dot"></span>Kimi Code <span class="pill">模型层</span></button>
-      <button role="tab" data-tab="oc"><span class="dot"></span>OpenClaw <span class="pill">全渠道</span></button>
-      <button role="tab" data-tab="by"><span class="dot"></span>baoyu-design <span class="pill">设计层</span></button>
+    <span class="nav-ver">Node.js · portable Agent Skill</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#positioning"><span class="idx">01</span>核心定位</a></li>
+        <li><a href="#architecture-overview"><span class="idx">02</span>架构总览</a></li>
+        <li><a href="#harness-abstraction"><span class="idx">03</span>Harness 抽象层</a></li>
+        <li><a href="#ds-pipeline"><span class="idx">04</span>设计系统管道</a></li>
+        <li><a href="#ds-core"><span class="idx">05</span>ds-core 解析器</a></li>
+        <li><a href="#asset-store"><span class="idx">06</span>资产版本化</a></li>
+        <li><a href="#starter-components"><span class="idx">07</span>Starter 构件</a></li>
+        <li><a href="#fork-verifier"><span class="idx">08</span>验证子 agent</a></li>
+        <li><a href="#ds-lifecycle"><span class="idx">09</span>创作消费全流程</a></li>
+        <li><a href="#compile-call-chain"><span class="idx">10</span>编译调用链全解</a></li>
+        <li><a href="#bundle-internals" class="sub-link"><span class="idx">11</span>Bundle 双作用域</a></li>
+        <li><a href="#babel-strip-plugin" class="sub-link"><span class="idx">12</span>Babel 剥离插件</a></li>
+        <li><a href="#token-classification" class="sub-link"><span class="idx">13</span>Token 分类器</a></li>
+        <li><a href="#adherence-lint" class="sub-link"><span class="idx">14</span>Adherence Lint</a></li>
+        <li><a href="#namespace-resolution" class="sub-link"><span class="idx">15</span>命名空间解析</a></li>
+        <li><a href="#import-flow"><span class="idx">16</span>Import 数据流</a></li>
+        <li><a href="#ds-prompt-render"><span class="idx">17</span>_ds_prompt 渲染</a></li>
+        <li><a href="#verifier-probes"><span class="idx">18</span>验证探针协议</a></li>
+        <li><a href="#vs-pi-workflows"><span class="idx">19</span>对比 pi-workflows</a></li>
+        <li><a href="#highlights"><span class="idx">20</span>技术亮点</a></li>
+        <li><a href="#limitations"><span class="idx">21</span>局限性</a></li>
+        <li><a href="#pitfalls" class="sub-link"><span class="idx">22</span>工程陷阱</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      JimLiu/baoyu-design · MIT<br/>
+      portable design skill · 零 API<br/>
+      <a href="https://github.com/JimLiu/baoyu-design" target="_blank" rel="noopener">github.com/JimLiu/baoyu-design ↗</a>
     </div>
-  </div>
-</header>
+  </aside>
 
-<main>
+  <!-- =================== MAIN =================== -->
+  <main class="main">
 
-<div class="tab-panel active" data-tab="by">
-
-<!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
-<nav class="nav-toc" aria-label="页面目录">
-  <h3>目录</h3>
-  <ul>
-    <li><a href="#positioning">核心定位</a></li>
-    <li><a href="#architecture-overview">架构总览</a></li>
-    <li><a href="#harness-abstraction">Harness 抽象层</a></li>
-    <li><a href="#ds-pipeline">设计系统管道</a></li>
-    <li><a href="#ds-core">ds-core 解析器</a></li>
-    <li><a href="#asset-store">资产版本化</a></li>
-    <li><a href="#starter-components">Starter 构件</a></li>
-    <li><a href="#fork-verifier">验证子 agent</a></li>
-    <li><a href="#ds-lifecycle">创作消费全流程</a></li>
-    <li><a href="#compile-call-chain">编译调用链全解</a></li>
-    <li class="toc-sub"><a href="#bundle-internals">Bundle 双作用域</a></li>
-    <li class="toc-sub"><a href="#babel-strip-plugin">Babel 剥离插件</a></li>
-    <li class="toc-sub"><a href="#token-classification">Token 分类器</a></li>
-    <li class="toc-sub"><a href="#adherence-lint">Adherence Lint</a></li>
-    <li class="toc-sub"><a href="#namespace-resolution">命名空间解析</a></li>
-    <li><a href="#import-flow">Import 数据流</a></li>
-    <li><a href="#ds-prompt-render">_ds_prompt 渲染</a></li>
-    <li><a href="#verifier-probes">验证探针协议</a></li>
-    <li><a href="#vs-pi-workflows">对比 pi-workflows</a></li>
-    <li><a href="#highlights">技术亮点</a></li>
-    <li><a href="#limitations">局限性</a></li>
-    <li class="toc-sub"><a href="#pitfalls">工程陷阱</a></li>
-  </ul>
-</nav>
-
-  <style>.tab-panel[data-tab="by"] section{--accent:#e9b873}.tab-panel[data-tab="by"] .hero{--accent:#e9b873}</style>
-
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>JimLiu/baoyu-design · 2026-06-06 · MIT</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">baoyu-design</span> · 把 Claude Design 装进本地 coding agent</h1>
-    <p class="lead reveal" style="margin-bottom:0">把 claude.ai/design 的设计引擎封装成<strong>跨 harness 的 portable Agent Skill</strong>——Claude Code、Cursor、Codex、OpenCode 都能跑，在本地生成 UI mockups、交互原型、线框图、PPT、slides，输出物全部是自包含 HTML，零 API、零上传。</p>
-    <div class="statstrip reveal" style="max-width:780px;margin:38px auto 0">
-      <div class="cell"><div class="n">672</div><div class="l">Stars (6 days)</div></div>
-      <div class="cell"><div class="n">Node.js</div><div class="l">运行时</div></div>
-      <div class="cell"><div class="n">4</div><div class="l">Harness 支持</div></div>
-      <div class="cell"><div class="n">38 KB</div><div class="l">System Prompt</div></div>
-    </div>
-  </div>
-</section>
-
-  <section id="by" class="project by">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">BY</div>
-      <div class="proj-title">
-        <h2>baoyu-design</h2>
-        <a class="repo" href="https://github.com/JimLiu/baoyu-design" target="_blank" rel="noopener">JimLiu/baoyu-design · MIT · 2026-06-06</a>
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>JimLiu/baoyu-design · 源码级</span>
+        <span class="pill">2026-06-06 · <b>MIT</b></span>
+        <span class="pill">基于 <b>skills/</b> 源码文本</span>
       </div>
-    </div>
-    <div class="narrow">
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">把 Claude Design</span>
+            <span class="l2">装进<em>本地</em> coding <span class="core">agent</span></span>
+          </h1>
+          <p class="hero-sub">把 <b>claude.ai/design</b> 的设计引擎封装成跨 harness 的 <b>portable Agent Skill</b>——Claude Code / Cursor / Codex / OpenCode 都能在本地跑，生成 UI mockups、交互原型、线框图、PPT，输出物全是自包含 HTML，零 API、零上传。</p>
+          <p class="hero-pkg"># <b>JimLiu/baoyu-design</b> · Node.js / MJS · vendored Babel</p>
+          <div class="hero-cta">
+            <a href="#architecture-overview" class="btn primary">▸ 从架构读起</a>
+            <a href="#pitfalls" class="btn ghost">查看工程陷阱</a>
+          </div>
+          <div class="hero-stats">
+            <div class="cell"><div class="n">672</div><div class="l">Stars (6 days)</div></div>
+            <div class="cell"><div class="n">Node.js</div><div class="l">运行时</div></div>
+            <div class="cell"><div class="n">4 Harness</div><div class="l">Claude / Cursor / Codex / generic</div></div>
+            <div class="cell"><div class="n">38 KB</div><div class="l">System Prompt</div></div>
+          </div>
+        </div>
 
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">672</div><div class="l">Stars (6 days)</div></div>
-        <div class="chip"><div class="n">Node.js / MJS</div><div class="l">技术栈</div></div>
-        <div class="chip"><div class="n">Babel</div><div class="l">JSX 转译</div></div>
-        <div class="chip"><div class="n">零 API</div><div class="l">设计引擎</div></div>
+        <!-- radar -->
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#e9b873" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#e9b873" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#e9b873" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#e9b873" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#54d6e0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fcf9e" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#54d6e0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#e9b873" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="28" fill="rgba(233,184,115,0.08)" stroke="rgba(233,184,115,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#e9b873" font-size="14">Skill</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">portable</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">Harness</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">ds-core</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">compile</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">verify</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">import</text>
+          </svg>
+        </div>
+      </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
+
+    <!-- ---------- 01 核心定位 ---------- -->
+    <section id="positioning">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">positioning · the one-liner</div>
+        <h2>核心<em>定位</em></h2>
+        <p class="lead">一句话：把 Claude Design 的能力包装成一个 <strong>portable Agent Skill</strong>，让 Claude Code、Cursor、Codex（甚至通用的文件读写 agent）都能在本地运行完整的设计引擎，输出物是自包含 HTML——不需要访问 claude.ai/design，不需要订阅，不需要任何远程 API。</p>
       </div>
 
-      <div class="prose">
+      <div class="reveal">
+        <p>作者 JimLiu 在 6 天内（2026-06-06 创建）把这个项目从 0 做到 <strong>672 stars</strong>，增长速度极快。关键在于它解决了一个真实痛点：coding agent 越来越强，但设计师和开发者想把 AI 生成的设计直接嵌入自己的工作流，需要在「网站」和「编辑器」之间来回切换。baoyu-design 把这个 gap 消掉了。</p>
 
-        <h4 class="reveal" id="positioning">核心定位</h4>
-        <p class="reveal"><strong>一句话：</strong>把 Claude Design 的能力包装成一个 portable Agent Skill，让 Claude Code、Cursor、Codex（甚至通用的文件读写 agent）都能在本地运行完整的设计引擎，输出物是自包含 HTML——不需要访问 claude.ai/design，不需要订阅，不需要任何远程 API。</p>
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">portable</div><h3>跨 harness</h3><p>同一套 Skill 跑在 Claude Code / Cursor / Codex / 通用 agent 上，方法论复用、工具实现解耦。</p></div>
+          <div class="card cy"><div class="ic">零 API</div><h3>本地设计引擎</h3><p>所有能力在本地运行，不访问 claude.ai/design、不需要订阅、不上传任何内容。</p></div>
+          <div class="card"><div class="ic">self-contained</div><h3>自包含 HTML</h3><p>UI mockups / 交互原型 / 线框图 / PPT 全部产出自包含 HTML，可直接打开或部署。</p></div>
+        </div>
+      </div>
+    </section>
 
-        <p class="reveal">作者 JimLiu 在 6 天内（2026-06-06 创建）把这个项目从 0 做到 672 stars，增长速度极快。关键在于它解决了一个真实痛点：coding agent 越来越强，但设计师和开发者想把 AI 生成的设计直接嵌入自己的工作流，需要在「网站」和「编辑器」之间来回切换。baoyu-design 把这个 gap 消掉了。</p>
+    <!-- ---------- 02 架构总览 ---------- -->
+    <section id="architecture-overview">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">layout · the source map</div>
+        <h2>架构<em>总览</em></h2>
+        <p class="lead">技能根目录 <code class="k">skills/baoyu-design/</code> 把方法论、harness 映射、子技能、编译 agent、设计构件与 vendored Babel 分层组织。</p>
+      </div>
 
-        <h4 class="reveal" id="architecture-overview">架构总览</h4>
-<pre class="reveal lang-text">skills/baoyu-design/
-├── SKILL.md              ← 入口：harness 检测 + 技能调度
-├── system-prompt.md       ← 核心设计方法论（38 KB）
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">skills/baoyu-design/ 目录树</span><button class="copy">复制</button></div>
+<pre><code>skills/baoyu-design/
+├── SKILL.md              <span class="t-com">← 入口：harness 检测 + 技能调度</span>
+├── system-prompt.md      <span class="t-com">← 核心设计方法论（38 KB）</span>
 ├── references/
-│   ├── claude.md         ← Claude Code 工具映射
-│   ├── cursor.md         ← Cursor 工具映射
-│   └── codex.md          ← Codex Agent 工具映射
-├── built-in-skills/      ← 设计类型专用子技能
-│   ├── hi-fi-design.md       ← 默认：高质量 mockup
+│   ├── claude.md         <span class="t-com">← Claude Code 工具映射</span>
+│   ├── cursor.md         <span class="t-com">← Cursor 工具映射</span>
+│   └── codex.md          <span class="t-com">← Codex Agent 工具映射</span>
+├── built-in-skills/      <span class="t-com">← 设计类型专用子技能</span>
+│   ├── hi-fi-design.md       <span class="t-com">← 默认：高质量 mockup</span>
 │   ├── interactive-prototype.md
 │   ├── wireframe.md
 │   ├── make-a-deck.md
@@ -145,110 +565,148 @@
 │   ├── export-as-pptx-editable.md
 │   └── ...（20+ 技能文件）
 ├── agents/
-│   ├── compile-design-system.mjs   ← 写：编译 DS 为 bundle
-│   ├── check-design-system.mjs    ← 读：验证 DS 完整性
-│   ├── import-design-system.mjs    ← 消费者侧同步 DS
-│   ├── record-asset.mjs           ← 记录 deliverable
-│   ├── fork-verifier-agent.md     ← 验证子 agent
+│   ├── compile-design-system.mjs   <span class="t-com">← 写：编译 DS 为 bundle</span>
+│   ├── check-design-system.mjs     <span class="t-com">← 读：验证 DS 完整性</span>
+│   ├── import-design-system.mjs    <span class="t-com">← 消费者侧同步 DS</span>
+│   ├── record-asset.mjs            <span class="t-com">← 记录 deliverable</span>
+│   ├── fork-verifier-agent.md      <span class="t-com">← 验证子 agent</span>
 │   ├── design-system-checker.md
-│   ├── fork-verifier-agent.md
 │   └── lib/
-│       ├── ds-core.mjs       ← 读：DS 解析器（不写磁盘）
-│       ├── ds-prompt.mjs     ← 生成 _ds_prompt.md
-│       └── asset-store.mjs   ← _d_meta.json 读写
-├── starter-components/   ← 设计构件（React + Babel）
-│   ├── design-canvas.jsx   ← 多方案对比画布
-│   ├── deck-stage.js       ← PPT 播放引擎
-│   ├── tweaks-panel.jsx    ← 实时调参面板
+│       ├── ds-core.mjs       <span class="t-com">← 读：DS 解析器（不写磁盘）</span>
+│       ├── ds-prompt.mjs     <span class="t-com">← 生成 _ds_prompt.md</span>
+│       └── asset-store.mjs   <span class="t-com">← _d_meta.json 读写</span>
+├── starter-components/   <span class="t-com">← 设计构件（React + Babel）</span>
+│   ├── design-canvas.jsx     <span class="t-com">← 多方案对比画布</span>
+│   ├── deck-stage.js         <span class="t-com">← PPT 播放引擎</span>
+│   ├── tweaks-panel.jsx      <span class="t-com">← 实时调参面板</span>
 │   ├── animations.jsx
 │   ├── ios-frame.jsx / android-frame.jsx / macos-window.jsx
 │   └── browser-window.jsx
 └── vendor/
-    └── babel.min.js       ← 3.1 MB，JSX 转译
-</pre>
+    └── babel.min.js      <span class="t-com">← 3.1 MB，JSX 转译</span></code></pre>
+        </div>
+        <div class="grid g3 reveal" style="margin-top:8px">
+          <div class="card"><div class="ic">SKILL.md</div><h3>入口调度</h3><p>检测 harness 类型并加载对应 reference，再把请求分发给 built-in-skills 子技能。</p></div>
+          <div class="card cy"><div class="ic">agents/</div><h3>三段式管道</h3><p>compile（写）/ check（读）/ import（同步）三个 .mjs 脚本 + lib/ 三个纯模块。</p></div>
+          <div class="card"><div class="ic">vendor/</div><h3>离线 Babel</h3><p>3.1 MB babel.min.js 内联在 repo 里做 JSX → React.createElement 转译，无 CDN 依赖。</p></div>
+        </div>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="harness-abstraction">Harness 抽象层：同一套 Skill，四个不同的 agent 都能跑</h4>
+    <!-- ---------- 03 Harness 抽象层 ---------- -->
+    <section id="harness-abstraction">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">harness · one skill, four agents</div>
+        <h2>Harness <em>抽象层</em></h2>
+        <p class="lead">baoyu-design 最大的工程突破是 <strong>harness 抽象层</strong>。system-prompt.md 定义的是设计方法论（craft），但它调用的工具（提问、预览、截图、验证）是 harness-specific 的。</p>
+      </div>
 
-        <p class="reveal">baoyu-design 最大的工程突破是<strong>harness 抽象层</strong>。system-prompt.md 定义的是设计方法论（craft），但它调用的工具（提问、预览、截图、验证）是 harness-specific 的。</p>
+      <div class="reveal">
+        <p>架构把这个问题优雅地解决了——方法论在中心，外围每个 reference 文档把抽象的「Web 工具」映射到具体 harness 的真实工具：</p>
 
-        <p class="reveal">架构把这个问题优雅地解决了：</p>
-
-<pre class="reveal lang-text">system-prompt.md（设计方法论）
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">system-prompt.md → 按 harness 分流</span><button class="copy">复制</button></div>
+<pre><code>system-prompt.md（设计方法论）
     ↓
     检测 harness 类型
     ↓
 ┌─────────────────────────────────────────────┐
-│  references/claude.md    → Claude Code      │
-│  references/cursor.md   → Cursor           │
-│  references/codex.md     → Codex Agent      │
-│  （fallback）            → 通用 agent       │
-└─────────────────────────────────────────────┘
-    ↓
- 每个 reference 文档定义了四个能力的精确映射：
- ┌──────────────────┬──────────────────────────────┐
- │ Web 工具         │ Claude Code 实现              │
- ├──────────────────┼──────────────────────────────┤
- │ questions_v2     │ AskUserQuestion               │
- │ done / verifier  │ SendUserFile + Claude Preview │
- │                  │   MCP + fork-verifier-agent   │
- │ write_file       │ Write（去掉 asset review pane）│
- │ copy_files      │ Bash cp                       │
- │ eval_js         │ Bash / preview_eval           │
- │ web_fetch       │ WebFetch / WebSearch          │
- └──────────────────┴──────────────────────────────┘
-</pre>
+│  references/claude.md   → Claude Code        │
+│  references/cursor.md   → Cursor             │
+│  references/codex.md    → Codex Agent        │
+│  （fallback）           → 通用 agent          │
+└─────────────────────────────────────────────┘</code></pre>
+        </div>
 
-        <p class="reveal">SKILL.md 里的入口逻辑就是简单的 harness 检测：</p>
+        <p>每个 reference 文档定义了四个能力的精确映射。以 Claude Code 为例：</p>
 
-<pre class="reveal lang-js">// SKILL.md 中的检测伪代码
-if (has AskUserQuestion + Claude Preview MCP) → read references/claude.md
-else if (has AskQuestion + cursor-ide-browser MCP) → read references/cursor.md
-else if (has functions.* + tool_search) → read references/codex.md
-else → generic workflow（ask in chat, write files, HTTP serve designs/）
-</pre>
+        <div class="panel pad tick reveal" style="margin-top:8px">
+          <div class="kicker">表 03 · Web 工具 → Claude Code 实现映射</div>
+          <table class="tbl">
+            <tr><th>Web 工具</th><th>Claude Code 实现</th></tr>
+            <tr><td><code>questions_v2</code></td><td><code class="cy">AskUserQuestion</code></td></tr>
+            <tr><td><code>done / verifier</code></td><td><code class="cy">SendUserFile</code> + Claude Preview MCP + <code>fork-verifier-agent</code></td></tr>
+            <tr><td><code>write_file</code></td><td><code class="cy">Write</code>（去掉 asset review pane）</td></tr>
+            <tr><td><code>copy_files</code></td><td><code>Bash cp</code></td></tr>
+            <tr><td><code>eval_js</code></td><td><code>Bash</code> / <code>preview_eval</code></td></tr>
+            <tr><td><code>web_fetch</code></td><td><code class="ph">WebFetch</code> / <code class="ph">WebSearch</code></td></tr>
+          </table>
+        </div>
 
-        <h4 class="reveal" id="ds-pipeline">设计系统管道：compile / check / import 三段式</h4>
+        <p style="margin-top:24px">SKILL.md 里的入口逻辑就是简单的 harness 检测：</p>
 
-        <p class="reveal">baoyu-design 不只是输出设计物，它还支持完整的<strong>设计系统消费和创作</strong>管道。这个设计受了 Claude Design 网站产品的启发，但实现了完整的开源版本。</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">SKILL.md — harness 检测伪代码</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// SKILL.md 中的检测伪代码</span>
+<span class="t-key">if</span> (has AskUserQuestion + Claude Preview MCP)   → read references/claude.md
+<span class="t-key">else if</span> (has AskQuestion + cursor-ide-browser MCP) → read references/cursor.md
+<span class="t-key">else if</span> (has functions.* + tool_search)          → read references/codex.md
+<span class="t-key">else</span> → generic workflow（ask in chat, write files, HTTP serve designs/）</code></pre>
+        </div>
+        <div class="note cy reveal"><b>解耦了什么：</b>方法论（craft）与工具实现（tooling）被彻底分离——四套不同的 agent 共享同一套 system-prompt.md，只在 references/*.md 这一层切换具体工具名。新增一个 harness 只需新增一份 reference 文档。</div>
+      </div>
+    </section>
 
-        <p class="reveal"><strong>第一段：compile-design-system.mjs（写磁盘）</strong></p>
+    <!-- ---------- 04 设计系统管道 ---------- -->
+    <section id="ds-pipeline">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">pipeline · compile / check / import</div>
+        <h2>设计系统<em>管道</em></h2>
+        <p class="lead">baoyu-design 不只是输出设计物，它还支持完整的<strong>设计系统消费和创作</strong>管道——受 Claude Design 网站产品启发，但实现了完整的开源版本。</p>
+      </div>
 
-        <p class="reveal">设计系统的源码（React 组件 + CSS tokens）经过这个编译器，产出三个产物：</p>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker" style="margin-bottom:30px">图 04 · 三段式管道</div>
+          <div class="flow">
+            <div class="flow-node"><div class="ttl am">compile-design-system.mjs</div><div class="meta">写磁盘</div></div>
+            <div class="flow-arr"><span class="flow-stage">build</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+            <div class="flow-node"><div class="ttl cy">check-design-system.mjs</div><div class="meta">只读 subagent</div></div>
+            <div class="flow-arr cy"><span class="flow-stage">sync</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.6s"/></svg></div>
+            <div class="flow-node"><div class="ttl">import-design-system.mjs</div><div class="meta">消费者侧同步</div></div>
+          </div>
+        </div>
 
-        <ul class="reveal">
-          <li><code>_ds_bundle.js</code> — IIFE 格式，定义 <code>window.&lt;Namespace&gt;.&lt;Component&gt;</code>，可直接在浏览器里 <code>&lt;script src&gt;</code> 加载</li>
-          <li><code>_ds_manifest.json</code> — 命名空间、组件列表、卡片信息、起始点、tokens、字体</li>
-          <li><code>_adherence.oxlintrc.json</code> — lint 规则（原生 hex/px 值 + per-component prop 白名单）</li>
+        <p style="margin-top:28px"><strong>第一段：compile-design-system.mjs（写磁盘）</strong>。设计系统的源码（React 组件 + CSS tokens）经过这个编译器，产出三个产物：</p>
+        <ul class="body">
+          <li><code class="k">_ds_bundle.js</code> — IIFE 格式，定义 <code class="k">window.&lt;Namespace&gt;.&lt;Component&gt;</code>，可直接在浏览器里 <code class="k">&lt;script src&gt;</code> 加载</li>
+          <li><code class="k">_ds_manifest.json</code> — 命名空间、组件列表、卡片信息、起始点、tokens、字体</li>
+          <li><code class="k">_adherence.oxlintrc.json</code> — lint 规则（原生 hex/px 值 + per-component prop 白名单）</li>
         </ul>
+        <p>关键实现细节：它用 vendored Babel（3.1 MB 的 babel.min.js）做 JSX → React.createElement 转译，Babel 以 UMD 加载，用 <code class="k">createRequire(import.meta.url)</code> 在 ESM 模块里引用 UMD——一个很巧妙的兼容性处理。</p>
 
-        <p class="reveal">关键实现细节：它用 vendored Babel（3.1 MB 的 babel.min.js）做 JSX → React.createElement 转译，Babel 以 UMD 加载，用 <code>createRequire(import.meta.url)</code> 在 ESM 模块里引用 UMD——这是一个很巧妙的兼容性处理。</p>
-
-        <p class="reveal"><strong>第二段：check-design-system.mjs（只读，零写磁盘）</strong></p>
-
-        <p class="reveal">这个检查器由 ds-core.mjs（读-only 解析器）驱动，可以作为 subagent 运行。它检查的内容包括：</p>
-
-        <ul class="reveal">
+        <p style="margin-top:20px"><strong>第二段：check-design-system.mjs（只读，零写磁盘）</strong>。这个检查器由 ds-core.mjs（read-only 解析器）驱动，可以作为 subagent 运行，检查内容包括：</p>
+        <ul class="body">
           <li>组件是否正确导出到 window 命名空间</li>
           <li>CSS token 是否存在且无循环依赖</li>
           <li>@dsCard / @startingPoint 标注是否合法</li>
           <li>manifest 和 bundle 是否一致</li>
         </ul>
+        <div class="note reveal"><b>为什么要 read-only：</b>这个检查器被设计成可以在一个隔离的 Agent 里运行，不写任何磁盘——这对于 Claude Code 的 subagent 机制很重要（subagent 不应该污染主工作区）。</div>
 
-        <p class="reveal">重要的是：<strong>这个检查器被设计成可以在一个隔离的 Agent 里运行，不写任何磁盘</strong>——这对于 Claude Code 的 subagent 机制很重要（subagent 不应该污染主工作区）。</p>
+        <p style="margin-top:20px"><strong>第三段：import-design-system.mjs（消费者侧同步）</strong>。当用户在设计项目里想绑定一个已有设计系统时，这个脚本把编译好的 DS 复制到 <code class="k">&lt;project&gt;/_ds/&lt;slug&gt;/</code> 下作为自包含副本（版本钉住），并生成 <code class="k">_ds_prompt.md</code>（绑定提示词）和 <code class="k">_d_meta.json</code>（元数据）。</p>
+        <div class="note cy reveal"><b>设计系统绑定到项目而非全局：</b>每个设计项目有自己独立的 DS 副本，设计系统更新不会意外影响已有项目。</div>
+      </div>
+    </section>
 
-        <p class="reveal"><strong>第三段：import-design-system.mjs（消费者侧同步）</strong></p>
+    <!-- ---------- 05 ds-core 解析器 ---------- -->
+    <section id="ds-core">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">ds-core · the read-only model</div>
+        <h2>ds-core <em>解析器</em></h2>
+        <p class="lead">源码：<code class="k">agents/lib/ds-core.mjs</code>。整个设计系统管道的数据核心，实现了对设计系统源码的完整解析——但<strong>不写任何磁盘</strong>。这是刻意为之的设计决策。</p>
+      </div>
 
-        <p class="reveal">当用户在设计项目里想要绑定一个已有的设计系统时，这个脚本把编译好的设计系统复制到 <code>&lt;project&gt;/_ds/&lt;slug&gt;/</code> 下作为自包含副本（版本钉住），并生成 <code>_ds_prompt.md</code>（绑定提示词）和 <code>_d_meta.json</code>（元数据）。</p>
-
-        <p class="reveal">这个设计的关键价值：<strong>设计系统是绑定到项目而非全局的</strong>，每次设计项目有自己独立的 DS 副本，设计系统更新不会意外影响已有项目。</p>
-
-        <h4 class="reveal" id="ds-core">ds-core.mjs：读-only 解析器的工程哲学</h4>
-
-        <p class="reveal">ds-core.mjs 是整个设计系统管道的数据核心，它实现了对设计系统源码的完整解析——但不写任何磁盘。这是刻意为之的设计决策：</p>
-
-        <pre class="reveal lang-text">ds-core.mjs 的核心能力：
-  walk(root)          → 遍历目录，跳过 node_modules/.git/vendor
-  buildModel(root)    → 构建完整项目 model
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">ds-core.mjs — 核心能力</span><button class="copy">复制</button></div>
+<pre><code><span class="t-fn">walk</span>(root)          → 遍历目录，跳过 node_modules/.git/vendor
+<span class="t-fn">buildModel</span>(root)    → 构建完整项目 model
     ├─ global CSS entry 查找（8 个已知文件名优先级）
     ├─ @import closure 解析（post-order，收集所有依赖）
     ├─ 组件模块解析（.jsx/.tsx → 命名导出）
@@ -256,64 +714,98 @@ else → generic workflow（ask in chat, write files, HTTP serve designs/）
     ├─ @startingPoint 起始点提取（模板）
     ├─ 品牌字体解析
     ├─ 命名空间提取
-    └─ 问题列表（never writes，only reports）
-</pre>
+    └─ 问题列表（never writes，only reports）</code></pre>
+        </div>
+        <p>这个 read-only 的约束让 checker 能够作为 subagent 安全运行，也让设计系统的静态分析（linter、diff、版本比较）成为可能——这些能力在没有这个约束的情况下很难实现。</p>
+        <div class="note reveal"><b>ds-core 是复用核心：</b><code class="k">buildModel()</code> 同时被 compile（建模后产出 bundle）、check（验证）、import（决定复制集）三条链路复用，是「一次解析、多处消费」的唯一真相源。</div>
+      </div>
+    </section>
 
-        <p class="reveal">这个读-only 的约束让 checker 能够作为 subagent 安全运行，也让设计系统的静态分析（linter、diff、版本比较）成为可能——这些能力在没有这个约束的情况下很难实现。</p>
+    <!-- ---------- 06 资产版本化 ---------- -->
+    <section id="asset-store">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">asset-store · versioned deliverables</div>
+        <h2>资产<em>版本化</em></h2>
+        <p class="lead">asset 记录系统是 baoyu-design 元数据管理的另一条线。<code class="k">record-asset.mjs</code> 负责把每个设计交付物（HTML 文件）记录到 <code class="k">_d_meta.json</code>。</p>
+      </div>
 
-        <h4 class="reveal" id="asset-store">asset-store.mjs：每个 deliverable 都是版本化的</h4>
-
-        <p class="reveal">asset 记录系统是 baoyu-design 元数据管理的另一条线。<code>record-asset.mjs</code> 负责把每个设计交付物（HTML 文件）记录到 <code>_d_meta.json</code>：</p>
-
-        <pre class="reveal lang-text">_d_meta.json 结构：
-{
-  "designSystems": [{"slug": "...", "path": "_ds/...", "primary": true}],
-  "assets": [
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">_d_meta.json 结构</span><button class="copy">复制</button></div>
+<pre><code>{
+  <span class="t-str">"designSystems"</span>: [{<span class="t-str">"slug"</span>: <span class="t-str">"..."</span>, <span class="t-str">"path"</span>: <span class="t-str">"_ds/..."</span>, <span class="t-str">"primary"</span>: <span class="t-key">true</span>}],
+  <span class="t-str">"assets"</span>: [
     {
-      "name": "Reader Mac App",
-      "path": "designs/reader-nods/Reader App.html",
-      "status": "approved" | "changes-requested",
-      "versions": [{"path": "...", "created": ISO8601}],
-      "inheritFrom": null
+      <span class="t-str">"name"</span>: <span class="t-str">"Reader Mac App"</span>,
+      <span class="t-str">"path"</span>: <span class="t-str">"designs/reader-nods/Reader App.html"</span>,
+      <span class="t-str">"status"</span>: <span class="t-str">"approved"</span> | <span class="t-str">"changes-requested"</span>,
+      <span class="t-str">"versions"</span>: [{<span class="t-str">"path"</span>: <span class="t-str">"..."</span>, <span class="t-str">"created"</span>: ISO8601}],
+      <span class="t-str">"inheritFrom"</span>: <span class="t-key">null</span>
     }
   ]
-}
-</pre>
+}</code></pre>
+        </div>
+        <p>status 字段（<code class="k">approved</code> / <code class="k">changes-requested</code>）实现了设计交付的 review 闭环。record-asset 支持 <code class="k">--status approved</code> 翻转状态，<code class="k">--remove</code> 删除记录，<code class="k">--inherit-from</code> 建立版本链——这是典型的版本控制系统思路，但用于非代码资产。</p>
+      </div>
+    </section>
 
-        <p class="reveal">status 字段（approved / changes-requested）实现了设计交付的 review 闭环。record-asset 支持 <code>--status approved</code> 来翻转状态，支持 <code>--remove</code> 来删除记录，支持 <code>--inherit-from</code> 来建立版本链——这是典型的版本控制系统思路，但用于非代码资产。</p>
+    <!-- ---------- 07 Starter 构件 ---------- -->
+    <section id="starter-components">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">starter-components · atomic building blocks</div>
+        <h2>Starter <em>构件</em></h2>
+        <p class="lead">源码：<code class="k">starter-components/</code>。设计交付物的原子构件，使用 React + Babel in-browser 转译。</p>
+      </div>
 
-        <h4 class="reveal" id="starter-components">Starter Components：设计交付物的原子构件</h4>
+      <div class="reveal">
+        <div class="grid g2 reveal">
+          <div class="card"><div class="ic">design-canvas.jsx</div><h3>多方案对比画布</h3><p>把多个 prototype 并排展示，用 <code class="k">DCArtboard</code> 组织。</p></div>
+          <div class="card cy"><div class="ic">deck-stage.js</div><h3>PPT 播放引擎</h3><p>slide 位置存在 URL hash 里，支持键盘 / 点击导航。</p></div>
+          <div class="card"><div class="ic">tweaks-panel.jsx</div><h3>实时调参面板</h3><p>设计师可直接在原型上调整参数，参数存在 localStorage 里。</p></div>
+          <div class="card cy"><div class="ic">*-frame.jsx</div><h3>设备外壳</h3><p><code class="k">ios-frame</code> / <code class="k">android-frame</code> / <code class="k">macos-window</code> / <code class="k">browser-window</code> 把设计包裹进对应窗口。</p></div>
+          <div class="card"><div class="ic">animations.jsx</div><h3>视频级动画</h3><p>读取 <code class="k">built-in-skills/animated-video.md</code> 的规范驱动动画。</p></div>
+        </div>
+        <div class="note reveal" style="margin-top:24px"><b>确定性构建：</b>精确的 script 标签版本（<code class="k">react@18.3.1</code>、<code class="k">babel@7.29.0</code>）硬编码在 system-prompt.md 里，确保每次构建的确定性。CSS 推荐用自定义属性（CSS variables）而非 per-component style 对象，避免多文件间命名冲突。</div>
+      </div>
+    </section>
 
-        <p class="reveal">starter-components/ 提供了设计交付物的原子构件：</p>
+    <!-- ---------- 08 验证子 agent ---------- -->
+    <section id="fork-verifier">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">fork-verifier · quality gate</div>
+        <h2>验证<em>子 agent</em></h2>
+        <p class="lead">源码：<code class="k">agents/fork-verifier-agent.md</code>。verification 是设计交付物质量保证的关键，它定义了一个专门的验证子 agent。</p>
+      </div>
 
-        <ul class="reveal">
-          <li><code>design-canvas.jsx</code> — 多方案对比画布（把多个 prototype 并排展示，用 DCArtboard 组织）</li>
-          <li><code>deck-stage.js</code> — PPT 播放引擎（slide 位置存在 URL hash 里，支持键盘/点击导航）</li>
-          <li><code>tweaks-panel.jsx</code> — 实时调参面板（设计师可以直接在原型上调整参数，参数存在 localStorage 里）</li>
-          <li><code>ios-frame.jsx / android-frame.jsx / macos-window.jsx</code> — 设备外壳（把设计包裹在 iOS/Android/macOS 窗口里）</li>
-          <li><code>browser-window.jsx</code> — 浏览器窗口外壳</li>
-          <li><code>animations.jsx</code> — 视频级动画（读取 built-in-skills/animated-video.md 的规范）</li>
-        </ul>
-
-        <p class="reveal">这些组件使用 React + Babel in-browser 转译，精确的 script 标签版本（react@18.3.1、babel@7.29.0）硬编码在 system-prompt.md 里，确保每次构建的确定性。CSS 推荐使用自定义属性（CSS variables）而非 per-component style 对象，避免多文件间的命名冲突。</p>
-
-        <h4 class="reveal" id="fork-verifier">fork-verifier-agent.md：验证子 agent 的设计</h4>
-
-        <p class="reveal">verification 是设计交付物质量保证的关键。<code>fork-verifier-agent.md</code> 定义了一个专门的验证子 agent，它的职责是：</p>
-
-        <ul class="reveal">
+      <div class="reveal">
+        <p>它的职责是：</p>
+        <ul class="body">
           <li>加载 served 的 HTML（通过 localhost HTTP，不是 file://）</li>
           <li>捕获 JS console errors</li>
           <li>截图检查布局</li>
-          <li>探测 overflow root causes 和未解析的 <code>var(--*)</code> token</li>
-          <li>返回单一 verdict：done / needs-work</li>
+          <li>探测 overflow root causes 和未解析的 <code class="k">var(--*)</code> token</li>
+          <li>返回单一 verdict：<code class="ph">done</code> / <code class="ro">needs-work</code></li>
         </ul>
+        <div class="note cy reveal"><b>共性问题闭环：</b>这个验证流程解决了多 harness 环境下「设计物到底能不能跑」的共性问题——无论在哪个 harness 里，最终的 HTML 交付物都必须能正确加载。探针协议细节见 <a class="inl" href="#verifier-probes">验证探针协议 →</a></div>
+      </div>
+    </section>
 
-        <p class="reveal">这个验证流程解决了多 harness 环境下「设计物到底能不能跑」的共性问题——无论在哪个 harness 里，最终的 HTML 交付物都必须能正确加载。</p>
+    <!-- ---------- 09 创作消费全流程 ---------- -->
+    <section id="ds-lifecycle">
+      <div class="sec-head reveal">
+        <div class="sec-num">09</div>
+        <div class="kicker">lifecycle · author & consume</div>
+        <h2>创作消费<em>全流程</em></h2>
+        <p class="lead">从设计系统作者写组件，到设计 agent 消费、验证、交付——两条链路在 import 处汇合。</p>
+      </div>
 
-        <h4 class="reveal" id="ds-lifecycle">设计系统的创作与消费全流程</h4>
-
-<pre class="reveal lang-text">【设计系统创作】
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">设计系统创作 + 消费全流程</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">【设计系统创作】</span>
 设计系统作者
     ↓
 写组件 .jsx + tokens.css
@@ -324,14 +816,14 @@ node compile-design-system.mjs → _ds_bundle.js + manifest + lint config
     ↓
 设计系统发布
 
-【设计系统消费】
+<span class="t-com">【设计系统消费】</span>
 设计 agent 收到项目请求
     ↓
 glob designs/*/_ds_manifest.json 发现已有 DS
     ↓
-node import-design-system.mjs _ds/<slug>/ designs/<proj>/
+node import-design-system.mjs _ds/&lt;slug&gt;/ designs/&lt;proj&gt;/
     ↓
-_ds/<slug>/_ds_prompt.md 生成（绑定视觉风格）
+_ds/&lt;slug&gt;/_ds_prompt.md 生成（绑定视觉风格）
     ↓
 读取 _ds_prompt.md → 设计时遵循 DS token/component
     ↓
@@ -339,16 +831,26 @@ record-asset.mjs 记录每个交付物
     ↓
 fork-verifier-agent 验证
     ↓
-交付 + 记录 approved/changes-requested
-</pre>
+交付 + 记录 approved/changes-requested</code></pre>
+        </div>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="compile-call-chain">深入源码：一次 compile 的完整调用链</h4>
+    <!-- ---------- 10 编译调用链全解 ---------- -->
+    <section id="compile-call-chain">
+      <div class="sec-head reveal">
+        <div class="sec-num">10</div>
+        <div class="kicker">compile · the full call chain</div>
+        <h2>编译调用链<em>全解</em></h2>
+        <p class="lead">以下基于真实源码逐函数拆解。<code class="k">agents/compile-design-system.mjs</code> 的 main 段落只有约 40 行，全部重活分在两个层次：<code class="k">ds-core.mjs</code> 的 <code class="k">buildModel()</code>（纯读，建模）和编译器自身的三个 build 函数（纯写，产出）。</p>
+      </div>
 
-        <p class="reveal">以下基于真实源码逐函数拆解。<code>agents/compile-design-system.mjs</code> 的 main 段落只有约 40 行，全部重活分在两个层次：<code>agents/lib/ds-core.mjs</code> 的 <code>buildModel()</code>（纯读，建模）和编译器自身的三个 build 函数（纯写，产出）：</p>
-
-<pre class="reveal lang-text">node compile-design-system.mjs &lt;projectDir&gt;
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">node compile-design-system.mjs &lt;projectDir&gt;</span><button class="copy">复制</button></div>
+<pre><code>node compile-design-system.mjs &lt;projectDir&gt;
     ↓
-buildModel(projectDir)              ← agents/lib/ds-core.mjs（零写磁盘）
+buildModel(projectDir)              <span class="t-com">← ds-core.mjs（零写磁盘）</span>
     ├─ walk(root)              跳过 SKIP_DIRS（node_modules/.git/dist/vendor…）
     │                          + GENERATED 三件套（防止产物被当源码重新摄入）
     ├─ findGlobalCssEntry()    8 个已知入口名 × 最浅路径优先
@@ -364,152 +866,221 @@ buildBundle(model)     → _ds_bundle.js（IIFE，逐文件 try/catch）
 buildManifest(model)   → _ds_manifest.json（model 字段直通）
 buildAdherence(model)  → _adherence.oxlintrc.json（.d.ts 派生 lint 规则）
     ↓
-fs.writeFileSync ×3    ← 整条管道唯一写磁盘的位置（main 段落里的 w() helper）</pre>
+fs.writeFileSync ×3    <span class="t-com">← 整条管道唯一写磁盘的位置（main 段落里的 w() helper）</span></code></pre>
+        </div>
 
-        <p class="reveal">一个容易被忽略但很关键的细节：<code>walk()</code> 在遍历时把编译产物从源文件集合里剔除，否则第二次编译会把上一次的 <code>_ds_bundle.js</code> 当作源码处理，产生自我污染：</p>
+        <p>一个容易被忽略但很关键的细节：<code class="k">walk()</code> 在遍历时把编译产物从源文件集合里剔除，否则第二次编译会把上一次的 <code class="k">_ds_bundle.js</code> 当作源码处理，产生自我污染：</p>
 
-<pre class="reveal lang-js">// agents/lib/ds-core.mjs — generated artifacts the compiler emits,
-// never treated as source
-const GENERATED = new Set([
-  '_ds_bundle.js', '_ds_manifest.json', '_adherence.oxlintrc.json',
-]);</pre>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">ds-core.mjs — GENERATED 三件套</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// generated artifacts the compiler emits, never treated as source</span>
+<span class="t-key">const</span> GENERATED = <span class="t-key">new</span> <span class="t-typ">Set</span>([
+  <span class="t-str">'_ds_bundle.js'</span>, <span class="t-str">'_ds_manifest.json'</span>, <span class="t-str">'_adherence.oxlintrc.json'</span>,
+]);</code></pre>
+        </div>
 
-        <p class="reveal">CSS 入口查找也有一层兜底设计：文件名启发式（styles.css / index.css / globals.css / main.css …共 8 个）miss 时，回退到已编译 manifest 里记录的 <code>globalCssPaths</code>——因为闭包是 post-order 的，数组最后一项一定是入口文件本身。源码注释明确写了动机：从 SPA 提取出来的设计系统可能用 <code>colors_and_type.css</code> 这种非常规命名，「without hardcoding every possible entry name」。兜底拿到入口后仍然<strong>重新计算闭包</strong>，所以重编译时新增的 <code>@import</code> 不会被旧 manifest 漏掉。</p>
+        <p>CSS 入口查找也有一层兜底设计：文件名启发式（<code class="k">styles.css</code> / <code class="k">index.css</code> / <code class="k">globals.css</code> / <code class="k">main.css</code> …共 8 个）miss 时，回退到已编译 manifest 里记录的 <code class="k">globalCssPaths</code>——因为闭包是 post-order 的，数组最后一项一定是入口文件本身。源码注释明确写了动机：从 SPA 提取出来的设计系统可能用 <code class="k">colors_and_type.css</code> 这种非常规命名，「without hardcoding every possible entry name」。兜底拿到入口后仍然<strong>重新计算闭包</strong>，所以重编译时新增的 <code class="k">@import</code> 不会被旧 manifest 漏掉。</p>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="bundle-internals">_ds_bundle.js 的双作用域与 fail-soft 契约</h4>
+    <!-- ---------- 11 Bundle 双作用域 ---------- -->
+    <section id="bundle-internals">
+      <div class="sec-head reveal">
+        <div class="sec-num">11</div>
+        <div class="kicker">bundle · dual scope & fail-soft</div>
+        <h2>_ds_bundle.js <em>双作用域</em></h2>
+        <p class="lead"><code class="k">buildBundle()</code> 生成的 IIFE 里有两个刻意分开的对象：<code class="k">__ds_ns</code>（挂到 <code class="k">window.&lt;Namespace&gt;</code> 的公开命名空间）和 <code class="k">__ds_scope</code>（仅 bundle 内部可见的共享作用域，兄弟组件互相引用走这里）。</p>
+      </div>
 
-        <p class="reveal"><code>buildBundle()</code> 生成的 IIFE 里有两个刻意分开的对象：<code>__ds_ns</code>（挂到 <code>window.&lt;Namespace&gt;</code> 的公开命名空间）和 <code>__ds_scope</code>（仅 bundle 内部可见的共享作用域，兄弟组件互相引用走这里）。每个源文件被包成一个独立的 try/catch 块：</p>
-
-<pre class="reveal lang-js">// agents/compile-design-system.mjs — buildBundle() 生成的真实输出骨架
-/* @ds-bundle: {"format":3,"namespace":"...","sourceHashes":{...}} */
+      <div class="reveal">
+        <p>每个源文件被包成一个独立的 try/catch 块：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">compile-design-system.mjs — buildBundle() 输出骨架</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">/* @ds-bundle: {"format":3,"namespace":"...","sourceHashes":{...}} */</span>
 (() =&gt; {
-const __ds_ns = (window.Namespace = window.Namespace || {});
-const __ds_scope = {};
+<span class="t-key">const</span> __ds_ns = (window.Namespace = window.Namespace || {});
+<span class="t-key">const</span> __ds_scope = {};
 (__ds_ns.__errors = __ds_ns.__errors || []);
 
-// components/button.jsx
-try { (() =&gt; {
-  /* transpiled body */
-  Object.assign(__ds_scope, { Button });
-})(); } catch (e) { __ds_ns.__errors.push({ path: "components/button.jsx",
-  error: String((e &amp;&amp; e.message) || e) }); }
+<span class="t-com">// components/button.jsx</span>
+<span class="t-key">try</span> { (() =&gt; {
+  <span class="t-com">/* transpiled body */</span>
+  <span class="t-typ">Object</span>.assign(__ds_scope, { Button });
+})(); } <span class="t-key">catch</span> (e) { __ds_ns.__errors.push({ path: <span class="t-str">"components/button.jsx"</span>,
+  error: <span class="t-typ">String</span>((e &amp;&amp; e.message) || e) }); }
 
 __ds_ns.Button = __ds_scope.Button;
-})();</pre>
+})();</code></pre>
+        </div>
+        <p>这是一个 <strong>fail-soft 契约</strong>：单个组件抛错只会变成 <code class="k">__ds_ns.__errors</code> 里的一条记录，不会让整个 bundle 加载失败。连转译失败也被纳入同一契约——Babel 抛异常时，该文件的 body 被替换成一条运行时 throw，错误顺着 per-file catch 流进 <code class="k">__errors</code>：</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">buildBundle() — 转译失败也走 fail-soft</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// a file that fails to transpile becomes a runtime error entry,</span>
+<span class="t-com">// matching the bundle's per-file try/catch contract</span>
+<span class="t-key">try</span> {
+  body = <span class="t-fn">transpile</span>(raw, s.path);
+} <span class="t-key">catch</span> (e) {
+  body = <span class="t-str">`throw new Error(${JSON.stringify('transpile failed: ' + ((e &amp;&amp; e.message) || e))});`</span>;
+}</code></pre>
+        </div>
+        <p>命名冲突也有明确的优先级规则：有 <code class="k">.d.ts</code> 背书的「模块组件」永远赢得命名空间槽位，非模块文件里的同名导出不允许写入 <code class="k">__ds_scope</code>：</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">命名空间槽位归属</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// a non-module file never writes a .d.ts-backed component's name into</span>
+<span class="t-com">// __ds_scope — the module implementation must win the namespace slot</span>
+<span class="t-key">const</span> assignNames = s.isModule ? s.exports : s.exports.filter((n) =&gt; !exposed.has(n));</code></pre>
+        </div>
+        <div class="note cy reveal"><b>sourceHashes 钩子：</b>bundle 首行的 <code class="k">@ds-bundle</code> JSON 注释里带着每个源文件的 <code class="k">sourceHashes</code>（sha256 前 12 位），任何工具不解析 bundle 体就能 diff 出哪些源文件已过期——这是给增量工作流留的钩子，同时也是 <code class="k">resolveNamespace()</code> 的第二级数据源。</div>
+      </div>
+    </section>
 
-        <p class="reveal">这是一个 <strong>fail-soft 契约</strong>：单个组件抛错只会变成 <code>__ds_ns.__errors</code> 里的一条记录，不会让整个 bundle 加载失败。连转译失败也被纳入同一契约——Babel 抛异常时，该文件的 body 被替换成一条运行时 throw，错误顺着 per-file catch 流进 <code>__errors</code>：</p>
+    <!-- ---------- 12 Babel 剥离插件 ---------- -->
+    <section id="babel-strip-plugin">
+      <div class="sec-head reveal">
+        <div class="sec-num">12</div>
+        <div class="kicker">makeStripPlugin · two author styles</div>
+        <h2>Babel <em>剥离插件</em></h2>
+        <p class="lead">设计系统组件有两种写法：参考源用全局风格（<code class="k">const React = window.React</code>，零 import），用户自己写的组件却往往是标准 ESM（<code class="k">import React from 'react'</code> + 相对路径引兄弟组件）。编译器用一个自定义 Babel 插件统一两者。</p>
+      </div>
 
-<pre class="reveal lang-js">// buildBundle() 内：a file that fails to transpile becomes a runtime
-// error entry, matching the bundle's per-file try/catch contract
-try {
-  body = transpile(raw, s.path);
-} catch (e) {
-  body = `throw new Error(${JSON.stringify('transpile failed: ' + ((e &amp;&amp; e.message) || e))});`;
-}</pre>
-
-        <p class="reveal">命名冲突也有明确的优先级规则：有 <code>.d.ts</code> 背书的「模块组件」永远赢得命名空间槽位，非模块文件里的同名导出不允许写入 <code>__ds_scope</code>：</p>
-
-<pre class="reveal lang-js">// a non-module file never writes a .d.ts-backed component's name into
-// __ds_scope — the module implementation must win the namespace slot
-const assignNames = s.isModule ? s.exports : s.exports.filter((n) =&gt; !exposed.has(n));</pre>
-
-        <p class="reveal">bundle 首行的 <code>@ds-bundle</code> JSON 注释里还带着每个源文件的 <code>sourceHashes</code>（sha256 前 12 位），任何工具不解析 bundle 体就能 diff 出哪些源文件已过期——这是给增量工作流留的钩子；它同时也是 <code>resolveNamespace()</code> 的第二级数据源。</p>
-
-        <h4 class="reveal" id="babel-strip-plugin">makeStripPlugin：让两种作者风格都能 bundle</h4>
-
-        <p class="reveal">设计系统组件有两种写法：参考源用全局风格（<code>const React = window.React</code>，零 import），用户自己写的组件却往往是标准 ESM（<code>import React from 'react'</code> + 相对路径引兄弟组件）。编译器用一个自定义 Babel 插件统一两者——React 系 import 直接删除，相对路径 import 改写成从 <code>__ds_scope</code> 解构：</p>
-
-<pre class="reveal lang-js">// agents/compile-design-system.mjs — makeStripPlugin 的 ImportDeclaration visitor
-ImportDeclaration(p) {
-  const src = p.node.source.value;
-  if (src === 'react' || src === 'react-dom' || src === 'react-dom/client') {
+      <div class="reveal">
+        <p>React 系 import 直接删除，相对路径 import 改写成从 <code class="k">__ds_scope</code> 解构：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">compile-design-system.mjs — makeStripPlugin 的 ImportDeclaration visitor</span><button class="copy">复制</button></div>
+<pre><code><span class="t-fn">ImportDeclaration</span>(p) {
+  <span class="t-key">const</span> src = p.node.source.value;
+  <span class="t-key">if</span> (src === <span class="t-str">'react'</span> || src === <span class="t-str">'react-dom'</span> || src === <span class="t-str">'react-dom/client'</span>) {
     p.remove();
-    return;
+    <span class="t-key">return</span>;
   }
-  if (src.startsWith('.') || src.startsWith('/')) {
-    // relative sibling import → pull the names out of __ds_scope
-    // import { Icon } from './icon'  ⇒  const { Icon } = __ds_scope;
+  <span class="t-key">if</span> (src.startsWith(<span class="t-str">'.'</span>) || src.startsWith(<span class="t-str">'/'</span>)) {
+    <span class="t-com">// relative sibling import → pull the names out of __ds_scope</span>
+    <span class="t-com">// import { Icon } from './icon'  ⇒  const { Icon } = __ds_scope;</span>
     p.replaceWith(
-      t.variableDeclaration('const', [
-        t.variableDeclarator(t.objectPattern(names), t.identifier('__ds_scope')),
+      t.variableDeclaration(<span class="t-str">'const'</span>, [
+        t.variableDeclarator(t.objectPattern(names), t.identifier(<span class="t-str">'__ds_scope'</span>)),
       ]),
     );
   }
-  // bare external imports (e.g. a CDN lib) are left as-is for the author to resolve
-}</pre>
+  <span class="t-com">// bare external imports (e.g. a CDN lib) are left as-is for the author to resolve</span>
+}</code></pre>
+        </div>
+        <p>export 系列节点同样被剥掉（<code class="k">ExportNamedDeclaration</code> 保留 declaration 本体，<code class="k">ExportDefaultDeclaration</code> 只保留具名 function/class，匿名 default 直接丢弃）。转译预设是 <code class="k">['react', { runtime: 'classic' }]</code>——classic runtime 意味着产物调用 <code class="k">React.createElement</code>，所以页面必须先加载 React UMD；<code class="k">.ts/.tsx</code> 再追加 typescript preset。而 vendored Babel 本身是 UMD 格式，在 ESM 模块里加载它用了一个不常见但很干净的技巧：</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">UMD → CJS：createRequire 加载 vendored babel</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// UMD → CJS：在 .mjs 里用 createRequire 加载 vendored babel.min.js</span>
+<span class="t-key">import</span> { createRequire } <span class="t-key">from</span> <span class="t-str">'node:module'</span>;
+<span class="t-key">const</span> require = <span class="t-fn">createRequire</span>(import.meta.url);
+Babel = <span class="t-fn">require</span>(<span class="t-str">'./vendor/babel.min.js'</span>);</code></pre>
+        </div>
+      </div>
+    </section>
 
-        <p class="reveal">export 系列节点同样被剥掉（<code>ExportNamedDeclaration</code> 保留 declaration 本体，<code>ExportDefaultDeclaration</code> 只保留具名 function/class，匿名 default 直接丢弃）。转译预设是 <code>['react', { runtime: 'classic' }]</code>——classic runtime 意味着产物调用 <code>React.createElement</code>，所以页面必须先加载 React UMD；<code>.ts/.tsx</code> 再追加 typescript preset。而 vendored Babel 本身是 UMD 格式，在 ESM 模块里加载它用了一个不常见但很干净的技巧：</p>
+    <!-- ---------- 13 Token 分类器 ---------- -->
+    <section id="token-classification">
+      <div class="sec-head reveal">
+        <div class="sec-num">13</div>
+        <div class="kicker">tokens · annotation first, value fallback</div>
+        <h2>Token <em>分类器</em></h2>
+        <p class="lead">设计 token 要进 manifest 和 lint 配置，必须先知道每个 <code class="k">--token</code> 是 color、spacing 还是 shadow。ds-core 的策略是「标注优先、按值兜底」。</p>
+      </div>
 
-<pre class="reveal lang-js">// UMD → CJS：在 .mjs 里用 createRequire 加载 vendored babel.min.js
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-Babel = require('./vendor/babel.min.js');</pre>
-
-        <h4 class="reveal" id="token-classification">Token 分类器：annotation 优先，value 兜底</h4>
-
-        <p class="reveal">设计 token 要进 manifest 和 lint 配置，必须先知道每个 <code>--token</code> 是 color、spacing 还是 shadow。ds-core 的策略是「标注优先、按值兜底」。token 提取用一条正则同时抓名字、值和可选的 <code>/* @kind */</code> 行尾注解：</p>
-
-<pre class="reveal lang-js">// agents/lib/ds-core.mjs
-const DECL_RE =
-  /(--[A-Za-z0-9-]+)\s*:\s*([^;]+);[ \t]*(?:\/\*\s*@kind\s+([A-Za-z]+)\s*\*\/)?/g;</pre>
-
-        <p class="reveal">没有注解的 token 走 <code>classifyByValue()</code>。关键在于分类前先用 <code>makeResolver()</code> 把 <code>var()</code> 引用链解析到底（深度上限 10 防循环引用，并处理 <code>var(--x, fallback)</code> 的兜底值），所以 <code>--btn-bg: var(--brand)</code> 能正确归为 color：</p>
-
-<pre class="reveal lang-js">function classifyByValue(raw, resolve) {
-  const v = String(resolve(raw)).trim();
-  const hasColor =
+      <div class="reveal">
+        <p>token 提取用一条正则同时抓名字、值和可选的 <code class="k">/* @kind */</code> 行尾注解：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">ds-core.mjs — DECL_RE</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">const</span> DECL_RE =
+  /(--[A-Za-z0-9-]+)\s*:\s*([^;]+);[ \t]*(?:\/\*\s*@kind\s+([A-Za-z]+)\s*\*\/)?/g;</code></pre>
+        </div>
+        <p>没有注解的 token 走 <code class="k">classifyByValue()</code>。关键在于分类前先用 <code class="k">makeResolver()</code> 把 <code class="k">var()</code> 引用链解析到底（深度上限 10 防循环引用，并处理 <code class="k">var(--x, fallback)</code> 的兜底值），所以 <code class="k">--btn-bg: var(--brand)</code> 能正确归为 color：</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">ds-core.mjs — classifyByValue()</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">function</span> <span class="t-fn">classifyByValue</span>(raw, resolve) {
+  <span class="t-key">const</span> v = <span class="t-typ">String</span>(<span class="t-fn">resolve</span>(raw)).trim();
+  <span class="t-key">const</span> hasColor =
     /#[0-9a-fA-F]{3,8}\b/.test(v) ||
     /\b(rgba?|hsla?|okl?ch|oklab|lab|lch|hwb|color)\(/.test(v) ||
     NAMED_COLORS.has(v.toLowerCase());
-  const hasLen =
+  <span class="t-key">const</span> hasLen =
     /(^|[\s,(])-?\d*\.?\d+(px|rem|em|vh|vw|vmin|vmax|%|pt)\b/.test(v);
-  if (hasColor &amp;&amp; hasLen) return 'shadow';   // 颜色 + 长度并存 ⇒ 阴影
-  if (hasColor) return 'color';
-  if (hasLen) return 'spacing';
-  return null; // unclassifiable by value
-}</pre>
+  <span class="t-key">if</span> (hasColor &amp;&amp; hasLen) <span class="t-key">return</span> <span class="t-str">'shadow'</span>;   <span class="t-com">// 颜色 + 长度并存 ⇒ 阴影</span>
+  <span class="t-key">if</span> (hasColor) <span class="t-key">return</span> <span class="t-str">'color'</span>;
+  <span class="t-key">if</span> (hasLen) <span class="t-key">return</span> <span class="t-str">'spacing'</span>;
+  <span class="t-key">return</span> <span class="t-key">null</span>; <span class="t-com">// unclassifiable by value</span>
+}</code></pre>
+        </div>
+        <div class="note reveal"><b>数据质量前移：</b>分类不出来的 token 不会被静默吞掉，而是聚合成 checker 输出里的「headline issue」（带前 10 个名字的列表），提示作者补 <code class="k">/* @kind color|spacing|radius|shadow|font */</code> 注解或改名——把数据质量问题前移到创作时解决，而不是留给消费侧猜。</div>
+      </div>
+    </section>
 
-        <p class="reveal">分类不出来的 token 不会被静默吞掉，而是聚合成 checker 输出里的「headline issue」（带前 10 个名字的列表），提示作者补 <code>/* @kind color|spacing|radius|shadow|font */</code> 注解或改名——把数据质量问题前移到创作时解决，而不是留给消费侧猜。</p>
+    <!-- ---------- 14 Adherence Lint ---------- -->
+    <section id="adherence-lint">
+      <div class="sec-head reveal">
+        <div class="sec-num">14</div>
+        <div class="kicker">adherence · prop allowlist from .d.ts</div>
+        <h2>Adherence <em>Lint</em></h2>
+        <p class="lead"><code class="k">_adherence.oxlintrc.json</code> 是给消费侧的「设计系统遵循度」检查。除了两条全局规则（裸 hex 颜色、裸 px 值都应换成 <code class="k">var()</code> token），它为每个组件生成 JSX 级别的 prop 白名单。</p>
+      </div>
 
-        <h4 class="reveal" id="adherence-lint">Adherence Lint：从 .d.ts 推导 prop 白名单</h4>
-
-        <p class="reveal"><code>_adherence.oxlintrc.json</code> 是给消费侧的「设计系统遵循度」检查。除了两条全局规则（裸 hex 颜色、裸 px 值都应换成 <code>var()</code> token），它为每个组件生成 JSX 级别的 prop 白名单——数据来源是该组件 <code>.d.ts</code> 里的<strong>第一个</strong> exported interface：interface 名去掉尾部 <code>Props</code> 即元素名，成员即合法 prop：</p>
-
-<pre class="reveal lang-js">// agents/compile-design-system.mjs — buildAdherence() 生成的 selector
-syntax.push({
-  selector: `JSXOpeningElement[name.name='${name}'] &gt; JSXAttribute &gt; JSXIdentifier[name!=/${allowedRe}/]`,
-  message: `&lt;${name}&gt; doesn't accept that prop. Declared props: ...`,
+      <div class="reveal">
+        <p>数据来源是该组件 <code class="k">.d.ts</code> 里的<strong>第一个</strong> exported interface：interface 名去掉尾部 <code class="k">Props</code> 即元素名，成员即合法 prop：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">compile-design-system.mjs — buildAdherence() selector</span><button class="copy">复制</button></div>
+<pre><code>syntax.push({
+  selector: <span class="t-str">`JSXOpeningElement[name.name='${name}'] &gt; JSXAttribute &gt; JSXIdentifier[name!=/${allowedRe}/]`</span>,
+  message: <span class="t-str">`&lt;${name}&gt; doesn't accept that prop. Declared props: ...`</span>,
 });
-// 纯字符串 union 类型的 prop 还会得到「值级别」的规则：
+<span class="t-com">// 纯字符串 union 类型的 prop 还会得到「值级别」的规则：</span>
 syntax.push({
-  selector: `JSXOpeningElement[name.name='${name}'] &gt; JSXAttribute[name.name='${p.name}'] &gt; Literal[value!=/${valRe}/]`,
-  message: `&lt;${name}&gt; ${p.name} must be one of 'a' | 'b'.`,
-});</pre>
+  selector: <span class="t-str">`JSXOpeningElement[name.name='${name}'] &gt; JSXAttribute[name.name='${p.name}'] &gt; Literal[value!=/${valRe}/]`</span>,
+  message: <span class="t-str">`&lt;${name}&gt; ${p.name} must be one of 'a' | 'b'.`</span>,
+});</code></pre>
+        </div>
+        <p><code class="k">key / ref / className / style / children</code>（源码里的 <code class="k">ALWAYS_PROPS</code> 常量）永远在白名单里。<code class="k">parseFirstInterface()</code> 解析时还做了一个细节处理：把 interface body 按 <code class="k">;</code> 拆行再跑行锚定的 prop 正则，既能匹配单行 interface 的每个成员，又不会把 <code class="k">onChange?: (value: string) =&gt; void</code> 这类函数类型误拆出假 prop。</p>
+        <div class="note reveal"><b>已知边界（advisory）：</b>源码注释坦白了推导的边界——对集合型组件（Dropdown / RadioGroup / TabList），文件里第一个 interface 是 item 形状（DropdownOption 等），所以规则落在 item 元素而非容器上。「This is advisory lint config」，不是硬校验。</div>
+      </div>
+    </section>
 
-        <p class="reveal"><code>key / ref / className / style / children</code>（源码里的 <code>ALWAYS_PROPS</code> 常量）永远在白名单里。<code>parseFirstInterface()</code> 解析时还做了一个细节处理：把 interface body 按 <code>;</code> 拆行再跑行锚定的 prop 正则，既能匹配单行 interface 的每个成员，又不会把 <code>onChange?: (value: string) =&gt; void</code> 这类函数类型误拆出假 prop。源码注释也坦白了推导的已知边界：对集合型组件（Dropdown / RadioGroup / TabList），文件里第一个 interface 是 item 形状（DropdownOption 等），所以规则落在 item 元素而非容器上——「This is advisory lint config」，不是硬校验。</p>
+    <!-- ---------- 15 命名空间解析 ---------- -->
+    <section id="namespace-resolution">
+      <div class="sec-head reveal">
+        <div class="sec-num">15</div>
+        <div class="kicker">namespace · stability above all</div>
+        <h2>命名空间<em>解析</em></h2>
+        <p class="lead">所有组件都挂在 <code class="k">window.&lt;Namespace&gt;</code> 下，而 @dsCard 卡片 HTML 里写死了 <code class="k">const { X } = window.&lt;Namespace&gt;</code>——一旦重编译改变命名空间，所有卡片同时失效。所以 <code class="k">resolveNamespace()</code> 把「沿用旧值」放在最高优先级。</p>
+      </div>
 
-        <h4 class="reveal" id="namespace-resolution">命名空间的三级解析：稳定压倒一切</h4>
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">ds-core.mjs — resolveNamespace(root, projectName)</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// 1. existing manifest（_ds_manifest.json 的 namespace 字段）</span>
+<span class="t-com">// 2. existing bundle header（首行 @ds-bundle: {...} JSON 注释里的 namespace）</span>
+<span class="t-com">// 3. derive fresh, deterministic from the project name:</span>
+<span class="t-key">const</span> hash = crypto.<span class="t-fn">createHash</span>(<span class="t-str">'sha256'</span>).<span class="t-fn">update</span>(projectName).<span class="t-fn">digest</span>(<span class="t-str">'hex'</span>).slice(0, 6);
+<span class="t-key">return</span> <span class="t-str">`${pascalCase(projectName)}_${hash}`</span>;</code></pre>
+        </div>
+        <p>第三级的派生是确定性的（同名项目永远得到同一个 6 位 hash 后缀），既避免两个都叫 MyKit 的设计系统在同一页面里互相覆盖 <code class="k">window.MyKit</code>，又保证重复编译可复现。</p>
+        <div class="note cy reveal"><b>stale readme 启发式：</b>配套还有一个检查——<code class="k">buildModel()</code> 扫描 README 里的 <code class="k">window.Xxx_abcdef</code> 引用，与当前命名空间不一致就报 issue。连文档漂移都纳入了 checker 的检查面。</div>
+      </div>
+    </section>
 
-        <p class="reveal">所有组件都挂在 <code>window.&lt;Namespace&gt;</code> 下，而 @dsCard 卡片 HTML 里写死了 <code>const { X } = window.&lt;Namespace&gt;</code>——一旦重编译改变命名空间，所有卡片同时失效。所以 <code>resolveNamespace()</code> 把「沿用旧值」放在最高优先级：</p>
+    <!-- ---------- 16 Import 数据流 ---------- -->
+    <section id="import-flow">
+      <div class="sec-head reveal">
+        <div class="sec-num">16</div>
+        <div class="kicker">import · copy set & metadata merge</div>
+        <h2>Import <em>数据流</em></h2>
+        <p class="lead"><code class="k">agents/import-design-system.mjs</code> 是消费侧唯一入口。它复用 <code class="k">buildModel()</code>（零写）解析 DS 源目录，然后构建一个去重的「精确复制集」，按三层收集。</p>
+      </div>
 
-<pre class="reveal lang-js">// agents/lib/ds-core.mjs — resolveNamespace(root, projectName)
-// 1. existing manifest（_ds_manifest.json 的 namespace 字段）
-// 2. existing bundle header（首行 @ds-bundle: {...} JSON 注释里的 namespace）
-// 3. derive fresh, deterministic from the project name:
-const hash = crypto.createHash('sha256').update(projectName).digest('hex').slice(0, 6);
-return `${pascalCase(projectName)}_${hash}`;</pre>
-
-        <p class="reveal">第三级的派生是确定性的（同名项目永远得到同一个 6 位 hash 后缀），既避免两个都叫 MyKit 的设计系统在同一页面里互相覆盖 <code>window.MyKit</code>，又保证重复编译可复现。配套还有一个「stale readme」启发式：<code>buildModel()</code> 扫描 README 里的 <code>window.Xxx_abcdef</code> 引用，与当前命名空间不一致就报 issue——连文档漂移都纳入了 checker 的检查面。</p>
-
-        <h4 class="reveal" id="import-flow">Import 数据流：三层 copy set 与元数据合并</h4>
-
-        <p class="reveal"><code>agents/import-design-system.mjs</code> 是消费侧唯一入口。它复用 <code>buildModel()</code>（零写）解析 DS 源目录，然后构建一个去重的 copy set——「精确复制集」，按三层收集：</p>
-
-<pre class="reveal lang-text">node import-design-system.mjs &lt;dsDir&gt; &lt;projectDir&gt; [--primary]
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">node import-design-system.mjs &lt;dsDir&gt; &lt;projectDir&gt; [--primary]</span><button class="copy">复制</button></div>
+<pre><code>node import-design-system.mjs &lt;dsDir&gt; &lt;projectDir&gt; [--primary]
     ↓
 前置校验：&lt;dsDir&gt; 根必须有 _ds_manifest.json（没编译过 → 直接报错退出）
     ↓
-buildModel(dsDir)               ← 复用 ds-core，决定精确复制集
+buildModel(dsDir)               <span class="t-com">← 复用 ds-core，决定精确复制集</span>
     ↓
 copy set（copyOnce() 按相对路径去重）：
   ① model.globalCssPaths        @import 闭包里的全部 CSS（post-order）
@@ -525,130 +1096,260 @@ _d_meta.json merge：designSystems[] 按 slug upsert；
 renderDsPrompt(...) → _ds/&lt;slug&gt;/_ds_prompt.md（绑定提示词）
     ↓
 stdout 报告：精确 wiring 顺序（React UMD → 每个 &lt;link&gt; 按闭包序 → bundle）
-  + @startingPoint 种子清单 + warnings（model.issues 全量透传）</pre>
+  + @startingPoint 种子清单 + warnings（model.issues 全量透传）</code></pre>
+        </div>
+        <p>两个值得注意的细节：其一，<code class="k">url()</code> 资产解析对 <code class="k">..</code> 越界路径直接 skip——一个简单但必要的 path-traversal 防护，保证 <code class="k">_ds/&lt;slug&gt;/</code> 副本真正自包含；其二，多设计系统共存的 token 冲突没有引入新机制，而是直接用 CSS 层叠顺序解决——报告里明确指示「PRIMARY 系统的 <code class="k">&lt;link&gt;</code> 最后加载，所以它的 token 赢」。</p>
+      </div>
+    </section>
 
-        <p class="reveal">两个值得注意的细节：其一，<code>url()</code> 资产解析对 <code>..</code> 越界路径直接 skip——一个简单但必要的 path-traversal 防护，保证 <code>_ds/&lt;slug&gt;/</code> 副本真正自包含；其二，多设计系统共存的 token 冲突没有引入新机制，而是直接用 CSS 层叠顺序解决——报告里明确指示「PRIMARY 系统的 <code>&lt;link&gt;</code> 最后加载，所以它的 token 赢」。</p>
+    <!-- ---------- 17 _ds_prompt 渲染 ---------- -->
+    <section id="ds-prompt-render">
+      <div class="sec-head reveal">
+        <div class="sec-num">17</div>
+        <div class="kicker">ds-prompt · the executable contract</div>
+        <h2>_ds_prompt.md <em>渲染器</em></h2>
+        <p class="lead"><code class="k">agents/lib/ds-prompt.mjs</code> 是纯字符串装配（注释自述：reads and writes nothing），但它生成的 <code class="k">_ds_prompt.md</code> 是整条消费链路的「执行合同」。</p>
+      </div>
 
-        <h4 class="reveal" id="ds-prompt-render">_ds_prompt.md 渲染器：把绑定约束写成可执行的提示词</h4>
-
-        <p class="reveal"><code>agents/lib/ds-prompt.mjs</code> 是纯字符串装配（注释自述：reads and writes nothing），但它生成的 <code>_ds_prompt.md</code> 是整条消费链路的「执行合同」。几个工程上很讲究的点：</p>
-
-        <ul class="reveal">
-          <li><strong>版本钉死到 integrity hash</strong>：React 18.3.1 / Babel 7.29.0 的 <code>&lt;script&gt;</code> 标签连同 <code>integrity="sha384-…"</code> 一起硬编码在 <code>REACT_UMD_TAGS</code> / <code>BABEL_TAG</code> 常量里，注释要求与 system-prompt.md 同步——prompt 必须自包含，「whoever reopens the project」不需要再翻技能文档</li>
-          <li><strong>代码围栏自愈</strong>：<code>extractPromptExcerpt()</code> 截取每个组件 <code>*.prompt.md</code> 的前 5 行作为用法摘要，截断后若围栏数为奇数就自动补一个闭合围栏，防止未闭合的 code fence 吞掉后面整个 prompt</li>
-          <li><strong>示例名挑选</strong>：<code>sampleComponentNames()</code> 只挑「PascalCase 且含小写字母」的导出做解构示例——避免 <code>ICON_NAMES</code> 这类常量导出被当成组件用法演示</li>
-          <li><strong>token allowlist 是硬护栏</strong>：把全部 <code>--*</code> 名字排序后列进 prompt，并明确警告「Never guess a token name — an unresolved <code>var()</code> silently falls back to the browser default」——这是对 LLM 幻觉 token 名的针对性防御</li>
+      <div class="reveal">
+        <p>几个工程上很讲究的点：</p>
+        <ul class="body">
+          <li><strong>版本钉死到 integrity hash</strong>：React 18.3.1 / Babel 7.29.0 的 <code class="k">&lt;script&gt;</code> 标签连同 <code class="k">integrity="sha384-…"</code> 一起硬编码在 <code class="k">REACT_UMD_TAGS</code> / <code class="k">BABEL_TAG</code> 常量里，注释要求与 system-prompt.md 同步——prompt 必须自包含，「whoever reopens the project」不需要再翻技能文档</li>
+          <li><strong>代码围栏自愈</strong>：<code class="k">extractPromptExcerpt()</code> 截取每个组件 <code class="k">*.prompt.md</code> 的前 5 行作为用法摘要，截断后若围栏数为奇数就自动补一个闭合围栏，防止未闭合的 code fence 吞掉后面整个 prompt</li>
+          <li><strong>示例名挑选</strong>：<code class="k">sampleComponentNames()</code> 只挑「PascalCase 且含小写字母」的导出做解构示例——避免 <code class="k">ICON_NAMES</code> 这类常量导出被当成组件用法演示</li>
+          <li><strong>token allowlist 是硬护栏</strong>：把全部 <code class="k">--*</code> 名字排序后列进 prompt，并明确警告「Never guess a token name — an unresolved <code class="k">var()</code> silently falls back to the browser default」——这是对 LLM 幻觉 token 名的针对性防御</li>
           <li><strong>Scope 免疫声明</strong>：prompt 开头注入 SCOPE 段，声明设计系统只是视觉风格参考，guide 里的示例品牌/人物「never treat … as a fact about the user」——防止 DS 文档内容污染对话语境</li>
-          <li><strong>per-component 摘要随 prompt 走</strong>：组件的 <code>*.prompt.md</code> 文件<strong>刻意不复制</strong>进 <code>_ds/</code>，它们的首行摘要以 <code>&lt;ds-prompt-excerpts&gt;</code> 块的形式内联在 _ds_prompt.md 里，完整文件留在源树——副本保持最小，信息却不丢</li>
+          <li><strong>per-component 摘要随 prompt 走</strong>：组件的 <code class="k">*.prompt.md</code> 文件<strong>刻意不复制</strong>进 <code class="k">_ds/</code>，它们的首行摘要以 <code class="k">&lt;ds-prompt-excerpts&gt;</code> 块的形式内联在 _ds_prompt.md 里，完整文件留在源树——副本保持最小，信息却不丢</li>
         </ul>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="verifier-probes">验证探针：fork-verifier 的两段 in-page JS</h4>
+    <!-- ---------- 18 验证探针协议 ---------- -->
+    <section id="verifier-probes">
+      <div class="sec-head reveal">
+        <div class="sec-num">18</div>
+        <div class="kicker">probes · two in-page diagnostics</div>
+        <h2>验证<em>探针协议</em></h2>
+        <p class="lead"><code class="k">agents/fork-verifier-agent.md</code> 不只是「截图看看」的检查清单，它内置了两段可直接 eval 的诊断 JS。</p>
+      </div>
 
-        <p class="reveal"><code>agents/fork-verifier-agent.md</code> 不只是「截图看看」的检查清单，它内置了两段可直接 eval 的诊断 JS。第一段定位 overflow / 对齐问题的根因——同时取出元素和父元素的盒模型约束，强制主 agent 修根因（box-sizing、flex 的 <code>min-height:auto</code>、父级高度未解析的百分比高度）而不是修像素：</p>
-
-<pre class="reveal lang-js">// fork-verifier-agent.md — 盒约束探针（diagnose the constraint before reporting）
-const el = document.querySelector('...'); const p = el.parentElement;
-const pick = (e, cs) =&gt; ({rect: e.getBoundingClientRect(), boxSizing: cs.boxSizing,
+      <div class="reveal">
+        <p>第一段定位 overflow / 对齐问题的根因——同时取出元素和父元素的盒模型约束，强制主 agent 修根因（box-sizing、flex 的 <code class="k">min-height:auto</code>、父级未解析的百分比高度）而不是修像素：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">fork-verifier-agent.md — 盒约束探针</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// diagnose the constraint before reporting</span>
+<span class="t-key">const</span> el = document.querySelector(<span class="t-str">'...'</span>); <span class="t-key">const</span> p = el.parentElement;
+<span class="t-key">const</span> pick = (e, cs) =&gt; ({rect: e.getBoundingClientRect(), boxSizing: cs.boxSizing,
   display: cs.display, position: cs.position, width: cs.width, height: cs.height,
   minHeight: cs.minHeight, flexDirection: cs.flexDirection});
-JSON.stringify({el: pick(el, getComputedStyle(el)), parent: pick(p, getComputedStyle(p))});</pre>
-
-        <p class="reveal">第二段收集页面所有样式表里<strong>实际定义过</strong>的 CSS 自定义属性（递归进 <code>@layer</code> / <code>@media</code>，不止 <code>:root</code>），再 grep 源文件里引用的 <code>var(--…)</code>，集合做差即得「未解析 token」清单——和 _ds_prompt.md 的 allowlist 护栏在交付端闭环：</p>
-
-<pre class="reveal lang-js">// fork-verifier-agent.md — 自定义属性收集器
-const defined = new Set();
-const walk = rs =&gt; { for (const r of rs||[]) { if (r.style) for (const p of r.style)
-  if (p.startsWith('--')) defined.add(p);
-  try { walk(r.cssRules || r.styleSheet?.cssRules); } catch {} } };
-for (const ss of document.styleSheets) try { walk(ss.cssRules); } catch {}
-JSON.stringify([...defined]);</pre>
-
-        <p class="reveal">协议层面有三条硬规则：验证 agent <strong>绝对只读</strong>（upstream 的 write_file / str_replace_edit / run_script 全部 off-limits，发现问题只报告、由主 agent 修复后重跑）；<code>needs_work</code> 只留给真问题（broken layout、console error、缺内容、未解析 token），「Not nitpicks」；以及「<strong>The verdict is the only exit</strong>」——最终消息必须以 done / needs_work 收尾，没有 verdict 的纯文字回复被定义为 dead end。</p>
-
-        <h4 class="reveal" id="vs-pi-workflows">与 pi-dynamic-workflows 的架构对比</h4>
-
-        <p class="reveal">虽然 baoyu-design 和 pi-dynamic-workflows 都服务于 coding agent，但解决的问题域完全不同：</p>
-
-        <div class="reveal" style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:0.9rem">
-          <thead><tr style="background:var(--accent);color:#000">
-            <th style="padding:8px 12px;text-align:left">维度</th>
-            <th style="padding:8px 12px;text-align:left">pi-dynamic-workflows</th>
-            <th style="padding:8px 12px;text-align:left">baoyu-design</th>
-          </tr></thead>
-          <tbody style="color:var(--text)">
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">解决的问题</td><td style="padding:6px 12px;border-bottom:1px solid #333">模型编排：子 agent 的 fan-out / fan-in</td><td style="padding:6px 12px;border-bottom:1px solid #333">设计生成：UI mockup / prototype / deck</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">核心模块</td><td style="padding:6px 12px;border-bottom:1px solid #333">assertDeterministicAst + vm.Script</td><td style="padding:6px 12px;border-bottom:1px solid #333">compile-design-system.mjs + Babel</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">用户可见输出</td><td style="padding:6px 12px;border-bottom:1px solid #333">workflow 执行结果（结构化 JSON）</td><td style="padding:6px 12px;border-bottom:1px solid #333">HTML 设计物（mockup/prototype/deck）</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">AST 校验</td><td style="padding:6px 12px;border-bottom:1px solid #333">严格：拒绝 Date/Math.random/原型链</td><td style="padding:6px 12px;border-bottom:1px solid #333">N/A（设计系统编译，非脚本执行）</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">版本管理</td><td style="padding:6px 12px;border-bottom:1px solid #333">无（每次 workflow 全新）</td><td style="padding:6px 12px;border-bottom:1px solid #333">_d_meta.json + 版本链 + status</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">多 harness</td><td style="padding:6px 12px;border-bottom:1px solid #333">单 harness（Claude Code）</td><td style="padding:6px 12px;border-bottom:1px solid #333">4 harness（Claude Code/Cursor/Codex/generic）</td></tr>
-            <tr><td style="padding:6px 12px;border-bottom:1px solid #333">沙箱</td><td style="padding:6px 12px;border-bottom:1px solid #333">node:vm + 冻结 process/console</td><td style="padding:6px 12px;border-bottom:1px solid #333">浏览器 sandbox（HTTP served）</td></tr>
-          </tbody>
-        </table>
+<span class="t-typ">JSON</span>.stringify({el: pick(el, getComputedStyle(el)), parent: pick(p, getComputedStyle(p))});</code></pre>
         </div>
+        <p>第二段收集页面所有样式表里<strong>实际定义过</strong>的 CSS 自定义属性（递归进 <code class="k">@layer</code> / <code class="k">@media</code>，不止 <code class="k">:root</code>），再 grep 源文件里引用的 <code class="k">var(--…)</code>，集合做差即得「未解析 token」清单——和 _ds_prompt.md 的 allowlist 护栏在交付端闭环：</p>
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">fork-verifier-agent.md — 自定义属性收集器</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">const</span> defined = <span class="t-key">new</span> <span class="t-typ">Set</span>();
+<span class="t-key">const</span> walk = rs =&gt; { <span class="t-key">for</span> (<span class="t-key">const</span> r <span class="t-key">of</span> rs||[]) { <span class="t-key">if</span> (r.style) <span class="t-key">for</span> (<span class="t-key">const</span> p <span class="t-key">of</span> r.style)
+  <span class="t-key">if</span> (p.startsWith(<span class="t-str">'--'</span>)) defined.add(p);
+  <span class="t-key">try</span> { <span class="t-fn">walk</span>(r.cssRules || r.styleSheet?.cssRules); } <span class="t-key">catch</span> {} } };
+<span class="t-key">for</span> (<span class="t-key">const</span> ss <span class="t-key">of</span> document.styleSheets) <span class="t-key">try</span> { <span class="t-fn">walk</span>(ss.cssRules); } <span class="t-key">catch</span> {}
+<span class="t-typ">JSON</span>.stringify([...defined]);</code></pre>
+        </div>
+        <div class="note reveal"><b>协议三条硬规则：</b>验证 agent <strong>绝对只读</strong>（upstream 的 write_file / str_replace_edit / run_script 全部 off-limits，发现问题只报告、由主 agent 修复后重跑）；<code class="k">needs_work</code> 只留给真问题（broken layout、console error、缺内容、未解析 token），「Not nitpicks」；以及「<strong>The verdict is the only exit</strong>」——最终消息必须以 done / needs_work 收尾，没有 verdict 的纯文字回复被定义为 dead end。</div>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="highlights">技术亮点总结</h4>
+    <!-- ---------- 19 对比 pi-workflows ---------- -->
+    <section id="vs-pi-workflows">
+      <div class="sec-head reveal">
+        <div class="sec-num">19</div>
+        <div class="kicker">contrast · vs pi-dynamic-workflows</div>
+        <h2>对比 <em>pi-workflows</em></h2>
+        <p class="lead">虽然 baoyu-design 和 pi-dynamic-workflows 都服务于 coding agent，但解决的问题域完全不同。</p>
+      </div>
 
-        <ul class="reveal">
-          <li><strong>Harness 抽象层</strong>：同一套 SKILL.md + system-prompt.md，通过 references/*.md 注入不同 harness 的工具实现，四套代码复用同一套方法论</li>
-          <li><strong>设计系统管道</strong>：compile（写）/ check（读-only subagent）/ import（同步）三段式，解耦了「创作工具」和「消费工具」</li>
-          <li><strong>读-only 解析器</strong>：ds-core.mjs 不写磁盘，让 checker 可以作为隔离 subagent 安全运行</li>
-          <li><strong>版本化交付物</strong>：_d_meta.json 追踪每个设计物的版本链和 review 状态，实现了非代码资产的版本控制</li>
-          <li><strong>Vendored Babel</strong>：把 3.1 MB Babel 内联在 repo 里，避免 CDN 依赖，确保离线可用</li>
-          <li><strong>多格式输出</strong>：hi-fi mockup、interactive prototype、wireframe、deck、PPT export——20+ built-in skills 覆盖了设计输出的主要形态</li>
-          <li><strong>零 API 设计</strong>：所有能力在本地运行，不需要访问 claude.ai/design，不需要任何远程服务</li>
-        </ul>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 19 · 架构对比</div>
+          <table class="tbl">
+            <tr><th>维度</th><th>pi-dynamic-workflows</th><th>baoyu-design</th></tr>
+            <tr><td>解决的问题</td><td>模型编排：子 agent 的 fan-out / fan-in</td><td>设计生成：UI mockup / prototype / deck</td></tr>
+            <tr><td>核心模块</td><td><code>assertDeterministicAst</code> + <code>vm.Script</code></td><td><code class="cy">compile-design-system.mjs</code> + Babel</td></tr>
+            <tr><td>用户可见输出</td><td>workflow 执行结果（结构化 JSON）</td><td>HTML 设计物（mockup/prototype/deck）</td></tr>
+            <tr><td>AST 校验</td><td>严格：拒绝 Date/Math.random/原型链</td><td>N/A（设计系统编译，非脚本执行）</td></tr>
+            <tr><td>版本管理</td><td>无（每次 workflow 全新）</td><td><code class="cy">_d_meta.json</code> + 版本链 + status</td></tr>
+            <tr><td>多 harness</td><td>单 harness（Claude Code）</td><td><span class="ph">4 harness</span>（Claude Code/Cursor/Codex/generic）</td></tr>
+            <tr><td>沙箱</td><td><code>node:vm</code> + 冻结 process/console</td><td>浏览器 sandbox（HTTP served）</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="limitations">局限性</h4>
+    <!-- ---------- 20 技术亮点 ---------- -->
+    <section id="highlights">
+      <div class="sec-head reveal">
+        <div class="sec-num">20</div>
+        <div class="kicker">highlights · what stands out</div>
+        <h2>技术<em>亮点</em></h2>
+        <p class="lead">七个工程决策共同构成了 baoyu-design 的差异化竞争力。</p>
+      </div>
 
-        <ul class="reveal">
+      <div class="reveal">
+        <div class="grid g2 reveal">
+          <div class="card"><div class="ic">harness 抽象层</div><h3>一套方法论，四套工具</h3><p>同一套 SKILL.md + system-prompt.md，通过 references/*.md 注入不同 harness 的工具实现，四套代码复用同一套方法论。</p></div>
+          <div class="card cy"><div class="ic">三段式管道</div><h3>创作 / 消费解耦</h3><p>compile（写）/ check（读-only subagent）/ import（同步）三段式，解耦了「创作工具」和「消费工具」。</p></div>
+          <div class="card"><div class="ic">read-only 解析器</div><h3>可作隔离 subagent</h3><p>ds-core.mjs 不写磁盘，让 checker 可以作为隔离 subagent 安全运行。</p></div>
+          <div class="card cy"><div class="ic">版本化交付物</div><h3>非代码资产的 VCS</h3><p>_d_meta.json 追踪每个设计物的版本链和 review 状态，实现非代码资产的版本控制。</p></div>
+          <div class="card"><div class="ic">vendored Babel</div><h3>离线可用</h3><p>把 3.1 MB Babel 内联在 repo 里，避免 CDN 依赖，确保离线可用。</p></div>
+          <div class="card cy"><div class="ic">多格式输出</div><h3>20+ built-in skills</h3><p>hi-fi mockup、interactive prototype、wireframe、deck、PPT export——覆盖设计输出的主要形态。</p></div>
+        </div>
+        <div class="note reveal" style="margin-top:24px"><b>零 API 设计：</b>所有能力在本地运行，不需要访问 claude.ai/design，不需要任何远程服务——这是整个项目的立身之本。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 21 局限性 ---------- -->
+    <section id="limitations">
+      <div class="sec-head reveal">
+        <div class="sec-num">21</div>
+        <div class="kicker">limitations · the trade-offs</div>
+        <h2>局限<em>性</em></h2>
+        <p class="lead">几个为换取核心价值而做出的必要权衡。</p>
+      </div>
+
+      <div class="reveal">
+        <ul class="body">
           <li>设计系统创作（compile-design-system.mjs）需要开发者理解 React + CSS tokens，对非前端背景的用户有门槛</li>
           <li>Babel vendor（3.1 MB）占 repo 体积的绝大部分，但这是为了离线可用性的必要权衡</li>
           <li>starter-components 依赖 React 18.3.1 + Babel 7.29.0 的精确版本锁定，升级需要手动更新 system-prompt.md 里的 integrity hash</li>
           <li>design-system 的「起始点」（starting points）功能依赖 @startingPoint 标注的一致性，标注不规范会导致功能失效</li>
         </ul>
+      </div>
+    </section>
 
-        <h4 class="reveal" id="pitfalls">工程陷阱：源码与 reference 文档里自曝的坑</h4>
-
-        <p class="reveal"><code>references/claude.md</code> 和各 .mjs 的注释里记录了大量「踩过才知道」的坑，对在 Claude Code 里实际跑这套技能的人尤其有用：</p>
-
-        <ul class="reveal">
-          <li><strong>preview_click 打不到 React 的 onClick</strong>：React 18 <code>createRoot</code> 把事件委托在根容器上，Claude Preview MCP 的合成点击到不了 handler。文档给出的 workaround 是用 <code>preview_eval</code> 找到节点的 <code>__reactProps$*</code> key，手动调 <code>el[propKey].onClick({stopPropagation(){},preventDefault(){}})</code>——真实浏览器点击没问题，这是 harness-only 的坑</li>
-          <li><strong>键盘事件反而可用</strong>：全局 keydown 监听能用 <code>window.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true}))</code> 触发——测 ⌘K / Esc 快捷键走这条路</li>
-          <li><strong>截图表面会失同步</strong>：页面内 <code>location.reload()</code> 或反复自定义 resize 之后，截图窗口会缩在角落。修复手段是 <code>preview_resize</code> 切到预设尺寸再切回来；文档直接建议用 <code>location.href = …</code> 代替 <code>reload()</code></li>
-          <li><strong>file:// 是死路</strong>：多文件原型（HTML 加载 <code>&lt;script type="text/babel" src="…jsx"&gt;</code>）在 file:// 下被浏览器的 cross-origin 本地脚本读取限制拦死，必须 HTTP。官方姿势是单个 server 服务整个 designs/ 目录（<code>python3 -m http.server 4311 --directory designs</code>），所有项目复用同一个</li>
-          <li><strong>_d_meta.json 损坏时宁可崩</strong>：<code>asset-store.mjs</code> 的 <code>readMeta()</code> 对「文件存在但 JSON 非法」选择 throw 而不是返回空对象——注释写明动机：「better than silently clobbering the orchestrator-written fields on the next write」。静默重建会丢掉 title / prompt / designSystems 等编排器写入的字段</li>
-          <li><strong>fail-soft 的另一面</strong>：组件转译失败不会让编译报错退出，而是变成 bundle 里的运行时 throw 进 <code>__errors</code>。debug「组件怎么没渲染」时，第一步应该是在控制台查 <code>window.&lt;Namespace&gt;.__errors</code></li>
-          <li><strong>直接 &lt;script src&gt; 组件模块会被 checker 抓</strong>：@dsCard 卡片若直接引用组件 .jsx 而不是走 <code>_ds_bundle.js</code>，ds-core 会报 issue——绕过 bundle 意味着绕过命名空间和 fail-soft 契约；但页面加载自己本地的非模块 .jsx 是正常 multi-file-prototype 模式，源码注释里专门说明「is NOT flagged」</li>
-          <li><strong>prop 白名单只看第一个 interface</strong>：adherence 推导对一文件多 interface 的组件（Card → CardProps + CardHeaderProps）只取第一个；集合组件的规则会落在 item 元素上。这是 advisory lint 的已知边界，不要把它当成完整类型检查</li>
-        </ul>
-
+    <!-- ---------- 22 工程陷阱 ---------- -->
+    <section id="pitfalls">
+      <div class="sec-head reveal">
+        <div class="sec-num">22</div>
+        <div class="kicker">pitfalls · self-documented traps</div>
+        <h2>工程<em>陷阱</em></h2>
+        <p class="lead"><code class="k">references/claude.md</code> 和各 .mjs 的注释里记录了大量「踩过才知道」的坑，对在 Claude Code 里实际跑这套技能的人尤其有用。</p>
       </div>
 
-      <div class="callout reveal"><b>相关项目</b>：本站同时分析了 <a href="pi-dynamic-workflows.html">pi-dynamic-workflows ↗</a>（模型编排层）和 <a href="index.html">Agent Infrastructure Teardown 首页 ↗</a>，可以对比阅读。</div>
-    </div>
-  </div>
-</section>
+      <div class="reveal">
+        <div class="grid g2 reveal">
+          <div class="card"><div class="ic">preview_click</div><h3>打不到 React 的 onClick</h3><p>React 18 <code class="k">createRoot</code> 把事件委托在根容器上，Claude Preview MCP 的合成点击到不了 handler。workaround 是用 <code class="k">preview_eval</code> 找到节点的 <code class="k">__reactProps$*</code> key，手动调 <code class="k">el[propKey].onClick({stopPropagation(){},preventDefault(){}})</code>——真实浏览器点击没问题，这是 harness-only 的坑。</p></div>
+          <div class="card cy"><div class="ic">键盘事件</div><h3>反而可用</h3><p>全局 keydown 监听能用 <code class="k">window.dispatchEvent(new KeyboardEvent('keydown',{key:'k',metaKey:true,bubbles:true}))</code> 触发——测 ⌘K / Esc 快捷键走这条路。</p></div>
+          <div class="card"><div class="ic">截图失同步</div><h3>resize 兜底</h3><p>页面内 <code class="k">location.reload()</code> 或反复自定义 resize 之后，截图窗口会缩在角落。修复手段是 <code class="k">preview_resize</code> 切到预设尺寸再切回来；文档直接建议用 <code class="k">location.href = …</code> 代替 <code class="k">reload()</code>。</p></div>
+          <div class="card cy"><div class="ic">file://</div><h3>是死路</h3><p>多文件原型（HTML 加载 <code class="k">&lt;script type="text/babel" src="…jsx"&gt;</code>）在 file:// 下被浏览器的 cross-origin 本地脚本读取限制拦死，必须 HTTP。官方姿势是单个 server 服务整个 designs/ 目录（<code class="k">python3 -m http.server 4311 --directory designs</code>），所有项目复用同一个。</p></div>
+          <div class="card"><div class="ic">_d_meta.json</div><h3>损坏时宁可崩</h3><p><code class="k">asset-store.mjs</code> 的 <code class="k">readMeta()</code> 对「文件存在但 JSON 非法」选择 throw 而不是返回空对象——注释写明动机：「better than silently clobbering the orchestrator-written fields on the next write」。静默重建会丢掉 title / prompt / designSystems 等编排器写入的字段。</p></div>
+          <div class="card cy"><div class="ic">fail-soft 的另一面</div><h3>查 __errors</h3><p>组件转译失败不会让编译报错退出，而是变成 bundle 里的运行时 throw 进 <code class="k">__errors</code>。debug「组件怎么没渲染」时，第一步应该是在控制台查 <code class="k">window.&lt;Namespace&gt;.__errors</code>。</p></div>
+          <div class="card"><div class="ic">&lt;script src&gt; 组件</div><h3>会被 checker 抓</h3><p>@dsCard 卡片若直接引用组件 .jsx 而不是走 <code class="k">_ds_bundle.js</code>，ds-core 会报 issue——绕过 bundle 意味着绕过命名空间和 fail-soft 契约；但页面加载自己本地的非模块 .jsx 是正常 multi-file-prototype 模式，源码注释里专门说明「is NOT flagged」。</p></div>
+          <div class="card cy"><div class="ic">prop 白名单</div><h3>只看第一个 interface</h3><p>adherence 推导对一文件多 interface 的组件（Card → CardProps + CardHeaderProps）只取第一个；集合组件的规则会落在 item 元素上。这是 advisory lint 的已知边界，不要把它当成完整类型检查。</p></div>
+        </div>
 
+        <div class="note cy reveal" style="margin-top:24px"><b>相关项目：</b>可对比阅读 <a class="inl" href="https://github.com/Michaelliv/pi-dynamic-workflows" target="_blank" rel="noopener">pi-dynamic-workflows ↗</a>（模型编排层）。</div>
+      </div>
+
+      <div class="foot reveal">
+        <div class="big">baoyu<b>design</b> · 源码即文档</div>
+        <div class="meta">
+          JimLiu/baoyu-design · MIT · 2026-06-06<br/>
+          基于 skills/baoyu-design/ 源码文本撰写 · 含真实函数名与代码片段<br/>
+          <a class="inl" href="https://github.com/JimLiu/baoyu-design" target="_blank" rel="noopener">github.com/JimLiu/baoyu-design ↗</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
 </div>
-</main>
 
-<footer>
-  <div class="wrap">
-    <div class="fbrand">Agent Infrastructure Teardown</div>
-    <p>基于源码逐文件拆解撰写 · 顶部 Tab 可切换不同项目的深度解析</p>
-    <div class="links">
-      <a href="https://github.com/JimLiu/baoyu-design" target="_blank" rel="noopener">baoyu-design ↗</a>
-      <a href="https://github.com/colbymchenry/codegraph" target="_blank" rel="noopener">CodeGraph ↗</a>
-      <a href="https://github.com/Michaelliv/pi-dynamic-workflows" target="_blank" rel="noopener">PI Dynamic Workflows ↗</a>
-    </div>
-    <p class="meta">Built with Claude Code · 静态站点 · 部署于 GitHub Pages</p>
-  </div>
-</footer>
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(233,184,115,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
 
-<button class="totop" aria-label="返回顶部">↑</button>
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
 
-<script src="./assets/main.js"></script>
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
 </body>
 </html>
