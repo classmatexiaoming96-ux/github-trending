@@ -1,370 +1,974 @@
-<!doctype html>
-<html lang="zh-CN" class="has-tabs">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>OpenClaw · 源码级架构解析 · ACP / MCP / Plugin / Sandbox</title>
 <meta name="description" content="openclaw/openclaw 源码级深度解析——Gateway 入口与主循环、ACP 会话生成（acp-spawn.ts）、MCP 运行时（@modelcontextprotocol/sdk）、插件系统（manifest.ts / api-builder.ts）、沙箱隔离（sandbox/runtime-status.ts）。基于 src/ 源码撰写，含实际函数名与类型定义。" />
 <meta property="og:title" content="OpenClaw · 源码级架构解析" />
 <meta property="og:type" content="article" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
-</head>
-<body class="tabs-active">
-<div id="progress"></div>
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
 
-<nav class="site-index">
-  <div class="wrap">
-    <span class="site-index-label">📂 项目索引</span>
-    <div class="site-index-links">
-      <a href="index.html#cg">🗂 CodeGraph<span>索引层 · 代码语义后端</span></a>
-      <a href="index.html#ua">🗂 Understand-Anything<span>认知层 · 代码地图</span></a>
-      <a href="index.html#cp">🗂 Claude Plugins<span>能力层 · 官方插件生态</span></a>
-      <a href="index.html#oh">🗂 OpenHuman Memory Tree<span>记忆层 · 本地知识库</span></a>
-      <a href="index.html#kc">🗂 Kimi Code<span>模型层 · 多 Agent 引擎</span></a>
-      <a href="index.html#oc">🗂 OpenClaw<span>全渠道 · 个人 AI 助手</span></a>
-      <a href="index.html#od">🗂 Odysseus<span>Agent 层 · 自托管工作台</span></a>
-    </div>
-  </div>
-</nav>
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
 
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#oc"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="active" data-tab="oc"><span class="dot"></span>OpenClaw <span class="pill">源码级</span></button>
-    </div>
-  </div>
-</header>
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
 
-<main>
-<div class="tab-panel active" data-tab="oc">
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
 
-  <nav class="nav-toc" aria-label="页面目录">
-    <h3>目录</h3>
-    <ul>
-      <li><a href="#entry">Gateway 入口与主循环</a></li>
-      <li><a href="#acp-spawn">ACP 会话生成（acp-spawn.ts）</a></li>
-      <li><a href="#harness-types">AgentHarness 类型系统</a></li>
-      <li><a href="#mcp-runtime">MCP 运行时（agent-bundle-mcp-runtime.ts）</a></li>
-      <li><a href="#plugin-types">插件系统公共接口（types.ts）</a></li>
-      <li><a href="#plugin-manifest">Manifest 解析（manifest.ts）</a></li>
-      <li><a href="#plugin-builder">PluginApi 构建器（api-builder.ts）</a></li>
-      <li><a href="#sandbox">沙箱隔离模型（sandbox/runtime-status.ts）</a></li>
-      <li><a href="#dir-tree">完整目录树</a></li>
-    </ul>
-  </nav>
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
 
-  <style>.tab-panel[data-tab="oc"] section{--accent:#e8825a}.tab-panel[data-tab="oc"] .hero{--accent:#e8825a}</style>
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
 
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>openclaw/openclaw · TypeScript · 源码级解析</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">OpenClaw</span> · 源码级架构解析</h1>
-    <p class="lead reveal" style="margin-bottom:0">深入 <code>src/</code> 源码，逐模块还原真实实现——Gateway 入口、ACP 会话生成、MCP Client、插件系统、沙箱隔离。所有结论来自源码文本，含实际函数签名与类型定义。</p>
-    <div class="statstrip reveal" style="max-width:820px;margin:38px auto 0"><div class="cell"><div class="n">~1708</div><div class="l">acp-spawn.ts 行数</div></div><div class="cell"><div class="n">@modelcontextprotocol/sdk</div><div class="l">MCP Client</div></div><div class="cell"><div class="n">openclaw.plugin.json</div><div class="l">Manifest 协议</div></div><div class="cell"><div class="n">sandbox mode</div><div class="l">隔离策略</div></div></div>
-  </div>
-</section>
-
-  <section id="oc" class="project oc">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">OC</div>
-      <div class="proj-title">
-        <h2>OpenClaw</h2>
-        <a class="repo" href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">openclaw/openclaw · TypeScript · pnpm monorepo</a>
-      </div>
-    </div>
-    <div class="narrow">
-
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">src/agents/</div><div class="l">Agent 核心</div></div>
-        <div class="chip"><div class="n">src/plugins/</div><div class="l">插件系统</div></div>
-        <div class="chip"><div class="n">src/channels/</div><div class="l">渠道接入</div></div>
-        <div class="chip"><div class="n">packages/</div><div class="l">共享包</div></div>
-      </div>
-
-      <div class="prose">
-
-        <h4 class="reveal" id="entry">Gateway 入口与主循环</h4>
-        <p class="reveal">源码：<code>src/entry.ts</code>（Node.js CLI 入口点）</p>
-        <p class="reveal">整个系统从 <code>entry.ts</code> 的 <code>runMainOrRootHelp()</code> 开始：</p>
-        <pre class="reveal"><code>// entry.ts:92-94
-const entryFile = fileURLToPath(import.meta.url);
-const installRoot = resolveEntryInstallRoot(entryFile);
-
-// entry.ts:285
-async function runMainOrRootHelp(argv: string[]): Promise<void> {
-    const { runCli } = await gatewayEntryStartupTrace.measure("cli", async () => {
-        const parsed = parseCliProfileArgs(parsedContainer.argv);
-        // ...profile env applied
-        await runCli({ argv: parsed.argv });
-    });
-}</code></pre>
-        <p class="reveal">启动链路：<code>entry.ts</code> → <code>resolveEntryInstallRoot()</code> → <code>respawnWithoutOpenClawCompileCacheIfNeeded()</code>（编译缓存优化）→ <code>parseCliProfileArgs()</code>（加载 profile 环境变量）→ <code>runCli()</code>。Gateway 模式下实际跑的是 <code>runCli</code> 内部的 <code>gateway</code> 子命令。</p>
-        <p class="reveal">编译缓存通过 <code>entry.compile-cache.ts</code> 管理，用 <code>OPENCLAW_COMPILE_CACHE_DIR</code> 环境变量定位缓存目录，重 spawn 时不带缓存标志以避免递归。</p>
-
-        <h4 class="reveal" id="acp-spawn">ACP 会话生成（acp-spawn.ts）</h4>
-        <p class="reveal">源码：<code>src/agents/acp-spawn.ts</code>（1708 行，核心文件）</p>
-        <p class="reveal">ACP（Agent Client Protocol）的会话生成逻辑在此文件：</p>
-        <pre class="reveal"><code>// acp-spawn.ts 导入链
-import { getAcpSessionManager } from "../acp/control-plane/manager.js";
-import {
-  cleanupFailedAcpSpawn,
-  type AcpSpawnRuntimeCloseHandle,
-} from "../acp/control-plane/spawn.js";
-import { isAcpEnabledByPolicy, resolveAcpAgentPolicyError } from "../acp/policy.js";
-import { readAcpSessionMeta } from "../acp/runtime/session-meta.js";
-import { resolveAcpSessionCwd, resolveAcpThreadSessionDetailLines }
-  from "@openclaw/acp-core/runtime/session-identifiers";
-import type { AcpRuntimeSessionMode } from "@openclaw/acp-core/runtime/types";</code></pre>
-        <p class="reveal">ACP Core 是一个独立 package（<code>@openclaw/acp-core</code>），包含 session 标识符解析、运行时类型定义（<code>AcpRuntimeSessionMode</code>）以及会话元数据读写（<code>session-meta.js</code>）。</p>
-        <p class="reveal">会话生成流程：<code>acp-spawn.ts</code> 调用 <code>getAcpSessionManager()</code> 获取会话管理器 → 通过 <code>spawn.js</code> 中的 <code>cleanupFailedAcpSpawn()</code> 处理失败清理 → 由 <code>policy.js</code> 的 <code>isAcpEnabledByPolicy()</code> 做策略检查。父进程通过 <code>acp-spawn-parent-stream.ts</code> 做 stdout/parent-stream relay，把 ACP harness 的输出打回到 OpenClaw 的会话流中。</p>
-        <p class="reveal">会话限制由 <code>config/agent-limits.ts</code> 控制：</p>
-        <pre class="reveal"><code>// src/config/agent-limits.ts
-DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT  // 每个 agent 最大子会话数
-DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH         // 最大 spawn 深度（防止嵌套失控）</code></pre>
-
-        <h4 class="reveal" id="harness-types">AgentHarness 类型系统</h4>
-        <p class="reveal">源码：<code>src/agents/harness/types.ts</code></p>
-        <p class="reveal">OpenClaw 的外部编程接口通过 <code>AgentHarness</code> 接口抽象。这是 ACP harness（Claude Code / Codex 等）接入的核心协议：</p>
-        <pre class="reveal"><code>// src/agents/harness/types.ts
-export type AgentHarness = AgentHarnessRunCapability &
-  AgentHarnessSideQuestionCapability &
-  AgentHarnessClassificationCapability &
-  AgentHarnessCompactionCapability &
-  AgentHarnessSessionLifecycleCapability;
-
-// 核心能力：
-export type AgentHarnessRunCapability = {
-  run(params: AgentHarnessAttemptParams): Promise&lt;AgentHarnessAttemptResult&gt;;
-};
-
-export type AgentHarnessSideQuestionCapability = {
-  sideQuestion(params: AgentHarnessSideQuestionParams): Promise&lt;AgentHarnessSideQuestionResult&gt;;
-};
-
-export type AgentHarnessClassificationCapability = {
-  classify?(input: unknown): Promise&lt;AgentHarnessResultClassification&gt;;
-};
-
-export type AgentHarnessCompactionCapability = {
-  compact(params: AgentHarnessCompactParams): Promise&lt;AgentHarnessCompactResult&gt;;
-};
-
-export type AgentHarnessSessionLifecycleCapability = {
-  reset?(params: AgentHarnessResetParams): Promise&lt;void&gt;;
-};</code></pre>
-        <p class="reveal">关键点：<code>run()</code> 是必须方法，<code>sideQuestion()</code>（侧提问）、<code>classify()</code>（结果分类）、<code>compact()</code>（压缩会话）、<code>reset()</code> 都是可选扩展。OpenClaw 通过这个统一接口驱动 Claude Code、Cursor、Gemini CLI 等外部 harness。</p>
-
-        <h4 class="reveal" id="mcp-runtime">MCP 运行时（agent-bundle-mcp-runtime.ts）</h4>
-        <p class="reveal">源码：<code>src/agents/agent-bundle-mcp-runtime.ts</code></p>
-        <p class="reveal">OpenClaw 的 MCP（Model Context Protocol）客户端实现，基于 <code>@modelcontextprotocol/sdk</code>：</p>
-        <pre class="reveal"><code>// agent-bundle-mcp-runtime.ts
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-
-// Session-scoped MCP session 结构
-type BundleMcpSession = {
-  serverName: string;
-  client: Client;
-  transport: Transport;
-  transportType: "stdio" | "sse" | "streamable-http";
-  requestTimeoutMs: number;
-  supportsParallelToolCalls: boolean;
-  detachStderr?: () =&gt; void;
-};
-
-// 全局 session manager 符号（保证每个进程只有一个 manager 实例）
-const SESSION_MCP_RUNTIME_MANAGER_KEY = Symbol.for("openclaw.sessionMcpRuntimeManager");</code></pre>
-        <p class="reveal">工具调用链：<code>Client.listTools()</code> → 获取工具列表 → <code>Client.callTool()</code> 调用工具 → 结果通过 <code>CallToolResult</code> 类型返回。超时由 <code>BUNDLE_MCP_CATALOG_LIST_TIMEOUT_MS = 1500ms</code> 控制，失败重试用指数退避（<code>BUNDLE_MCP_FAILURE_COOLDOWN_MS = 60000ms</code>）。</p>
-        <pre class="reveal"><code>// 关键函数签名
-export function createBundleMcpJsonSchemaValidator(): jsonSchemaValidator;
-export function resolveSessionMcpConfigSummary(params: {...}): {...};
-export function resolveSessionMcpConfigFingerprint(params: {...}): string;
-function resolveSessionMcpRuntimeIdleTtlMs(cfg?: OpenClawConfig): number;
-  // 默认值：10 分钟 idle TTL</code></pre>
-        <p class="reveal">MCP 服务器配置通过 <code>loadEmbeddedAgentMcpConfig()</code> 加载（<code>embedded-agent-mcp.ts</code>），由 <code>mcp-config-shared.ts</code> 的 <code>isMcpConfigRecord()</code> 做类型校验，传输解析在 <code>mcp-transport.ts</code> 中。</p>
-
-        <h4 class="reveal" id="plugin-types">插件系统公共接口（types.ts）</h4>
-        <p class="reveal">源码：<code>src/plugins/types.ts</code>（定义了 <code>OpenClawPluginApi</code> 所有公共注册方法）</p>
-        <p class="reveal">插件通过 <code>buildPluginApi()</code>（<code>api-builder.ts</code>）构建的 API 对象注册自己的能力：</p>
-        <pre class="reveal"><code>// api-builder.ts — BuildPluginApiParams 定义了所有可注册项
-export type BuildPluginApiParams = {
-  id: string;
-  name: string;
-  version?: string;
-  source: string;
-  registrationMode: OpenClawPluginApi["registrationMode"];
-  config: OpenClawConfig;
-  runtime: PluginRuntime;
-  logger: PluginLogger;
-  handlers?: Partial&lt;Pick&lt;OpenClawPluginApi,
-    | "registerTool"          // 注册工具
-    | "registerHook"          // 注册生命周期钩子
-    | "registerHttpRoute"      // 注册 HTTP 路由
-    | "registerChannel"       // 注册消息渠道
-    | "registerGatewayMethod" // 注册 Gateway 方法
-    | "registerCli"            // 注册 CLI 命令
-    | "registerProvider"       // 注册 Provider（模型/语音/图像等）
-    | "registerAgentHarness"  // 注册外部 Agent Harness（ACP）
-    | "registerMcpServer"      // 注册 MCP 服务器
-    | ...（共 30+ 项）
-  &gt;&gt;;
-};</code></pre>
-        <p class="reveal">每个注册方法对应一个具体的功能领域。例如 <code>registerTool</code> 让插件声明自己的工具，<code>registerHook</code> 注入生命周期回调（start/stop/enable/disable 等），<code>registerAgentHarness</code> 是 ACP 外部 harness 接入的正式入口。</p>
-
-        <h4 class="reveal" id="plugin-manifest">Manifest 解析（manifest.ts）</h4>
-        <p class="reveal">源码：<code>src/plugins/manifest.ts</code></p>
-        <p class="reveal">插件的元数据描述文件是 <code>openclaw.plugin.json</code>（<code>PLUGIN_MANIFEST_FILENAME</code> 常量），解析在此文件：</p>
-        <pre class="reveal"><code>// manifest.ts
-export const PLUGIN_MANIFEST_FILENAME = "openclaw.plugin.json";
-export const MAX_PLUGIN_MANIFEST_BYTES = 256 * 1024;
-
-// manifest 解析缓存（SLRU，512 条目）
-const pluginManifestLoadCache = new PluginLruCache&lt;PluginManifestLoadCacheEntry&gt;(
-  MAX_PLUGIN_MANIFEST_LOAD_CACHE_ENTRIES,
-);
-
-// 缓存 key 生成
-export function createPluginCacheKey(...): PluginCacheKey;
-
-// 清除缓存（测试用）
-export function clearPluginManifestLoadCache(): void;</code></pre>
-        <p class="reveal">Manifest 中包含插件版本、入口点、config schema、commands、providers、hooks 等元数据。解析后缓存 512 条，缓存条目包含 <code>mtimeMs</code>/<code>ctimeMs</code> 以跟踪文件变化。Secret provider exec 参数长度限制等安全策略也在此文件校验。</p>
-
-        <h4 class="reveal" id="plugin-builder">Plugin 运行时协调器（runtime.ts）</h4>
-        <p class="reveal">源码：<code>src/plugins/runtime.ts</code></p>
-        <p class="reveal">Plugin 运行时协调器管理全局 plugin registry 状态：</p>
-        <pre class="reveal"><code>// runtime.ts — 全局 RegistryState 保存在 globalThis 上
-const state: RegistryState = (() => {
-  const globalState = globalThis as typeof globalThis & {
-    [PLUGIN_REGISTRY_STATE]?: RegistryState;
-  };
-  let registryState = globalState[PLUGIN_REGISTRY_STATE];
-  if (!registryState) {
-    registryState = {
-      activeRegistry: null,
-      activeVersion: 0,
-      httpRoute: { registry: null, pinned: false, version: 0 },
-      channel: { registry: null, pinned: false, version: 0 },
-      importedPluginIds: new Set&lt;string&gt;(),
-      runtimeSubagentMode: "default",
-    };
-    globalState[PLUGIN_REGISTRY_STATE] = registryState;
-  }
-  return registryState;
-})();
-
-// 关键函数：
-function asPluginRegistry(registry: RegistryState["activeRegistry"]): PluginRegistry | null;
-async function cleanupPreviousPluginHostRegistry(params: {...}): Promise&lt;void&gt;;
-function isRegistryLive(registry: PluginRegistry): boolean;
-function isRegistryPinned(registry: PluginRegistry): boolean;</code></pre>
-        <p class="reveal">运行时状态设计：每个进程只有一个全局 registry（存在 <code>globalThis</code> 上），通过 <code>activeRegistry</code> / <code>httpRoute</code> / <code>channel</code> 三个视角观察同一份 registry。<code>pinned</code> 标记用于防止正在使用的 registry 被意外清理。</p>
-
-        <h4 class="reveal" id="sandbox">沙箱隔离模型（sandbox/runtime-status.ts）</h4>
-        <p class="reveal">源码：<code>src/agents/sandbox/runtime-status.ts</code></p>
-        <p class="reveal">沙箱模式由 <code>sandbox.mode</code> 配置控制：</p>
-        <pre class="reveal"><code>// sandbox/runtime-status.ts
-function shouldSandboxSession(
-  cfg: SandboxConfig,
-  sessionKey: string,
-  mainSessionKey: string,
-) {
-  if (cfg.mode === "off") return false;   // 关闭沙箱
-  if (cfg.mode === "all") return true;    // 所有 session 都沙箱
-  // 默认：main session 不沙箱，其他沙箱
-  return sessionKey.trim() !== mainSessionKey.trim();
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
 }
 
-export function resolveSandboxRuntimeStatus(params: {
-  cfg?: OpenClawConfig;
-  sessionKey?: string;
-  agentId: string;
-}): SandboxRuntimeStatus;</code></pre>
-        <p class="reveal">沙箱策略通过 <code>tool-policy.ts</code> 的 <code>classifyToolAgainstSandboxToolPolicy()</code> 对每个工具调用做检查。<code>sandbox.mode</code> 可选值：<code>"off"</code>（不隔离）、<code>"all"</code>（全部隔离）、<code>"non-main"</code>（默认，只对非主 session 隔离）。实际 Docker/SSH 隔离在 <code>sandbox/config.ts</code> 中配置。</p>
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
 
-        <h4 class="reveal" id="dir-tree">完整目录树</h4>
-        <p class="reveal">以下为 <code>src/</code> 顶层目录（基于仓库主分支）：</p>
-        <pre class="reveal"><code>openclaw/src/
-├── entry.ts                  # CLI 入口，runMainOrRootHelp()
-├── entry.compile-cache.ts    # 编译缓存管理
-├── entry.respawn.ts          # 进程重 spawn 逻辑
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; flex-wrap:wrap; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.12em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(44px,7.5vw,98px); line-height:0.94;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(16px,1.6vw,20px); color:var(--text-2); max-width:56ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#1a1206; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+.hero-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:54px; }
+.hero-stats .cell{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; }
+.hero-stats .n{ font-family:var(--mono); font-size:15px; color:var(--star-soft); word-break:break-all; }
+.hero-stats .l{ font-size:12px; color:var(--text-dim); margin-top:5px; }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(232,130,90,0.16); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.06em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ============================================================
+   FLOW (pipeline)
+   ============================================================ */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files / cheat ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .hero-stats{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.hero-stats{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">TypeScript · pnpm monorepo</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#entry"><span class="idx">01</span>Gateway 入口与主循环</a></li>
+        <li><a href="#acp-spawn"><span class="idx">02</span>ACP 会话生成</a></li>
+        <li><a href="#harness-types"><span class="idx">03</span>AgentHarness 类型系统</a></li>
+        <li><a href="#mcp-runtime"><span class="idx">04</span>MCP 运行时</a></li>
+        <li><a href="#plugin-types"><span class="idx">05</span>插件系统公共接口</a></li>
+        <li><a href="#plugin-manifest"><span class="idx">06</span>Manifest 解析</a></li>
+        <li><a href="#plugin-builder"><span class="idx">07</span>Plugin 运行时协调器</a></li>
+        <li><a href="#sandbox"><span class="idx">08</span>沙箱隔离模型</a></li>
+        <li><a href="#dir-tree"><span class="idx">09</span>完整目录树</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      全渠道 · 个人 AI 助手<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>openclaw/openclaw · 源码级</span>
+        <span class="pill">基于 <b>src/</b> 源码文本</span>
+      </div>
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">逐模块还原</span>
+            <span class="l2"><em>OpenClaw</em> 的<span class="core">内核</span></span>
+          </h1>
+          <p class="hero-sub">深入 <b>src/</b> 源码，逐模块还原真实实现——Gateway 入口、ACP 会话生成、MCP Client、插件系统、沙箱隔离。所有结论来自源码文本，含实际函数签名与类型定义。</p>
+          <p class="hero-pkg"># <b>openclaw/openclaw</b> · TypeScript · pnpm monorepo</p>
+          <div class="hero-cta">
+            <a href="#entry" class="btn primary">▸ 从入口读起</a>
+            <a href="#dir-tree" class="btn ghost">查看目录树</a>
+          </div>
+          <div class="hero-stats">
+            <div class="cell"><div class="n">~1708</div><div class="l">acp-spawn.ts 行数</div></div>
+            <div class="cell"><div class="n">@modelcontextprotocol/sdk</div><div class="l">MCP Client</div></div>
+            <div class="cell"><div class="n">openclaw.plugin.json</div><div class="l">Manifest 协议</div></div>
+            <div class="cell"><div class="n">sandbox mode</div><div class="l">隔离策略</div></div>
+          </div>
+        </div>
+
+        <!-- radar -->
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#e8825a" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#e8825a" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#e8825a" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#e8825a" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#54d6e0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fcf9e" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#54d6e0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#e8825a" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="28" fill="rgba(232,130,90,0.08)" stroke="rgba(232,130,90,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#e8825a" font-size="14">Gateway</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">loop</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">ACP</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">MCP</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">Plugin</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">Sandbox</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">Channel</text>
+          </svg>
+        </div>
+      </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
+
+    <!-- ---------- 01 Gateway 入口 ---------- -->
+    <section id="entry">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">入口 · the entry point</div>
+        <h2>Gateway 入口与<em>主循环</em></h2>
+        <p class="lead">源码：<code class="k">src/entry.ts</code>（Node.js CLI 入口点）。整个系统从 <strong>runMainOrRootHelp()</strong> 开始。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/entry.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// entry.ts:92-94</span>
+<span class="t-key">const</span> entryFile = <span class="t-fn">fileURLToPath</span>(import.meta.url);
+<span class="t-key">const</span> installRoot = <span class="t-fn">resolveEntryInstallRoot</span>(entryFile);
+
+<span class="t-com">// entry.ts:285</span>
+<span class="t-key">async function</span> <span class="t-fn">runMainOrRootHelp</span>(argv: <span class="t-typ">string</span>[]): <span class="t-typ">Promise</span>&lt;<span class="t-typ">void</span>&gt; {
+    <span class="t-key">const</span> { runCli } = <span class="t-key">await</span> gatewayEntryStartupTrace.<span class="t-fn">measure</span>(<span class="t-str">"cli"</span>, <span class="t-key">async</span> () =&gt; {
+        <span class="t-key">const</span> parsed = <span class="t-fn">parseCliProfileArgs</span>(parsedContainer.argv);
+        <span class="t-com">// ...profile env applied</span>
+        <span class="t-key">await</span> <span class="t-fn">runCli</span>({ argv: parsed.argv });
+    });
+}</code></pre>
+        </div>
+        <p class="reveal">启动链路：<code class="k">entry.ts</code> → <code class="k">resolveEntryInstallRoot()</code> → <code class="k">respawnWithoutOpenClawCompileCacheIfNeeded()</code>（编译缓存优化）→ <code class="k">parseCliProfileArgs()</code>（加载 profile 环境变量）→ <code class="k">runCli()</code>。Gateway 模式下实际跑的是 <code class="k">runCli</code> 内部的 <code class="kc">gateway</code> 子命令。</p>
+        <p class="reveal">编译缓存通过 <code class="k">entry.compile-cache.ts</code> 管理，用 <code class="k">OPENCLAW_COMPILE_CACHE_DIR</code> 环境变量定位缓存目录，重 spawn 时不带缓存标志以避免递归。</p>
+      </div>
+    </section>
+
+    <!-- ---------- 02 ACP 会话生成 ---------- -->
+    <section id="acp-spawn">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">ACP · agent client protocol</div>
+        <h2>ACP <em>会话生成</em></h2>
+        <p class="lead">源码：<code class="k">src/agents/acp-spawn.ts</code>（1708 行，核心文件）。ACP（Agent Client Protocol）的会话生成逻辑在此文件。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">acp-spawn.ts · 导入链</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">import</span> { getAcpSessionManager } <span class="t-key">from</span> <span class="t-str">"../acp/control-plane/manager.js"</span>;
+<span class="t-key">import</span> {
+  cleanupFailedAcpSpawn,
+  <span class="t-key">type</span> <span class="t-typ">AcpSpawnRuntimeCloseHandle</span>,
+} <span class="t-key">from</span> <span class="t-str">"../acp/control-plane/spawn.js"</span>;
+<span class="t-key">import</span> { isAcpEnabledByPolicy, resolveAcpAgentPolicyError } <span class="t-key">from</span> <span class="t-str">"../acp/policy.js"</span>;
+<span class="t-key">import</span> { readAcpSessionMeta } <span class="t-key">from</span> <span class="t-str">"../acp/runtime/session-meta.js"</span>;
+<span class="t-key">import</span> { resolveAcpSessionCwd, resolveAcpThreadSessionDetailLines }
+  <span class="t-key">from</span> <span class="t-str">"@openclaw/acp-core/runtime/session-identifiers"</span>;
+<span class="t-key">import type</span> { <span class="t-typ">AcpRuntimeSessionMode</span> } <span class="t-key">from</span> <span class="t-str">"@openclaw/acp-core/runtime/types"</span>;</code></pre>
+        </div>
+        <p class="reveal">ACP Core 是一个独立 package（<code class="k">@openclaw/acp-core</code>），包含 session 标识符解析、运行时类型定义（<code class="k">AcpRuntimeSessionMode</code>）以及会话元数据读写（<code class="k">session-meta.js</code>）。</p>
+        <p class="reveal">会话生成流程：<code class="k">acp-spawn.ts</code> 调用 <code class="k">getAcpSessionManager()</code> 获取会话管理器 → 通过 <code class="k">spawn.js</code> 中的 <code class="k">cleanupFailedAcpSpawn()</code> 处理失败清理 → 由 <code class="k">policy.js</code> 的 <code class="k">isAcpEnabledByPolicy()</code> 做策略检查。父进程通过 <code class="k">acp-spawn-parent-stream.ts</code> 做 stdout/parent-stream relay，把 ACP harness 的输出打回到 OpenClaw 的会话流中。</p>
+        <p class="reveal">会话限制由 <code class="k">config/agent-limits.ts</code> 控制：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/config/agent-limits.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-typ">DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT</span>  <span class="t-com">// 每个 agent 最大子会话数</span>
+<span class="t-typ">DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</span>         <span class="t-com">// 最大 spawn 深度（防止嵌套失控）</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 03 AgentHarness 类型系统 ---------- -->
+    <section id="harness-types">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">harness · the contract</div>
+        <h2>AgentHarness <em>类型系统</em></h2>
+        <p class="lead">源码：<code class="k">src/agents/harness/types.ts</code>。OpenClaw 的外部编程接口通过 <strong>AgentHarness</strong> 接口抽象——这是 ACP harness（Claude Code / Codex 等）接入的核心协议。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/agents/harness/types.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export type</span> <span class="t-typ">AgentHarness</span> = <span class="t-typ">AgentHarnessRunCapability</span> &amp;
+  <span class="t-typ">AgentHarnessSideQuestionCapability</span> &amp;
+  <span class="t-typ">AgentHarnessClassificationCapability</span> &amp;
+  <span class="t-typ">AgentHarnessCompactionCapability</span> &amp;
+  <span class="t-typ">AgentHarnessSessionLifecycleCapability</span>;
+
+<span class="t-com">// 核心能力：</span>
+<span class="t-key">export type</span> <span class="t-typ">AgentHarnessRunCapability</span> = {
+  <span class="t-fn">run</span>(params: <span class="t-typ">AgentHarnessAttemptParams</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">AgentHarnessAttemptResult</span>&gt;;
+};
+
+<span class="t-key">export type</span> <span class="t-typ">AgentHarnessSideQuestionCapability</span> = {
+  <span class="t-fn">sideQuestion</span>(params: <span class="t-typ">AgentHarnessSideQuestionParams</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">AgentHarnessSideQuestionResult</span>&gt;;
+};
+
+<span class="t-key">export type</span> <span class="t-typ">AgentHarnessClassificationCapability</span> = {
+  <span class="t-fn">classify</span>?(input: <span class="t-typ">unknown</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">AgentHarnessResultClassification</span>&gt;;
+};
+
+<span class="t-key">export type</span> <span class="t-typ">AgentHarnessCompactionCapability</span> = {
+  <span class="t-fn">compact</span>(params: <span class="t-typ">AgentHarnessCompactParams</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">AgentHarnessCompactResult</span>&gt;;
+};
+
+<span class="t-key">export type</span> <span class="t-typ">AgentHarnessSessionLifecycleCapability</span> = {
+  <span class="t-fn">reset</span>?(params: <span class="t-typ">AgentHarnessResetParams</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">void</span>&gt;;
+};</code></pre>
+        </div>
+        <p class="reveal">关键点：<code class="k">run()</code> 是必须方法，<code class="kc">sideQuestion()</code>（侧提问）、<code class="kc">classify()</code>（结果分类）、<code class="kc">compact()</code>（压缩会话）、<code class="kc">reset()</code> 都是可选扩展。OpenClaw 通过这个统一接口驱动 Claude Code、Cursor、Gemini CLI 等外部 harness。</p>
+
+        <div class="grid g3" style="margin-top:24px">
+          <div class="card"><div class="ic">run() · 必须</div><h3>主运行能力</h3><p>每次 attempt 走 <code class="k">run()</code>，输入 <code class="k">AttemptParams</code>，输出 <code class="k">AttemptResult</code>。</p></div>
+          <div class="card cy"><div class="ic">compact() · 可选</div><h3>会话压缩</h3><p>把长 transcript 压成摘要，配合 <code class="kc">classify()</code> 做结果分类。</p></div>
+          <div class="card"><div class="ic">reset() · 可选</div><h3>生命周期</h3><p>会话级重置，让外部 harness 回到干净起点。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 04 MCP 运行时 ---------- -->
+    <section id="mcp-runtime">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">mcp · model context protocol</div>
+        <h2>MCP <em>运行时</em></h2>
+        <p class="lead">源码：<code class="k">src/agents/agent-bundle-mcp-runtime.ts</code>。OpenClaw 的 MCP 客户端实现，基于 <strong>@modelcontextprotocol/sdk</strong>。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">agent-bundle-mcp-runtime.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">import</span> { <span class="t-typ">Client</span> } <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/client/index.js"</span>;
+<span class="t-key">import</span> { <span class="t-typ">StreamableHTTPClientTransport</span> } <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/client/streamableHttp.js"</span>;
+<span class="t-key">import type</span> { <span class="t-typ">Transport</span> } <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/shared/transport.js"</span>;
+
+<span class="t-com">// Session-scoped MCP session 结构</span>
+<span class="t-key">type</span> <span class="t-typ">BundleMcpSession</span> = {
+  serverName: <span class="t-typ">string</span>;
+  client: <span class="t-typ">Client</span>;
+  transport: <span class="t-typ">Transport</span>;
+  transportType: <span class="t-str">"stdio"</span> | <span class="t-str">"sse"</span> | <span class="t-str">"streamable-http"</span>;
+  requestTimeoutMs: <span class="t-typ">number</span>;
+  supportsParallelToolCalls: <span class="t-typ">boolean</span>;
+  detachStderr?: () =&gt; <span class="t-typ">void</span>;
+};
+
+<span class="t-com">// 全局 session manager 符号（保证每个进程只有一个 manager 实例）</span>
+<span class="t-key">const</span> <span class="t-typ">SESSION_MCP_RUNTIME_MANAGER_KEY</span> = <span class="t-typ">Symbol</span>.<span class="t-fn">for</span>(<span class="t-str">"openclaw.sessionMcpRuntimeManager"</span>);</code></pre>
+        </div>
+        <p class="reveal">工具调用链：<code class="k">Client.listTools()</code> → 获取工具列表 → <code class="k">Client.callTool()</code> 调用工具 → 结果通过 <code class="k">CallToolResult</code> 类型返回。超时由 <code class="k">BUNDLE_MCP_CATALOG_LIST_TIMEOUT_MS = 1500ms</code> 控制，失败重试用指数退避（<code class="k">BUNDLE_MCP_FAILURE_COOLDOWN_MS = 60000ms</code>）。</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">关键函数签名</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export function</span> <span class="t-fn">createBundleMcpJsonSchemaValidator</span>(): <span class="t-typ">jsonSchemaValidator</span>;
+<span class="t-key">export function</span> <span class="t-fn">resolveSessionMcpConfigSummary</span>(params: {...}): {...};
+<span class="t-key">export function</span> <span class="t-fn">resolveSessionMcpConfigFingerprint</span>(params: {...}): <span class="t-typ">string</span>;
+<span class="t-key">function</span> <span class="t-fn">resolveSessionMcpRuntimeIdleTtlMs</span>(cfg?: <span class="t-typ">OpenClawConfig</span>): <span class="t-typ">number</span>;
+  <span class="t-com">// 默认值：10 分钟 idle TTL</span></code></pre>
+        </div>
+        <p class="reveal">MCP 服务器配置通过 <code class="k">loadEmbeddedAgentMcpConfig()</code> 加载（<code class="k">embedded-agent-mcp.ts</code>），由 <code class="k">mcp-config-shared.ts</code> 的 <code class="k">isMcpConfigRecord()</code> 做类型校验，传输解析在 <code class="k">mcp-transport.ts</code> 中。</p>
+      </div>
+    </section>
+
+    <!-- ---------- 05 插件系统公共接口 ---------- -->
+    <section id="plugin-types">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">plugins · the public api</div>
+        <h2>插件系统<em>公共接口</em></h2>
+        <p class="lead">源码：<code class="k">src/plugins/types.ts</code>（定义了 <strong>OpenClawPluginApi</strong> 所有公共注册方法）。插件通过 <code class="k">buildPluginApi()</code> 构建的 API 对象注册自己的能力。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">api-builder.ts · BuildPluginApiParams</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export type</span> <span class="t-typ">BuildPluginApiParams</span> = {
+  id: <span class="t-typ">string</span>;
+  name: <span class="t-typ">string</span>;
+  version?: <span class="t-typ">string</span>;
+  source: <span class="t-typ">string</span>;
+  registrationMode: <span class="t-typ">OpenClawPluginApi</span>[<span class="t-str">"registrationMode"</span>];
+  config: <span class="t-typ">OpenClawConfig</span>;
+  runtime: <span class="t-typ">PluginRuntime</span>;
+  logger: <span class="t-typ">PluginLogger</span>;
+  handlers?: <span class="t-typ">Partial</span>&lt;<span class="t-typ">Pick</span>&lt;<span class="t-typ">OpenClawPluginApi</span>,
+    | <span class="t-str">"registerTool"</span>          <span class="t-com">// 注册工具</span>
+    | <span class="t-str">"registerHook"</span>          <span class="t-com">// 注册生命周期钩子</span>
+    | <span class="t-str">"registerHttpRoute"</span>     <span class="t-com">// 注册 HTTP 路由</span>
+    | <span class="t-str">"registerChannel"</span>       <span class="t-com">// 注册消息渠道</span>
+    | <span class="t-str">"registerGatewayMethod"</span> <span class="t-com">// 注册 Gateway 方法</span>
+    | <span class="t-str">"registerCli"</span>           <span class="t-com">// 注册 CLI 命令</span>
+    | <span class="t-str">"registerProvider"</span>      <span class="t-com">// 注册 Provider（模型/语音/图像等）</span>
+    | <span class="t-str">"registerAgentHarness"</span>  <span class="t-com">// 注册外部 Agent Harness（ACP）</span>
+    | <span class="t-str">"registerMcpServer"</span>     <span class="t-com">// 注册 MCP 服务器</span>
+    | ...<span class="t-com">（共 30+ 项）</span>
+  &gt;&gt;;
+};</code></pre>
+        </div>
+        <p class="reveal">每个注册方法对应一个具体的功能领域。例如 <code class="k">registerTool</code> 让插件声明自己的工具，<code class="k">registerHook</code> 注入生命周期回调（start/stop/enable/disable 等），<code class="k">registerAgentHarness</code> 是 ACP 外部 harness 接入的正式入口。</p>
+      </div>
+    </section>
+
+    <!-- ---------- 06 Manifest 解析 ---------- -->
+    <section id="plugin-manifest">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">manifest · plugin metadata</div>
+        <h2>Manifest <em>解析</em></h2>
+        <p class="lead">源码：<code class="k">src/plugins/manifest.ts</code>。插件的元数据描述文件是 <strong>openclaw.plugin.json</strong>（<code class="k">PLUGIN_MANIFEST_FILENAME</code> 常量）。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/plugins/manifest.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export const</span> <span class="t-typ">PLUGIN_MANIFEST_FILENAME</span> = <span class="t-str">"openclaw.plugin.json"</span>;
+<span class="t-key">export const</span> <span class="t-typ">MAX_PLUGIN_MANIFEST_BYTES</span> = <span class="t-num">256</span> * <span class="t-num">1024</span>;
+
+<span class="t-com">// manifest 解析缓存（SLRU，512 条目）</span>
+<span class="t-key">const</span> pluginManifestLoadCache = <span class="t-key">new</span> <span class="t-typ">PluginLruCache</span>&lt;<span class="t-typ">PluginManifestLoadCacheEntry</span>&gt;(
+  <span class="t-typ">MAX_PLUGIN_MANIFEST_LOAD_CACHE_ENTRIES</span>,
+);
+
+<span class="t-com">// 缓存 key 生成</span>
+<span class="t-key">export function</span> <span class="t-fn">createPluginCacheKey</span>(...): <span class="t-typ">PluginCacheKey</span>;
+
+<span class="t-com">// 清除缓存（测试用）</span>
+<span class="t-key">export function</span> <span class="t-fn">clearPluginManifestLoadCache</span>(): <span class="t-typ">void</span>;</code></pre>
+        </div>
+        <p class="reveal">Manifest 中包含插件版本、入口点、config schema、commands、providers、hooks 等元数据。解析后缓存 512 条，缓存条目包含 <code class="k">mtimeMs</code>/<code class="k">ctimeMs</code> 以跟踪文件变化。Secret provider exec 参数长度限制等安全策略也在此文件校验。</p>
+      </div>
+    </section>
+
+    <!-- ---------- 07 Plugin 运行时协调器 ---------- -->
+    <section id="plugin-builder">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">runtime · registry coordinator</div>
+        <h2>Plugin <em>运行时协调器</em></h2>
+        <p class="lead">源码：<code class="k">src/plugins/runtime.ts</code>。Plugin 运行时协调器管理全局 plugin registry 状态。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">runtime.ts · 全局 RegistryState</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// runtime.ts — 全局 RegistryState 保存在 globalThis 上</span>
+<span class="t-key">const</span> state: <span class="t-typ">RegistryState</span> = (() =&gt; {
+  <span class="t-key">const</span> globalState = globalThis <span class="t-key">as typeof</span> globalThis &amp; {
+    [<span class="t-typ">PLUGIN_REGISTRY_STATE</span>]?: <span class="t-typ">RegistryState</span>;
+  };
+  <span class="t-key">let</span> registryState = globalState[<span class="t-typ">PLUGIN_REGISTRY_STATE</span>];
+  <span class="t-key">if</span> (!registryState) {
+    registryState = {
+      activeRegistry: <span class="t-key">null</span>,
+      activeVersion: <span class="t-num">0</span>,
+      httpRoute: { registry: <span class="t-key">null</span>, pinned: <span class="t-key">false</span>, version: <span class="t-num">0</span> },
+      channel: { registry: <span class="t-key">null</span>, pinned: <span class="t-key">false</span>, version: <span class="t-num">0</span> },
+      importedPluginIds: <span class="t-key">new</span> <span class="t-typ">Set</span>&lt;<span class="t-typ">string</span>&gt;(),
+      runtimeSubagentMode: <span class="t-str">"default"</span>,
+    };
+    globalState[<span class="t-typ">PLUGIN_REGISTRY_STATE</span>] = registryState;
+  }
+  <span class="t-key">return</span> registryState;
+})();
+
+<span class="t-com">// 关键函数：</span>
+<span class="t-key">function</span> <span class="t-fn">asPluginRegistry</span>(registry: <span class="t-typ">RegistryState</span>[<span class="t-str">"activeRegistry"</span>]): <span class="t-typ">PluginRegistry</span> | <span class="t-key">null</span>;
+<span class="t-key">async function</span> <span class="t-fn">cleanupPreviousPluginHostRegistry</span>(params: {...}): <span class="t-typ">Promise</span>&lt;<span class="t-typ">void</span>&gt;;
+<span class="t-key">function</span> <span class="t-fn">isRegistryLive</span>(registry: <span class="t-typ">PluginRegistry</span>): <span class="t-typ">boolean</span>;
+<span class="t-key">function</span> <span class="t-fn">isRegistryPinned</span>(registry: <span class="t-typ">PluginRegistry</span>): <span class="t-typ">boolean</span>;</code></pre>
+        </div>
+        <p class="reveal">运行时状态设计：每个进程只有一个全局 registry（存在 <code class="k">globalThis</code> 上），通过 <code class="k">activeRegistry</code> / <code class="k">httpRoute</code> / <code class="k">channel</code> 三个视角观察同一份 registry。<code class="k">pinned</code> 标记用于防止正在使用的 registry 被意外清理。</p>
+      </div>
+    </section>
+
+    <!-- ---------- 08 沙箱隔离模型 ---------- -->
+    <section id="sandbox">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">sandbox · isolation model</div>
+        <h2>沙箱<em>隔离模型</em></h2>
+        <p class="lead">源码：<code class="k">src/agents/sandbox/runtime-status.ts</code>。沙箱模式由 <code class="k">sandbox.mode</code> 配置控制。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">sandbox/runtime-status.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">function</span> <span class="t-fn">shouldSandboxSession</span>(
+  cfg: <span class="t-typ">SandboxConfig</span>,
+  sessionKey: <span class="t-typ">string</span>,
+  mainSessionKey: <span class="t-typ">string</span>,
+) {
+  <span class="t-key">if</span> (cfg.mode === <span class="t-str">"off"</span>) <span class="t-key">return</span> <span class="t-key">false</span>;   <span class="t-com">// 关闭沙箱</span>
+  <span class="t-key">if</span> (cfg.mode === <span class="t-str">"all"</span>) <span class="t-key">return</span> <span class="t-key">true</span>;    <span class="t-com">// 所有 session 都沙箱</span>
+  <span class="t-com">// 默认：main session 不沙箱，其他沙箱</span>
+  <span class="t-key">return</span> sessionKey.<span class="t-fn">trim</span>() !== mainSessionKey.<span class="t-fn">trim</span>();
+}
+
+<span class="t-key">export function</span> <span class="t-fn">resolveSandboxRuntimeStatus</span>(params: {
+  cfg?: <span class="t-typ">OpenClawConfig</span>;
+  sessionKey?: <span class="t-typ">string</span>;
+  agentId: <span class="t-typ">string</span>;
+}): <span class="t-typ">SandboxRuntimeStatus</span>;</code></pre>
+        </div>
+        <p class="reveal">沙箱策略通过 <code class="k">tool-policy.ts</code> 的 <code class="k">classifyToolAgainstSandboxToolPolicy()</code> 对每个工具调用做检查。实际 Docker/SSH 隔离在 <code class="k">sandbox/config.ts</code> 中配置。</p>
+
+        <table class="tbl reveal">
+          <tr><th>sandbox.mode</th><th>行为</th></tr>
+          <tr><td><code class="ro">off</code></td><td>不隔离，所有 session 直接跑在宿主环境。</td></tr>
+          <tr><td><code class="ph">all</code></td><td>全部隔离，每个 session 都进沙箱。</td></tr>
+          <tr><td><code>non-main</code> <span style="color:var(--text-faint)">(默认)</span></td><td>只对非主 session 隔离；main session 保持原生权限。</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ---------- 09 完整目录树 ---------- -->
+    <section id="dir-tree">
+      <div class="sec-head reveal">
+        <div class="sec-num">09</div>
+        <div class="kicker">tree · the source map</div>
+        <h2>完整<em>目录树</em></h2>
+        <p class="lead">以下为 <code class="k">src/</code> 顶层目录（基于仓库主分支），把前面各节的源码文件放回它们的位置。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">openclaw/src/</span><button class="copy">复制</button></div>
+<pre><code>openclaw/src/
+├── entry.ts                  <span class="t-com"># CLI 入口，runMainOrRootHelp()</span>
+├── entry.compile-cache.ts    <span class="t-com"># 编译缓存管理</span>
+├── entry.respawn.ts          <span class="t-com"># 进程重 spawn 逻辑</span>
 │
-├── agents/                   # Agent 运行时核心
-│   ├── acp-spawn.ts         # ACP 会话生成（1708 行）
+├── agents/                   <span class="t-com"># Agent 运行时核心</span>
+│   ├── acp-spawn.ts         <span class="t-com"># ACP 会话生成（1708 行）</span>
 │   ├── acp-runtime-overlay.ts
-│   ├── agent-bundle-mcp-runtime.ts   # MCP Client 实现
-│   ├── agent-bundle-mcp-tools.ts    # MCP 工具封装
-│   ├── agent-command.ts      # Agent 命令处理
-│   ├── harness/types.ts     # AgentHarness 接口定义
+│   ├── agent-bundle-mcp-runtime.ts   <span class="t-com"># MCP Client 实现</span>
+│   ├── agent-bundle-mcp-tools.ts    <span class="t-com"># MCP 工具封装</span>
+│   ├── agent-command.ts      <span class="t-com"># Agent 命令处理</span>
+│   ├── harness/types.ts     <span class="t-com"># AgentHarness 接口定义</span>
 │   ├── sandbox/
-│   │   ├── runtime-status.ts    # 沙箱模式判断
-│   │   ├── config.ts           # 沙箱配置
-│   │   └── tool-policy.ts      # 工具策略分类
-│   └── agent-scope.ts       # Session / Agent 作用域解析
+│   │   ├── runtime-status.ts    <span class="t-com"># 沙箱模式判断</span>
+│   │   ├── config.ts           <span class="t-com"># 沙箱配置</span>
+│   │   └── tool-policy.ts      <span class="t-com"># 工具策略分类</span>
+│   └── agent-scope.ts       <span class="t-com"># Session / Agent 作用域解析</span>
 │
-├── plugins/                  # 插件系统
-│   ├── types.ts             # OpenClawPluginApi 公共接口
-│   ├── manifest.ts          # openclaw.plugin.json 解析
-│   ├── api-builder.ts       # PluginApi 构建器
-│   ├── runtime.ts           # PluginRegistry 运行时协调器
-│   ├── registry-types.ts    # Registry 类型定义
-│   ├── registry-lifecycle.ts # Registry 生命周期管理
-│   ├── host-hook-runtime.ts  # 钩子运行时分发
-│   └── hook-types.ts        # 钩子类型定义
+├── plugins/                  <span class="t-com"># 插件系统</span>
+│   ├── types.ts             <span class="t-com"># OpenClawPluginApi 公共接口</span>
+│   ├── manifest.ts          <span class="t-com"># openclaw.plugin.json 解析</span>
+│   ├── api-builder.ts       <span class="t-com"># PluginApi 构建器</span>
+│   ├── runtime.ts           <span class="t-com"># PluginRegistry 运行时协调器</span>
+│   ├── registry-types.ts    <span class="t-com"># Registry 类型定义</span>
+│   ├── registry-lifecycle.ts <span class="t-com"># Registry 生命周期管理</span>
+│   ├── host-hook-runtime.ts  <span class="t-com"># 钩子运行时分发</span>
+│   └── hook-types.ts        <span class="t-com"># 钩子类型定义</span>
 │
-├── channels/                 # 消息渠道接入
+├── channels/                 <span class="t-com"># 消息渠道接入</span>
 │   ├── plugins/
-│   │   ├── types.plugin.ts  # ChannelPlugin 接口
-│   │   └── types.core.ts   # 核心 channel 类型
-│   ├── route-projection.ts  # 消息路由映射
-│   └── thread-bindings-*.ts # 线程/话题绑定
+│   │   ├── types.plugin.ts  <span class="t-com"># ChannelPlugin 接口</span>
+│   │   └── types.core.ts   <span class="t-com"># 核心 channel 类型</span>
+│   ├── route-projection.ts  <span class="t-com"># 消息路由映射</span>
+│   └── thread-bindings-*.ts <span class="t-com"># 线程/话题绑定</span>
 │
 ├── config/
 │   ├── sessions/
-│   │   ├── store.ts        # Session 存储
-│   │   └── paths.ts        # 路径解析
-│   ├── agent-limits.ts     # 子 agent 限制
-│   └── types.openclaw.ts   # OpenClaw 配置类型
+│   │   ├── store.ts        <span class="t-com"># Session 存储</span>
+│   │   └── paths.ts        <span class="t-com"># 路径解析</span>
+│   ├── agent-limits.ts     <span class="t-com"># 子 agent 限制</span>
+│   └── types.openclaw.ts   <span class="t-com"># OpenClaw 配置类型</span>
 │
-├── acp/                     # ACP 协议实现
+├── acp/                     <span class="t-com"># ACP 协议实现</span>
 │   ├── control-plane/
-│   │   ├── manager.ts      # ACP Session 管理器
-│   │   └── spawn.ts        # ACP Spawn 逻辑
-│   └── policy.ts           # ACP 策略检查
+│   │   ├── manager.ts      <span class="t-com"># ACP Session 管理器</span>
+│   │   └── spawn.ts        <span class="t-com"># ACP Spawn 逻辑</span>
+│   └── policy.ts           <span class="t-com"># ACP 策略检查</span>
 │
-├── cli/                     # CLI 相关
-│   ├── argv.ts             # 参数解析
-│   ├── profile.ts          # Profile 环境变量
-│   └── program/            # CLI 程序结构
+├── cli/                     <span class="t-com"># CLI 相关</span>
+│   ├── argv.ts             <span class="t-com"># 参数解析</span>
+│   ├── profile.ts          <span class="t-com"># Profile 环境变量</span>
+│   └── program/            <span class="t-com"># CLI 程序结构</span>
 │
-├── gateway/                 # Gateway WebSocket API
-│   ├── server-methods/     # Gateway 方法处理
-│   └── call.ts             # Gateway 调用封装
+├── gateway/                 <span class="t-com"># Gateway WebSocket API</span>
+│   ├── server-methods/     <span class="t-com"># Gateway 方法处理</span>
+│   └── call.ts             <span class="t-com"># Gateway 调用封装</span>
 │
-└── packages/                # 内部共享包
-    ├── acp-core/           # ACP 核心类型与工具
-    ├── agent-core/         # Agent 核心逻辑
-    ├── plugin-sdk/         # 插件 SDK（public）
-    ├── gateway-protocol/   # Gateway 协议定义
-    ├── llm-core/           # LLM 接口
-    └── model-catalog-core/ # 模型目录</code></pre>
-
+└── packages/                <span class="t-com"># 内部共享包</span>
+    ├── acp-core/           <span class="t-com"># ACP 核心类型与工具</span>
+    ├── agent-core/         <span class="t-com"># Agent 核心逻辑</span>
+    ├── plugin-sdk/         <span class="t-com"># 插件 SDK（public）</span>
+    ├── gateway-protocol/   <span class="t-com"># Gateway 协议定义</span>
+    ├── llm-core/           <span class="t-com"># LLM 接口</span>
+    └── model-catalog-core/ <span class="t-com"># 模型目录</span></code></pre>
+        </div>
       </div>
-    </div>
-  </div>
-</section>
 
+      <div class="foot reveal">
+        <div class="big">Open<b>Claw</b> · 源码即文档</div>
+        <div class="meta">
+          openclaw/openclaw · TypeScript · pnpm monorepo<br/>
+          基于 src/ 源码文本撰写 · 含实际函数签名与类型定义<br/>
+          <a class="inl" href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
 </div>
-</main>
 
-<script src="./assets/main.js"></script>
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
 </body>
 </html>
