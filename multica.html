@@ -1,464 +1,1022 @@
-<!doctype html>
-<html lang="zh-CN" class="has-tabs">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Multica · 把编程 Agent 变成真实队友 · 架构深度解析</title>
-<meta name="description" content="multica-ai/multica 架构深度解析——把编程 Agent 当队友的平台：polymorphic assignee 任务队列、headless 共享包（core/ui/views）、Web+Desktop 双端同构、技能可累积可追溯，源码级拆解。" />
-<meta property="og:title" content="Multica · 把编程 Agent 变成真实队友" />
-<meta property="og:description" content="Go + Next.js + Electron 的开源 managed-agents 平台：拉取式任务队列、状态机、Headless 业务包、Web/Desktop 同构。源码级深度解析。" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Multica · 源码级架构解析 · Task Queue / Headless / 双端同构</title>
+<meta name="description" content="multica-ai/multica 源码级深度解析——把编程 Agent 当队友的平台：polymorphic assignee 任务队列（task.go）、headless 共享包（core/ui/views）、Web+Desktop 双端同构（NavigationAdapter）、包边界强制（phantom-dep lint）、技能可累积可追溯。基于 server/ 与 packages/ 源码撰写，含实际函数名与类型定义。" />
+<meta property="og:title" content="Multica · 源码级架构解析" />
 <meta property="og:type" content="article" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%239b8cf0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%237a68d0'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23b9adf6' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   Multica — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* violet accent — Multica */
+  --star:       #9b8cf0;
+  --star-soft:  #b9adf6;
+  --star-deep:  #7a68d0;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(155,140,240,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(155,140,240,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(155,140,240,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(155,140,240,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(155,140,240,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(155,140,240,0.09); border:1px solid rgba(155,140,240,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- deep-read link ---- */
+.deep-link{
+  display:inline-flex; align-items:center; gap:8px; margin-top:16px;
+  font-family:var(--mono); font-size:11.5px; letter-spacing:0.06em;
+  color:var(--star); text-decoration:none; border:1px solid var(--line-amber);
+  border-radius:99px; padding:6px 15px; background:rgba(155,140,240,0.06);
+  transition:background .25s var(--ease), transform .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover{ background:rgba(155,140,240,0.15); border-color:var(--star); }
+.deep-link .arr{ transition:transform .25s var(--ease); }
+.deep-link:hover .arr{ transform:translateX(4px); }
+.deep-link b{ color:var(--star-soft); font-weight:500; }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; flex-wrap:wrap; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.12em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(44px,7.5vw,98px); line-height:0.94;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(16px,1.6vw,20px); color:var(--text-2); max-width:56ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#140f2e; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+.hero-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:54px; }
+.hero-stats .cell{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; }
+.hero-stats .n{ font-family:var(--mono); font-size:15px; color:var(--star-soft); word-break:break-all; }
+.hero-stats .l{ font-size:12px; color:var(--text-dim); margin-top:5px; }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(155,140,240,0.16); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.06em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ============================================================
+   FLOW (pipeline)
+   ============================================================ */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files / cheat ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.ulist{ color:var(--text-2); font-size:14.5px; max-width:72ch; padding-left:20px; }
+.ulist li{ margin:8px 0; }
+.ulist li strong{ color:var(--text); }
+.ulist code,.ulist .mono{ font-family:var(--mono); font-size:0.86em; color:var(--star-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .hero-stats{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.hero-stats{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
 </head>
-<body class="tabs-active">
-<div id="progress"></div>
+<body>
 
-<!-- 站点索引：顶部导航 -->
-<nav class="site-index">
-  <div class="wrap">
-    <span class="site-index-label">📂 项目索引</span>
-    <div class="site-index-links">
-      <a href="index.html#cg">🗂 CodeGraph<br><span>索引层 · 代码语义后端</span></a>
-      <a href="index.html#ua">🗂 Understand-Anything<br><span>认知层 · 代码地图</span></a>
-      <a href="index.html#cp">🗂 Claude Plugins<br><span>能力层 · 官方插件生态</span></a>
-      <a href="index.html#oh">🗂 OpenHuman Memory Tree<br><span>记忆层 · 本地知识库</span></a>
-      <a href="index.html#kc">🗂 Kimi Code<br><span>模型层 · 多 Agent 引擎</span></a>
-      <a href="index.html#oc">🗂 OpenClaw<br><span>全渠道 · 个人 AI 助手</span></a>
-      <a href="index.html#od">🗂 Odysseus<br><span>Agent 层 · 自托管工作台</span></a>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Mult<b>ica</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">Mult<b>ica</b></div>
+      <div class="sub">源码级架构解析 · server/ · packages/</div>
     </div>
-  </div>
-</nav>
-
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#mc"><span class="dot"></span><span>Agent&nbsp;Infrastructure&nbsp;Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="active" data-tab="mc"><span class="dot"></span>Multica <span class="pill">Agent</span></button>
+    <span class="nav-ver">Go + Next.js + Electron · pnpm + Turbo</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#layered-architecture"><span class="idx">01</span>分层架构</a></li>
+        <li><a href="#core-modules"><span class="idx">02</span>核心模块一览</a></li>
+        <li><a href="#headless-core"><span class="idx">03</span>Headless core</a></li>
+        <li><a href="#package-boundaries"><span class="idx">04</span>包边界强制</a></li>
+        <li><a href="#agent-management"><span class="idx">05</span>Agent 管理</a></li>
+        <li><a href="#web-desktop-shared"><span class="idx">06</span>双端共享架构</a></li>
+        <li><a href="#monorepo-organization"><span class="idx">07</span>Monorepo 组织</a></li>
+        <li><a href="#failure-modes"><span class="idx">08</span>失败模式</a></li>
+        <li><a href="#ecosystem-significance"><span class="idx">09</span>生态意义对比</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      multica-ai/multica<br/>
+      把编程 Agent 变成真实队友<br/>
+      <a href="https://github.com/multica-ai/multica" target="_blank" rel="noopener">github.com/multica-ai/multica ↗</a>
     </div>
-  </div>
-</header>
+  </aside>
 
-<main>
-<div class="tab-panel active" data-tab="mc">
-  <!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
-  <nav class="nav-toc" aria-label="页面目录">
-    <h3>目录</h3>
-    <ul>
-      <li><a href="#layered-architecture">① 分层架构</a></li>
-      <li><a href="#core-modules">② 核心模块一览</a></li>
-      <li><a href="#headless-core">③ Headless core</a></li>
-      <li><a href="#package-boundaries">④ 包边界强制</a></li>
-      <li><a href="#agent-management">⑤ Agent 管理</a></li>
-      <li><a href="#web-desktop-shared">⑥ 双端共享架构</a></li>
-      <li><a href="#monorepo-organization">⑦ Monorepo 组织</a></li>
-      <li><a href="#failure-modes">⑧ 失败模式</a></li>
-      <li><a href="#ecosystem-significance">⑨ 生态意义对比</a></li>
-    </ul>
-  </nav>
-  <style>.tab-panel[data-tab="mc"] section{--accent:#9b8cf0}.tab-panel[data-tab="mc"] .hero{--accent:#9b8cf0}</style>
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>multica-ai/multica · Go + Next.js + Electron · 改良版 Apache-2.0 · Stars 未知</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">Multica</span> · 把编程 Agent 变成真实队友</h1>
-    <p class="lead reveal" style="margin-bottom:0">把编程 Agent 变成真实队友的平台——像给同事派活一样把 issue 指派给 Agent，它自己<strong>接活、写代码、报阻塞、改状态</strong>，并在过程中累积可复用的 skill；Web/Desktop 双端共享同一套 <strong>headless 业务包</strong>。</p>
-    <div class="statstrip reveal" style="max-width:820px;margin:38px auto 0"><div class="cell"><div class="n">未知</div><div class="l">Stars</div></div><div class="cell"><div class="n">4 端</div><div class="l">Web·Desktop·Mobile·CLI</div></div><div class="cell"><div class="n">3 包</div><div class="l">core·ui·views</div></div><div class="cell"><div class="n">pg17</div><div class="l">PostgreSQL</div></div></div>
-  </div>
-</section>
+  <!-- =================== MAIN =================== -->
+  <main class="main">
 
-  <section id="mc" class="project mc">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">MC</div>
-      <div class="proj-title">
-        <h2>Multica</h2>
-        <a class="repo" href="https://github.com/multica-ai/multica" target="_blank" rel="noopener">multica-ai/multica · Go + Next.js + Electron · 改良版 Apache-2.0</a>
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>multica-ai/multica · 源码级</span>
+        <span class="pill">基于 <b>server/</b> + <b>packages/</b> 源码</span>
       </div>
-    </div>
-    <div class="narrow">
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">把编程 Agent</span>
+            <span class="l2">变成<em>真实</em><span class="core">队友</span></span>
+          </h1>
+          <p class="hero-sub">像给同事派活一样把 issue 指派给 <b>Agent</b>——它自己接活、写代码、报阻塞、改状态，并累积可复用的 skill。Web/Desktop 双端共享同一套 <b>headless 业务包</b>。所有结论来自源码文本，含实际函数签名与类型定义。</p>
+          <p class="hero-pkg"># <b>multica-ai/multica</b> · Go + Next.js + Electron · 改良版 Apache-2.0</p>
+          <div class="hero-cta">
+            <a href="#layered-architecture" class="btn primary">▸ 从分层读起</a>
+            <a href="#failure-modes" class="btn ghost">查看失败模式</a>
+          </div>
+          <div class="hero-stats">
+            <div class="cell"><div class="n">Go · Next · Electron</div><div class="l">全栈技术</div></div>
+            <div class="cell"><div class="n">core · ui · views</div><div class="l">3 个共享包</div></div>
+            <div class="cell"><div class="n">PostgreSQL pg17</div><div class="l">pgvector · 单容器多 DB</div></div>
+            <div class="cell"><div class="n">pnpm + Turbo</div><div class="l">Monorepo</div></div>
+          </div>
+        </div>
 
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">未知</div><div class="l">Stars</div></div>
-        <div class="chip"><div class="n">Go+Next+Electron</div><div class="l">技术栈</div></div>
-        <div class="chip"><div class="n">pnpm+Turbo</div><div class="l">Monorepo</div></div>
-        <div class="chip"><div class="n">Apache-2.0</div><div class="l">License</div></div>
+        <!-- radar -->
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#9b8cf0" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#9b8cf0" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#9b8cf0" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#9b8cf0" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#54d6e0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fcf9e" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#54d6e0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#9b8cf0" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="28" fill="rgba(155,140,240,0.08)" stroke="rgba(155,140,240,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#9b8cf0" font-size="14">Multica</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">teammate</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">Task</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">Skill</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">Desktop</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">Web</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">Daemon</text>
+          </svg>
+        </div>
       </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
 
-      <div class="prose">
-        <p class="reveal"><strong>一句话定位：</strong>Multica 把<em>编程 Agent 当成真实队友</em>——你像给同事派活一样把 issue 指派给 Agent（或在评论里 @ 它），它会自己接活、写代码、报阻塞、改状态，并在过程中累积可复用的 skill。后端是 <strong>Go</strong>（Chi + pgx/sqlc + gorilla/websocket），Web 端是 <strong>Next.js</strong>（App Router），桌面端是 <strong>Electron</strong>（electron-vite + react-router-dom），移动端是 Expo/RN，数据库 <strong>PostgreSQL</strong>（pgvector/pg17）。Web 与 Desktop 通过 <code>@multica/core</code>、<code>@multica/ui</code>、<code>@multica/views</code> 三个共享包复用全部业务逻辑与 UI。</p>
-        <p class="reveal" style="color:var(--text-dim);font-size:14.5px">本文基于对 <code>server/</code>、<code>apps/web/</code>、<code>apps/desktop/</code>、<code>packages/core|ui|views|eslint-config</code>、<code>CLAUDE.md</code>、各 <code>package.json</code>、<code>turbo.json</code>、<code>pnpm-workspace.yaml</code> 的源码级阅读，所有引用均来自实际读到的文件。</p>
-
-        <h4 class="reveal" id="layered-architecture">① 分层架构</h4>
-        <p class="reveal">从 PostgreSQL 到双端 app，依赖方向严格单向：<code>views → core + ui</code>，而 <code>core</code> 与 <code>ui</code> 彼此独立、互不导入。所有共享包以<strong>原始 <code>.ts/.tsx</code> 源码导出</strong>（无预编译），由消费端 app 的打包器直接编译——这就是 “Internal Packages” 模式，换取零配置 HMR 与即时跳转定义。</p>
-      </div>
-
-      <div class="tree reveal">                          ┌──────────────────────────────────────────────────┐
-                          │                  PostgreSQL                        │
-                          │   pgvector/pgvector:pg17 · 单容器多 DB（worktree）    │
-                          │   agent / agent_task_queue / skill / agent_skill / │
-                          │   issue / runtime / chat_session / autopilot …     │
-                          └───────────────▲──────────────────────────────────┘
-                                          │ pgx + sqlc（生成代码 server/pkg/db/generated）
-                          ┌───────────────┴──────────────────────────────────┐
-                          │                Go Backend  (server/)              │
-                          │  Chi router · gorilla/websocket Hub · events.Bus  │
-                          │  internal/handler/*  内部 service/*  pkg/protocol  │
-                          │  ┌──────────────┐ ┌───────────────┐ ┌──────────┐  │
-                          │  │ TaskService  │ │ AgentTmpl /   │ │ Skill /  │  │
-                          │  │ (派活/认领/   │ │ Autopilot /   │ │ builtin_ │  │
-                          │  │  生命周期)    │ │ Squad service │ │ skills   │  │
-                          │  └──────────────┘ └───────────────┘ └──────────┘  │
-                          └───▲───────────────▲────────────────────▲──────────┘
-        HTTP(JSON) + WS(/ws)  │               │ daemon WS(/tasks/claim, /start…)
-                              │               │                    │ 内嵌 CLI(multica)
-        ┌─────────────────────┴──┐   ┌────────┴──────────┐   ┌─────┴──────────────┐
-        │   apps/web (Next.js)   │   │ apps/desktop      │   │ 本地 daemon / 云 runtime │
-        │   App Router · SSR     │   │ (Electron)        │   │ 真正跑 Claude Code/Codex│
-        │   platform/navigation  │   │ react-router-dom  │   │ 等 Agent 二进制         │
-        │   (next/navigation)    │   │ 多 tab memory 路由 │   └─────────────────────┘
-        └───────────┬────────────┘   └─────────┬─────────┘
-                    │ 都 import           都 import │
-                    ▼                             ▼
-        ┌───────────────────────────────────────────────────────────────────┐
-        │                    共享包 (packages/, workspace:*)                   │
-        │                                                                     │
-        │   @multica/views  —— 业务页面/组件（零 next/*、零 react-router、零 store）│
-        │        │  依赖                                                        │
-        │        ▼                                                             │
-        │   @multica/core   ←──────────────┐   @multica/ui  （纯原子组件）        │
-        │   Headless 业务逻辑               │   零 @multica/core 导入             │
-        │   零 react-dom / 零 localStorage  │   Base UI primitives + Tailwind v4 │
-        │   ┌───────────────────────────┐  │   styles/ 设计 token                │
-        │   │ 客户端状态：Zustand stores  │  └────────────▲──────────────────────┘
-        │   │  (view-store/nav/auth/chat)│               │ views 同时依赖 ui
-        │   ├───────────────────────────┤               │
-        │   │ 服务端状态：TanStack Query  │───────────────┘
-        │   │  queries.ts / mutations.ts │
-        │   │  + WS 事件 invalidate       │
-        │   ├───────────────────────────┤
-        │   │ platform/CoreProvider      │  ← 各 app 用自己的 NavigationAdapter 包根
-        │   │ api/ClientIdentity + zod    │
-        │   └───────────────────────────┘                                      │
-        └───────────────────────────────────────────────────────────────────┘
-                    │ 仅 import type（纯类型 + 纯函数，零运行时耦合）
-                    ▼
-        ┌───────────────────────────┐
-        │  apps/mobile (Expo / RN)  │  独立：自有 React 版本、UI、状态、构建链
-        └───────────────────────────┘</div>
-
-      <!-- ======================= 核心模块拆解 ======================= -->
-      <h4 class="reveal" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 核心模块源码拆解 · Source-Level Teardown</h4>
-      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于对 <code>server/</code> 与 <code>packages/*</code> 的逐文件阅读，把上面的分层展开到「关键文件 + 关键代码段 + 设计 + 失败模式」的粒度。</p>
-
-      <div class="prose">
-        <h4 class="reveal" id="core-modules">② 核心模块一览</h4>
+    <!-- ---------- 01 分层架构 ---------- -->
+    <section id="layered-architecture">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">architecture · the layering</div>
+        <h2>分层<em>架构</em></h2>
+        <p class="lead">一句话定位：Multica 把<strong>编程 Agent 当成真实队友</strong>。后端 <code class="k">Go</code>（Chi + pgx/sqlc + gorilla/websocket），Web 端 <code class="k">Next.js</code>（App Router），桌面端 <code class="k">Electron</code>（electron-vite + react-router-dom），移动端 Expo/RN，数据库 <code class="kc">PostgreSQL</code>（pgvector/pg17）。</p>
       </div>
 
-      <div class="tablewrap reveal">
-        <table class="cmp">
-          <thead><tr><th>模块</th><th>文件 / 目录</th><th>作用</th></tr></thead>
-          <tbody>
-            <tr><td class="c-cg">server/ 入口</td><td><code>cmd/server</code>·<code>cmd/multica</code>·<code>cmd/migrate</code></td><td>三个入口二进制：HTTP/WS 服务、<code>multica</code> CLI、迁移工具（module <code>github.com/multica-ai/multica/server</code>，Go 1.26.1）</td></tr>
-            <tr><td class="c-cg">server/ handler</td><td><code>internal/handler/*.go</code></td><td>Chi HTTP handler，按资源拆分（<code>issue.go</code>/<code>agent.go</code>/<code>chat.go</code>/<code>daemon.go</code>/<code>daemon_ws.go</code>…），统一 UUID 解析三态约定</td></tr>
-            <tr><td class="c-cg">server/ task</td><td><code>internal/service/task.go</code></td><td><code>TaskService</code>——派活、认领、生命周期推进、状态对账、指标的核心（2362 行）</td></tr>
-            <tr><td class="c-cg">server/ builtin</td><td><code>internal/service/builtin_skills/*</code></td><td>随产品发给 Agent 的内置 skill（<code>multica-working-on-issues</code>、<code>multica-squads</code>、<code>multica-autopilots</code>），是“源码可追溯的契约”</td></tr>
-            <tr><td class="c-cg">server/ skill</td><td><code>internal/skill/frontmatter.go</code>·<code>reserved.go</code></td><td>SKILL.md frontmatter 解析（与前端 <code>core/skills/frontmatter.ts</code> 同构）、保留 slug</td></tr>
-            <tr><td class="c-cg">server/ tmpl</td><td><code>internal/agenttmpl/templates</code></td><td>Agent 模板（静态目录，工作区无关，前端缓存 <code>staleTime: Infinity</code>）</td></tr>
-            <tr><td class="c-cg">server/ realtime</td><td><code>internal/realtime</code>·<code>internal/events</code></td><td><code>Hub</code>——WS 广播；<code>Bus</code>——进程内事件总线</td></tr>
-            <tr><td class="c-cg">server/ runtime</td><td><code>internal/daemon</code>·<code>daemonws</code>·<code>cloudruntime</code></td><td>本地 daemon 与云 runtime：真正执行 Agent 的 execenv/repocache</td></tr>
-            <tr><td class="c-cg">server/ db</td><td><code>pkg/db/queries/*.sql</code> + <code>pkg/db/generated</code></td><td>sqlc：手写 SQL → 生成类型安全 Go。改 SQL 后 <code>make sqlc</code> 重生成</td></tr>
-            <tr><td class="c-cg">server/ protocol</td><td><code>pkg/protocol</code></td><td>WS/任务事件载荷类型（<code>EventTaskQueued/Dispatch/Running/Completed/Failed</code>、<code>TaskCompletedPayload</code>）</td></tr>
-            <tr><td class="c-cg">apps/web</td><td><code>app/[workspaceSlug]/(dashboard)/…</code>·<code>platform/navigation.tsx</code></td><td>工作区作用域路由 + 路由组；<strong>Web 端唯一允许用 <code>next/navigation</code> 的地方</strong>，适配成共享 <code>NavigationAdapter</code></td></tr>
-            <tr><td class="c-cg">apps/desktop</td><td><code>src/main</code>·<code>src/renderer/src/platform/navigation.tsx</code></td><td>Electron 主进程/preload 桥；<strong>Desktop 端唯一用 <code>react-router-dom</code> 的地方</strong>，多 tab + memory router；构建把 <code>multica</code> CLI 打进 app</td></tr>
-            <tr><td class="c-cg">packages/core</td><td><code>api/</code>·<code>platform/</code>·<code>&lt;domain&gt;/queries|mutations|stores</code></td><td>Headless 业务逻辑：零 react-dom/零 localStorage/零 process.env；TanStack Query + Zustand + WS 同步；<code>react</code> 仅为 peer</td></tr>
-            <tr><td class="c-cg">packages/ui</td><td><code>components/ui/*</code>·<code>styles/tokens.css</code></td><td>原子 UI：shadcn 基于 <code>@base-ui/react</code>（非 Radix）；<strong>没有 <code>@multica/core</code></strong>，强制“纯 UI、零业务逻辑”</td></tr>
-            <tr><td class="c-cg">packages/views</td><td><code>issues/agents/inbox/squads/chat</code>·<code>navigation/*</code></td><td>共享业务页面；定义 <code>NavigationAdapter</code> 抽象、<code>&lt;AppLink&gt;</code>；<strong>exports 与 deps 里没有任何 <code>next</code>/<code>react-router-dom</code></strong></td></tr>
-          </tbody>
-        </table>
+      <div class="reveal">
+        <p class="reveal">从 PostgreSQL 到双端 app，依赖方向严格单向：<code class="k">views → core + ui</code>，而 <code class="k">core</code> 与 <code class="k">ui</code> 彼此独立、互不导入。所有共享包以<strong>原始 <code class="k">.ts/.tsx</code> 源码导出</strong>（无预编译），由消费端 app 的打包器直接编译——这就是 “Internal Packages” 模式，换取零配置 HMR 与即时跳转定义。Web 与 Desktop 通过 <code class="k">@multica/core</code>、<code class="k">@multica/ui</code>、<code class="k">@multica/views</code> 三个共享包复用全部业务逻辑与 UI。</p>
+        <p class="reveal" style="color:var(--text-dim);font-size:14px">本文基于对 <code class="k">server/</code>、<code class="k">apps/web/</code>、<code class="k">apps/desktop/</code>、<code class="k">packages/core|ui|views|eslint-config</code>、<code class="k">CLAUDE.md</code>、各 <code class="k">package.json</code>、<code class="k">turbo.json</code>、<code class="k">pnpm-workspace.yaml</code> 的源码级阅读，所有引用均来自实际读到的文件。</p>
+
+        <div class="code reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">multica · 分层依赖图（自底向上）</span><button class="copy">复制</button></div>
+<pre><code>          ┌──────────────────────────────────────────────────┐
+          │                  PostgreSQL                        │
+          │   pgvector/pgvector:pg17 · 单容器多 DB（worktree）   │
+          │   agent / agent_task_queue / skill / agent_skill / │
+          │   issue / runtime / chat_session / autopilot …     │
+          └───────────────▲──────────────────────────────────┘
+                          │ pgx + sqlc（生成代码 server/pkg/db/generated）
+          ┌───────────────┴──────────────────────────────────┐
+          │                Go Backend  (server/)              │
+          │  Chi router · gorilla/websocket Hub · events.Bus  │
+          │  internal/handler/*  内部 service/*  pkg/protocol  │
+          │  ┌──────────────┐ ┌───────────────┐ ┌──────────┐  │
+          │  │ TaskService  │ │ AgentTmpl /   │ │ Skill /  │  │
+          │  │ (派活/认领/   │ │ Autopilot /   │ │ builtin_ │  │
+          │  │  生命周期)    │ │ Squad service │ │ skills   │  │
+          │  └──────────────┘ └───────────────┘ └──────────┘  │
+          └───▲───────────────▲────────────────────▲──────────┘
+ HTTP+WS(/ws) │               │ daemon WS(/tasks/claim, /start…)
+              │               │                    │ 内嵌 CLI(multica)
+ ┌────────────┴──┐   ┌────────┴──────────┐   ┌─────┴──────────────┐
+ │ apps/web      │   │ apps/desktop      │   │ 本地 daemon / 云 runtime│
+ │ Next.js · SSR │   │ (Electron)        │   │ 真正跑 Claude Code/Codex│
+ │ platform/nav  │   │ react-router-dom  │   │ 等 Agent 二进制         │
+ │ (next/nav)    │   │ 多 tab memory 路由 │   └─────────────────────┘
+ └──────┬────────┘   └─────────┬─────────┘
+        │ 都 import        都 import │
+        ▼                          ▼
+ ┌───────────────────────────────────────────────────────────┐
+ │              共享包 (packages/, workspace:*)                │
+ │  @multica/views — 业务页面（零 next/*、零 react-router、零 store）│
+ │       │ 依赖                                                 │
+ │       ▼                                                     │
+ │  @multica/core  ←───────────┐   @multica/ui （纯原子组件）    │
+ │  Headless 业务逻辑           │   零 @multica/core 导入        │
+ │  零 react-dom / 零 localStorage  Base UI + Tailwind v4       │
+ │  · Zustand stores（客户端状态） │   styles/ 设计 token         │
+ │  · TanStack Query（服务端状态）─┘   ← views 同时依赖 ui        │
+ │  · platform/CoreProvider · api/ClientIdentity + zod         │
+ └───────────────────────────────────────────────────────────┘
+        │ 仅 import type（纯类型 + 纯函数，零运行时耦合）
+        ▼
+ ┌───────────────────────────┐
+ │  apps/mobile (Expo / RN)  │  独立：自有 React 版本、UI、状态、构建链
+ └───────────────────────────┘</code></pre>
+        </div>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">views → core + ui</div><h3>严格单向</h3><p><code class="k">core</code> 与 <code class="k">ui</code> 互不导入，<code class="k">views</code> 同时依赖二者；框架 API 只允许出现在各 app 的 <code class="k">platform/</code> 层。</p></div>
+          <div class="card cy"><div class="ic">Internal Packages</div><h3>源码直出</h3><p>共享包不预编译，<code class="k">exports</code> 直指 <code class="k">.ts/.tsx</code>，消费端打包器编译——零配置 HMR + 即时跳定义。</p></div>
+          <div class="card"><div class="ic">4 端 1 后端</div><h3>同构多端</h3><p>Web / Desktop / Mobile / CLI 四端 + Go 后端；mobile 与 core 之间仅 <code class="k">import type</code> 纯类型耦合。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 02 核心模块一览 ---------- -->
+    <section id="core-modules">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">modules · source-level teardown</div>
+        <h2>核心模块<em>一览</em></h2>
+        <p class="lead">以下基于对 <code class="k">server/</code> 与 <code class="k">packages/*</code> 的逐文件阅读，把分层展开到「关键文件 + 关键代码段 + 设计 + 失败模式」的粒度。</p>
       </div>
 
-      <div class="prose">
-        <h5 class="reveal">关键设计 —— UUID 解析三态约定</h5>
-        <p class="reveal">源于真实事故 <strong>#1661</strong>（<code>DELETE</code> 返回 204 却匹配 0 行，因原 <code>util.ParseUUID</code> 对非法输入静默返回零 UUID）。<code>CLAUDE.md</code> 的 Backend Handler UUID Parsing Convention 把它定为硬约定：① 资源路径参数（可能是 <code>MUL-123</code> 也可能是 UUID）必须经 <code>loadIssueForUser</code>/<code>loadAgentForUser</code> 等 loader 解析，之后所有写查询用解析出的 <code>entity.ID</code>；② 纯 UUID 的请求边界输入用 <code>parseUUIDOrBadRequest</code>，非法即写 400；③ 可信往返（sqlc 返回的 UUID）用 <code>parseUUID</code>（panic-on-invalid，由 <code>middleware.Recoverer</code> 兜成 500）。</p>
-      </div>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 01 · 模块 → 文件/目录 → 作用</div>
+          <table class="tbl">
+            <tr><th>模块</th><th>文件 / 目录</th><th>作用</th></tr>
+            <tr><td><span class="mono">server/ 入口</span></td><td><code>cmd/server</code> · <code>cmd/multica</code> · <code>cmd/migrate</code></td><td>三个入口二进制：HTTP/WS 服务、<code>multica</code> CLI、迁移工具（module <code>github.com/multica-ai/multica/server</code>，Go 1.26.1）</td></tr>
+            <tr><td><span class="mono">server/ handler</span></td><td><code>internal/handler/*.go</code></td><td>Chi HTTP handler，按资源拆分（<code>issue.go</code>/<code>agent.go</code>/<code>chat.go</code>/<code>daemon.go</code>/<code>daemon_ws.go</code>…），统一 UUID 解析三态约定</td></tr>
+            <tr><td><span class="mono">server/ task</span></td><td><code>internal/service/task.go</code></td><td><code class="cy">TaskService</code>——派活、认领、生命周期推进、状态对账、指标的核心（2362 行）</td></tr>
+            <tr><td><span class="mono">server/ builtin</span></td><td><code>internal/service/builtin_skills/*</code></td><td>随产品发给 Agent 的内置 skill（<code>multica-working-on-issues</code>、<code>multica-squads</code>、<code>multica-autopilots</code>），是“源码可追溯的契约”</td></tr>
+            <tr><td><span class="mono">server/ skill</span></td><td><code>internal/skill/frontmatter.go</code> · <code>reserved.go</code></td><td>SKILL.md frontmatter 解析（与前端 <code>core/skills/frontmatter.ts</code> 同构）、保留 slug</td></tr>
+            <tr><td><span class="mono">server/ tmpl</span></td><td><code>internal/agenttmpl/templates</code></td><td>Agent 模板（静态目录，工作区无关，前端缓存 <code>staleTime: Infinity</code>）</td></tr>
+            <tr><td><span class="mono">server/ realtime</span></td><td><code>internal/realtime</code> · <code>internal/events</code></td><td><code class="ph">Hub</code>——WS 广播；<code class="ph">Bus</code>——进程内事件总线</td></tr>
+            <tr><td><span class="mono">server/ runtime</span></td><td><code>internal/daemon</code> · <code>daemonws</code> · <code>cloudruntime</code></td><td>本地 daemon 与云 runtime：真正执行 Agent 的 execenv/repocache</td></tr>
+            <tr><td><span class="mono">server/ db</span></td><td><code>pkg/db/queries/*.sql</code> + <code>pkg/db/generated</code></td><td>sqlc：手写 SQL → 生成类型安全 Go。改 SQL 后 <code>make sqlc</code> 重生成</td></tr>
+            <tr><td><span class="mono">server/ protocol</span></td><td><code>pkg/protocol</code></td><td>WS/任务事件载荷类型（<code>EventTaskQueued/Dispatch/Running/Completed/Failed</code>、<code>TaskCompletedPayload</code>）</td></tr>
+            <tr><td><span class="mono">apps/web</span></td><td><code>app/[workspaceSlug]/(dashboard)/…</code> · <code>platform/navigation.tsx</code></td><td>工作区作用域路由 + 路由组；<strong>Web 端唯一允许用 <code>next/navigation</code> 的地方</strong>，适配成共享 <code>NavigationAdapter</code></td></tr>
+            <tr><td><span class="mono">apps/desktop</span></td><td><code>src/main</code> · <code>src/renderer/src/platform/navigation.tsx</code></td><td>Electron 主进程/preload 桥；<strong>Desktop 端唯一用 <code>react-router-dom</code> 的地方</strong>，多 tab + memory router；构建把 <code>multica</code> CLI 打进 app</td></tr>
+            <tr><td><span class="mono">packages/core</span></td><td><code>api/</code> · <code>platform/</code> · <code>&lt;domain&gt;/queries|mutations|stores</code></td><td>Headless 业务逻辑：零 react-dom/零 localStorage/零 process.env；TanStack Query + Zustand + WS 同步；<code>react</code> 仅为 peer</td></tr>
+            <tr><td><span class="mono">packages/ui</span></td><td><code>components/ui/*</code> · <code>styles/tokens.css</code></td><td>原子 UI：shadcn 基于 <code>@base-ui/react</code>（非 Radix）；<strong>没有 <code>@multica/core</code></strong>，强制“纯 UI、零业务逻辑”</td></tr>
+            <tr><td><span class="mono">packages/views</span></td><td><code>issues/agents/inbox/squads/chat</code> · <code>navigation/*</code></td><td>共享业务页面；定义 <code>NavigationAdapter</code> 抽象、<code>&lt;AppLink&gt;</code>；<strong>exports 与 deps 里没有任何 <code>next</code>/<code>react-router-dom</code></strong></td></tr>
+          </table>
+        </div>
 
-      <!-- ====== 专题 1：Headless core ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="headless-core">③ Headless core：Zustand（客户端状态）+ React Query（服务端状态）严格分离</h4>
-        <p class="reveal"><code>CLAUDE.md</code> 把这条定为“架构保持连贯的根本约束”：<strong>TanStack Query 拥有全部服务端状态，Zustand 拥有全部客户端状态，二者绝不混用</strong>。<strong>服务端状态</strong>用 <code>queryOptions</code> 描述，键以 <code>wsId</code> 开头——工作区切换即换 key、自动出对数据，无需手动失效。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/core/agents/queries.ts — wsId 前缀的 queryKey</span></div>
-        <pre><code><span class="tok-k">export const</span> agentTaskSnapshotKeys <span class="tok-p">=</span> <span class="tok-p">{</span>
-  all<span class="tok-p">:</span> (wsId<span class="tok-p">:</span> <span class="tok-t">string</span>) <span class="tok-p">=&gt;</span> <span class="tok-p">[</span><span class="tok-s">"workspaces"</span><span class="tok-p">,</span> wsId<span class="tok-p">,</span> <span class="tok-s">"agent-task-snapshot"</span><span class="tok-p">]</span> <span class="tok-k">as const</span><span class="tok-p">,</span>
-  list<span class="tok-p">:</span> (wsId<span class="tok-p">:</span> <span class="tok-t">string</span>) <span class="tok-p">=&gt;</span> <span class="tok-p">[</span>...agentTaskSnapshotKeys.<span class="tok-f">all</span>(wsId)<span class="tok-p">,</span> <span class="tok-s">"list"</span><span class="tok-p">]</span> <span class="tok-k">as const</span><span class="tok-p">,</span>
-<span class="tok-p">}</span><span class="tok-p">;</span>
-
-<span class="tok-k">export function</span> <span class="tok-f">agentTaskSnapshotOptions</span>(wsId<span class="tok-p">:</span> <span class="tok-t">string</span>) <span class="tok-p">{</span>
-  <span class="tok-k">return</span> <span class="tok-f">queryOptions</span>(<span class="tok-p">{</span>
-    queryKey<span class="tok-p">:</span> agentTaskSnapshotKeys.<span class="tok-f">list</span>(wsId)<span class="tok-p">,</span>
-    queryFn<span class="tok-p">:</span> () <span class="tok-p">=&gt;</span> api.<span class="tok-f">getAgentTaskSnapshot</span>()<span class="tok-p">,</span>
-    staleTime<span class="tok-p">:</span> <span class="tok-n">30</span> <span class="tok-p">*</span> <span class="tok-n">1000</span><span class="tok-p">,</span>        <span class="tok-c">// 仅作 fallback；主刷新信号是 WS 任务事件</span>
-    refetchOnWindowFocus<span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span>
-  <span class="tok-p">}</span>)<span class="tok-p">;</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>客户端状态</strong>——Zustand store 一律放在 <code>packages/core</code>（即便是视图相关的 filter/viewMode 也算纯状态），并用工作区感知的 persist；<strong>WS 事件只做失效、绝不直接写 store</strong>（保持 Query 缓存为唯一真相，避免竞态）。一个任务生命周期事件会把一组与 Agent presence 相关的 query 全部置 stale。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/core/realtime/use-realtime-sync.ts — task 前缀处理器</span></div>
-        <pre><code>task<span class="tok-p">:</span> () <span class="tok-p">=&gt;</span> <span class="tok-p">{</span>
-  <span class="tok-k">const</span> wsId <span class="tok-p">=</span> <span class="tok-f">getCurrentWsId</span>()<span class="tok-p">;</span>
-  <span class="tok-k">if</span> (!wsId) <span class="tok-k">return</span><span class="tok-p">;</span>
-  qc.<span class="tok-f">invalidateQueries</span>(<span class="tok-p">{</span> queryKey<span class="tok-p">:</span> agentTaskSnapshotKeys.<span class="tok-f">list</span>(wsId) <span class="tok-p">}</span>)<span class="tok-p">;</span>
-  qc.<span class="tok-f">invalidateQueries</span>(<span class="tok-p">{</span> queryKey<span class="tok-p">:</span> agentActivityKeys.<span class="tok-f">last30d</span>(wsId) <span class="tok-p">}</span>)<span class="tok-p">;</span>
-  qc.<span class="tok-f">invalidateQueries</span>(<span class="tok-p">{</span> queryKey<span class="tok-p">:</span> agentRunCountsKeys.<span class="tok-f">last30d</span>(wsId) <span class="tok-p">}</span>)<span class="tok-p">;</span>
-  qc.<span class="tok-f">invalidateQueries</span>(<span class="tok-p">{</span> queryKey<span class="tok-p">:</span> agentTasksKeys.<span class="tok-f">all</span>(wsId) <span class="tok-p">}</span>)<span class="tok-p">;</span>
-  qc.<span class="tok-f">invalidateQueries</span>(<span class="tok-p">{</span> queryKey<span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"issues"</span><span class="tok-p">,</span> <span class="tok-s">"tasks"</span><span class="tok-p">]</span> <span class="tok-p">}</span>)<span class="tok-p">;</span>  <span class="tok-c">// 前缀匹配所有 issue</span>
-<span class="tok-p">}</span>
-<span class="tok-c">// task:message 故意不走该前缀——长任务每条流式消息都来一次会引发失效风暴。</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>关键设计：</strong>Agent 的 presence（在线性 <code>AgentAvailability</code> × 负载 <code>Workload</code>）是<strong>纯前端派生</strong>（<code>agents/types.ts</code>、<code>derive-presence.ts</code>）——后端只提供 agent + runtime + 最近任务快照，前端从同一份 <code>agentTaskSnapshot</code> 缓存推导所有列表小圆点/悬浮卡，<strong>零额外网络</strong>。</p>
-        <h5 class="reveal">失败模式</h5>
-        <ul class="reveal">
-          <li><strong>Zustand 无限重渲染：</strong>selector 返回新对象/数组（<code>s =&gt; ({a,b})</code>）每次都不同——必须选基本量或用 shallow 比较（<code>CLAUDE.md</code> Common Zustand footguns）。</li>
-          <li><strong>双真相源漂移：</strong>把服务端数据复制进 Zustand → 两个真相源必然漂移（硬规则禁止）。</li>
-          <li><strong>“无故空列表”：</strong><code>agentRunningFilter</code> 故意 NOT 持久化——running 状态秒级变化，持久化开关会让用户回来面对空列表（<code>partialize</code> 排除该字段）。</li>
+        <h3 class="reveal" style="margin-top:34px">关键设计 · UUID 解析三态约定</h3>
+        <p class="reveal">源于真实事故 <strong>#1661</strong>（<code class="k">DELETE</code> 返回 204 却匹配 0 行，因原 <code class="k">util.ParseUUID</code> 对非法输入静默返回零 UUID）。<code class="k">CLAUDE.md</code> 的 Backend Handler UUID Parsing Convention 把它定为硬约定：</p>
+        <ul class="ulist reveal">
+          <li>① 资源路径参数（可能是 <code>MUL-123</code> 也可能是 UUID）必须经 <code>loadIssueForUser</code>/<code>loadAgentForUser</code> 等 loader 解析，之后所有写查询用解析出的 <code>entity.ID</code>；</li>
+          <li>② 纯 UUID 的请求边界输入用 <code>parseUUIDOrBadRequest</code>，非法即写 400；</li>
+          <li>③ 可信往返（sqlc 返回的 UUID）用 <code>parseUUID</code>（panic-on-invalid，由 <code>middleware.Recoverer</code> 兜成 500）。</li>
         </ul>
       </div>
+    </section>
 
-      <!-- ====== 专题 2：包边界 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="package-boundaries">④ packages 边界规则（core 零 react-dom、ui 零 core）—— 如何被强制</h4>
-        <p class="reveal">本仓库最反直觉的发现：<strong>边界不是靠 ESLint <code>no-restricted-imports</code> 或 dependency-cruiser 强制的</strong>（全仓搜索 <code>no-restricted-imports</code>/<code>dependency-cruiser</code>/<code>no-restricted-paths</code> 均无命中）。强制手段是<strong>依赖声明 + TypeScript 解析失败 + phantom-dep lint</strong> 三者叠加：</p>
-        <p class="reveal"><strong>1) 包的 <code>package.json</code> 决定它能 import 什么。</strong><code>@multica/ui</code> 的 deps 里<strong>根本没有</strong> <code>@multica/core</code>；<code>@multica/views</code> 的 deps/peer 里<strong>根本没有</strong> <code>next</code> 或 <code>react-router-dom</code>；<code>@multica/core</code> 把 <code>react-dom</code> 只放在 <code>devDependencies</code>（测试用），生产代码无法依赖它。<strong>2) phantom-dep 规则把“偷用未声明依赖”变成 CI 报错</strong>（<code>eslint-plugin-import-x/no-extraneous-dependencies</code>）：</p>
+    <!-- ---------- 03 Headless core ---------- -->
+    <section id="headless-core">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">headless · state separation</div>
+        <h2>Headless <em>core</em></h2>
+        <p class="lead">Zustand（客户端状态）+ React Query（服务端状态）严格分离。<code class="k">CLAUDE.md</code> 把这条定为“架构保持连贯的根本约束”：<strong>TanStack Query 拥有全部服务端状态，Zustand 拥有全部客户端状态，二者绝不混用</strong>。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/eslint-config/base.js — phantom-dep 拦截（节选）</span></div>
-        <pre><code><span class="tok-s">"import-x/no-extraneous-dependencies"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"error"</span><span class="tok-p">,</span> <span class="tok-p">{</span>
-  devDependencies<span class="tok-p">:</span> <span class="tok-p">[</span> <span class="tok-s">"**/*.test.{ts,tsx}"</span><span class="tok-p">,</span> <span class="tok-s">"**/test/**"</span><span class="tok-p">,</span>
-    <span class="tok-s">"**/electron.vite.config.*"</span><span class="tok-p">,</span> <span class="tok-s">"**/src/main/**"</span><span class="tok-p">,</span> <span class="tok-s">"**/src/preload/**"</span><span class="tok-p">,</span> <span class="tok-c">/* … */</span> <span class="tok-p">]</span><span class="tok-p">,</span>
-  peerDependencies<span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span>
-<span class="tok-p">}</span><span class="tok-p">]</span><span class="tok-p">;</span></code></pre>
+      <div class="reveal">
+        <p class="reveal"><strong>服务端状态</strong>用 <code class="k">queryOptions</code> 描述，键以 <code class="kc">wsId</code> 开头——工作区切换即换 key、自动出对数据，无需手动失效。</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">packages/core/agents/queries.ts — wsId 前缀的 queryKey</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export const</span> agentTaskSnapshotKeys <span class="t-pun">=</span> <span class="t-pun">{</span>
+  all<span class="t-pun">:</span> (wsId<span class="t-pun">:</span> <span class="t-typ">string</span>) <span class="t-pun">=&gt;</span> <span class="t-pun">[</span><span class="t-str">"workspaces"</span><span class="t-pun">,</span> wsId<span class="t-pun">,</span> <span class="t-str">"agent-task-snapshot"</span><span class="t-pun">]</span> <span class="t-key">as const</span><span class="t-pun">,</span>
+  list<span class="t-pun">:</span> (wsId<span class="t-pun">:</span> <span class="t-typ">string</span>) <span class="t-pun">=&gt;</span> <span class="t-pun">[</span>...agentTaskSnapshotKeys.<span class="t-fn">all</span>(wsId)<span class="t-pun">,</span> <span class="t-str">"list"</span><span class="t-pun">]</span> <span class="t-key">as const</span><span class="t-pun">,</span>
+<span class="t-pun">}</span><span class="t-pun">;</span>
+
+<span class="t-key">export function</span> <span class="t-fn">agentTaskSnapshotOptions</span>(wsId<span class="t-pun">:</span> <span class="t-typ">string</span>) <span class="t-pun">{</span>
+  <span class="t-key">return</span> <span class="t-fn">queryOptions</span>(<span class="t-pun">{</span>
+    queryKey<span class="t-pun">:</span> agentTaskSnapshotKeys.<span class="t-fn">list</span>(wsId)<span class="t-pun">,</span>
+    queryFn<span class="t-pun">:</span> () <span class="t-pun">=&gt;</span> api.<span class="t-fn">getAgentTaskSnapshot</span>()<span class="t-pun">,</span>
+    staleTime<span class="t-pun">:</span> <span class="t-num">30</span> <span class="t-pun">*</span> <span class="t-num">1000</span><span class="t-pun">,</span>        <span class="t-com">// 仅作 fallback；主刷新信号是 WS 任务事件</span>
+    refetchOnWindowFocus<span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span>
+  <span class="t-pun">}</span>)<span class="t-pun">;</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>客户端状态</strong>——Zustand store 一律放在 <code class="k">packages/core</code>（即便是视图相关的 filter/viewMode 也算纯状态），并用工作区感知的 persist；<strong>WS 事件只做失效、绝不直接写 store</strong>（保持 Query 缓存为唯一真相，避免竞态）。一个任务生命周期事件会把一组与 Agent presence 相关的 query 全部置 stale。</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">packages/core/realtime/use-realtime-sync.ts — task 前缀处理器</span><button class="copy">复制</button></div>
+<pre><code>task<span class="t-pun">:</span> () <span class="t-pun">=&gt;</span> <span class="t-pun">{</span>
+  <span class="t-key">const</span> wsId <span class="t-pun">=</span> <span class="t-fn">getCurrentWsId</span>()<span class="t-pun">;</span>
+  <span class="t-key">if</span> (!wsId) <span class="t-key">return</span><span class="t-pun">;</span>
+  qc.<span class="t-fn">invalidateQueries</span>(<span class="t-pun">{</span> queryKey<span class="t-pun">:</span> agentTaskSnapshotKeys.<span class="t-fn">list</span>(wsId) <span class="t-pun">}</span>)<span class="t-pun">;</span>
+  qc.<span class="t-fn">invalidateQueries</span>(<span class="t-pun">{</span> queryKey<span class="t-pun">:</span> agentActivityKeys.<span class="t-fn">last30d</span>(wsId) <span class="t-pun">}</span>)<span class="t-pun">;</span>
+  qc.<span class="t-fn">invalidateQueries</span>(<span class="t-pun">{</span> queryKey<span class="t-pun">:</span> agentRunCountsKeys.<span class="t-fn">last30d</span>(wsId) <span class="t-pun">}</span>)<span class="t-pun">;</span>
+  qc.<span class="t-fn">invalidateQueries</span>(<span class="t-pun">{</span> queryKey<span class="t-pun">:</span> agentTasksKeys.<span class="t-fn">all</span>(wsId) <span class="t-pun">}</span>)<span class="t-pun">;</span>
+  qc.<span class="t-fn">invalidateQueries</span>(<span class="t-pun">{</span> queryKey<span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"issues"</span><span class="t-pun">,</span> <span class="t-str">"tasks"</span><span class="t-pun">]</span> <span class="t-pun">}</span>)<span class="t-pun">;</span>  <span class="t-com">// 前缀匹配所有 issue</span>
+<span class="t-pun">}</span>
+<span class="t-com">// task:message 故意不走该前缀——长任务每条流式消息都来一次会引发失效风暴。</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>关键设计：</strong>Agent 的 presence（在线性 <code class="k">AgentAvailability</code> × 负载 <code class="k">Workload</code>）是<strong>纯前端派生</strong>（<code class="k">agents/types.ts</code>、<code class="k">derive-presence.ts</code>）——后端只提供 agent + runtime + 最近任务快照，前端从同一份 <code class="k">agentTaskSnapshot</code> 缓存推导所有列表小圆点/悬浮卡，<strong>零额外网络</strong>。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">本节失败模式</div>
+          <ul class="ulist" style="margin:0">
+            <li><strong>Zustand 无限重渲染：</strong>selector 返回新对象/数组（<code>s =&gt; ({a,b})</code>）每次都不同——必须选基本量或用 shallow 比较（<code>CLAUDE.md</code> Common Zustand footguns）。</li>
+            <li><strong>双真相源漂移：</strong>把服务端数据复制进 Zustand → 两个真相源必然漂移（硬规则禁止）。</li>
+            <li><strong>“无故空列表”：</strong><code>agentRunningFilter</code> 故意 NOT 持久化——running 状态秒级变化，持久化开关会让用户回来面对空列表（<code>partialize</code> 排除该字段）。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 04 包边界强制 ---------- -->
+    <section id="package-boundaries">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">boundaries · how they're enforced</div>
+        <h2>包边界<em>强制</em></h2>
+        <p class="lead">本仓库最反直觉的发现：<strong>边界不是靠 ESLint <code class="k">no-restricted-imports</code> 或 dependency-cruiser 强制的</strong>（全仓搜索 <code class="k">no-restricted-imports</code>/<code class="k">dependency-cruiser</code>/<code class="k">no-restricted-paths</code> 均无命中）。</p>
       </div>
 
-      <div class="prose">
-        <p class="reveal">于是 <code>@multica/ui</code> 里若有人 <code>import {…} from "@multica/core"</code>，因为 core 不在 ui 的 package.json，lint 直接 <code>no-extraneous-dependencies</code> 失败；<code>views</code> 里 <code>import "next/navigation"</code> 同理失败。<code>CLAUDE.md</code> 的 Dependency Declaration Rule 明确：<strong>禁止依赖 pnpm hoist 解析未声明的 import</strong>（会导致 peer-dep 变体下的生产构建失败）。<strong>3)</strong> <code>CLAUDE.md</code> Package Boundary Rules 把这些写成硬约束：<code>core</code> 零 react-dom/零 localStorage（用 <code>StorageAdapter</code>）/零 process.env；<code>ui</code> 零 <code>@multica/core</code>；<code>views</code> 零 <code>next/*</code>/零 <code>react-router-dom</code>/零 store；框架 API 只允许出现在各 app 的 <code>platform/</code> 层。</p>
-        <p class="reveal"><strong>关键设计：</strong>唯一被 ESLint 主动“正向拦截”的边界是 i18n——<code>packages/views/eslint.config.mjs</code> 开 <code>i18next/no-literal-string</code>，JSX 里写裸字符串直接编译报错。其余边界靠“包依赖图 + TS 找不到模块 + phantom-dep”被动失败。<strong>潜在弱点：</strong>因为没有显式 import 防火墙，若有人把 <code>next</code> 误加进 <code>views</code> 的 package.json，边界即被打开——这是“约定 + 评审”而非“工具硬隔离”。</p>
+      <div class="reveal">
+        <p class="reveal">强制手段是<strong>依赖声明 + TypeScript 解析失败 + phantom-dep lint</strong> 三者叠加：<strong>1)</strong> 包的 <code class="k">package.json</code> 决定它能 import 什么。<code class="k">@multica/ui</code> 的 deps 里<strong>根本没有</strong> <code class="k">@multica/core</code>；<code class="k">@multica/views</code> 的 deps/peer 里<strong>根本没有</strong> <code class="k">next</code> 或 <code class="k">react-router-dom</code>；<code class="k">@multica/core</code> 把 <code class="k">react-dom</code> 只放在 <code class="k">devDependencies</code>（测试用），生产代码无法依赖它。<strong>2)</strong> phantom-dep 规则把“偷用未声明依赖”变成 CI 报错（<code class="k">eslint-plugin-import-x/no-extraneous-dependencies</code>）：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">packages/eslint-config/base.js — phantom-dep 拦截（节选）</span><button class="copy">复制</button></div>
+<pre><code><span class="t-str">"import-x/no-extraneous-dependencies"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"error"</span><span class="t-pun">,</span> <span class="t-pun">{</span>
+  devDependencies<span class="t-pun">:</span> <span class="t-pun">[</span> <span class="t-str">"**/*.test.{ts,tsx}"</span><span class="t-pun">,</span> <span class="t-str">"**/test/**"</span><span class="t-pun">,</span>
+    <span class="t-str">"**/electron.vite.config.*"</span><span class="t-pun">,</span> <span class="t-str">"**/src/main/**"</span><span class="t-pun">,</span> <span class="t-str">"**/src/preload/**"</span><span class="t-pun">,</span> <span class="t-com">/* … */</span> <span class="t-pun">]</span><span class="t-pun">,</span>
+  peerDependencies<span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span>
+<span class="t-pun">}</span><span class="t-pun">]</span><span class="t-pun">;</span></code></pre>
+        </div>
+
+        <p class="reveal">于是 <code class="k">@multica/ui</code> 里若有人 <code class="k">import {…} from "@multica/core"</code>，因为 core 不在 ui 的 package.json，lint 直接 <code class="k">no-extraneous-dependencies</code> 失败；<code class="k">views</code> 里 <code class="k">import "next/navigation"</code> 同理失败。<code class="k">CLAUDE.md</code> 的 Dependency Declaration Rule 明确：<strong>禁止依赖 pnpm hoist 解析未声明的 import</strong>（会导致 peer-dep 变体下的生产构建失败）。<strong>3)</strong> <code class="k">CLAUDE.md</code> Package Boundary Rules 把这些写成硬约束：<code class="k">core</code> 零 react-dom/零 localStorage（用 <code class="k">StorageAdapter</code>）/零 process.env；<code class="k">ui</code> 零 <code class="k">@multica/core</code>；<code class="k">views</code> 零 <code class="k">next/*</code>/零 <code class="k">react-router-dom</code>/零 store；框架 API 只允许出现在各 app 的 <code class="k">platform/</code> 层。</p>
+
+        <div class="grid g2 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">i18n · 正向拦截</div><h3>唯一主动防火墙</h3><p>唯一被 ESLint 主动“正向拦截”的边界是 i18n——<code class="k">packages/views/eslint.config.mjs</code> 开 <code class="k">i18next/no-literal-string</code>，JSX 里写裸字符串直接编译报错。</p></div>
+          <div class="card cy"><div class="ic">潜在弱点</div><h3>约定 + 评审</h3><p>因为没有显式 import 防火墙，若有人把 <code class="k">next</code> 误加进 <code class="k">views</code> 的 package.json，边界即被打开——这是“约定 + 评审”而非“工具硬隔离”。</p></div>
+        </div>
+        <div class="note reveal"><b>被动失败链：</b>包依赖图（package.json deps）→ TS 找不到模块 → phantom-dep lint 报错——三层叠加把“偷用未声明依赖”在 CI 拦下，而非靠单一显式规则。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 05 Agent 管理 ---------- -->
+    <section id="agent-management">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">agents · assign · claim · skill</div>
+        <h2>Agent <em>管理</em></h2>
+        <p class="lead">任务分配、进度跟踪、技能积累——核心在 <code class="k">server/internal/service/task.go</code>（<code class="cy">TaskService</code>，2362 行）。<strong>任务分配——polymorphic assignee：</strong>Issue 的 assignee 可以是 member 或 agent（<code class="k">assignee_type</code> + <code class="k">assignee_id</code>）。</p>
       </div>
 
-      <!-- ====== 专题 3：Agent 管理 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="agent-management">⑤ Agent 管理：任务分配、进度跟踪、技能积累</h4>
-        <p class="reveal"><strong>任务分配——polymorphic assignee。</strong>Issue 的 assignee 可以是 member 或 agent（<code>assignee_type</code> + <code>assignee_id</code>）。把 issue 指派给 Agent（或在评论里 @ 它）即触发入队：</p>
+      <div class="reveal">
+        <p class="reveal">把 issue 指派给 Agent（或在评论里 @ 它）即触发入队：</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">server/internal/service/task.go — enqueueIssueTask</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">func</span> (s <span class="t-pun">*</span><span class="t-typ">TaskService</span>) <span class="t-fn">enqueueIssueTask</span>(ctx<span class="t-pun">,</span> issue<span class="t-pun">,</span> triggerCommentID<span class="t-pun">,</span> forceFreshSession) (db.<span class="t-typ">AgentTaskQueue</span><span class="t-pun">,</span> <span class="t-typ">error</span>) <span class="t-pun">{</span>
+    <span class="t-key">if</span> !issue.AssigneeID.Valid <span class="t-pun">{</span> <span class="t-key">return</span> ...<span class="t-pun">,</span> fmt.<span class="t-fn">Errorf</span>(<span class="t-str">"issue has no assignee"</span>) <span class="t-pun">}</span>
+    agent<span class="t-pun">,</span> _ <span class="t-pun">:=</span> s.Queries.<span class="t-fn">GetAgent</span>(ctx<span class="t-pun">,</span> issue.AssigneeID)
+    <span class="t-key">if</span> agent.ArchivedAt.Valid <span class="t-pun">{</span> <span class="t-key">return</span> ...<span class="t-pun">,</span> fmt.<span class="t-fn">Errorf</span>(<span class="t-str">"agent is archived"</span>) <span class="t-pun">}</span>
+    <span class="t-key">if</span> !agent.RuntimeID.Valid <span class="t-pun">{</span> <span class="t-key">return</span> ...<span class="t-pun">,</span> fmt.<span class="t-fn">Errorf</span>(<span class="t-str">"agent has no runtime"</span>) <span class="t-pun">}</span>
+
+    task<span class="t-pun">,</span> _ <span class="t-pun">:=</span> s.Queries.<span class="t-fn">CreateAgentTask</span>(ctx<span class="t-pun">,</span> db.<span class="t-typ">CreateAgentTaskParams</span><span class="t-pun">{</span>
+        AgentID<span class="t-pun">:</span> issue.AssigneeID<span class="t-pun">,</span> RuntimeID<span class="t-pun">:</span> agent.RuntimeID<span class="t-pun">,</span> IssueID<span class="t-pun">:</span> issue.ID<span class="t-pun">,</span>
+        Priority<span class="t-pun">:</span> <span class="t-fn">priorityToInt</span>(issue.Priority)<span class="t-pun">,</span>
+        TriggerCommentID<span class="t-pun">:</span> triggerCommentID<span class="t-pun">,</span>
+        TriggerSummary<span class="t-pun">:</span>   s.<span class="t-fn">buildCommentTriggerSummary</span>(ctx<span class="t-pun">,</span> triggerCommentID)<span class="t-pun">,</span> <span class="t-com">// 200 rune 摘要</span>
+        ForceFreshSession<span class="t-pun">:</span> ...<span class="t-pun">,</span>
+    <span class="t-pun">}</span>)
+    <span class="t-com">// 先广播 queued，再通知 daemon——保证客户端按 queued→dispatch 顺序观测</span>
+    s.<span class="t-fn">broadcastTaskEvent</span>(ctx<span class="t-pun">,</span> protocol.EventTaskQueued<span class="t-pun">,</span> task)
+    s.<span class="t-fn">NotifyTaskEnqueued</span>(ctx<span class="t-pun">,</span> task)
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal">入队后<strong>不存上下文快照</strong>——Agent 在 runtime 里通过 <code class="k">multica</code> CLI 现取所需数据。除 issue 任务外还有 <code class="k">EnqueueChatTask</code>、<code class="k">EnqueueQuickCreateTask</code>（自然语言→<code class="k">multica issue create</code>）、<code class="k">EnqueueTaskForSquadLeader</code>（Squad 路由层，leader 代理再分派）等变体。<strong>认领——daemon pull + 容量约束：</strong>runtime（本地 daemon/云）调 <code class="k">/tasks/claim</code>，服务端原子认领并尊重 <code class="k">max_concurrent_tasks</code>：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">server/internal/service/task.go — ClaimTask</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">func</span> (s <span class="t-pun">*</span><span class="t-typ">TaskService</span>) <span class="t-fn">ClaimTask</span>(ctx<span class="t-pun">,</span> agentID) (<span class="t-pun">*</span>db.<span class="t-typ">AgentTaskQueue</span><span class="t-pun">,</span> <span class="t-typ">error</span>) <span class="t-pun">{</span>
+    agent<span class="t-pun">,</span> _ <span class="t-pun">:=</span> s.Queries.<span class="t-fn">GetAgent</span>(ctx<span class="t-pun">,</span> agentID)
+    running<span class="t-pun">,</span> _ <span class="t-pun">:=</span> s.Queries.<span class="t-fn">CountRunningTasks</span>(ctx<span class="t-pun">,</span> agentID)
+    <span class="t-key">if</span> running <span class="t-pun">&gt;=</span> <span class="t-typ">int64</span>(agent.MaxConcurrentTasks) <span class="t-pun">{</span> <span class="t-key">return</span> <span class="t-key">nil</span><span class="t-pun">,</span> <span class="t-key">nil</span> <span class="t-pun">}</span>  <span class="t-com">// 无容量</span>
+    task<span class="t-pun">,</span> err <span class="t-pun">:=</span> s.Queries.<span class="t-fn">ClaimAgentTask</span>(ctx<span class="t-pun">,</span> agentID)                  <span class="t-com">// 原子取下一条 queued</span>
+    <span class="t-key">if</span> errors.<span class="t-fn">Is</span>(err<span class="t-pun">,</span> pgx.ErrNoRows) <span class="t-pun">{</span> <span class="t-key">return</span> <span class="t-key">nil</span><span class="t-pun">,</span> <span class="t-key">nil</span> <span class="t-pun">}</span>
+    s.<span class="t-fn">ReconcileAgentStatus</span>(ctx<span class="t-pun">,</span> agentID)
+    s.<span class="t-fn">broadcastTaskDispatch</span>(ctx<span class="t-pun">,</span> task)
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal"><code class="k">ClaimTaskForRuntime</code> 还有两个性能/正确性机制：<code class="k">EmptyClaim</code> 缓存（Redis）让稳态空队列跳过 Postgres 扫描，并在每次 enqueue 时同步失效；<code class="k">ReclaimStaleDispatchedTaskForRuntime</code> 用 <strong>90s 恢复窗口</strong>回收“claim 响应丢失”的 dispatched 任务，避免双派发。<strong>进度跟踪——状态机 + WS 事件：</strong>任务生命周期 <code class="kc">queued → dispatched → running → completed/failed/cancelled</code>，另有 <code class="kc">waiting_local_directory</code>（等本地路径锁）。每次转移都 <code class="k">broadcastTaskEvent</code>，前端据此失效 presence 缓存。</p>
+
+        <div class="note cy reveal"><b>issue 状态不由服务端在任务完成时改</b>——由 Agent 自己通过 CLI 管理（<code class="k">StartTask</code>/<code class="k">CompleteTask</code> 注释明确 “Issue status is NOT changed here”）。<code class="k">CompleteTask</code> 还保证“每个完成的 issue 任务至少留一条 Agent 评论”，并对 chat 任务在同一事务里更新 resume 指针避免竞态。</div>
+
+        <p class="reveal"><strong>技能积累——skill 表 + agent_skill junction + 内置 skill：</strong>Skill 是工作区级实体（<code class="k">skill</code> 表含 <code class="k">content</code> = SKILL.md 正文 + <code class="k">skill_file</code> 子文件），Agent 与 skill 多对多：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">server/pkg/db/queries/skill.sql — agent_skill 多对多</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">-- name: AddAgentSkill :exec</span>
+<span class="t-key">INSERT INTO</span> agent_skill (agent_id<span class="t-pun">,</span> skill_id) <span class="t-key">VALUES</span> ($1<span class="t-pun">,</span> $2) <span class="t-key">ON CONFLICT DO NOTHING</span><span class="t-pun">;</span>
+
+<span class="t-com">-- name: ListAgentSkills :many</span>
+<span class="t-key">SELECT</span> s.<span class="t-pun">*</span> <span class="t-key">FROM</span> skill s <span class="t-key">JOIN</span> agent_skill ask <span class="t-key">ON</span> ask.skill_id <span class="t-pun">=</span> s.id
+<span class="t-key">WHERE</span> ask.agent_id <span class="t-pun">=</span> $1 <span class="t-key">ORDER BY</span> s.name <span class="t-key">ASC</span><span class="t-pun">;</span></code></pre>
+        </div>
+
+        <p class="reveal">Agent 模板物化时按 name find-or-create skill（<code class="k">GetSkillByWorkspaceAndName</code>，复用已存在的 skill_id，避开 <code class="k">UNIQUE(workspace_id,name)</code>）。前后端用<strong>同构的 frontmatter 解析</strong>（<code class="k">server/internal/skill/frontmatter.go</code> 与 <code class="k">packages/core/skills/frontmatter.ts</code> 共用同一正则）。此外 <code class="k">builtin_skills/*</code> 是随产品发给 Agent 的<strong>源码可追溯契约</strong>——<code class="k">CLAUDE.md</code> 要求改 CLI/API/行为时必须同 PR 更新对应 <code class="k">SKILL.md</code> 与 <code class="k">references/*-source-map.md</code>，否则会“悄悄教 Agent 过时行为”。</p>
+        <div class="note reveal"><b>列表接口省略 content 列：</b><code class="k">ListSkillSummariesByWorkspace</code>/<code class="k">ListAgentSkillSummaries</code> 故意不带 <code class="k">content</code> 列——曾因每行带 SKILL.md 正文导致高延迟地区 CLI 15s 超时（GH #2174）。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 06 双端共享架构 ---------- -->
+    <section id="web-desktop-shared">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">web + desktop · one codebase</div>
+        <h2>双端<em>共享</em>架构</h2>
+        <p class="lead">两端都把根组件包进 <code class="k">&lt;CoreProvider&gt;</code>（初始化 api/auth/chat store + QueryClient + WS），并各自提供 <code class="k">NavigationAdapter</code>——一个共享抽象接口。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">server/internal/service/task.go — enqueueIssueTask</span></div>
-        <pre><code><span class="tok-k">func</span> (s <span class="tok-p">*</span><span class="tok-t">TaskService</span>) <span class="tok-f">enqueueIssueTask</span>(ctx<span class="tok-p">,</span> issue<span class="tok-p">,</span> triggerCommentID<span class="tok-p">,</span> forceFreshSession) (db.<span class="tok-t">AgentTaskQueue</span><span class="tok-p">,</span> <span class="tok-t">error</span>) <span class="tok-p">{</span>
-    <span class="tok-k">if</span> !issue.AssigneeID.Valid <span class="tok-p">{</span> <span class="tok-k">return</span> ...<span class="tok-p">,</span> fmt.<span class="tok-f">Errorf</span>(<span class="tok-s">"issue has no assignee"</span>) <span class="tok-p">}</span>
-    agent<span class="tok-p">,</span> _ <span class="tok-p">:=</span> s.Queries.<span class="tok-f">GetAgent</span>(ctx<span class="tok-p">,</span> issue.AssigneeID)
-    <span class="tok-k">if</span> agent.ArchivedAt.Valid <span class="tok-p">{</span> <span class="tok-k">return</span> ...<span class="tok-p">,</span> fmt.<span class="tok-f">Errorf</span>(<span class="tok-s">"agent is archived"</span>) <span class="tok-p">}</span>
-    <span class="tok-k">if</span> !agent.RuntimeID.Valid <span class="tok-p">{</span> <span class="tok-k">return</span> ...<span class="tok-p">,</span> fmt.<span class="tok-f">Errorf</span>(<span class="tok-s">"agent has no runtime"</span>) <span class="tok-p">}</span>
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">packages/views/navigation/types.ts — 共享抽象</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export interface</span> <span class="t-typ">NavigationAdapter</span> <span class="t-pun">{</span>
+  <span class="t-fn">push</span>(path<span class="t-pun">:</span> <span class="t-typ">string</span>)<span class="t-pun">:</span> <span class="t-typ">void</span><span class="t-pun">;</span> <span class="t-fn">replace</span>(path<span class="t-pun">:</span> <span class="t-typ">string</span>)<span class="t-pun">:</span> <span class="t-typ">void</span><span class="t-pun">;</span> <span class="t-fn">back</span>()<span class="t-pun">:</span> <span class="t-typ">void</span><span class="t-pun">;</span>
+  pathname<span class="t-pun">:</span> <span class="t-typ">string</span><span class="t-pun">;</span> searchParams<span class="t-pun">:</span> <span class="t-typ">URLSearchParams</span><span class="t-pun">;</span>
+  getShareableUrl<span class="t-pun">:</span> (path<span class="t-pun">:</span> <span class="t-typ">string</span>) <span class="t-pun">=&gt;</span> <span class="t-typ">string</span><span class="t-pun">;</span>
+  openInNewTab?<span class="t-pun">:</span> (path<span class="t-pun">,</span> title?<span class="t-pun">,</span> opts?) <span class="t-pun">=&gt;</span> <span class="t-typ">void</span><span class="t-pun">;</span>   <span class="t-com">// 仅 desktop</span>
+  prefetch?<span class="t-pun">:</span> (path<span class="t-pun">:</span> <span class="t-typ">string</span>) <span class="t-pun">=&gt;</span> <span class="t-typ">void</span><span class="t-pun">;</span>               <span class="t-com">// 仅 web → router.prefetch</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
 
-    task<span class="tok-p">,</span> _ <span class="tok-p">:=</span> s.Queries.<span class="tok-f">CreateAgentTask</span>(ctx<span class="tok-p">,</span> db.<span class="tok-t">CreateAgentTaskParams</span><span class="tok-p">{</span>
-        AgentID<span class="tok-p">:</span> issue.AssigneeID<span class="tok-p">,</span> RuntimeID<span class="tok-p">:</span> agent.RuntimeID<span class="tok-p">,</span> IssueID<span class="tok-p">:</span> issue.ID<span class="tok-p">,</span>
-        Priority<span class="tok-p">:</span> <span class="tok-f">priorityToInt</span>(issue.Priority)<span class="tok-p">,</span>
-        TriggerCommentID<span class="tok-p">:</span> triggerCommentID<span class="tok-p">,</span>
-        TriggerSummary<span class="tok-p">:</span>   s.<span class="tok-f">buildCommentTriggerSummary</span>(ctx<span class="tok-p">,</span> triggerCommentID)<span class="tok-p">,</span> <span class="tok-c">// 200 rune 摘要</span>
-        ForceFreshSession<span class="tok-p">:</span> ...<span class="tok-p">,</span>
-    <span class="tok-p">}</span>)
-    <span class="tok-c">// 先广播 queued，再通知 daemon——保证客户端按 queued→dispatch 顺序观测</span>
-    s.<span class="tok-f">broadcastTaskEvent</span>(ctx<span class="tok-p">,</span> protocol.EventTaskQueued<span class="tok-p">,</span> task)
-    s.<span class="tok-f">NotifyTaskEnqueued</span>(ctx<span class="tok-p">,</span> task)
-<span class="tok-p">}</span></code></pre>
+        <p class="reveal">Web 实现极薄（直接转发 <code class="k">next/navigation</code>）；Desktop 实现承载全部平台差异——多 tab、memory router、跨工作区切换、overlay：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">apps/desktop/src/renderer/src/platform/navigation.tsx — push 节选</span><button class="copy">复制</button></div>
+<pre><code>push<span class="t-pun">:</span> (path) <span class="t-pun">=&gt;</span> <span class="t-pun">{</span>
+  <span class="t-key">if</span> (path <span class="t-pun">===</span> <span class="t-str">"/login"</span>) <span class="t-pun">{</span> <span class="t-fn">useAuthStore</span>().<span class="t-fn">getState</span>().<span class="t-fn">logout</span>()<span class="t-pun">;</span> <span class="t-key">return</span><span class="t-pun">;</span> <span class="t-pun">}</span>
+  <span class="t-key">if</span> (<span class="t-fn">tryRouteToOverlay</span>(path<span class="t-pun">,</span> active?.router)) <span class="t-key">return</span><span class="t-pun">;</span>        <span class="t-com">// /workspaces/new 等 → WindowOverlay</span>
+  <span class="t-key">if</span> (<span class="t-fn">tryRouteToOtherWorkspace</span>(path)) <span class="t-key">return</span><span class="t-pun">;</span>                 <span class="t-com">// 跨工作区 → switchWorkspace(slug,path)</span>
+  <span class="t-key">if</span> (<span class="t-fn">tryRouteToPinnedNewTab</span>(path)) <span class="t-key">return</span><span class="t-pun">;</span>                   <span class="t-com">// 钉住 tab 的 push → 开新 tab</span>
+  active?.router.<span class="t-fn">navigate</span>(path)<span class="t-pun">;</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal">这样 <code class="k">@multica/views</code> 里的页面只调 <code class="k">useNavigation().push()</code>/<code class="k">&lt;AppLink&gt;</code>，对“自己跑在 Web 还是 Desktop”完全无感。<code class="k">CLAUDE.md</code> 的 No-Duplication Rule 把决策树写死：依赖 Next/Electron → 留各自 app；依赖 <code class="k">react-router-dom</code>/<code class="k">next/navigation</code> → 留 app 的 <code class="k">platform/</code>；其余一律进 <code class="k">core</code>（headless）或 <code class="k">views</code>（UI）。需要两端不同表现时用 props/slot（<code class="k">extra</code>、<code class="k">topSlot</code>）注入差异，而非复制逻辑。</p>
+
+        <div class="grid g2 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">CoreProvider</div><h3>模块级单例</h3><p>auth/chat store 做成<strong>模块级单例</strong>（首渲染 <code class="k">useMemo([])</code> 一次性 init），依赖 Vite HMR 保留模块级状态以跨热重载存活；并通过 <code class="k">ClientIdentity</code>（platform/version/os）给所有 HTTP/WS 打标。</p></div>
+          <div class="card cy"><div class="ic">version skew</div><h3>响应必过 zod</h3><p>older desktop 必然连更新的 server，<strong>所有响应都要 <code class="k">parseWithFallback</code> + zod</strong>、不得裸 <code class="k">as</code>、enum 漂移降级不崩溃（源于 #2143/#2147/#2192）。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 07 Monorepo 组织 ---------- -->
+    <section id="monorepo-organization">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">monorepo · turbo + pnpm</div>
+        <h2>Monorepo <em>组织</em></h2>
+        <p class="lead">Turbo + pnpm workspace。<code class="k">pnpm-workspace.yaml</code> 声明 workspace（<code class="k">apps/*</code>、<code class="k">packages/*</code>）并用 <strong>catalog 钉版本</strong>——所有共享依赖写 <code class="k">"pkg": "catalog:"</code>，保证全仓单一版本。</p>
       </div>
 
-      <div class="prose">
-        <p class="reveal">入队后<strong>不存上下文快照</strong>——Agent 在 runtime 里通过 <code>multica</code> CLI 现取所需数据。除 issue 任务外还有 <code>EnqueueChatTask</code>、<code>EnqueueQuickCreateTask</code>（自然语言→<code>multica issue create</code>）、<code>EnqueueTaskForSquadLeader</code>（Squad 路由层，leader 代理再分派）等变体。<strong>认领——daemon pull + 容量约束。</strong>runtime（本地 daemon/云）调 <code>/tasks/claim</code>，服务端原子认领并尊重 <code>max_concurrent_tasks</code>：</p>
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">pnpm-workspace.yaml — catalog 钉版本（节选）</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">packages</span><span class="t-pun">:</span>
+  <span class="t-pun">-</span> <span class="t-str">"apps/*"</span>
+  <span class="t-pun">-</span> <span class="t-str">"packages/*"</span>
+<span class="t-key">catalog</span><span class="t-pun">:</span>
+  <span class="t-typ">react</span><span class="t-pun">:</span> <span class="t-str">"19.2.3"</span>
+  <span class="t-typ">zustand</span><span class="t-pun">:</span> <span class="t-str">"^5.0.0"</span>
+  <span class="t-typ">"@tanstack/react-query"</span><span class="t-pun">:</span> <span class="t-str">"^5.96.2"</span>
+  <span class="t-typ">zod</span><span class="t-pun">:</span> <span class="t-str">"^4.1.5"</span>          <span class="t-com"># 防御 API 漂移</span>
+  <span class="t-typ">tailwindcss</span><span class="t-pun">:</span> <span class="t-str">"^4"</span>
+  <span class="t-typ">vitest</span><span class="t-pun">:</span> <span class="t-str">"^4.1.0"</span></code></pre>
+        </div>
+
+        <p class="reveal"><code class="k">turbo.json</code> 定义任务图——<code class="k">build</code>/<code class="k">typecheck</code>/<code class="k">test</code>/<code class="k">lint</code> 均 <code class="k">dependsOn: ["^typecheck"]</code> 或 <code class="k">["^build"]</code>（先建上游包），<code class="k">dev</code> 标 <code class="k">persistent + cache:false</code>：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">turbo.json — 任务依赖图</span><button class="copy">复制</button></div>
+<pre><code><span class="t-pun">{</span>
+  <span class="t-str">"tasks"</span><span class="t-pun">:</span> <span class="t-pun">{</span>
+    <span class="t-str">"build"</span><span class="t-pun">:</span>     <span class="t-pun">{</span> <span class="t-str">"dependsOn"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"^build"</span><span class="t-pun">]</span><span class="t-pun">,</span> <span class="t-str">"outputs"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">".next/**"</span><span class="t-pun">,</span><span class="t-str">"dist/**"</span><span class="t-pun">,</span><span class="t-str">"out/**"</span><span class="t-pun">]</span> <span class="t-pun">}</span><span class="t-pun">,</span>
+    <span class="t-str">"dev"</span><span class="t-pun">:</span>       <span class="t-pun">{</span> <span class="t-str">"cache"</span><span class="t-pun">:</span> <span class="t-key">false</span><span class="t-pun">,</span> <span class="t-str">"persistent"</span><span class="t-pun">:</span> <span class="t-key">true</span> <span class="t-pun">}</span><span class="t-pun">,</span>
+    <span class="t-str">"typecheck"</span><span class="t-pun">:</span> <span class="t-pun">{</span> <span class="t-str">"dependsOn"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"^typecheck"</span><span class="t-pun">]</span> <span class="t-pun">}</span><span class="t-pun">,</span>
+    <span class="t-str">"test"</span><span class="t-pun">:</span>      <span class="t-pun">{</span> <span class="t-str">"dependsOn"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"^typecheck"</span><span class="t-pun">]</span> <span class="t-pun">}</span><span class="t-pun">,</span>
+    <span class="t-str">"lint"</span><span class="t-pun">:</span>      <span class="t-pun">{</span> <span class="t-str">"dependsOn"</span><span class="t-pun">:</span> <span class="t-pun">[</span><span class="t-str">"^typecheck"</span><span class="t-pun">]</span> <span class="t-pun">}</span>
+  <span class="t-pun">}</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal">根 <code class="k">package.json</code> 脚本全部经 turbo + <code class="k">--filter</code>：<code class="k">dev:web</code>=<code class="k">turbo dev --filter=@multica/web</code>，<code class="k">build</code>/<code class="k">typecheck</code>/<code class="k">test</code>/<code class="k">lint</code> 都 <code class="k">--filter=!@multica/mobile</code>（移动端独立、不进根流水线）。后端不在 turbo 图里——Go 侧走 <code class="k">Makefile</code>（<code class="k">make server</code>/<code class="k">make sqlc</code>/<code class="k">make migrate-up</code>/<code class="k">make test</code>），<code class="k">make dev</code> 一键拉起 DB+迁移+前后端，并自动识别 git worktree（每个 checkout 独立 DB 名 + 端口，共用一个 PostgreSQL 容器）。</p>
+        <div class="note cy reveal"><b>Internal Packages 的代价：</b>共享包不预编译，<code class="k">exports</code> 直接指向 <code class="k">.ts/.tsx</code>（如 core 的 <code class="k">"./issues/queries": "./issues/queries.ts"</code>），由消费端打包器编译，换取零配置 HMR + 即时跳定义。代价是消费端必须能编译这些源（Next/electron-vite 都配了 <code class="k">@source</code> 扫描共享包让 Tailwind 看见类名）。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 08 失败模式 ---------- -->
+    <section id="failure-modes">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">failure modes · edge cases</div>
+        <h2>关键技术与<em>失败模式</em></h2>
+        <p class="lead">下表汇总从源码与 <code class="k">CLAUDE.md</code> 提炼的边界场景、触发条件与处理方式——多数源于真实事故编号（GH issue）。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">server/internal/service/task.go — ClaimTask</span></div>
-        <pre><code><span class="tok-k">func</span> (s <span class="tok-p">*</span><span class="tok-t">TaskService</span>) <span class="tok-f">ClaimTask</span>(ctx<span class="tok-p">,</span> agentID) (<span class="tok-p">*</span>db.<span class="tok-t">AgentTaskQueue</span><span class="tok-p">,</span> <span class="tok-t">error</span>) <span class="tok-p">{</span>
-    agent<span class="tok-p">,</span> _ <span class="tok-p">:=</span> s.Queries.<span class="tok-f">GetAgent</span>(ctx<span class="tok-p">,</span> agentID)
-    running<span class="tok-p">,</span> _ <span class="tok-p">:=</span> s.Queries.<span class="tok-f">CountRunningTasks</span>(ctx<span class="tok-p">,</span> agentID)
-    <span class="tok-k">if</span> running <span class="tok-p">&gt;=</span> <span class="tok-t">int64</span>(agent.MaxConcurrentTasks) <span class="tok-p">{</span> <span class="tok-k">return</span> <span class="tok-k">nil</span><span class="tok-p">,</span> <span class="tok-k">nil</span> <span class="tok-p">}</span>  <span class="tok-c">// 无容量</span>
-    task<span class="tok-p">,</span> err <span class="tok-p">:=</span> s.Queries.<span class="tok-f">ClaimAgentTask</span>(ctx<span class="tok-p">,</span> agentID)                  <span class="tok-c">// 原子取下一条 queued</span>
-    <span class="tok-k">if</span> errors.<span class="tok-f">Is</span>(err<span class="tok-p">,</span> pgx.ErrNoRows) <span class="tok-p">{</span> <span class="tok-k">return</span> <span class="tok-k">nil</span><span class="tok-p">,</span> <span class="tok-k">nil</span> <span class="tok-p">}</span>
-    s.<span class="tok-f">ReconcileAgentStatus</span>(ctx<span class="tok-p">,</span> agentID)
-    s.<span class="tok-f">broadcastTaskDispatch</span>(ctx<span class="tok-p">,</span> task)
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><code>ClaimTaskForRuntime</code> 还有两个性能/正确性机制：<code>EmptyClaim</code> 缓存（Redis）让稳态空队列跳过 Postgres 扫描，并在每次 enqueue 时同步失效；<code>ReclaimStaleDispatchedTaskForRuntime</code> 用 <strong>90s 恢复窗口</strong>回收“claim 响应丢失”的 dispatched 任务，避免双派发。<strong>进度跟踪——状态机 + WS 事件。</strong>任务生命周期 <code>queued → dispatched → running → completed/failed/cancelled</code>，另有 <code>waiting_local_directory</code>（等本地路径锁）。每次转移都 <code>broadcastTaskEvent</code>，前端据此失效 presence 缓存。值得注意：<strong>issue 状态不由服务端在任务完成时改</strong>——由 Agent 自己通过 CLI 管理（<code>StartTask</code>/<code>CompleteTask</code> 注释明确 “Issue status is NOT changed here”）。<code>CompleteTask</code> 还保证“每个完成的 issue 任务至少留一条 Agent 评论”，并对 chat 任务在同一事务里更新 resume 指针避免竞态。</p>
-        <p class="reveal"><strong>技能积累——skill 表 + agent_skill junction + 内置 skill。</strong>Skill 是工作区级实体（<code>skill</code> 表含 <code>content</code> = SKILL.md 正文 + <code>skill_file</code> 子文件），Agent 与 skill 多对多：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">server/pkg/db/queries/skill.sql — agent_skill 多对多</span></div>
-        <pre><code><span class="tok-c">-- name: AddAgentSkill :exec</span>
-<span class="tok-k">INSERT INTO</span> agent_skill (agent_id<span class="tok-p">,</span> skill_id) <span class="tok-k">VALUES</span> ($1<span class="tok-p">,</span> $2) <span class="tok-k">ON CONFLICT DO NOTHING</span><span class="tok-p">;</span>
-
-<span class="tok-c">-- name: ListAgentSkills :many</span>
-<span class="tok-k">SELECT</span> s.<span class="tok-p">*</span> <span class="tok-k">FROM</span> skill s <span class="tok-k">JOIN</span> agent_skill ask <span class="tok-k">ON</span> ask.skill_id <span class="tok-p">=</span> s.id
-<span class="tok-k">WHERE</span> ask.agent_id <span class="tok-p">=</span> $1 <span class="tok-k">ORDER BY</span> s.name <span class="tok-k">ASC</span><span class="tok-p">;</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">Agent 模板物化时按 name find-or-create skill（<code>GetSkillByWorkspaceAndName</code>，复用已存在的 skill_id，避开 <code>UNIQUE(workspace_id,name)</code>）。前后端用<strong>同构的 frontmatter 解析</strong>（<code>server/internal/skill/frontmatter.go</code> 与 <code>packages/core/skills/frontmatter.ts</code> 共用同一正则）。此外 <code>builtin_skills/*</code> 是随产品发给 Agent 的<strong>源码可追溯契约</strong>——<code>CLAUDE.md</code> 要求改 CLI/API/行为时必须同 PR 更新对应 <code>SKILL.md</code> 与 <code>references/*-source-map.md</code>，否则会“悄悄教 Agent 过时行为”。<strong>关键设计：</strong>列表接口用 <code>ListSkillSummariesByWorkspace</code>/<code>ListAgentSkillSummaries</code> <strong>省略 <code>content</code> 列</strong>——曾因每行带 SKILL.md 正文导致高延迟地区 CLI 15s 超时（GH #2174）。</p>
-      </div>
-
-      <!-- ====== 专题 4：双端共享 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="web-desktop-shared">⑥ Web + Desktop 双端共享 packages 架构</h4>
-        <p class="reveal">两端都把根组件包进 <code>&lt;CoreProvider&gt;</code>（初始化 api/auth/chat store + QueryClient + WS），并各自提供 <code>NavigationAdapter</code>——一个共享抽象接口：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">packages/views/navigation/types.ts — 共享抽象</span></div>
-        <pre><code><span class="tok-k">export interface</span> <span class="tok-t">NavigationAdapter</span> <span class="tok-p">{</span>
-  <span class="tok-f">push</span>(path<span class="tok-p">:</span> <span class="tok-t">string</span>)<span class="tok-p">:</span> <span class="tok-t">void</span><span class="tok-p">;</span> <span class="tok-f">replace</span>(path<span class="tok-p">:</span> <span class="tok-t">string</span>)<span class="tok-p">:</span> <span class="tok-t">void</span><span class="tok-p">;</span> <span class="tok-f">back</span>()<span class="tok-p">:</span> <span class="tok-t">void</span><span class="tok-p">;</span>
-  pathname<span class="tok-p">:</span> <span class="tok-t">string</span><span class="tok-p">;</span> searchParams<span class="tok-p">:</span> <span class="tok-t">URLSearchParams</span><span class="tok-p">;</span>
-  getShareableUrl<span class="tok-p">:</span> (path<span class="tok-p">:</span> <span class="tok-t">string</span>) <span class="tok-p">=&gt;</span> <span class="tok-t">string</span><span class="tok-p">;</span>
-  openInNewTab?<span class="tok-p">:</span> (path<span class="tok-p">,</span> title?<span class="tok-p">,</span> opts?) <span class="tok-p">=&gt;</span> <span class="tok-t">void</span><span class="tok-p">;</span>   <span class="tok-c">// 仅 desktop</span>
-  prefetch?<span class="tok-p">:</span> (path<span class="tok-p">:</span> <span class="tok-t">string</span>) <span class="tok-p">=&gt;</span> <span class="tok-t">void</span><span class="tok-p">;</span>               <span class="tok-c">// 仅 web → router.prefetch</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">Web 实现极薄（直接转发 <code>next/navigation</code>）；Desktop 实现承载全部平台差异——多 tab、memory router、跨工作区切换、overlay：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">apps/desktop/src/renderer/src/platform/navigation.tsx — push 节选</span></div>
-        <pre><code>push<span class="tok-p">:</span> (path) <span class="tok-p">=&gt;</span> <span class="tok-p">{</span>
-  <span class="tok-k">if</span> (path <span class="tok-p">===</span> <span class="tok-s">"/login"</span>) <span class="tok-p">{</span> <span class="tok-f">useAuthStore</span>().<span class="tok-f">getState</span>().<span class="tok-f">logout</span>()<span class="tok-p">;</span> <span class="tok-k">return</span><span class="tok-p">;</span> <span class="tok-p">}</span>
-  <span class="tok-k">if</span> (<span class="tok-f">tryRouteToOverlay</span>(path<span class="tok-p">,</span> active?.router)) <span class="tok-k">return</span><span class="tok-p">;</span>        <span class="tok-c">// /workspaces/new 等 → WindowOverlay</span>
-  <span class="tok-k">if</span> (<span class="tok-f">tryRouteToOtherWorkspace</span>(path)) <span class="tok-k">return</span><span class="tok-p">;</span>                 <span class="tok-c">// 跨工作区 → switchWorkspace(slug,path)</span>
-  <span class="tok-k">if</span> (<span class="tok-f">tryRouteToPinnedNewTab</span>(path)) <span class="tok-k">return</span><span class="tok-p">;</span>                   <span class="tok-c">// 钉住 tab 的 push → 开新 tab</span>
-  active?.router.<span class="tok-f">navigate</span>(path)<span class="tok-p">;</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">这样 <code>@multica/views</code> 里的页面只调 <code>useNavigation().push()</code>/<code>&lt;AppLink&gt;</code>，对“自己跑在 Web 还是 Desktop”完全无感。<code>CLAUDE.md</code> 的 No-Duplication Rule 把决策树写死：依赖 Next/Electron → 留各自 app；依赖 <code>react-router-dom</code>/<code>next/navigation</code> → 留 app 的 <code>platform/</code>；其余一律进 <code>core</code>（headless）或 <code>views</code>（UI）。需要两端不同表现时用 props/slot（<code>extra</code>、<code>topSlot</code>）注入差异，而非复制逻辑。<strong>关键设计：</strong><code>CoreProvider</code> 把 auth/chat store 做成<strong>模块级单例</strong>（首渲染 <code>useMemo([])</code> 一次性 init），依赖 Vite HMR 保留模块级状态以跨热重载存活；并通过 <code>ClientIdentity</code>（platform/version/os）给所有 HTTP/WS 打标。<code>CLAUDE.md</code> 还规定：older desktop 必然连更新的 server，<strong>所有响应都要 <code>parseWithFallback</code> + zod</strong>、不得裸 <code>as</code>、enum 漂移降级不崩溃（源于 #2143/#2147/#2192）。</p>
-      </div>
-
-      <!-- ====== 专题 5：Monorepo ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="monorepo-organization">⑦ Turbo + pnpm workspace 的 monorepo 组织</h4>
-        <p class="reveal"><code>pnpm-workspace.yaml</code> 声明 workspace（<code>apps/*</code>、<code>packages/*</code>）并用 <strong>catalog 钉版本</strong>——所有共享依赖写 <code>"pkg": "catalog:"</code>，保证全仓单一版本：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">pnpm-workspace.yaml — catalog 钉版本（节选）</span></div>
-        <pre><code><span class="tok-k">packages</span><span class="tok-p">:</span>
-  <span class="tok-p">-</span> <span class="tok-s">"apps/*"</span>
-  <span class="tok-p">-</span> <span class="tok-s">"packages/*"</span>
-<span class="tok-k">catalog</span><span class="tok-p">:</span>
-  <span class="tok-t">react</span><span class="tok-p">:</span> <span class="tok-s">"19.2.3"</span>
-  <span class="tok-t">zustand</span><span class="tok-p">:</span> <span class="tok-s">"^5.0.0"</span>
-  <span class="tok-t">"@tanstack/react-query"</span><span class="tok-p">:</span> <span class="tok-s">"^5.96.2"</span>
-  <span class="tok-t">zod</span><span class="tok-p">:</span> <span class="tok-s">"^4.1.5"</span>          <span class="tok-c"># 防御 API 漂移</span>
-  <span class="tok-t">tailwindcss</span><span class="tok-p">:</span> <span class="tok-s">"^4"</span>
-  <span class="tok-t">vitest</span><span class="tok-p">:</span> <span class="tok-s">"^4.1.0"</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><code>turbo.json</code> 定义任务图——<code>build</code>/<code>typecheck</code>/<code>test</code>/<code>lint</code> 均 <code>dependsOn: ["^typecheck"]</code> 或 <code>["^build"]</code>（先建上游包），<code>dev</code> 标 <code>persistent + cache:false</code>：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">turbo.json — 任务依赖图</span></div>
-        <pre><code><span class="tok-p">{</span>
-  <span class="tok-s">"tasks"</span><span class="tok-p">:</span> <span class="tok-p">{</span>
-    <span class="tok-s">"build"</span><span class="tok-p">:</span>     <span class="tok-p">{</span> <span class="tok-s">"dependsOn"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"^build"</span><span class="tok-p">]</span><span class="tok-p">,</span> <span class="tok-s">"outputs"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">".next/**"</span><span class="tok-p">,</span><span class="tok-s">"dist/**"</span><span class="tok-p">,</span><span class="tok-s">"out/**"</span><span class="tok-p">]</span> <span class="tok-p">}</span><span class="tok-p">,</span>
-    <span class="tok-s">"dev"</span><span class="tok-p">:</span>       <span class="tok-p">{</span> <span class="tok-s">"cache"</span><span class="tok-p">:</span> <span class="tok-k">false</span><span class="tok-p">,</span> <span class="tok-s">"persistent"</span><span class="tok-p">:</span> <span class="tok-k">true</span> <span class="tok-p">}</span><span class="tok-p">,</span>
-    <span class="tok-s">"typecheck"</span><span class="tok-p">:</span> <span class="tok-p">{</span> <span class="tok-s">"dependsOn"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"^typecheck"</span><span class="tok-p">]</span> <span class="tok-p">}</span><span class="tok-p">,</span>
-    <span class="tok-s">"test"</span><span class="tok-p">:</span>      <span class="tok-p">{</span> <span class="tok-s">"dependsOn"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"^typecheck"</span><span class="tok-p">]</span> <span class="tok-p">}</span><span class="tok-p">,</span>
-    <span class="tok-s">"lint"</span><span class="tok-p">:</span>      <span class="tok-p">{</span> <span class="tok-s">"dependsOn"</span><span class="tok-p">:</span> <span class="tok-p">[</span><span class="tok-s">"^typecheck"</span><span class="tok-p">]</span> <span class="tok-p">}</span>
-  <span class="tok-p">}</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">根 <code>package.json</code> 脚本全部经 turbo + <code>--filter</code>：<code>dev:web</code>=<code>turbo dev --filter=@multica/web</code>，<code>build</code>/<code>typecheck</code>/<code>test</code>/<code>lint</code> 都 <code>--filter=!@multica/mobile</code>（移动端独立、不进根流水线）。后端不在 turbo 图里——Go 侧走 <code>Makefile</code>（<code>make server</code>/<code>make sqlc</code>/<code>make migrate-up</code>/<code>make test</code>），<code>make dev</code> 一键拉起 DB+迁移+前后端，并自动识别 git worktree（每个 checkout 独立 DB 名 + 端口，共用一个 PostgreSQL 容器）。<strong>关键设计——Internal Packages：</strong>共享包不预编译，<code>exports</code> 直接指向 <code>.ts/.tsx</code>（如 core 的 <code>"./issues/queries": "./issues/queries.ts"</code>），由消费端打包器编译，换取零配置 HMR + 即时跳定义。代价是消费端必须能编译这些源（Next/electron-vite 都配了 <code>@source</code> 扫描共享包让 Tailwind 看见类名）。</p>
-      </div>
-
-      <!-- ====== 失败模式表 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="failure-modes">⑧ 关键技术与失败模式 / 边界规则违例</h4>
-        <p class="reveal">下表汇总从源码与 <code>CLAUDE.md</code> 提炼的边界场景、触发条件与处理方式——多数源于真实事故编号（GH issue）：</p>
-        <div class="tablewrap reveal">
-          <table class="cmp">
-            <thead><tr><th>场景 / 边界</th><th>触发条件</th><th>处理 / 后果</th></tr></thead>
-            <tbody>
-              <tr><td><code>DELETE</code> 返回 204 却 0 行（#1661）</td><td>原 <code>util.ParseUUID</code> 非法输入静默返回零 UUID</td><td>改为 loader 解析 + <code>parseUUIDOrBadRequest</code> 三态约定</td></tr>
-              <tr><td>presence 误读为“离线/失败”</td><td>历史任务结果污染当前状态</td><td>presence 纯前端派生，<code>archived</code> 优先于 runtime 健康；只答“此刻”</td></tr>
-              <tr><td>任务双派发</td><td>claim 响应丢失，dispatched 无人推进</td><td><code>ReclaimStaleDispatchedTaskForRuntime</code> 90s 恢复窗口（&gt; daemon 30+30s 超时）</td></tr>
-              <tr><td>刚入队任务被空队列缓存挡住</td><td><code>EmptyClaim</code> 缓存命中</td><td>enqueue 同步 bump version；<code>preSelectVersion</code> 比对关闭竞态</td></tr>
-              <tr><td>并发完成同一任务</td><td>多 Agent / 重复回调</td><td><code>UPDATE … WHERE status='running'</code> 无行 → 幂等成功</td></tr>
-              <tr><td>切换工作区看到旧数据</td><td>query key 未带 wsId</td><td>所有工作区作用域 query 必须以 <code>wsId</code> 为 key 前缀</td></tr>
-              <tr><td>Zustand 无限重渲染</td><td>selector 每次返回新对象/数组</td><td>选基本量或用 shallow 比较</td></tr>
-              <tr><td>持久化 filter 致“无故空列表”</td><td>running 状态秒级变化</td><td><code>partialize</code> 故意排除 <code>agentRunningFilter</code>，保持 ephemeral</td></tr>
-              <tr><td>老 desktop 连新 server 白屏（#2143/#2147/#2192）</td><td>响应 shape 漂移</td><td><code>parseWithFallback</code>+zod、禁裸 <code>as</code>、enum 漂移降级、<code>switch</code> 必带 <code>default</code></td></tr>
-              <tr><td>包边界被打开</td><td>误把 <code>next</code>/<code>core</code> 加进错误包的 package.json</td><td>仅靠依赖图 + phantom-dep lint + 评审被动拦截（无显式防火墙）——<strong>潜在弱点</strong></td></tr>
-              <tr><td>CLI 高延迟地区 15s 超时（#2174）</td><td>skill 列表每行带 SKILL.md 正文</td><td>列表查询用 <code>*Summaries</code>（省略 <code>content</code>）</td></tr>
-              <tr><td>保留 slug 与 TS 副本漂移</td><td>手改 <code>reserved_slugs.json</code> 未重生成</td><td>CI 重跑 <code>generate:reserved-slugs</code> 并 fail-on-drift</td></tr>
-              <tr><td>内置 skill 教 Agent 过时行为</td><td>改了 CLI/API/行为但没改 SKILL.md</td><td><code>CLAUDE.md</code> 强制同 PR 更新 <code>SKILL.md</code> + <code>*-source-map.md</code></td></tr>
-            </tbody>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 02 · 边界场景 / 触发 / 处理</div>
+          <table class="tbl">
+            <tr><th>场景 / 边界</th><th>触发条件</th><th>处理 / 后果</th></tr>
+            <tr><td><code>DELETE</code> 返回 204 却 0 行（#1661）</td><td>原 <code>util.ParseUUID</code> 非法输入静默返回零 UUID</td><td>改为 loader 解析 + <code>parseUUIDOrBadRequest</code> 三态约定</td></tr>
+            <tr><td>presence 误读为“离线/失败”</td><td>历史任务结果污染当前状态</td><td>presence 纯前端派生，<code class="ph">archived</code> 优先于 runtime 健康；只答“此刻”</td></tr>
+            <tr><td>任务双派发</td><td>claim 响应丢失，dispatched 无人推进</td><td><code>ReclaimStaleDispatchedTaskForRuntime</code> 90s 恢复窗口（&gt; daemon 30+30s 超时）</td></tr>
+            <tr><td>刚入队任务被空队列缓存挡住</td><td><code>EmptyClaim</code> 缓存命中</td><td>enqueue 同步 bump version；<code>preSelectVersion</code> 比对关闭竞态</td></tr>
+            <tr><td>并发完成同一任务</td><td>多 Agent / 重复回调</td><td><code>UPDATE … WHERE status='running'</code> 无行 → 幂等成功</td></tr>
+            <tr><td>切换工作区看到旧数据</td><td>query key 未带 wsId</td><td>所有工作区作用域 query 必须以 <code class="cy">wsId</code> 为 key 前缀</td></tr>
+            <tr><td>Zustand 无限重渲染</td><td>selector 每次返回新对象/数组</td><td>选基本量或用 shallow 比较</td></tr>
+            <tr><td>持久化 filter 致“无故空列表”</td><td>running 状态秒级变化</td><td><code>partialize</code> 故意排除 <code>agentRunningFilter</code>，保持 ephemeral</td></tr>
+            <tr><td>老 desktop 连新 server 白屏（#2143/#2147/#2192）</td><td>响应 shape 漂移</td><td><code>parseWithFallback</code>+zod、禁裸 <code>as</code>、enum 漂移降级、<code>switch</code> 必带 <code>default</code></td></tr>
+            <tr><td>包边界被打开</td><td>误把 <code>next</code>/<code>core</code> 加进错误包的 package.json</td><td>仅靠依赖图 + phantom-dep lint + 评审被动拦截（无显式防火墙）——<strong class="ro">潜在弱点</strong></td></tr>
+            <tr><td>CLI 高延迟地区 15s 超时（#2174）</td><td>skill 列表每行带 SKILL.md 正文</td><td>列表查询用 <code>*Summaries</code>（省略 <code>content</code>）</td></tr>
+            <tr><td>保留 slug 与 TS 副本漂移</td><td>手改 <code>reserved_slugs.json</code> 未重生成</td><td>CI 重跑 <code>generate:reserved-slugs</code> 并 fail-on-drift</td></tr>
+            <tr><td>内置 skill 教 Agent 过时行为</td><td>改了 CLI/API/行为但没改 SKILL.md</td><td><code>CLAUDE.md</code> 强制同 PR 更新 <code>SKILL.md</code> + <code>*-source-map.md</code></td></tr>
           </table>
         </div>
       </div>
+    </section>
 
-      <!-- ====== 生态意义 + 对比 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="ecosystem-significance">⑨ 对 managed-agents 生态的意义：vs Manus / Cursor Agent / Windsurf</h4>
-        <p class="reveal">Multica 在“把 Agent 当队友”的赛道上有几处区别于现有产品的取舍。它的工程重心<strong>不在“更强的单个 Agent”，而在让一群 Agent 像团队成员一样被管理</strong>：可指派、可观测、可累积技能、人机同板协作。</p>
-        <div class="grid2">
-          <div class="card reveal"><span class="ico">🧩</span><h5 class="accent">Vendor-neutral 任务系统</h5><p>不绑定单一模型——可对接 Claude Code、Codex、Copilot CLI、OpenCode、Gemini、Cursor Agent、Kimi、Kiro CLI。对比 <strong>Cursor Agent / Windsurf</strong>（深度耦合各自编辑器与模型、以单人 IDE 回合为中心），Multica 把执行下放给 daemon/云 runtime，自身只做<strong>项目管理层</strong>——更像“给 Agent 用的 Linear”。</p></div>
-          <div class="card reveal"><span class="ico">📥</span><h5 class="accent">拉取式带容量队列</h5><p><code>agent_task_queue</code> 的 <code>queued→dispatched→running→completed/failed</code> 生命周期、<code>max_concurrent_tasks</code>、stale 回收、空队列缓存，是一套面向多 Agent 长期运行的<strong>调度基础设施</strong>。对比 <strong>Manus</strong> 这类“一个自治 Agent 跑一长链”，Multica 强调多 Agent 并行、可观测进度、人随时介入。</p></div>
-          <div class="card reveal"><span class="ico">🎓</span><h5 class="accent">技能可累积可追溯</h5><p>skill 是工作区级实体（SKILL.md + 子文件），通过 <code>agent_skill</code> 多对多挂到 Agent，模板物化时 find-or-create 复用；内置 skill 是“源码可追溯契约”并由 CI 约束与代码同步。把 README 所说的 “compound skills over time” 落到 schema 与流程上，而非停留在 prompt。</p></div>
-          <div class="card reveal"><span class="ico">🖥️</span><h5 class="accent">真正的 Web + Desktop 同构</h5><p>靠 <code>NavigationAdapter</code> + <code>CoreProvider</code> + 三层包边界（core 零 react-dom、ui 零 core、views 零框架）实现 Web 与 Electron 共享几乎全部业务代码，仅各自 <code>platform/</code> 层接框架 API。这套“headless 业务 + 平台适配器”是<strong>开源、自托管</strong>平台同时维护多端而不爆成本的关键。</p></div>
+    <!-- ---------- 09 生态意义对比 ---------- -->
+    <section id="ecosystem-significance">
+      <div class="sec-head reveal">
+        <div class="sec-num">09</div>
+        <div class="kicker">significance · vs the field</div>
+        <h2>生态意义：<em>vs Manus / Cursor / Windsurf</em></h2>
+        <p class="lead">Multica 在“把 Agent 当队友”的赛道上有几处区别于现有产品的取舍。它的工程重心<strong>不在“更强的单个 Agent”，而在让一群 Agent 像团队成员一样被管理</strong>：可指派、可观测、可累积技能、人机同板协作。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="grid g2 reveal">
+          <div class="card"><div class="ic">🧩 vendor-neutral</div><h3>无关模型的任务系统</h3><p>不绑定单一模型——可对接 Claude Code、Codex、Copilot CLI、OpenCode、Gemini、Cursor Agent、Kimi、Kiro CLI。对比 <strong>Cursor Agent / Windsurf</strong>（深度耦合各自编辑器与模型、以单人 IDE 回合为中心），Multica 把执行下放给 daemon/云 runtime，自身只做<strong>项目管理层</strong>——更像“给 Agent 用的 Linear”。</p></div>
+          <div class="card cy"><div class="ic">📥 pull queue</div><h3>拉取式带容量队列</h3><p><code class="k">agent_task_queue</code> 的 <code class="kc">queued→dispatched→running→completed/failed</code> 生命周期、<code class="k">max_concurrent_tasks</code>、stale 回收、空队列缓存，是一套面向多 Agent 长期运行的<strong>调度基础设施</strong>。对比 <strong>Manus</strong> 这类“一个自治 Agent 跑一长链”，Multica 强调多 Agent 并行、可观测进度、人随时介入。</p></div>
+          <div class="card"><div class="ic">🎓 compound skills</div><h3>技能可累积可追溯</h3><p>skill 是工作区级实体（SKILL.md + 子文件），通过 <code class="k">agent_skill</code> 多对多挂到 Agent，模板物化时 find-or-create 复用；内置 skill 是“源码可追溯契约”并由 CI 约束与代码同步。把 README 所说的 “compound skills over time” 落到 schema 与流程上，而非停留在 prompt。</p></div>
+          <div class="card cy"><div class="ic">🖥️ isomorphic</div><h3>真正的 Web + Desktop 同构</h3><p>靠 <code class="k">NavigationAdapter</code> + <code class="k">CoreProvider</code> + 三层包边界（core 零 react-dom、ui 零 core、views 零框架）实现 Web 与 Electron 共享几乎全部业务代码，仅各自 <code class="k">platform/</code> 层接框架 API。这套“headless 业务 + 平台适配器”是<strong>开源、自托管</strong>平台同时维护多端而不爆成本的关键。</p></div>
         </div>
-        <p class="reveal"><strong>Squad 路由层</strong>为更大团队提供“把活派给一个由 Agent 领队的小组、领队再分派”的稳定抽象——这是把人类组织结构映射到 Agent 团队的早期尝试，超出了多数 Agent 工具“单 Agent/单会话”的边界。总体而言，Multica 用<strong>严格的状态分离与包边界</strong>保证这套“多 Agent 当队友”系统在 Web/Desktop 双端长期可维护。</p>
+
+        <p class="reveal" style="margin-top:22px"><strong>Squad 路由层</strong>为更大团队提供“把活派给一个由 Agent 领队的小组、领队再分派”的稳定抽象——这是把人类组织结构映射到 Agent 团队的早期尝试，超出了多数 Agent 工具“单 Agent/单会话”的边界。总体而言，Multica 用<strong>严格的状态分离与包边界</strong>保证这套“多 Agent 当队友”系统在 Web/Desktop 双端长期可维护。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">⚠ 待确认清单</div>
+          <ul class="ulist" style="margin:0">
+            <li><strong>Stars 数</strong>未知（README 用 shields 动态徽章，仓库未含静态数值）。</li>
+            <li>是否存在 ESLint 之外的 <strong>CI 脚本显式校验包依赖图</strong>（防止 <code>next</code>/<code>core</code> 被误加进错误包）——未在 <code>.github/workflows</code> 中逐项核实。</li>
+            <li><code>apps/mobile</code> 内部架构（UI/状态/构建链）未在本次阅读范围内展开，仅确认其与 core 之间为 <code>import type</code> 纯类型耦合。</li>
+            <li>LICENSE 为“改良版 Apache-2.0 + 附加商用/品牌条款”，附加条款的完整法律含义未逐条解读。</li>
+          </ul>
+        </div>
+
+        <div class="foot reveal">
+          <div class="big">Mult<b>ica</b> · 把 Agent 当队友</div>
+          <div class="meta">
+            multica-ai/multica · Go + Next.js + Electron · 改良版 Apache-2.0<br/>
+            基于 server/ 与 packages/ 源码文本撰写 · 含实际函数名与类型定义<br/>
+            <a class="inl" href="https://github.com/multica-ai/multica" target="_blank" rel="noopener">github.com/multica-ai/multica ↗</a>
+          </div>
+        </div>
       </div>
+    </section>
 
-      <!-- ====== 待确认 ====== -->
-      <div class="callout reveal">
-        <strong>⚠ 待确认清单</strong>
-        <ul>
-          <li><strong>Stars 数</strong>未知（README 用 shields 动态徽章，仓库未含静态数值）。</li>
-          <li>是否存在 ESLint 之外的 <strong>CI 脚本显式校验包依赖图</strong>（防止 <code>next</code>/<code>core</code> 被误加进错误包）——未在 <code>.github/workflows</code> 中逐项核实。</li>
-          <li><code>apps/mobile</code> 内部架构（UI/状态/构建链）未在本次阅读范围内展开，仅确认其与 core 之间为 <code>import type</code> 纯类型耦合。</li>
-          <li>LICENSE 为“改良版 Apache-2.0 + 附加商用/品牌条款”，附加条款的完整法律含义未逐条解读。</li>
-        </ul>
-      </div>
-
-    </div>
-  </div>
-</section>
-
+  </main>
 </div>
-</main>
 
-<button class="totop" aria-label="返回顶部">↑</button>
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(155,140,240,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
 
-<script>if(!location.hash){history.replaceState(null,'','#mc');}</script>
-<script src="./assets/main.js"></script>
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
 </body>
 </html>

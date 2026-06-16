@@ -1,105 +1,521 @@
-<!doctype html>
-<html lang="zh-CN" class="has-tabs">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ongrid · Ops AI + 根因分析 + 远程执行 · 源码深度解析</title>
-<meta name="description" content="ongridio/ongrid 源码级深度解析——Coordinator + Specialist 多 Agent 架构、零入站端口反向隧道、correlate_incident RCA bundle、cmdpolicy + ReviewGate 双闸、Slack/Telegram/飞书双向 IM 集成与浏览器 SSH。" />
-<meta property="og:title" content="Ongrid · Ops AI + 根因分析 + 远程执行" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ongrid · 源码级架构解析 · Coordinator/Specialist · 零入站隧道 · RCA</title>
+<meta name="description" content="ongridio/ongrid 源码级深度解析——Coordinator + Specialist 多 Agent 架构（cloudwego/eino ReAct 图）、零入站端口反向隧道（singchia/geminio）、correlate_incident RCA bundle、cmdpolicy + ReviewGate 双闸、Slack/Telegram/飞书双向 IM 集成与浏览器 SSH。基于 cmd/ 与 internal/ 源码逐文件阅读撰写。" />
+<meta property="og:title" content="Ongrid · 源码级架构解析" />
 <meta property="og:description" content="Coordinator + Specialist 多 Agent 架构、零入站端口、自带 Prometheus/Loki/Tempo 可观测性栈、双向 IM 集成与浏览器 SSH。" />
 <meta property="og:type" content="article" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="./assets/styles.css" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e0954a'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   Ongrid — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — Ongrid */
+  --star:       #e0954a;
+  --star-soft:  #eeb077;
+  --star-deep:  #b8722f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / denied */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(224,149,74,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(224,149,74,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(224,149,74,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(224,149,74,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(224,149,74,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:74ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(224,149,74,0.09); border:1px solid rgba(224,149,74,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+ul.lst{ color:var(--text-2); max-width:74ch; padding-left:20px; }
+ul.lst li{ margin:8px 0; }
+ul.lst li strong{ color:var(--text); }
+
+/* ---- deep-read link ---- */
+.deep-link{
+  display:inline-flex; align-items:center; gap:8px; margin-top:16px;
+  font-family:var(--mono); font-size:11.5px; letter-spacing:0.06em;
+  color:var(--star); text-decoration:none; border:1px solid var(--line-amber);
+  border-radius:99px; padding:6px 15px; background:rgba(224,149,74,0.06);
+  transition:background .25s var(--ease), transform .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover{ background:rgba(224,149,74,0.15); border-color:var(--star); }
+.deep-link .arr{ transition:transform .25s var(--ease); }
+.deep-link:hover .arr{ transform:translateX(4px); }
+.deep-link b{ color:var(--star-soft); font-weight:500; }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; flex-wrap:wrap; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.12em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(44px,7.5vw,98px); line-height:0.94;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(16px,1.6vw,20px); color:var(--text-2); max-width:56ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#1a1206; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+.hero-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:54px; }
+.hero-stats .cell{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; }
+.hero-stats .n{ font-family:var(--mono); font-size:15px; color:var(--star-soft); word-break:break-all; }
+.hero-stats .l{ font-size:12px; color:var(--text-dim); margin-top:5px; }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(224,149,74,0.16); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.06em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ============================================================
+   FLOW (pipeline)
+   ============================================================ */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- ascii tree ---- */
+.ascii{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.ascii pre{ padding:20px; font-family:var(--mono); font-size:11.5px; line-height:1.55; color:var(--text-2); }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; max-width:74ch; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .hero-stats{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.hero-stats{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
 </head>
-<body class="tabs-active">
-<div id="progress"></div>
+<body>
 
-<!-- 站点索引：顶部导航 -->
-<nav class="site-index">
-  <div class="wrap">
-    <span class="site-index-label">📂 项目索引</span>
-    <div class="site-index-links">
-      <a href="index.html#cg">🗂 CodeGraph<br><span>索引层 · 代码语义后端</span></a>
-      <a href="index.html#ua">🗂 Understand-Anything<br><span>认知层 · 代码地图</span></a>
-      <a href="index.html#cp">🗂 Claude Plugins<br><span>能力层 · 官方插件生态</span></a>
-      <a href="index.html#oh">🗂 OpenHuman Memory Tree<br><span>记忆层 · 本地知识库</span></a>
-      <a href="index.html#kc">🗂 Kimi Code<br><span>模型层 · 多 Agent 引擎</span></a>
-      <a href="index.html#oc">🗂 OpenClaw<br><span>全渠道 · 个人 AI 助手</span></a>
-      <a href="index.html#od">🗂 Odysseus<br><span>Agent 层 · 自托管工作台</span></a>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">On<b>grid</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">On<b>grid</b></div>
+      <div class="sub">源码级架构解析 · cmd/ + internal/</div>
     </div>
-  </div>
-</nav>
-
-<header class="nav has-tabs">
-  <div class="wrap nav-inner">
-    <a class="brand" href="index.html#og"><span class="dot"></span><span>Agent&nbsp;Infrastructure&nbsp;Teardown</span></a>
-  </div>
-  <div class="tabs-wrap">
-    <div class="tabs" role="tablist">
-      <button role="tab" class="active" data-tab="og"><span class="dot"></span>Ongrid <span class="pill">Ops AI</span></button>
+    <span class="nav-ver">Go + TypeScript · Apache-2.0</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#architecture"><span class="idx">01</span>分层架构与三 BC</a></li>
+        <li><a href="#modules"><span class="idx">02</span>核心模块拆解</a></li>
+        <li><a href="#multi-agent"><span class="idx">03</span>多 Agent 协作机制</a></li>
+        <li><a href="#reverse-tunnel"><span class="idx">04</span>反向隧道 / Browser SSH</a></li>
+        <li><a href="#rca"><span class="idx">05</span>根因 RCA 关联</a></li>
+        <li><a href="#im-bridge"><span class="idx">06</span>IM 双向集成</a></li>
+        <li><a href="#specialist-boundaries"><span class="idx">07</span>Specialist 能力边界</a></li>
+        <li><a href="#failure-modes"><span class="idx">08</span>失败模式总览</a></li>
+        <li><a href="#significance"><span class="idx">09</span>生态意义 · 技术亮点</a></li>
+        <li><a href="#open-questions"><span class="idx">10</span>待确认项</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      ongridio/ongrid<br/>
+      Ops AI · RCA · 远程执行<br/>
+      <a href="https://github.com/ongridio/ongrid" target="_blank" rel="noopener">github.com/ongridio/ongrid ↗</a>
     </div>
-  </div>
-</header>
+  </aside>
 
-<main>
-<div class="tab-panel active" data-tab="og">
-<!-- 左侧目录索引（≥1520px 视口显示，main.js 滚动高亮） -->
-<nav class="nav-toc" aria-label="页面目录">
-  <h3>目录</h3>
-  <ul>
-    <li><a href="#layered-architecture">分层架构</a></li>
-    <li><a href="#core-modules">核心模块拆解</a></li>
-    <li><a href="#source-teardown">源码级深度拆解</a></li>
-    <li class="toc-sub"><a href="#multi-agent">① 多 Agent 协作</a></li>
-    <li class="toc-sub"><a href="#reverse-tunnel">② 反向隧道/SSH</a></li>
-    <li class="toc-sub"><a href="#rca">③ 根因 RCA</a></li>
-    <li class="toc-sub"><a href="#im-bridge">④ IM 集成</a></li>
-    <li class="toc-sub"><a href="#specialist-boundaries">⑤ Specialist 边界</a></li>
-    <li class="toc-sub"><a href="#failure-modes">⑥ 失败模式总览</a></li>
-    <li><a href="#ecosystem-significance">生态意义</a></li>
-    <li><a href="#tech-highlights">技术亮点</a></li>
-  </ul>
-</nav>
-  <style>.tab-panel[data-tab="og"] section{--accent:#e0954a}.tab-panel[data-tab="og"] .hero{--accent:#e0954a}</style>
-  <section class="hero" style="padding:130px 0 30px">
-  <div class="wrap">
-    <span class="eyebrow reveal"><span class="pulse"></span>ongridio/ongrid · Go + TypeScript · Apache-2.0 · Stars 未知</span>
-    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">Ongrid</span> · Ops AI + 根因分析 + 远程执行</h1>
-    <p class="lead reveal" style="margin-bottom:0">Ops AI + 根因分析（RCA）+ 远程执行平台，<strong>Coordinator + Specialist 多 Agent 架构</strong>，零入站端口（边缘往外拨号），自带 Prometheus/Loki/Tempo 可观测性栈，支持 Slack/Telegram/飞书双向 IM 集成与浏览器 SSH。</p>
-    <div class="statstrip reveal" style="max-width:820px;margin:38px auto 0"><div class="cell"><div class="n">未知</div><div class="l">Stars</div></div><div class="cell"><div class="n">3 BC</div><div class="l">iam·manager·edge</div></div><div class="cell"><div class="n">7</div><div class="l">Specialist</div></div><div class="cell"><div class="n">6</div><div class="l">LLM Provider</div></div></div>
-  </div>
-</section>
+  <!-- =================== MAIN =================== -->
+  <main class="main">
 
-  <section id="og" class="project og">
-  <div class="wrap">
-    <div class="proj-head reveal">
-      <div class="proj-badge">OG</div>
-      <div class="proj-title">
-        <h2>Ongrid</h2>
-        <a class="repo" href="https://github.com/ongridio/ongrid" target="_blank" rel="noopener">ongridio/ongrid · Go + TypeScript · Apache-2.0</a>
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>ongridio/ongrid · 源码级</span>
+        <span class="pill">基于 <b>cmd/ + internal/</b> 逐文件阅读</span>
       </div>
-    </div>
-    <div class="narrow">
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">逐文件还原</span>
+            <span class="l2"><em>Ongrid</em> 的<span class="core">运维大脑</span></span>
+          </h1>
+          <p class="hero-sub">一个 <b>Ops AI + 根因分析（RCA）+ 远程执行</b>平台——<b>Coordinator + Specialist 多 Agent 架构</b>、零入站端口反向隧道、自带 Prometheus/Loki/Tempo 可观测性栈、Slack/Telegram/飞书双向 IM 与浏览器 SSH。所有结论来自源码文本，含真实函数名与算法。</p>
+          <p class="hero-pkg"># <b>ongridio/ongrid</b> · Go (Chi + cloudwego/eino + singchia/geminio) + TypeScript/React · Apache-2.0</p>
+          <div class="hero-cta">
+            <a href="#architecture" class="btn primary">▸ 从架构读起</a>
+            <a href="#multi-agent" class="btn ghost">看多 Agent 机制</a>
+          </div>
+          <div class="hero-stats">
+            <div class="cell"><div class="n">3 BC</div><div class="l">iam · manager · edge</div></div>
+            <div class="cell"><div class="n">7 persona</div><div class="l">Specialist + reviewer</div></div>
+            <div class="cell"><div class="n">6 provider</div><div class="l">LLM 热路由</div></div>
+            <div class="cell"><div class="n">0 入站口</div><div class="l">边缘往外拨号</div></div>
+          </div>
+        </div>
 
-      <div class="statrow reveal">
-        <div class="chip"><div class="n">未知</div><div class="l">Stars</div></div>
-        <div class="chip"><div class="n">Go+TS</div><div class="l">技术栈</div></div>
-        <div class="chip"><div class="n">Apache-2.0</div><div class="l">License</div></div>
-        <div class="chip"><div class="n">零入站端口</div><div class="l">边缘往外拨号</div></div>
+        <!-- radar -->
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#e0954a" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#e0954a" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#e0954a" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#e0954a" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#54d6e0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fcf9e" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#54d6e0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#e0954a" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="28" fill="rgba(224,149,74,0.08)" stroke="rgba(224,149,74,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#e0954a" font-size="13">Coord.</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">default</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">Specialist</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">RCA</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">Tunnel</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">IM</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">Edge</text>
+          </svg>
+        </div>
+      </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
+
+    <!-- ---------- 01 分层架构 ---------- -->
+    <section id="architecture">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">architecture · three bounded contexts</div>
+        <h2>分层架构与<em>三 BC</em></h2>
+        <p class="lead">一句话定位：ongrid 把"运维 AI"拆成三个<strong>互不 import</strong> 的 Bounded Context——<code class="k">iam</code>（用户/鉴权）、<code class="k">manager</code>（控制面 + AIOps 大脑）、<code class="k">edgeagent</code>（每台主机上的只读探针 + 执行器）。</p>
       </div>
 
-      <div class="prose">
-        <p class="reveal"><strong>一句话定位：</strong>ongrid 是一个 <strong>Ops AI + 根因分析（RCA）+ 远程执行平台</strong>，把"运维 AI"拆成三个互不 import 的 Bounded Context（BC）：<code>iam</code>（用户/鉴权）、<code>manager</code>（控制面 + AIOps 大脑）、<code>edgeagent</code>（装在每台主机上的只读探针 + 执行器）。三者通过 <code>.go-arch-lint.yml</code> 强制隔离，只能借 <code>internal/pkg/**</code>（业务无关共享层）和 <code>api/</code> 通信。</p>
-        <p class="reveal">技术栈：Go（Chi router + cloudwego/eino agent 框架 + singchia/geminio 反向隧道）+ TypeScript/React SPA + MySQL/SQLite + frontier broker + Docker Compose。整个系统的设计哲学是：<strong>深度数据查询和高危执行能力都下沉到 edge 和 specialist，coordinator 只做"派给谁/直接答/直接拒"的调度</strong>，并通过 cmdpolicy 沙箱 + ReviewGate 二审把"AI 误操作"的爆炸半径压到最小。</p>
+      <div class="reveal">
+        <p class="reveal">三者通过 <code class="k">.go-arch-lint.yml</code> 强制隔离，只能借 <code class="k">internal/pkg/**</code>（业务无关共享层）和 <code class="k">api/</code> 通信。技术栈：Go（Chi router + <code class="kc">cloudwego/eino</code> agent 框架 + <code class="kc">singchia/geminio</code> 反向隧道）+ TypeScript/React SPA + MySQL/SQLite + frontier broker + Docker Compose。</p>
+        <p class="reveal">设计哲学：<strong>深度数据查询和高危执行能力都下沉到 edge 和 specialist，coordinator 只做"派给谁 / 直接答 / 直接拒"的调度</strong>，并通过 <code class="k">cmdpolicy</code> 沙箱 + <code class="k">ReviewGate</code> 二审把"AI 误操作"的爆炸半径压到最小。边缘 agent 永远是发起方（dial-out）；manager 想调用 edge 的能力是通过 frontier broker <strong>反向调用</strong>边缘已注册的 RPC handler，而非主动连边缘端口。</p>
 
-        <h4 class="reveal" id="layered-architecture">分层架构</h4>
-        <p class="reveal">边缘 agent 永远是发起方（dial-out）。manager 想调用 edge 的能力（取负载、跑 skill、开 webshell），是通过 frontier broker <strong>反向调用</strong>边缘已注册的 RPC handler，而不是 manager 主动连边缘的端口。AIOps 大脑全在 manager 进程内（<code>chatruntime.Runtime</code>），基于 cloudwego/eino 的 ReAct 图——Coordinator 与 Specialist 是同一个 Runtime 里的不同 persona，靠 toolBag 过滤来划定能力边界。</p>
-      </div>
-
-      <div class="tree reveal">                            浏览器 SPA (web/  React+TS)              IM 平台
+        <div class="ascii reveal">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">系统全景 · manager / edge / broker</span><button class="copy">复制</button></div>
+<pre>                            浏览器 SPA (web/  React+TS)              IM 平台
                           ┌──────────────────────┐      Slack / Telegram / 飞书(Lark)
                           │ /chat  /webshell      │      DingTalk / WeCom / Webhook
                           │ /topology /incidents  │              │
@@ -146,277 +562,454 @@
         │  cmdpolicy 沙箱(只读 binary 白名单)  webshell TCP 转发到 :22    │
         │  plugins: hostmetrics / metrics / logs / traces / procmetrics  │
         └───────────────────────────────────────────────────────────────┘
-                 Prometheus  ◄── remote_write ──  Loki ◄── push ──  Tempo</div>
+                 Prometheus  ◄── remote_write ──  Loki ◄── push ──  Tempo</pre>
+        </div>
 
-      <div class="prose">
-        <h4 class="reveal" id="core-modules">核心模块拆解</h4>
-        <p class="reveal">系统由两个二进制（<code>cmd/ongrid</code> 云端主进程 + <code>cmd/ongrid-edge</code> 边缘 agent）和五大业务域组成。下表是逐文件阅读后梳理出的模块职责映射：</p>
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">iam</div><h3>用户 / 鉴权</h3><p>独立 Bounded Context，负责身份与权限。其余 BC 不能直接 import 它，只能走 <code class="k">api/</code> 与 <code class="k">internal/pkg/**</code> 共享层。</p></div>
+          <div class="card cy"><div class="ic">manager</div><h3>控制面 + 大脑</h3><p>装配 Chi handlers、IM bridge、<code class="k">chatruntime.Runtime</code>（eino ReAct 图）。AIOps 全在 manager 进程内。</p></div>
+          <div class="card"><div class="ic">edgeagent</div><h3>探针 + 执行器</h3><p>装在每台主机上的<strong>只读探针 + 受限执行器</strong>，dial-out 连 broker，注册 RPC handler 供 manager 反向调用。</p></div>
+        </div>
+        <div class="note cy reveal"><b>反向调用而非反向代理：</b>manager 调边缘能力走 <code class="k">tunnel.Caller.Call(edgeID, method, body)</code>，经 broker 路由到该 edge 已注册的 handler——主机上<strong>不开 22 / 80 / 443 任何入站口</strong>。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 02 核心模块拆解 ---------- -->
+    <section id="modules">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">modules · the source map</div>
+        <h2>核心模块<em>拆解</em></h2>
+        <p class="lead">系统由两个二进制（<code class="k">cmd/ongrid</code> 云端主进程 + <code class="k">cmd/ongrid-edge</code> 边缘 agent）和五大业务域组成。下表是逐文件阅读后梳理出的模块职责映射。</p>
       </div>
 
-      <div class="tablewrap reveal">
-        <table class="cmp">
-          <thead><tr><th>模块 / 路径</th><th>作用</th></tr></thead>
-          <tbody>
-            <tr><td class="c-cg"><code>cmd/ongrid/main.go</code></td><td>云端主进程：装配 iam + manager，<code>buildAIOpsRuntime</code> 把 LLM router / toolBag / SkillRegistry / AgentRegistry 拼成 <code>chatruntime.Runtime</code>，注册 "default" coordinator persona</td></tr>
-            <tr><td class="c-cg"><code>cmd/ongrid-edge/main.go</code></td><td>边缘 agent：<code>tunnel.NewClient</code> 拨号，注册 collector / host_files / restart_service / bash / webshell handler，启动 plugins supervisor</td></tr>
-            <tr><td class="c-cg"><code>aiops/chatruntime/runtime.go</code></td><td>协调员主循环 <code>Handle</code>：归属校验 → @-mention 内联 → 持久化 user 消息 → 解析 skill/persona → 组 system prompt → <code>BuildReActGraph</code> → <code>Invoke</code> → 翻译 Reply</td></tr>
-            <tr><td class="c-cg"><code>aiops/chatruntime/worker.go</code></td><td>Specialist 子 agent 生命周期（<code>SpawnWorker</code> / <code>SendToWorker</code> / <code>StopWorker</code>），<code>filterToolsForAgent</code> 按 persona 白/黑名单裁剪 toolBag，KB-first 预热</td></tr>
-            <tr><td class="c-cg"><code>aiops/graph/react.go</code></td><td><code>BuildReActGraph</code>：外层 MessageAssembler → ReActSubgraph → OutputProjector，内层复用 eino 的 <code>react.Agent</code>；每轮注入 <code>&lt;system-reminder&gt;</code> 反漂移块</td></tr>
-            <tr><td class="c-cg"><code>aiops/tools/</code> + <code>decorators/</code></td><td>30+ BaseTool（promql/logql/traceql/correlate_incident/expand_topology/host_*），<code>AgentTool</code> 派活工具；装饰器链 <code>tenant_bind → review_gate → timeout → audit → ratelimit → metric</code></td></tr>
-            <tr><td class="c-cg"><code>aiops/investigator/investigator.go</code></td><td>告警触发时的 P2 主动诊断（后台 worker pool，直接调 correlate_incident + 单轮 LLM）</td></tr>
-            <tr><td class="c-cg"><code>edgeagent/cmdpolicy/</code></td><td><code>host_bash</code> 只读 binary 白名单（ClassReadFS/ReadSystem/Mixed/Network/Denied），write 子命令拒绝；sandbox 加 path/network allowlist</td></tr>
-            <tr><td class="c-cg"><code>edgeagent/webshell/handler.go</code></td><td>把边缘变成纯 TCP 转发器：manager 开 stream → edge dial <code>127.0.0.1:22</code> → 双向 io.Copy</td></tr>
-            <tr><td class="c-cg"><code>internal/pkg/tunnel/</code></td><td>基于 geminio 的反向隧道：<code>client.go</code> 指数退避 + RetryEnd 自动重连 + 路由失效检测重连；<code>messages.go</code> 手写 JSON 消息体</td></tr>
-            <tr><td class="c-cg"><code>manager/biz/imbridge/</code></td><td>IM 双向桥：<code>bridge.go</code> inbound 归一化 → session 映射 → 渐进编辑；<code>stream_supervisor.go</code> 长连接 reconcile；<code>provider/{feishu,slack,telegram}</code></td></tr>
-          </tbody>
-        </table>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 02 · 模块 / 路径 → 职责</div>
+          <table class="tbl">
+            <tr><th>模块 / 路径</th><th>作用</th></tr>
+            <tr><td><code>cmd/ongrid/main.go</code></td><td>云端主进程：装配 iam + manager，<code>buildAIOpsRuntime</code> 把 LLM router / toolBag / SkillRegistry / AgentRegistry 拼成 <code>chatruntime.Runtime</code>，注册 "default" coordinator persona</td></tr>
+            <tr><td><code>cmd/ongrid-edge/main.go</code></td><td>边缘 agent：<code>tunnel.NewClient</code> 拨号，注册 collector / host_files / restart_service / bash / webshell handler，启动 plugins supervisor</td></tr>
+            <tr><td><code class="cy">aiops/chatruntime/runtime.go</code></td><td>协调员主循环 <code>Handle</code>：归属校验 → @-mention 内联 → 持久化 user 消息 → 解析 skill/persona → 组 system prompt → <code>BuildReActGraph</code> → <code>Invoke</code> → 翻译 Reply</td></tr>
+            <tr><td><code class="cy">aiops/chatruntime/worker.go</code></td><td>Specialist 子 agent 生命周期（<code>SpawnWorker</code> / <code>SendToWorker</code> / <code>StopWorker</code>），<code>filterToolsForAgent</code> 按 persona 白/黑名单裁剪 toolBag，KB-first 预热</td></tr>
+            <tr><td><code class="cy">aiops/graph/react.go</code></td><td><code>BuildReActGraph</code>：外层 MessageAssembler → ReActSubgraph → OutputProjector，内层复用 eino 的 <code>react.Agent</code>；每轮注入 <code>&lt;system-reminder&gt;</code> 反漂移块</td></tr>
+            <tr><td><code>aiops/tools/</code> + <code>decorators/</code></td><td>30+ BaseTool（promql/logql/traceql/correlate_incident/expand_topology/host_*），<code>AgentTool</code> 派活工具；装饰器链 <code class="ph">tenant_bind → review_gate → timeout → audit → ratelimit → metric</code></td></tr>
+            <tr><td><code>aiops/investigator/investigator.go</code></td><td>告警触发时的主动诊断（后台 worker pool，直接调 correlate_incident + 单轮 LLM）</td></tr>
+            <tr><td><code class="ro">edgeagent/cmdpolicy/</code></td><td><code>host_bash</code> 只读 binary 白名单（ClassReadFS/ReadSystem/Mixed/Network/Denied），write 子命令拒绝；sandbox 加 path/network allowlist</td></tr>
+            <tr><td><code>edgeagent/webshell/handler.go</code></td><td>把边缘变成纯 TCP 转发器：manager 开 stream → edge dial <code>127.0.0.1:22</code> → 双向 io.Copy</td></tr>
+            <tr><td><code>internal/pkg/tunnel/</code></td><td>基于 geminio 的反向隧道：<code>client.go</code> 指数退避 + RetryEnd 自动重连 + 路由失效检测重连；<code>messages.go</code> 手写 JSON 消息体</td></tr>
+            <tr><td><code>manager/biz/imbridge/</code></td><td>IM 双向桥：<code>bridge.go</code> inbound 归一化 → session 映射 → 渐进编辑；<code>stream_supervisor.go</code> 长连接 reconcile；<code>provider/{feishu,slack,telegram}</code></td></tr>
+          </table>
+        </div>
+
+        <div class="grid g4 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">2 binaries</div><h3>主进程 + 边缘</h3><p><code class="k">cmd/ongrid</code>（manager+iam）与 <code class="k">cmd/ongrid-edge</code>（探针+执行器）。</p></div>
+          <div class="card cy"><div class="ic">eino ReAct</div><h3>AIOps 内核</h3><p>新内核在 <code class="k">graph/</code>，与旧 <code class="k">agent.go</code> 并存，本文聚焦 graph 内核。</p></div>
+          <div class="card"><div class="ic">30+ tools</div><h3>装饰器链</h3><p>每个 BaseTool 过同一条装饰器链，横切关注点统一注入。</p></div>
+          <div class="card cy"><div class="ic">geminio</div><h3>反向隧道</h3><p><code class="k">internal/pkg/tunnel</code> 把 manager↔edge 双向 RPC 收口到一处。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 03 多 Agent 协作 ---------- -->
+    <section id="multi-agent">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">multi-agent · coordinator + specialist</div>
+        <h2>Coordinator + Specialist <em>多 Agent 协作</em></h2>
+        <p class="lead">模型：Coordinator 和 Specialist 是同一个 <code class="k">chatruntime.Runtime</code> 实例里的不同 <strong>persona</strong>，区别只在 toolBag 和 system prompt。Coordinator = <code class="k">sess.AgentID</code> 为空/"default"；其余 <code class="k">agents/*.md</code> 里定义的都是 worker。</p>
       </div>
 
-      <!-- ======================= 深度源码拆解 ======================= -->
-      <h4 class="reveal" id="source-teardown" style="font-family:var(--disp);margin:46px 0 6px;color:var(--text);font-size:1.5rem">⬇ 源码级深度拆解 · Source-Level Teardown</h4>
-      <p class="reveal" style="color:var(--text-dim);font-size:14.5px;margin-bottom:8px">以下基于 <code>cmd/</code>、<code>internal/manager/biz/aiops</code>、<code>internal/edgeagent</code>、<code>internal/pkg/tunnel</code> 的逐文件阅读，把五大主题展开到「关键代码段 + 算法 + 失败模式」的粒度。</p>
+      <div class="reveal">
+        <p class="reveal"><code class="k">buildAIOpsRuntime</code>（main.go:2376）是整个 AIOps 装配的咽喉——它把每个依赖恰好穿过一次。Coordinator 的 <code class="k">coordinatorToolNames</code>（main.go:2362）被刻意收窄成只读定位 + 知识工具，注释直言这是 "rule 1 的物理执行"：coordinator 的 toolBag 里<strong>根本没有</strong> <code class="k">query_promql / host_bash</code> 这类深度工具，所以 LLM 即使想 inline 查也调不到，只能走 <code class="k">AgentTool</code> 派给 specialist。</p>
 
-      <!-- ====== 1. Coordinator + Specialist ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="multi-agent">① Coordinator + Specialist 多 Agent 协作机制</h4>
-        <p class="reveal"><strong>模型</strong>：Coordinator 和 Specialist 是同一个 <code>chatruntime.Runtime</code> 实例里的不同 persona，区别只在 toolBag 和 system prompt。Coordinator = <code>sess.AgentID</code> 为空/"default"；其余 <code>agents/*.md</code> 里定义的都是 worker。<code>buildAIOpsRuntime</code>（main.go:2376）是整个 AIOps 装配的咽喉——它把每个依赖恰好穿过一次。Coordinator 的 <code>coordinatorToolNames</code>（main.go:2362）被刻意收窄成只读定位 + 知识工具，注释直言这是 "rule 1 的物理执行"：coordinator 的 toolBag 里<strong>根本没有</strong> <code>query_promql / host_bash</code> 这类深度工具，所以 LLM 即使想 inline 查也调不到，只能走 <code>AgentTool</code> 派给 specialist。</p>
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">cmd/ongrid/main.go — coordinator 受限 toolBag</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">var</span> coordinatorToolNames <span class="t-pun">=</span> []<span class="t-typ">string</span><span class="t-pun">{</span>
+    <span class="t-str">"query_devices"</span><span class="t-pun">,</span> <span class="t-str">"query_incidents"</span><span class="t-pun">,</span> <span class="t-str">"get_topology"</span><span class="t-pun">,</span> <span class="t-str">"query_knowledge"</span><span class="t-pun">,</span>
+    <span class="t-str">"search_web"</span><span class="t-pun">,</span> <span class="t-str">"list_repo_sources"</span><span class="t-pun">,</span> <span class="t-str">"read_source"</span><span class="t-pun">,</span> <span class="t-str">"grep_source"</span><span class="t-pun">,</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>派活路径</strong>：coordinator 的 LLM 调 <code class="k">AgentTool</code>（PascalCase，刻意对齐 claude-code 的工具名以利模型选择，见 agent_tool.go:91）。<code class="k">AgentTool</code> 是 coordinator-only 工具，<code class="k">tools</code> 包不能 import <code class="k">chatruntime</code>（会循环），所以它通过 <code class="k">WorkerSpawner</code> 窄接口调用，由 main.go 装配处把 <code class="k">*chatruntime.Runtime</code> shim 成该接口。<code class="k">AgentTool</code> 默认<strong>同步派活</strong>，拿到 worker 结论后强制 coordinator 收口：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">aiops/tools/agent_tool.go — 同步派活 + 强制收口</span><button class="copy">复制</button></div>
+<pre><code>w<span class="t-pun">,</span> err <span class="t-pun">:=</span> t.spawner.<span class="t-fn">SpawnWorker</span>(ctx<span class="t-pun">,</span> <span class="t-typ">SpawnWorkerRequest</span><span class="t-pun">{</span>
+    AgentName<span class="t-pun">:</span> args.SubagentType<span class="t-pun">,</span>
+    Prompt<span class="t-pun">:</span>    args.Prompt<span class="t-pun">,</span>
+    Locale<span class="t-pun">:</span>    basetool.<span class="t-fn">LocaleFromContext</span>(ctx)<span class="t-pun">,</span>  <span class="t-com">// 把 UI 语言透传给 specialist</span>
+<span class="t-pun">}</span>)
+<span class="t-com">// ...</span>
+res.Hint <span class="t-pun">=</span> <span class="t-str">"Specialist "</span> <span class="t-pun">+</span> args.SubagentType <span class="t-pun">+</span> <span class="t-str">" 已经返回最终结论（见 result 字段）。"</span> <span class="t-pun">+</span>
+    <span class="t-str">"直接基于它给用户写最终答复；**不要再调用任何工具**…"</span></code></pre>
+        </div>
+
+        <div class="panel pad tick reveal" style="margin-top:28px">
+          <div class="kicker" style="margin-bottom:30px">图 03 · 一次派活的同步往返</div>
+          <div class="flow">
+            <div class="flow-node"><div class="ttl cy">Coordinator</div><div class="meta">persona=default</div></div>
+            <div class="flow-arr cy"><span class="flow-stage">AgentTool</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+            <div class="flow-node"><div class="ttl am">SpawnWorker</div><div class="meta">同步阻塞</div></div>
+            <div class="flow-arr"><span class="flow-stage">filter</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.4s"/></svg></div>
+            <div class="flow-node"><div class="ttl">specialist-X</div><div class="meta">子 toolBag</div></div>
+            <div class="flow-arr"><span class="flow-stage">graph.Invoke</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.8s"/></svg></div>
+            <div class="flow-node"><div class="ttl">result</div><div class="meta">最终结论</div></div>
+            <div class="flow-arr cy"><span class="flow-stage">收口</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:1.1s"/></svg></div>
+            <div class="flow-node"><div class="ttl cy">用户答复</div><div class="meta">不再调工具</div></div>
+          </div>
+        </div>
+
+        <p class="reveal" style="margin-top:26px"><strong>Worker 隔离</strong>（worker.go:522 <code class="k">runWorker</code>）：每个 worker 跑独立 <code class="k">graph.Invoke</code>，toolBag 经 <code class="k">filterToolsForAgent</code> 用 persona 的白名单 + 黑名单裁剪（black wins），并强制剥离 <code class="k">coordinatorOnlyTools</code>（AgentTool/SendMessage/TaskStop）——<strong>worker 不能 spawn 嵌套 worker</strong>。worker 有自己的 session id（<code class="k">worker-&lt;8hex&gt;</code>），消息历史对父不可见。</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">aiops/chatruntime/worker.go — toolBag 角色过滤</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">var</span> coordinatorOnlyTools <span class="t-pun">=</span> <span class="t-key">map</span>[<span class="t-typ">string</span>]<span class="t-typ">bool</span><span class="t-pun">{</span>
+    <span class="t-str">"AgentTool"</span><span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span> <span class="t-str">"SendMessage"</span><span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span> <span class="t-str">"TaskStop"</span><span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span>
+<span class="t-pun">}</span>
+<span class="t-key">func</span> <span class="t-fn">filterToolsForAgentRole</span>(bag<span class="t-pun">,</span> agentDef<span class="t-pun">,</span> isCoordinator<span class="t-pun">,</span> viewerOnly) []<span class="t-typ">BaseTool</span> <span class="t-pun">{</span>
+    <span class="t-com">// viewer 降级：先砍掉所有 Class!=read 的工具</span>
+    <span class="t-com">// coordinator-only 工具只在 isCoordinator=true 时保留</span>
+    <span class="t-com">// 否则按 persona 白名单过滤，再减黑名单（支持 *_skill 通配）</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>Agent loop</strong>（graph/react.go）：外层包一个 eino <code class="k">react.Agent</code>，关键修正是 <code class="k">MaxStep = MaxIterations*2 + 2</code>——因为 eino 把每个节点 visit 都算一步，一轮 ReAct = ChatModel + ToolsNode = 2 步，不 ×2 会让 LLM 在 30 轮上限时只跑到 ~15 轮就 <code class="k">ErrExceededMaxSteps</code>。<strong>反漂移机制</strong>：每轮在 user 消息前注入独立的 <code class="kc">&lt;system-reminder&gt;</code> user-role 消息（graph/react.go:271 <code class="k">buildSystemReminder</code>），内容 = 硬编码基线规则 + persona 的 <code class="k">critical_reminder</code> + runtime 动态启发式（runtime.go:863 <code class="k">calcDynamicHints</code>：同工具连续失败、迭代数过高、重复调用同一 (tool,args)、"承诺但没发 tool_call" 检测）。</p>
+
+        <div class="note reveal"><b>失败模式 · 弱模型幻觉工具名：</b>GLM-4 等幻觉出不在 schema 的工具名 → eino "tool not found in toolsNode" 直接 abort 整个图。对策：coordinator 叠加 <code class="k">CoordinatorStubs</code>（redirect_stub.go）占住 <code class="k">host_bash / get_host_load</code> 等高幻觉名，返回"请用 AgentTool 派给 specialist-X"而非崩溃（runtime.go:519）。</div>
+        <div class="note cy reveal"><b>失败模式 · 重复派同一 specialist：</b>E2E eval D1 观测到 122 次 tool call / 240s → <code class="k">AgentTool</code> 用 <code class="k">sha256(subagent_type+prompt)</code> 做 <b>90s dedupe</b>（agent_tool.go:137），命中时返回"重复派活拦截" hint。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 04 反向隧道 ---------- -->
+    <section id="reverse-tunnel">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">tunnel · zero inbound ports</div>
+        <h2>零入站端口的<em>反向隧道</em> / Browser SSH</h2>
+        <p class="lead">源码：<code class="k">internal/pkg/tunnel/client.go</code> + <code class="k">edgeagent/webshell/handler.go</code>。边缘 agent 用 <code class="k">gclient.NewRetryEndWithDialer</code> <strong>主动连</strong> frontier broker——主机上不开任何入站口。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">cmd/ongrid/main.go — coordinator 受限 toolBag</span></div>
-        <pre><code><span class="tok-k">var</span> coordinatorToolNames <span class="tok-p">=</span> []<span class="tok-t">string</span><span class="tok-p">{</span>
-    <span class="tok-s">"query_devices"</span><span class="tok-p">,</span> <span class="tok-s">"query_incidents"</span><span class="tok-p">,</span> <span class="tok-s">"get_topology"</span><span class="tok-p">,</span> <span class="tok-s">"query_knowledge"</span><span class="tok-p">,</span>
-    <span class="tok-s">"search_web"</span><span class="tok-p">,</span> <span class="tok-s">"list_repo_sources"</span><span class="tok-p">,</span> <span class="tok-s">"read_source"</span><span class="tok-p">,</span> <span class="tok-s">"grep_source"</span><span class="tok-p">,</span>
-<span class="tok-p">}</span></code></pre>
+      <div class="reveal">
+        <p class="reveal"><strong>dial-out</strong>：首次拨号指数退避 1s→2s→…封顶 60s；连上后断线由 geminio RetryEnd 透明重连。手柄 blob <code class="k">Meta{AccessKey, SecretKey}</code> 在 connect 时塞进 geminio 不透明 Meta，server 端解码后做 AuthFunc。manager 想调边缘能力时是反向 Call：<code class="k">tunnel.Caller.Call(edgeID, method, body)</code> 经 broker 路由到该 edge 已注册的 handler。一个微妙坑——manager 重启会清掉 broker 路由表但 edge 的 TCP 还活着，所以 client 额外检测 broker 路由失效错误重连：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">internal/pkg/tunnel/client.go — 路由失效检测重连</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">func</span> <span class="t-fn">shouldReconnect</span>(err <span class="t-typ">error</span>) <span class="t-typ">bool</span> <span class="t-pun">{</span>
+    msg <span class="t-pun">:=</span> err.<span class="t-fn">Error</span>()
+    <span class="t-key">return</span> strings.<span class="t-fn">Contains</span>(msg<span class="t-pun">,</span> <span class="t-str">"not found"</span>) <span class="t-pun">||</span>
+        strings.<span class="t-fn">Contains</span>(msg<span class="t-pun">,</span> <span class="t-str">"mismatch clientID"</span>)
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>Browser SSH</strong>：架构经过一次重构——<strong>SSH 协议栈完全搬到 manager 侧</strong>，边缘退化成"一屏 TCP 转发器"。manager 用一个携带 <code class="k">{"target":"127.0.0.1:22"}</code> Meta 的 stream 进 edge，edge 校验 target 在 allowlist 内后 dial 本地 sshd，双向 io.Copy：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">edgeagent/webshell/handler.go — target allowlist</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">var</span> allowedTargets <span class="t-pun">=</span> <span class="t-key">map</span>[<span class="t-typ">string</span>]<span class="t-typ">bool</span><span class="t-pun">{</span>
+    <span class="t-str">"127.0.0.1:22"</span><span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span> <span class="t-str">"localhost:22"</span><span class="t-pun">:</span> <span class="t-key">true</span><span class="t-pun">,</span>
+<span class="t-pun">}</span>
+<span class="t-com">// localhost narrow scope 是安全边界——否则被攻破的 manager 能把 edge 当跳板打内网</span></code></pre>
+        </div>
+
+        <p class="reveal">manager 侧 <code class="k">biz/webshell/router.go</code> 维护 <code class="k">SessionID → Sink</code> 目录，把 edge 推回的 stdout 路由到对应浏览器 WebSocket；记录 per-session 字节数、支持 admin kill、idle watchdog、per-user/per-device 并发限制。SSH 口令 <code class="k">SSHPass</code> 是一次性的，Dial 后从 edge 内存抹掉，永不落盘/落日志（messages.go:84 注释）。</p>
+        <div class="note cy reveal"><b>关键设计：</b>让 manager 独占 webshell 的 policy/audit/并发/踢人逻辑，<strong>edge 越薄越安全</strong>（无 SSH client、无 pty、无 session map）。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 05 RCA ---------- -->
+    <section id="rca">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">rca · correlate then trace to patient zero</div>
+        <h2>根因 RCA：<em>拓扑 + 信号关联</em></h2>
+        <p class="lead">RCA 由两条路组成：被动（用户在 <code class="k">/chat</code> 问）和主动（<code class="k">investigator</code> 告警触发）。两者都吃同一个核心工具 <strong><code class="k">correlate_incident</code></strong>——一次性把告警周围的四类信号打成一个 bundle，让 LLM 不用 chain 十次工具。</p>
       </div>
 
-      <div class="prose">
-        <p class="reveal"><strong>派活路径</strong>：coordinator 的 LLM 调 <code>AgentTool</code>（PascalCase，刻意对齐 claude-code 的工具名以利模型选择，见 agent_tool.go:91）。<code>AgentTool</code> 是 coordinator-only 工具，<code>tools</code> 包不能 import <code>chatruntime</code>（会循环），所以它通过 <code>WorkerSpawner</code> 窄接口调用，由 main.go 装配处把 <code>*chatruntime.Runtime</code> shim 成该接口。<code>AgentTool</code> 默认同步派活，拿到 worker 结论后强制 coordinator 收口：</p>
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">aiops/tools/correlate_incident.go — 信号 bundle</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">type</span> correlateIncidentBundle <span class="t-key">struct</span> <span class="t-pun">{</span>
+    Incident    <span class="t-typ">incidentSummary</span>   <span class="t-com">// 规则名/severity/target/fired_at/labels</span>
+    Window      <span class="t-typ">windowRange</span>       <span class="t-com">// 以 first_fired_at 为中心 ±window/2</span>
+    MetricPanel []<span class="t-typ">metricSeries</span>    <span class="t-com">// PromQL range，top-3 series by magnitude</span>
+    LogPanel    []<span class="t-typ">logEntry</span>        <span class="t-com">// Loki: {edge_id} |~ "(?i)error|panic|oom|fatal|fail"</span>
+    TracePanel  []<span class="t-typ">traceEntry</span>      <span class="t-com">// Tempo: service.name 过滤</span>
+    Edge        <span class="t-pun">*</span><span class="t-typ">edgeSnapshot</span>     <span class="t-com">// 当前 cpu/mem/up + 24h flap 计数</span>
+    Skipped     <span class="t-key">map</span>[<span class="t-typ">string</span>]<span class="t-typ">string</span> <span class="t-com">// 哪个面板因何跳过（无 client/无 edge_id…）</span>
+    Truncated   <span class="t-key">map</span>[<span class="t-typ">string</span>]<span class="t-typ">int</span>    <span class="t-com">// 100KB 上限时砍 logs→traces→metric values</span>
+<span class="t-pun">}</span></code></pre>
+        </div>
+
+        <p class="reveal">PromQL 表达式由 <code class="k">metricExprFor</code> 从规则的闭集 metric 名（cpu_pct/mem_pct/disk_used_pct/load1…）翻译，再用 <code class="k">wrapPerEdge</code> 用 <code class="k">... and on(edge_id) (group by (edge_id) ({edge_id="N"}))</code> 限定到单台。每个子查询有独立短 deadline（trace/log/edge 互不阻塞），整体 60s 封顶，bundle 超 100KB 时按"<strong>先砍 logs 再砍 traces 最后砍 metric values</strong>"降级，并在 <code class="k">Truncated</code> 里告知 LLM "你看的不是全貌"。</p>
+
+        <div class="grid g3 reveal" style="margin-top:8px">
+          <div class="card"><div class="ic">expand_topology</div><h3>拓扑关联 BFS</h3><p>在业务 topology graph 上做 BFS，默认只走"传播失败"的边（<code class="k">PropagatesFailure</code> 的 relation：depends_on/deployed_on/routes_to），direction 支持 downstream（爆炸半径）/ upstream（谁导致我挂）/both。一次拉全 relation 进内存（假设 ≤10k/tenant），每个命中带 hop 数 + relation 类型 + semantics tag。</p></div>
+          <div class="card cy"><div class="ic">incident-investigator</div><h3>因果回溯到 0 号病人</h3><p>persona 把 RCA 定义成"输出一条因果链 <code class="k">根因→…→告警症状</code>"而非现象摘要，强调"找最早偏离的，不是最显眼的"，用 <code class="k">query_change_events</code>（产品侧变更常是 0 号病人）、<code class="k">expand_topology</code> 往上游走、<code class="k">query_traceql</code> 找慢 span 发起方逐层上溯。</p></div>
+          <div class="card"><div class="ic">investigator.go</div><h3>主动诊断 pool</h3><p>告警 first fire 时后台 spawn——<strong>3 worker + 100 buffer</strong> 的 pool，直接调 <code class="k">correlate_incident</code> 拿 bundle，单轮 LLM 出 <code class="k">ai_initial_diagnosis</code> Event 写回，SPA 在 incident 详情顶部高亮。完全 additive，LLM 没配/失败都静默退出，不阻塞告警 ingestion。</p></div>
+        </div>
+
+        <div class="note reveal"><b>失败模式 · 近似匹配：</b>incident 行只存 <code class="k">rule_key</code> 不存完整 <code class="k">ConditionsJSON</code>，所以 <code class="k">promExprForIncident</code> 用启发式（rule_key 命中闭集名 / labels["metric"] hint / annotations hint）近似，匹配不上则 metric panel 标 <code class="ro">skipped</code>。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 06 IM 集成 ---------- -->
+    <section id="im-bridge">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">im bridge · bidirectional messaging</div>
+        <h2>IM 双向集成：<em>飞书 / Telegram / Slack</em></h2>
+        <p class="lead">源码：<code class="k">manager/biz/imbridge/bridge.go</code>。provider 各自的 webhook/stream handler 先验签 + 解密，归一化成 <code class="k">InboundMessage</code>，bridge 保持<strong>平台无关</strong>。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">aiops/tools/agent_tool.go — 同步派活 + 强制收口</span></div>
-        <pre><code>w<span class="tok-p">,</span> err <span class="tok-p">:=</span> t.spawner.<span class="tok-f">SpawnWorker</span>(ctx<span class="tok-p">,</span> <span class="tok-t">SpawnWorkerRequest</span><span class="tok-p">{</span>
-    AgentName<span class="tok-p">:</span> args.SubagentType<span class="tok-p">,</span>
-    Prompt<span class="tok-p">:</span>    args.Prompt<span class="tok-p">,</span>
-    Locale<span class="tok-p">:</span>    basetool.<span class="tok-f">LocaleFromContext</span>(ctx)<span class="tok-p">,</span>  <span class="tok-c">// 把 UI 语言透传给 specialist</span>
-<span class="tok-p">}</span>)
-<span class="tok-c">// ...</span>
-res.Hint <span class="tok-p">=</span> <span class="tok-s">"Specialist "</span> <span class="tok-p">+</span> args.SubagentType <span class="tok-p">+</span> <span class="tok-s">" 已经返回最终结论（见 result 字段）。"</span> <span class="tok-p">+</span>
-    <span class="tok-s">"直接基于它给用户写最终答复；**不要再调用任何工具**…"</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>Worker 隔离</strong>（worker.go:522 <code>runWorker</code>）：每个 worker 跑独立 <code>graph.Invoke</code>，toolBag 经 <code>filterToolsForAgent</code> 用 persona 的白名单 + 黑名单裁剪（black wins），并强制剥离 <code>coordinatorOnlyTools</code>（AgentTool/SendMessage/TaskStop）——<strong>worker 不能 spawn 嵌套 worker</strong>。worker 有自己的 session id（<code>worker-&lt;8hex&gt;</code>），消息历史对父不可见。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">aiops/chatruntime/worker.go — toolBag 角色过滤</span></div>
-        <pre><code><span class="tok-k">var</span> coordinatorOnlyTools <span class="tok-p">=</span> <span class="tok-k">map</span>[<span class="tok-t">string</span>]<span class="tok-t">bool</span><span class="tok-p">{</span>
-    <span class="tok-s">"AgentTool"</span><span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span> <span class="tok-s">"SendMessage"</span><span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span> <span class="tok-s">"TaskStop"</span><span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span>
-<span class="tok-p">}</span>
-<span class="tok-k">func</span> <span class="tok-f">filterToolsForAgentRole</span>(bag<span class="tok-p">,</span> agentDef<span class="tok-p">,</span> isCoordinator<span class="tok-p">,</span> viewerOnly) []<span class="tok-t">BaseTool</span> <span class="tok-p">{</span>
-    <span class="tok-c">// viewer 降级：先砍掉所有 Class!=read 的工具</span>
-    <span class="tok-c">// coordinator-only 工具只在 isCoordinator=true 时保留</span>
-    <span class="tok-c">// 否则按 persona 白名单过滤，再减黑名单（支持 *_skill 通配）</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>Agent loop</strong>（graph/react.go）：外层包一个 eino <code>react.Agent</code>，关键修正是 <code>MaxStep = MaxIterations*2 + 2</code>——因为 eino 把每个节点 visit 都算一步，一轮 ReAct = ChatModel + ToolsNode = 2 步，不 ×2 会让 LLM 在 30 轮上限时只跑到 ~15 轮就 <code>ErrExceededMaxSteps</code>。<strong>反漂移机制</strong>：每轮在 user 消息前注入独立的 <code>&lt;system-reminder&gt;</code> user-role 消息（graph/react.go:271 <code>buildSystemReminder</code>），内容 = 硬编码基线规则 + persona 的 <code>critical_reminder</code> + runtime 动态启发式（runtime.go:863 <code>calcDynamicHints</code>：同工具连续失败、迭代数过高、重复调用同一 (tool,args)、"承诺但没发 tool_call" 检测）。</p>
-        <h5 class="reveal">失败模式</h5>
-        <ul class="reveal">
-          <li><strong>弱模型幻觉工具名：</strong>GLM-4 等幻觉出不在 schema 的工具名 → eino "tool not found in toolsNode" 直接 abort 整个图。对策：coordinator 叠加 <code>CoordinatorStubs</code>（redirect_stub.go）占住 <code>host_bash / get_host_load</code> 等高幻觉名，返回"请用 AgentTool 派给 specialist-X"而非崩溃（runtime.go:519）。</li>
-          <li><strong>重复派同一 specialist：</strong>E2E eval D1 观测到 122 次 tool call / 240s → <code>AgentTool</code> 用 <code>sha256(subagent_type+prompt)</code> 做 90s dedupe（agent_tool.go:137），命中时返回"重复派活拦截" hint。</li>
-        </ul>
-      </div>
-
-      <!-- ====== 2. 反向隧道 / Browser SSH ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="reverse-tunnel">② 零入站端口的反向隧道 / Browser SSH</h4>
-        <p class="reveal"><strong>dial-out</strong>（tunnel/client.go）：边缘 agent 用 <code>gclient.NewRetryEndWithDialer</code> 主动连 frontier broker。首次拨号指数退避 1s→2s→…封顶 60s；连上后断线由 geminio RetryEnd 透明重连。手柄 blob <code>Meta{AccessKey, SecretKey}</code> 在 connect 时塞进 geminio 不透明 Meta，server 端解码后做 AuthFunc。主机上<strong>不开 22/80/443 任何入站口</strong>。manager 想调边缘能力时，是反向 Call：<code>tunnel.Caller.Call(edgeID, method, body)</code> 经 broker 路由到该 edge 已注册的 handler。一个微妙坑——manager 重启会清掉 broker 路由表但 edge 的 TCP 还活着，所以 client 额外检测 broker 路由失效错误重连：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">internal/pkg/tunnel/client.go — 路由失效检测重连</span></div>
-        <pre><code><span class="tok-k">func</span> <span class="tok-f">shouldReconnect</span>(err <span class="tok-t">error</span>) <span class="tok-t">bool</span> <span class="tok-p">{</span>
-    msg <span class="tok-p">:=</span> err.<span class="tok-f">Error</span>()
-    <span class="tok-k">return</span> strings.<span class="tok-f">Contains</span>(msg<span class="tok-p">,</span> <span class="tok-s">"not found"</span>) <span class="tok-p">||</span>
-        strings.<span class="tok-f">Contains</span>(msg<span class="tok-p">,</span> <span class="tok-s">"mismatch clientID"</span>)
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>Browser SSH</strong>（edgeagent/webshell/handler.go）：架构经过一次重构——<strong>SSH 协议栈完全搬到 manager 侧</strong>，边缘退化成"一屏 TCP 转发器"。manager 用一个携带 <code>{"target":"127.0.0.1:22"}</code> Meta 的 stream 进 edge，edge 校验 target 在 allowlist 内后 dial 本地 sshd，双向 io.Copy：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">edgeagent/webshell/handler.go — target allowlist</span></div>
-        <pre><code><span class="tok-k">var</span> allowedTargets <span class="tok-p">=</span> <span class="tok-k">map</span>[<span class="tok-t">string</span>]<span class="tok-t">bool</span><span class="tok-p">{</span>
-    <span class="tok-s">"127.0.0.1:22"</span><span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span> <span class="tok-s">"localhost:22"</span><span class="tok-p">:</span> <span class="tok-k">true</span><span class="tok-p">,</span>
-<span class="tok-p">}</span>
-<span class="tok-c">// localhost narrow scope 是安全边界——否则被攻破的 manager 能把 edge 当跳板打内网</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">manager 侧 <code>biz/webshell/router.go</code> 维护 <code>SessionID → Sink</code> 目录，把 edge 推回的 stdout 路由到对应浏览器 WebSocket；记录 per-session 字节数、支持 admin kill、idle watchdog、per-user/per-device 并发限制。SSH 口令 <code>SSHPass</code> 是一次性的，Dial 后从 edge 内存抹掉，永不落盘/落日志（messages.go:84 注释）。<strong>关键设计</strong>：让 manager 独占 webshell 的 policy/audit/并发/踢人逻辑，edge 越薄越安全（无 SSH client、无 pty、无 session map）。</p>
-      </div>
-
-      <!-- ====== 3. RCA ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="rca">③ 根因 RCA：拓扑 + metrics/logs/traces 关联</h4>
-        <p class="reveal">RCA 由两条路组成：被动（用户在 /chat 问）和主动（<code>investigator</code> 告警触发）。两者都吃同一个核心工具 <strong><code>correlate_incident</code></strong>（tools/correlate_incident.go）——一次性把告警周围的四类信号打成一个 bundle，让 LLM 不用 chain 十次工具：</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">aiops/tools/correlate_incident.go — 信号 bundle</span></div>
-        <pre><code><span class="tok-k">type</span> correlateIncidentBundle <span class="tok-k">struct</span> <span class="tok-p">{</span>
-    Incident    <span class="tok-t">incidentSummary</span>   <span class="tok-c">// 规则名/severity/target/fired_at/labels</span>
-    Window      <span class="tok-t">windowRange</span>       <span class="tok-c">// 以 first_fired_at 为中心 ±window/2</span>
-    MetricPanel []<span class="tok-t">metricSeries</span>    <span class="tok-c">// PromQL range，top-3 series by magnitude</span>
-    LogPanel    []<span class="tok-t">logEntry</span>        <span class="tok-c">// Loki: {edge_id} |~ "(?i)error|panic|oom|fatal|fail"</span>
-    TracePanel  []<span class="tok-t">traceEntry</span>      <span class="tok-c">// Tempo: service.name 过滤</span>
-    Edge        <span class="tok-p">*</span><span class="tok-t">edgeSnapshot</span>     <span class="tok-c">// 当前 cpu/mem/up + 24h flap 计数</span>
-    Skipped     <span class="tok-k">map</span>[<span class="tok-t">string</span>]<span class="tok-t">string</span> <span class="tok-c">// 哪个面板因何跳过（无 client/无 edge_id…）</span>
-    Truncated   <span class="tok-k">map</span>[<span class="tok-t">string</span>]<span class="tok-t">int</span>    <span class="tok-c">// 100KB 上限时砍 logs→traces→metric values</span>
-<span class="tok-p">}</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">PromQL 表达式由 <code>metricExprFor</code> 从规则的闭集 metric 名（cpu_pct/mem_pct/disk_used_pct/load1…）翻译，再用 <code>wrapPerEdge</code> 用 <code>... and on(edge_id) (group by (edge_id) ({edge_id="N"}))</code> 限定到单台。每个子查询有独立短 deadline（trace/log/edge 互不阻塞），整体 60s 封顶，bundle 超 100KB 时按"先砍 logs 再砍 traces 最后砍 metric values"降级，并在 <code>Truncated</code> 里告知 LLM "你看的不是全貌"。</p>
-        <p class="reveal"><strong>拓扑关联</strong>（tools/expand_topology_basetool.go）：在业务 topology graph 上做 BFS，默认只走"传播失败"的边（<code>PropagatesFailure</code> 的 relation type，如 depends_on/deployed_on/routes_to），direction 支持 downstream（爆炸半径）/ upstream（谁导致我挂）/both。一次拉全 relation 进内存做 BFS（假设 ≤10k relation/tenant），每个命中带 hop 数 + relation 类型 + semantics tag。</p>
-        <p class="reveal"><strong>因果回溯</strong>：<code>incident-investigator</code> persona（agents/incident-investigator.md）把 RCA 定义成"输出一条因果链 <code>根因(0号病人)→…→告警症状</code>"而非现象摘要，强调"找最早偏离的，不是最显眼的"，用 <code>query_change_events</code>（产品侧变更常是 0 号病人）、<code>expand_topology</code> 往上游走、<code>query_traceql</code> 找慢 span 发起方逐层上溯。</p>
-        <p class="reveal"><strong>主动诊断</strong>（investigator/investigator.go）：告警 first fire 时，alert usecase 让 investigator 后台 spawn——3 worker + 100 buffer 的 pool，直接调 <code>correlate_incident</code> 拿 bundle，单轮 LLM 出 <code>ai_initial_diagnosis</code> Event 写回，SPA 在 incident 详情顶部高亮。完全 additive，LLM 没配/失败都静默退出，不阻塞告警 ingestion。<strong>失败模式</strong>：incident 行只存 rule_key 不存完整 ConditionsJSON，所以 <code>promExprForIncident</code> 用启发式（rule_key 命中闭集名 / labels["metric"] hint / annotations hint）近似，匹配不上则 metric panel 标 skipped。</p>
-      </div>
-
-      <!-- ====== 4. IM 集成 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="im-bridge">④ IM 集成（飞书/Telegram/Slack）双向消息</h4>
-        <p class="reveal"><strong>inbound</strong>（imbridge/bridge.go <code>HandleInbound</code>）：provider 各自的 webhook/stream handler 先验签 + 解密，归一化成 <code>InboundMessage</code>，bridge 保持平台无关。流程：去重（provider:app_id:event_id，防长轮询 replay 重复应答）→ 解析 app/thread 映射（按 <code>(im_app_id, im_chat_id, thread_id)</code> 一聊一 session，群里所有人共享）→ <code>/new</code> 等命令重置 session → 发 "✦ 思考中…" placeholder → 跑 agent + 节流编辑器渐进编辑 IM 消息。<strong>outbound 渐进编辑</strong>：<code>newStreamEditor</code> 把 agent SSE 的 assistant chunk 节流后不断 edit 同一条 IM 消息。</p>
+      <div class="reveal">
+        <p class="reveal"><strong>inbound 流程</strong>（<code class="k">HandleInbound</code>）：去重（<code class="k">provider:app_id:event_id</code>，防长轮询 replay 重复应答）→ 解析 app/thread 映射（按 <code class="k">(im_app_id, im_chat_id, thread_id)</code> 一聊一 session，群里所有人共享）→ <code class="k">/new</code> 等命令重置 session → 发 "✦ 思考中…" placeholder → 跑 agent + 节流编辑器渐进编辑 IM 消息。<strong>outbound 渐进编辑</strong>：<code class="k">newStreamEditor</code> 把 agent SSE 的 assistant chunk 节流后不断 edit 同一条 IM 消息。</p>
         <p class="reveal"><strong>飞书验签/解密</strong>（provider/feishu/verify.go）有个反直觉点——飞书 v2 events 用的是 <strong>SHA-256 拼接而非 HMAC</strong>：</p>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">imbridge/provider/feishu/verify.go — SHA-256 拼接验签</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// sig = sha256(timestamp + nonce + encryptKey + body), hex</span>
+<span class="t-key">func</span> <span class="t-fn">VerifyEventSignature</span>(timestamp<span class="t-pun">,</span> nonce<span class="t-pun">,</span> encryptKey <span class="t-typ">string</span><span class="t-pun">,</span> body []<span class="t-typ">byte</span><span class="t-pun">,</span> signatureHex <span class="t-typ">string</span>) <span class="t-typ">error</span> <span class="t-pun">{</span>
+    h <span class="t-pun">:=</span> sha256.<span class="t-fn">New</span>()
+    h.<span class="t-fn">Write</span>([]<span class="t-typ">byte</span>(timestamp))<span class="t-pun">;</span> h.<span class="t-fn">Write</span>([]<span class="t-typ">byte</span>(nonce))
+    h.<span class="t-fn">Write</span>([]<span class="t-typ">byte</span>(encryptKey))<span class="t-pun">;</span> h.<span class="t-fn">Write</span>(body)
+    <span class="t-com">// ...</span>
+<span class="t-pun">}</span>
+<span class="t-com">// DecryptEvent: AES-256-CBC，key=sha256(encrypt_key)，IV=密文前16字节，PKCS#7 去填充</span></code></pre>
+        </div>
+
+        <p class="reveal"><strong>长连接管理</strong>（stream_supervisor.go）：每个启用的 stream-mode IM app 一个 goroutine，30s reconcile DB——新增 app 拉起 client、禁用/密钥轮换则 cancel 重建。<code class="k">runClientWithRestart</code> 指数退避封顶 60s。<strong>locale</strong>：每个 channel 可 pin locale，bridge 在 user content 后追加语言指令（<code class="k">localeDirective</code>），coordinator 再透传给 specialist，避免 GLM 默认中文答英文问题。</p>
+        <div class="note reveal"><b>失败模式/待确认：</b>当前所有 IM 会话归属一个固定 service account user（<code class="k">serviceUserID</code>），per-IM-user 绑定（S3）未落地（adapter.go:31）。README 提到 DingTalk/WeCom，但 <code class="k">provider/</code> 目录只看到 feishu/slack/telegram 三个实现。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 07 specialist 边界 ---------- -->
+    <section id="specialist-boundaries">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">specialists · capability boundaries</div>
+        <h2>Specialist <em>能力边界</em> 与 mutating 纪律</h2>
+        <p class="lead">能力边界由 <code class="k">agents/*.md</code> frontmatter 的 <code class="k">tools</code> 白名单 + <code class="k">permission_mode</code> + <code class="k">max_turns</code> + worker.go 的 <code class="k">filterToolsForAgent</code> 共同物理约束。所有 specialist 都 <code class="k">permission_mode: read-only</code>、<code class="k">max_turns: 15</code>、第 0 步强制 <code class="k">query_knowledge</code>。</p>
       </div>
 
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">imbridge/provider/feishu/verify.go — SHA-256 拼接验签</span></div>
-        <pre><code><span class="tok-c">// sig = sha256(timestamp + nonce + encryptKey + body), hex</span>
-<span class="tok-k">func</span> <span class="tok-f">VerifyEventSignature</span>(timestamp<span class="tok-p">,</span> nonce<span class="tok-p">,</span> encryptKey <span class="tok-t">string</span><span class="tok-p">,</span> body []<span class="tok-t">byte</span><span class="tok-p">,</span> signatureHex <span class="tok-t">string</span>) <span class="tok-t">error</span> <span class="tok-p">{</span>
-    h <span class="tok-p">:=</span> sha256.<span class="tok-f">New</span>()
-    h.<span class="tok-f">Write</span>([]<span class="tok-t">byte</span>(timestamp))<span class="tok-p">;</span> h.<span class="tok-f">Write</span>([]<span class="tok-t">byte</span>(nonce))
-    h.<span class="tok-f">Write</span>([]<span class="tok-t">byte</span>(encryptKey))<span class="tok-p">;</span> h.<span class="tok-f">Write</span>(body)
-    <span class="tok-c">// ...</span>
-<span class="tok-p">}</span>
-<span class="tok-c">// DecryptEvent: AES-256-CBC，key=sha256(encrypt_key)，IV=密文前16字节，PKCS#7 去填充</span></code></pre>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 07 · 七个 persona 的领域与边界</div>
+          <table class="tbl">
+            <tr><th>Persona</th><th>领域</th><th>关键工具（白名单）</th><th>边界</th></tr>
+            <tr><td><code>specialist-compute</code></td><td>CPU/内存/load/进程/OOM/NUMA/sysctl</td><td>get_host_load, get_host_processes, rank_edges, find_outlier_edges, query_promql, host_bash</td><td>不碰磁盘IO/网络/服务启停</td></tr>
+            <tr><td><code>specialist-disk</code></td><td>文件系统/磁盘容量/inode/大文件</td><td>host_find_large_files, host_du_summary, host_stat_file, host_bash</td><td>不碰网络/进程/业务日志，不删改文件</td></tr>
+            <tr><td><code>specialist-network</code></td><td>OVS/netfilter/netns/conntrack/bpftool/路由</td><td>host_bash, host_probe_{http,dns,tcp}, host_netns_inspect, query_promql</td><td>只读，不碰文件系统/磁盘</td></tr>
+            <tr><td><code class="ro">specialist-ops</code></td><td>服务状态/启停重启/journalctl/cron/部署</td><td>host_bash, get_host_processes, <strong>host_restart_service</strong>, query_promql/logql</td><td>唯一带 mutating 工具者；重启走 ReviewGate 二审</td></tr>
+            <tr><td><code>specialist-sre</code></td><td>集群健康/趋势/告警优先级/SLO/错误预算</td><td>correlate_incident, get_active_incidents, find_outlier_edges, rank_edges, query_promql</td><td>不做单机操作，给优先级 P0-P3</td></tr>
+            <tr><td><code class="cy">incident-investigator</code></td><td>单 incident 端到端因果回溯</td><td>correlate_incident, query_{change_events,traceql,logql,promql}, expand_topology</td><td>max_turns=40，<code>disallowed_tools</code> 禁 execute_skill/host_restart_service</td></tr>
+            <tr><td><code class="ph">reviewer</code></td><td>mutating 提案 SOP 二审</td><td>get_incident_detail, get_edge_summary, get_sop_text</td><td>background=true 异步，model 钉死 claude-opus，<code>disallowed_tools: ["*_skill"]</code></td></tr>
+          </table>
+        </div>
+
+        <p class="reveal" style="margin-top:22px"><strong>没有专门的 "DB specialist"</strong>——README 说 "SRE / network / DB sub-agents"，但 <code class="k">agents/</code> 里实际是 compute/disk/network/ops/sre/investigator/reviewer 七个，DB 诊断目前落在 specialist-ops（service 状态）+ host_bash（mysql/redis 进程）。</p>
+
+        <p class="reveal"><strong>mutating 纪律（cmdpolicy + ReviewGate 双闸）：</strong></p>
+        <ul class="lst reveal">
+          <li><strong>① edge 侧 cmdpolicy</strong>（policy.go）：<code class="k">host_bash</code> 的 binary 分五类。<code class="k">systemctl restart</code> 等 write 子命令直接拒（specialist-ops.md 明说"不要用 host_bash 跑 systemctl restart 绕开二审——那条命令在 cmdpolicy 里被拒"）。<code class="k">ip netns exec</code> 因为是"递归 shell 可绕过 cmdpolicy"被显式拒。shells/脚本语言/rm/dd/chmod 全在 ClassDenied。Mixed 类默认拒。</li>
+          <li><strong>② manager 侧 ReviewGate</strong>（decorators/review_gate.go）：任何 <code class="k">Class=write|destructive</code> 的工具调用前，自动 spawn <code class="k">reviewer</code> worker 审 proposal，只有解析到 <code class="k">Decision: approve</code> 才放行内层工具；reject/解析失败/spawn 失败一律默认拒（safe default）。spawner 为 nil 时也是 "always reject"，防止误配置。</li>
+        </ul>
+
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">aiops/tools/decorators/review_gate.go — mutating 三态</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">func</span> <span class="t-fn">isMutatingClass</span>(class <span class="t-typ">string</span>) <span class="t-typ">bool</span> <span class="t-pun">{</span>
+    <span class="t-key">switch</span> strings.<span class="t-fn">ToLower</span>(strings.<span class="t-fn">TrimSpace</span>(class)) <span class="t-pun">{</span>
+    <span class="t-key">case</span> <span class="t-str">"write"</span><span class="t-pun">,</span> <span class="t-str">"destructive"</span><span class="t-pun">:</span> <span class="t-key">return</span> <span class="t-key">true</span>
+    <span class="t-key">default</span><span class="t-pun">:</span> <span class="t-key">return</span> <span class="t-key">false</span>
+    <span class="t-pun">}</span>
+<span class="t-pun">}</span>
+<span class="t-com">// 三态：approve→跑内层+MarkExecuted；reject→ErrReviewRejected；解析不出 Decision→ErrReviewUndecided(按reject)</span></code></pre>
+        </div>
+
+        <div class="note cy reveal">ReviewGate 刻意放在 timeout 外（reviewer 自己是 LLM graph，有独立 60s budget）和 audit 外（reject 没 execution 可审，写 <code class="k">chat_mutating_proposals</code> 而非 execution 行）。整条装饰器链是 <code class="k">tenant_bind → REVIEW_GATE → timeout → audit → ratelimit → metric</code>。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 08 失败模式总览 ---------- -->
+    <section id="failure-modes">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">failure modes · the guardrails</div>
+        <h2>关键技术与<em>失败模式</em>总览</h2>
+        <p class="lead">把前面各节出现的边界、触发条件与对策汇成一张表——这是 ongrid 对抗"弱模型 + 高危执行 + 分布式断连"的护栏全景。</p>
       </div>
 
-      <div class="prose">
-        <p class="reveal"><strong>长连接管理</strong>（stream_supervisor.go）：每个启用的 stream-mode IM app 一个 goroutine，30s reconcile DB——新增 app 拉起 client、禁用/密钥轮换则 cancel 重建。<code>runClientWithRestart</code> 指数退避封顶 60s。<strong>locale</strong>：每个 channel 可 pin locale，bridge 在 user content 后追加语言指令（<code>localeDirective</code>），coordinator 再透传给 specialist，避免 GLM 默认中文答英文问题。</p>
-        <p class="reveal"><strong>失败模式/待确认</strong>：当前所有 IM 会话归属一个固定 service account user（<code>serviceUserID</code>），per-IM-user 绑定（S3）未落地（adapter.go:31）。README 提到 DingTalk/WeCom，但 <code>provider/</code> 目录只看到 feishu/slack/telegram 三个实现——DingTalk/WeCom 具体实现待确认。</p>
-      </div>
-
-      <!-- ====== 5. specialist 能力边界 + mutating 纪律 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="specialist-boundaries">⑤ SRE / Network / DB specialist 的能力边界</h4>
-        <p class="reveal">能力边界由 <code>agents/*.md</code> frontmatter 的 <code>tools</code> 白名单 + <code>permission_mode</code> + <code>max_turns</code> + worker.go 的 <code>filterToolsForAgent</code> 共同物理约束。所有 specialist 都 <code>permission_mode: read-only</code>、<code>max_turns: 15</code>、第 0 步强制 <code>query_knowledge</code>：</p>
-      </div>
-
-      <div class="tablewrap reveal">
-        <table class="cmp">
-          <thead><tr><th>Persona</th><th>领域</th><th>关键工具（白名单）</th><th>边界</th></tr></thead>
-          <tbody>
-            <tr><td class="c-cg"><code>specialist-compute</code></td><td>CPU/内存/load/进程/OOM/NUMA/sysctl</td><td>get_host_load, get_host_processes, rank_edges, find_outlier_edges, query_promql, host_bash</td><td>不碰磁盘IO/网络/服务启停</td></tr>
-            <tr><td class="c-cg"><code>specialist-disk</code></td><td>文件系统/磁盘容量/inode/大文件</td><td>host_find_large_files, host_du_summary, host_stat_file, host_bash</td><td>不碰网络/进程/业务日志，不删改文件</td></tr>
-            <tr><td class="c-cg"><code>specialist-network</code></td><td>OVS/netfilter/netns/conntrack/bpftool/路由</td><td>host_bash, host_probe_{http,dns,tcp}, host_netns_inspect, query_promql</td><td>只读，不碰文件系统/磁盘</td></tr>
-            <tr><td class="c-cg"><code>specialist-ops</code></td><td>服务状态/启停重启/journalctl/cron/部署</td><td>host_bash, get_host_processes, <strong>host_restart_service</strong>, query_promql/logql</td><td>唯一带 mutating 工具者；重启走 ReviewGate 二审</td></tr>
-            <tr><td class="c-cg"><code>specialist-sre</code></td><td>集群健康/趋势/告警优先级/SLO/错误预算</td><td>correlate_incident, get_active_incidents, find_outlier_edges, rank_edges, query_promql</td><td>不做单机操作，给优先级 P0-P3</td></tr>
-            <tr><td class="c-cg"><code>incident-investigator</code></td><td>单 incident 端到端因果回溯</td><td>correlate_incident, query_{change_events,traceql,logql,promql}, expand_topology</td><td>max_turns=40，<code>disallowed_tools</code> 禁 execute_skill/host_restart_service</td></tr>
-            <tr><td class="c-cg"><code>reviewer</code></td><td>mutating 提案 SOP 二审</td><td>get_incident_detail, get_edge_summary, get_sop_text</td><td>background=true 异步，model 钉死 claude-opus，<code>disallowed_tools: ["*_skill"]</code></td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="prose">
-        <p class="reveal"><strong>没有专门的 "DB specialist"</strong>——README 说 "SRE / network / DB sub-agents"，但 <code>agents/</code> 里实际是 compute/disk/network/ops/sre/investigator/reviewer 七个，DB 诊断目前落在 specialist-ops（service 状态）+ host_bash（mysql/redis 进程）。独立 DB specialist 待确认是否存在/规划中。</p>
-        <p class="reveal"><strong>mutating 纪律（cmdpolicy + ReviewGate 双闸）：</strong> ① <strong>edge 侧 cmdpolicy</strong>（policy.go）：<code>host_bash</code> 的 binary 分五类。<code>systemctl restart</code> 等 write 子命令直接拒（specialist-ops.md 明说"不要用 host_bash 跑 systemctl restart 绕开二审——那条命令在 cmdpolicy 里被拒"）。<code>ip netns exec</code> 因为是"递归 shell 可绕过 cmdpolicy"被显式拒。shells/脚本语言/rm/dd/chmod 全在 ClassDenied。Mixed 类默认拒。 ② <strong>manager 侧 ReviewGate</strong>（decorators/review_gate.go）：任何 <code>Class=write|destructive</code> 的工具调用前，自动 spawn <code>reviewer</code> worker 审 proposal，只有解析到 <code>Decision: approve</code> 才放行内层工具；reject/解析失败/spawn 失败一律默认拒（safe default）。spawner 为 nil 时也是 "always reject"，防止误配置。</p>
-      </div>
-
-      <div class="code reveal">
-        <div class="bar"><i></i><i></i><i></i><span class="fname">aiops/tools/decorators/review_gate.go — mutating 三态</span></div>
-        <pre><code><span class="tok-k">func</span> <span class="tok-f">isMutatingClass</span>(class <span class="tok-t">string</span>) <span class="tok-t">bool</span> <span class="tok-p">{</span>
-    <span class="tok-k">switch</span> strings.<span class="tok-f">ToLower</span>(strings.<span class="tok-f">TrimSpace</span>(class)) <span class="tok-p">{</span>
-    <span class="tok-k">case</span> <span class="tok-s">"write"</span><span class="tok-p">,</span> <span class="tok-s">"destructive"</span><span class="tok-p">:</span> <span class="tok-k">return</span> <span class="tok-k">true</span>
-    <span class="tok-k">default</span><span class="tok-p">:</span> <span class="tok-k">return</span> <span class="tok-k">false</span>
-    <span class="tok-p">}</span>
-<span class="tok-p">}</span>
-<span class="tok-c">// 三态：approve→跑内层+MarkExecuted；reject→ErrReviewRejected；解析不出 Decision→ErrReviewUndecided(按reject)</span></code></pre>
-      </div>
-
-      <div class="prose">
-        <p class="reveal">ReviewGate 刻意放在 timeout 外（reviewer 自己是 LLM graph，有独立 60s budget）和 audit 外（reject 没 execution 可审，写 chat_mutating_proposals 而非 execution 行）。整条装饰器链是 <code>tenant_bind → REVIEW_GATE → timeout → audit → ratelimit → metric</code>。</p>
-      </div>
-
-      <!-- ====== 关键技术与失败模式 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="failure-modes">⑥ 关键技术与失败模式总览</h4>
-        <div class="tablewrap reveal">
-          <table class="cmp">
-            <thead><tr><th>场景 / 边界</th><th>触发条件</th><th>处理方式</th></tr></thead>
-            <tbody>
-              <tr><td>LLM 幻觉工具名</td><td>coordinator LLM 调 schema 外的 <code>host_bash</code> 等</td><td>CoordinatorStubs 占名返回"用 AgentTool 派活"；apology 兜底</td></tr>
-              <tr><td>协调员死循环</td><td>弱模型 30 轮 / 122 tool calls 空转</td><td>persona MaxTurns=10 收口 + 每轮 dynamicHints 注入"该收口了" + AgentTool 90s dedupe</td></tr>
-              <tr><td>重复派同一 specialist</td><td>同 (subagent_type, prompt) &lt;90s</td><td>sha256 dedupe 命中，返回"重复派活拦截" hint</td></tr>
-              <tr><td>user 消息丢失</td><td>graph 调用中途崩溃</td><td>LLM 调用前先持久化 user 消息（coordinator + worker 都遵守）</td></tr>
-              <tr><td>manager 重启路由失效</td><td>broker route 表清空但 edge TCP 仍活</td><td><code>shouldReconnect</code> 检测 "not found"/"mismatch clientID" → 异步 redial + re-register</td></tr>
-              <tr><td>webshell 被当跳板</td><td>被攻破的 manager 伪造 target Meta</td><td>edge allowedTargets 只允许 127.0.0.1:22 / localhost:22</td></tr>
-              <tr><td>host_bash 越权</td><td>LLM 想跑 <code>systemctl restart</code> / <code>rm</code> / <code>ip netns exec</code></td><td>cmdpolicy write 子命令 + ClassDenied + 递归 shell 全拒</td></tr>
-              <tr><td>mutating 误操作</td><td>任何 write/destructive 工具</td><td>ReviewGate spawn reviewer，default-reject；reviewer 三门控（SOP/无并行/有回滚）</td></tr>
-              <tr><td>viewer 越权</td><td>viewer 角色聊天</td><td>toolBag 先砍所有 Class!=read 工具，连 AgentTool 都看不到</td></tr>
-              <tr><td>correlate bundle 过大</td><td>bundle &gt; 100KB</td><td>先砍 logs(&gt;10)→traces(&gt;5)→metric values，Truncated 告知 LLM</td></tr>
-              <tr><td>IM 长轮询重复应答</td><td>Telegram getUpdates reconnect replay</td><td>dedupSet 按 provider:app_id:event_id 去重</td></tr>
-              <tr><td>worker session 泄漏</td><td>SpawnWorker 后 session 行 closed_at=NULL</td><td>goroutine defer CloseSession（曾累积 161 行 orphan）</td></tr>
-              <tr><td>子 agent 答错语言</td><td>GLM persona 中文答英文问</td><td>locale 经 ctx 透传 coordinator→specialist + 每轮 reminder 重申</td></tr>
-              <tr><td>告警风暴打爆 LLM</td><td>rule storm 大量 incident</td><td>investigator 3 worker + 100 buffer，超出直接丢弃并 warn，不阻塞 ingestion</td></tr>
-            </tbody>
+      <div class="reveal">
+        <div class="panel pad tick reveal">
+          <div class="kicker">表 08 · 场景 → 触发 → 处理</div>
+          <table class="tbl">
+            <tr><th>场景 / 边界</th><th>触发条件</th><th>处理方式</th></tr>
+            <tr><td>LLM 幻觉工具名</td><td>coordinator LLM 调 schema 外的 <code>host_bash</code> 等</td><td>CoordinatorStubs 占名返回"用 AgentTool 派活"；apology 兜底</td></tr>
+            <tr><td>协调员死循环</td><td>弱模型 30 轮 / 122 tool calls 空转</td><td>persona MaxTurns=10 收口 + 每轮 dynamicHints 注入"该收口了" + AgentTool 90s dedupe</td></tr>
+            <tr><td>重复派同一 specialist</td><td>同 (subagent_type, prompt) &lt;90s</td><td>sha256 dedupe 命中，返回"重复派活拦截" hint</td></tr>
+            <tr><td>user 消息丢失</td><td>graph 调用中途崩溃</td><td>LLM 调用前先持久化 user 消息（coordinator + worker 都遵守）</td></tr>
+            <tr><td>manager 重启路由失效</td><td>broker route 表清空但 edge TCP 仍活</td><td><code>shouldReconnect</code> 检测 "not found"/"mismatch clientID" → 异步 redial + re-register</td></tr>
+            <tr><td>webshell 被当跳板</td><td>被攻破的 manager 伪造 target Meta</td><td>edge allowedTargets 只允许 127.0.0.1:22 / localhost:22</td></tr>
+            <tr><td>host_bash 越权</td><td>LLM 想跑 <code>systemctl restart</code> / <code>rm</code> / <code>ip netns exec</code></td><td>cmdpolicy write 子命令 + ClassDenied + 递归 shell 全拒</td></tr>
+            <tr><td>mutating 误操作</td><td>任何 write/destructive 工具</td><td>ReviewGate spawn reviewer，default-reject；reviewer 三门控（SOP/无并行/有回滚）</td></tr>
+            <tr><td>viewer 越权</td><td>viewer 角色聊天</td><td>toolBag 先砍所有 Class!=read 工具，连 AgentTool 都看不到</td></tr>
+            <tr><td>correlate bundle 过大</td><td>bundle &gt; 100KB</td><td>先砍 logs(&gt;10)→traces(&gt;5)→metric values，Truncated 告知 LLM</td></tr>
+            <tr><td>IM 长轮询重复应答</td><td>Telegram getUpdates reconnect replay</td><td>dedupSet 按 provider:app_id:event_id 去重</td></tr>
+            <tr><td>worker session 泄漏</td><td>SpawnWorker 后 session 行 closed_at=NULL</td><td>goroutine defer CloseSession（曾累积 161 行 orphan）</td></tr>
+            <tr><td>子 agent 答错语言</td><td>GLM persona 中文答英文问</td><td>locale 经 ctx 透传 coordinator→specialist + 每轮 reminder 重申</td></tr>
+            <tr><td>告警风暴打爆 LLM</td><td>rule storm 大量 incident</td><td>investigator 3 worker + 100 buffer，超出直接丢弃并 warn，不阻塞 ingestion</td></tr>
           </table>
         </div>
       </div>
+    </section>
 
-      <!-- ====== 生态意义 ====== -->
-      <div class="prose">
-        <h4 class="reveal" id="ecosystem-significance">对 Ops AI / SRE 生态的意义</h4>
-        <p class="reveal"><strong>"调度优于全能"的多 Agent 范式</strong>：coordinator 不是更强的 specialist，而是更克制的——它的 toolBag 被物理收窄到只能"派/答/拒"，深度能力强制下沉到 specialist。这把"一个大 prompt 干所有事"的脆弱性换成了"小而专的子 agent + 明确边界"，并用 dedupe/MaxTurns/dynamicHints 一整套护栏对抗弱模型的死循环——这是把 SOTA agent 套路（claude-code 的 AgentTool/system-reminder）落到生产 SRE 场景的实践样本。</p>
+    <!-- ---------- 09 生态意义 / 亮点 ---------- -->
+    <section id="significance">
+      <div class="sec-head reveal">
+        <div class="sec-num">09</div>
+        <div class="kicker">significance · why it matters</div>
+        <h2>生态意义与<em>技术亮点</em></h2>
+        <p class="lead"><strong>"调度优于全能"的多 Agent 范式</strong>：coordinator 不是更强的 specialist，而是更克制的——它的 toolBag 被物理收窄到只能"派/答/拒"，深度能力强制下沉到 specialist。</p>
+      </div>
 
-        <h4 class="reveal" id="tech-highlights">技术亮点</h4>
-        <div class="grid2">
-          <div class="card reveal"><span class="ico">🛡</span><h5 class="accent">零信任执行面</h5><p>双层闸（edge cmdpolicy 只读白名单 + manager ReviewGate 二审）让"AI 远程跑命令"从不可接受变成可审计、可回滚、爆炸半径可控。reviewer 用最强模型、default-reject、三门控。</p></div>
-          <div class="card reveal"><span class="ico">🔌</span><h5 class="accent">零入站端口 + Browser SSH</h5><p>边缘只出站拨号，主机不开任何入站口，却仍能被远程巡检/执行/开 shell。SSH 栈收在 manager 侧让审计/并发/踢人单点可控。</p></div>
-          <div class="card reveal"><span class="ico">🔬</span><h5 class="accent">RCA 工程化</h5><p><code>correlate_incident</code> 把 metric+log+trace+edge+变更打成单个带降级策略的 bundle，配合拓扑 BFS 和"回溯到 0 号病人"的 persona，告警诞生瞬间就产出带证据的因果链。</p></div>
-          <div class="card reveal"><span class="ico">📦</span><h5 class="accent">自托管 + BYO-model + 多 IM</h5><p><code>docker compose up</code> 起全栈（含 Prometheus/Loki/Tempo/Grafana/frontier/searxng），模型层热路由 6 家 provider，IM 层 Slack/Telegram/飞书双向，避免厂商锁定。</p></div>
+      <div class="reveal">
+        <p class="reveal">这把"一个大 prompt 干所有事"的脆弱性换成了"小而专的子 agent + 明确边界"，并用 dedupe/MaxTurns/dynamicHints 一整套护栏对抗弱模型的死循环——这是把 SOTA agent 套路（claude-code 的 AgentTool/system-reminder）落到生产 SRE 场景的实践样本。</p>
+
+        <div class="grid g2 reveal" style="margin-top:14px">
+          <div class="card"><div class="ic">🛡 zero-trust</div><h3>零信任执行面</h3><p>双层闸（edge cmdpolicy 只读白名单 + manager ReviewGate 二审）让"AI 远程跑命令"从不可接受变成可审计、可回滚、爆炸半径可控。reviewer 用最强模型、default-reject、三门控。</p></div>
+          <div class="card cy"><div class="ic">🔌 zero-inbound</div><h3>零入站端口 + Browser SSH</h3><p>边缘只出站拨号，主机不开任何入站口，却仍能被远程巡检/执行/开 shell。SSH 栈收在 manager 侧让审计/并发/踢人单点可控。</p></div>
+          <div class="card"><div class="ic">🔬 rca-as-tool</div><h3>RCA 工程化</h3><p><code class="k">correlate_incident</code> 把 metric+log+trace+edge+变更打成单个带降级策略的 bundle，配合拓扑 BFS 和"回溯到 0 号病人"的 persona，告警诞生瞬间就产出带证据的因果链。</p></div>
+          <div class="card cy"><div class="ic">📦 self-hosted</div><h3>自托管 + BYO-model + 多 IM</h3><p><code class="k">docker compose up</code> 起全栈（含 Prometheus/Loki/Tempo/Grafana/frontier/searxng），模型层热路由 6 家 provider，IM 层 Slack/Telegram/飞书双向，避免厂商锁定。</p></div>
         </div>
 
-        <p class="reveal">一句话总结：ongrid 是把"运维 AI"从"贴一堆 Grafana 截图让人猜"升级成"系统在告警诞生瞬间就主动产出一条带证据的因果链"，并用双层闸把"AI 远程执行"压到工程可接受的爆炸半径——它降低了团队把"运维 AI"接进现有栈的门槛。</p>
+        <div class="note reveal" style="margin-top:24px"><b>一句话总结：</b>ongrid 把"运维 AI"从"贴一堆 Grafana 截图让人猜"升级成"系统在告警诞生瞬间就主动产出一条带证据的因果链"，并用双层闸把"AI 远程执行"压到工程可接受的爆炸半径——它降低了团队把"运维 AI"接进现有栈的门槛。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 10 待确认 ---------- -->
+    <section id="open-questions">
+      <div class="sec-head reveal">
+        <div class="sec-num">10</div>
+        <div class="kicker">open questions · to be confirmed</div>
+        <h2>附：<em>待确认项</em></h2>
+        <p class="lead">本次拆解基于 <code class="k">cmd/</code>、<code class="k">internal/manager/biz/aiops</code>、<code class="k">internal/edgeagent</code>、<code class="k">internal/pkg/tunnel</code> 的逐文件阅读；以下几项仍待与 README / 仓库其余部分对齐。</p>
       </div>
 
-      <!-- ====== 待确认 ====== -->
-      <div class="callout reveal">
-        <h5>附：待确认项</h5>
-        <ul>
-          <li><strong>Stars 数：</strong>未在仓库内体现，待确认（页面展示为「未知/—」）。</li>
-          <li><strong>DB specialist：</strong>README 提及 "DB sub-agents"，但 <code>agents/</code> 仅含 compute/disk/network/ops/sre/investigator/reviewer，独立 DB persona 待确认（当前 DB 诊断落在 specialist-ops + host_bash）。</li>
-          <li><strong>DingTalk / WeCom：</strong>README 列为支持渠道，但 <code>imbridge/provider/</code> 仅实现 feishu/slack/telegram，钉钉/企微实现待确认。</li>
-          <li><strong>web/ SPA 组件实现：</strong>本次只读了 <code>web/src/api/*.ts</code> 层，具体 React 组件（聊天/拓扑/webshell 渲染）实现细节待确认。</li>
-          <li><strong>旧 <code>agent.go</code> 内核：</strong>与 graph 内核并存，本文聚焦 graph 内核（<code>runtime.go</code>/<code>worker.go</code>），旧内核细节未深读。</li>
+      <div class="reveal">
+        <ul class="lst reveal">
+          <li><strong>Stars 数：</strong>未在仓库内体现，待确认（页面展示为「未知 / —」）。</li>
+          <li><strong>DB specialist：</strong>README 提及 "DB sub-agents"，但 <code class="k">agents/</code> 仅含 compute/disk/network/ops/sre/investigator/reviewer，独立 DB persona 待确认（当前 DB 诊断落在 specialist-ops + host_bash）。</li>
+          <li><strong>DingTalk / WeCom：</strong>README 列为支持渠道，但 <code class="k">imbridge/provider/</code> 仅实现 feishu/slack/telegram，钉钉/企微实现待确认。</li>
+          <li><strong>web/ SPA 组件实现：</strong>本次只读了 <code class="k">web/src/api/*.ts</code> 层，具体 React 组件（聊天/拓扑/webshell 渲染）实现细节待确认。</li>
+          <li><strong>旧 <code class="k">agent.go</code> 内核：</strong>与 graph 内核并存，本文聚焦 graph 内核（<code class="k">runtime.go</code>/<code class="k">worker.go</code>），旧内核细节未深读。</li>
         </ul>
+
+        <div class="foot reveal">
+          <div class="big">On<b>grid</b> · 源码即文档</div>
+          <div class="meta">
+            ongridio/ongrid · Go + TypeScript · Apache-2.0<br/>
+            基于 cmd/ + internal/ 源码逐文件阅读 · 含实际函数名与算法<br/>
+            <a class="inl" href="https://github.com/ongridio/ongrid" target="_blank" rel="noopener">github.com/ongridio/ongrid ↗</a>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
-</section>
+    </section>
 
+  </main>
 </div>
-</main>
 
-<button class="totop" aria-label="返回顶部">↑</button>
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(224,149,74,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
 
-<script>if(!location.hash){history.replaceState(null,'','#og');}</script>
-<script src="./assets/main.js"></script>
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy, .ascii .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code, .ascii').querySelector('code, pre');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
 </body>
 </html>
