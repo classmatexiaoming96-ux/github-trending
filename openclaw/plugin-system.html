@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>插件系统 · 深度解析 · OpenClaw</title>
+<meta name="description" content="OpenClaw 插件系统完整解析——types.ts 的 OpenClawPluginApi 公共接口、api-builder.ts 的 BuildPluginApiParams、manifest.ts 的 openclaw.plugin.json 解析与缓存、runtime.ts 的全局 RegistryState 协调器，以及「冷控制面」激活边界设计。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-back{
+  font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:color .25s var(--ease);
+}
+.nav-back:hover{ color:var(--star); }
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:64px; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h1{ font-family:var(--serif); font-weight:560; font-size:clamp(38px,6vw,72px); line-height:0.98; letter-spacing:-0.025em; margin:0 0 20px; }
+h1 em{ font-style:italic; color:var(--star); font-weight:500; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:20px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* ---- flow ---- */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+.foot .meta a{ color:var(--text-dim); text-decoration:none; }
+.foot .meta a:hover{ color:var(--signal); }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar a.mback{ font-family:var(--mono); font-size:12px; color:var(--star); text-decoration:none; }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <a class="mback" href="../openclaw.html">← 总览</a>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <a class="nav-back" href="../openclaw.html">← 返回 OpenClaw 总览</a>
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">插件系统 · src/plugins/</div>
+    </div>
+    <span class="nav-ver">深度阅读 · deep dive</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">01</span>插件系统总览</a></li>
+        <li><a href="#api"><span class="idx">02</span>OpenClawPluginApi 公共接口</a></li>
+        <li><a href="#manifest"><span class="idx">03</span>Manifest 解析与缓存</a></li>
+        <li><a href="#runtime"><span class="idx">04</span>运行时协调器</a></li>
+        <li><a href="#cold-plane"><span class="idx">05</span>冷控制面与激活边界</a></li>
+        <li><a href="#ecosystem"><span class="idx">06</span>插件生态规模</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      源码级深度解析 · src/<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ============ 01 · INTRO ============ -->
+    <section id="intro">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">plugins · the architecture</div>
+        <h2>插件系统<em>总览</em></h2>
+        <p class="lead">OpenClaw 是<strong>插件优先（plugin-first）</strong>的运行时：仓库内有 <strong>141 个扩展</strong>、<strong>16 个包</strong>。Provider、消息渠道、工具、MCP 服务器、外部 Agent Harness、记忆后端——几乎所有能力都不是硬编码进核心，而是通过插件注册进来的。</p>
+      </div>
+
+      <p class="reveal">把内核看作一个极薄的协调层：它只负责加载 manifest、构造一份精简过的 API 对象、再把插件注册进来的能力汇聚到一个全局注册表中。所有「OpenClaw 能做什么」的答案，最终都落在某个插件的注册调用上。这种设计让模型供应商、消息平台、工具集可以各自独立演进、独立发版，而无需触碰内核。</p>
+
+      <p class="reveal">插件系统的核心由四个源文件构成，它们的职责边界非常清晰：<code class="k">types.ts</code> 定义对插件暴露的公共 API 面，<code class="k">manifest.ts</code> 负责 <code class="kc">openclaw.plugin.json</code> 的解析与缓存，<code class="k">api-builder.ts</code> 按需裁剪并构造每个插件实际拿到的 API 对象，而 <code class="k">runtime.ts</code> 则在 <code class="kc">globalThis</code> 上维护一个进程级的全局注册表，协调热替换与回收。理解这四个文件，就理解了整个插件层。</p>
+
+      <div class="grid g4 reveal">
+        <div class="card">
+          <div class="ic">src/plugins</div>
+          <h3>types.ts</h3>
+          <p>公共 API 面定义——<code class="k">OpenClawPluginApi</code> 接口与全部 <code class="k">register*</code> 方法签名。</p>
+        </div>
+        <div class="card">
+          <div class="ic">src/plugins</div>
+          <h3>manifest.ts</h3>
+          <p>解析 <code class="kc">openclaw.plugin.json</code>，带 SLRU 缓存与 mtime/ctime 失效跟踪。</p>
+        </div>
+        <div class="card">
+          <div class="ic">src/plugins</div>
+          <h3>api-builder.ts</h3>
+          <p>用 <code class="k">BuildPluginApiParams</code> 按需裁剪并构造插件实际持有的 API 对象。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">src/plugins</div>
+          <h3>runtime.ts</h3>
+          <p>挂在 <code class="kc">globalThis</code> 上的全局 <code class="k">RegistryState</code> 协调器，管理热替换与回收。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 02 · API ============ -->
+    <section id="api">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">api · the public surface</div>
+        <h2><em>OpenClawPluginApi</em> 公共接口</h2>
+        <p class="lead">插件能调用的一切，都收敛在 <code class="k">src/plugins/types.ts</code> 定义的 <code class="k">OpenClawPluginApi</code> 接口上；而 <code class="k">api-builder.ts</code> 则用 <code class="k">BuildPluginApiParams</code> 决定每个插件实际拿到哪些方法。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">api-builder.ts · BuildPluginApiParams</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export type</span> <span class="t-typ">BuildPluginApiParams</span> = {
+  id: <span class="t-typ">string</span>;
+  name: <span class="t-typ">string</span>;
+  version?: <span class="t-typ">string</span>;
+  source: <span class="t-typ">string</span>;
+  registrationMode: <span class="t-typ">OpenClawPluginApi</span>[<span class="t-str">"registrationMode"</span>];
+  config: <span class="t-typ">OpenClawConfig</span>;
+  runtime: <span class="t-typ">PluginRuntime</span>;
+  logger: <span class="t-typ">PluginLogger</span>;
+  handlers?: <span class="t-typ">Partial</span>&lt;<span class="t-typ">Pick</span>&lt;<span class="t-typ">OpenClawPluginApi</span>,
+    | <span class="t-str">"registerTool"</span>          <span class="t-com">// 注册工具</span>
+    | <span class="t-str">"registerHook"</span>          <span class="t-com">// 注册生命周期钩子</span>
+    | <span class="t-str">"registerHttpRoute"</span>     <span class="t-com">// 注册 HTTP 路由</span>
+    | <span class="t-str">"registerChannel"</span>       <span class="t-com">// 注册消息渠道</span>
+    | <span class="t-str">"registerGatewayMethod"</span> <span class="t-com">// 注册 Gateway 方法</span>
+    | <span class="t-str">"registerCli"</span>           <span class="t-com">// 注册 CLI 命令</span>
+    | <span class="t-str">"registerProvider"</span>      <span class="t-com">// 注册 Provider（模型/语音/图像等）</span>
+    | <span class="t-str">"registerAgentHarness"</span>  <span class="t-com">// 注册外部 Agent Harness（ACP）</span>
+    | <span class="t-str">"registerMcpServer"</span>     <span class="t-com">// 注册 MCP 服务器</span>
+    | ...<span class="t-com">（共 30+ 项）</span>
+  &gt;&gt;;
+};</code></pre>
+      </div>
+
+      <p class="reveal">注意 <code class="k">handlers</code> 的类型：<code class="k">Partial&lt;Pick&lt;OpenClawPluginApi, ...&gt;&gt;</code>。这意味着插件只需实现自己关心的注册方法——一个纯 Provider 插件可能只提供 <code class="k">registerProvider</code>，宿主会据此裁剪它实际拿到的 API 面，避免把无关能力暴露给插件。下表按能力域归纳了这 30+ 个注册方法。</p>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">表 01 · 注册方法按能力域归纳</div>
+        <table class="tbl">
+          <tr><th>能力域</th><th>注册方法</th><th>作用</th></tr>
+          <tr>
+            <td>模型与执行</td>
+            <td><span class="cy">registerTool · registerProvider · registerMcpServer</span></td>
+            <td>暴露工具、接入模型/语音/图像 provider、挂载 MCP server</td>
+          </tr>
+          <tr>
+            <td>外部 Agent</td>
+            <td><code>registerAgentHarness</code></td>
+            <td>把 Claude Code / Codex 等 ACP harness 接进来</td>
+          </tr>
+          <tr>
+            <td>消息与路由</td>
+            <td><code>registerChannel · registerHttpRoute · registerGatewayMethod</code></td>
+            <td>新增渠道、HTTP 端点、Gateway RPC 方法</td>
+          </tr>
+          <tr>
+            <td>生命周期与 CLI</td>
+            <td><code>registerHook · registerCli</code></td>
+            <td>注入 start/stop/enable/disable 钩子、扩展 CLI 命令</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="note reveal"><b>裁剪而非全开：</b><code class="k">handlers</code> 是 <code class="k">Partial&lt;Pick&lt;...&gt;&gt;</code>——插件只实现它关心的那几个注册方法，宿主据此收缩 API 面。这既限制了插件的能力边界，也让类型系统在编译期就能反映「这个插件能做什么」。</div>
+    </section>
+
+    <!-- ============ 03 · MANIFEST ============ -->
+    <section id="manifest">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">manifest · plugin metadata</div>
+        <h2>Manifest <em>解析与缓存</em></h2>
+        <p class="lead">每个插件都由一份 <code class="kc">openclaw.plugin.json</code> 描述。<code class="k">src/plugins/manifest.ts</code> 负责解析这份清单，并用一套带失效跟踪的 SLRU 缓存避免重复读盘与重复解析。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">manifest.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export const</span> <span class="t-typ">PLUGIN_MANIFEST_FILENAME</span> = <span class="t-str">"openclaw.plugin.json"</span>;
+<span class="t-key">export const</span> <span class="t-typ">MAX_PLUGIN_MANIFEST_BYTES</span> = <span class="t-num">256</span> * <span class="t-num">1024</span>;
+
+<span class="t-com">// manifest 解析缓存（SLRU，512 条目）</span>
+<span class="t-key">const</span> pluginManifestLoadCache = <span class="t-key">new</span> <span class="t-fn">PluginLruCache</span>&lt;<span class="t-typ">PluginManifestLoadCacheEntry</span>&gt;(
+  <span class="t-typ">MAX_PLUGIN_MANIFEST_LOAD_CACHE_ENTRIES</span>,
+);
+
+<span class="t-key">export function</span> <span class="t-fn">createPluginCacheKey</span>(...): <span class="t-typ">PluginCacheKey</span>;
+<span class="t-key">export function</span> <span class="t-fn">clearPluginManifestLoadCache</span>(): <span class="t-typ">void</span>;</code></pre>
+      </div>
+
+      <p class="reveal">manifest 承载了插件的关键元数据：版本号、入口点、配置 schema、命令列表、对外暴露的 provider、以及生命周期 hook。解析结果会进入一个最多 <strong>512 条目</strong>的 SLRU 缓存（<code class="k">PluginLruCache</code>）；每条缓存项都记录源文件的 <code class="k">mtimeMs</code> 与 <code class="k">ctimeMs</code>，一旦文件被修改即自动失效并重解析。文件体积有 <strong>256 KiB</strong> 的硬上限（<code class="k">MAX_PLUGIN_MANIFEST_BYTES</code>），防止异常清单拖垮加载。</p>
+
+      <div class="grid g4 reveal">
+        <div class="card">
+          <div class="ic">convention</div>
+          <h3>文件名固定</h3>
+          <p>约定文件名 <code class="kc">openclaw.plugin.json</code>，由 <code class="k">PLUGIN_MANIFEST_FILENAME</code> 常量统一引用。</p>
+        </div>
+        <div class="card">
+          <div class="ic">limit</div>
+          <h3>256 KiB 上限</h3>
+          <p><code class="k">MAX_PLUGIN_MANIFEST_BYTES = 256 * 1024</code>，超限即拒绝解析。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">cache</div>
+          <h3>SLRU · 512</h3>
+          <p>解析结果进入 512 条目的 SLRU 缓存，复用读盘与解析成本。</p>
+        </div>
+        <div class="card">
+          <div class="ic">invalidate</div>
+          <h3>mtime + ctime</h3>
+          <p>每条缓存项跟踪 <code class="k">mtimeMs</code>/<code class="k">ctimeMs</code>，文件变更即失效。</p>
+        </div>
+      </div>
+
+      <div class="note cy reveal"><b>测试钩子：</b><code class="kc">createPluginCacheKey()</code> 暴露缓存键的构造逻辑，<code class="kc">clearPluginManifestLoadCache()</code> 则用于在测试或热重载场景下整体清空缓存——它们是这套缓存对外的两个显式接缝。</div>
+    </section>
+
+    <!-- ============ 04 · RUNTIME ============ -->
+    <section id="runtime">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">runtime · registry coordinator</div>
+        <h2>运行时<em>协调器</em></h2>
+        <p class="lead"><code class="k">src/plugins/runtime.ts</code> 在 <code class="kc">globalThis</code> 上维护唯一的 <code class="k">RegistryState</code>——一份进程级的全局注册表，所有插件注册进来的能力都汇聚于此，并由它协调热替换与回收。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">runtime.ts · 全局 RegistryState</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// runtime.ts — 全局 RegistryState 保存在 globalThis 上</span>
+<span class="t-key">const</span> state: <span class="t-typ">RegistryState</span> = (() =&gt; {
+  <span class="t-key">const</span> globalState = globalThis <span class="t-key">as typeof</span> globalThis &amp; {
+    [<span class="t-typ">PLUGIN_REGISTRY_STATE</span>]?: <span class="t-typ">RegistryState</span>;
+  };
+  <span class="t-key">let</span> registryState = globalState[<span class="t-typ">PLUGIN_REGISTRY_STATE</span>];
+  <span class="t-key">if</span> (!registryState) {
+    registryState = {
+      activeRegistry: <span class="t-key">null</span>,
+      activeVersion: <span class="t-num">0</span>,
+      httpRoute: { registry: <span class="t-key">null</span>, pinned: <span class="t-key">false</span>, version: <span class="t-num">0</span> },
+      channel: { registry: <span class="t-key">null</span>, pinned: <span class="t-key">false</span>, version: <span class="t-num">0</span> },
+      importedPluginIds: <span class="t-key">new</span> <span class="t-fn">Set</span>&lt;<span class="t-typ">string</span>&gt;(),
+      runtimeSubagentMode: <span class="t-str">"default"</span>,
+    };
+    globalState[<span class="t-typ">PLUGIN_REGISTRY_STATE</span>] = registryState;
+  }
+  <span class="t-key">return</span> registryState;
+})();
+
+<span class="t-key">function</span> <span class="t-fn">asPluginRegistry</span>(registry: <span class="t-typ">RegistryState</span>[<span class="t-str">"activeRegistry"</span>]): <span class="t-typ">PluginRegistry</span> | <span class="t-key">null</span>;
+<span class="t-key">async function</span> <span class="t-fn">cleanupPreviousPluginHostRegistry</span>(params: {...}): <span class="t-typ">Promise</span>&lt;<span class="t-typ">void</span>&gt;;
+<span class="t-key">function</span> <span class="t-fn">isRegistryLive</span>(registry: <span class="t-typ">PluginRegistry</span>): <span class="t-typ">boolean</span>;
+<span class="t-key">function</span> <span class="t-fn">isRegistryPinned</span>(registry: <span class="t-typ">PluginRegistry</span>): <span class="t-typ">boolean</span>;</code></pre>
+      </div>
+
+      <p class="reveal">关键设计是<strong>每进程一份全局注册表</strong>：状态挂在 <code class="kc">globalThis[PLUGIN_REGISTRY_STATE]</code> 上，即使模块被多次加载也只会有一份。在这份注册表之上有三个视角，它们指向同一份底层数据但各自带版本号：<code class="k">activeRegistry</code>（配 <code class="k">activeVersion</code>，每次热替换递增）、<code class="k">httpRoute</code> 与 <code class="k">channel</code>（各自带 <code class="k">pinned</code> 与 <code class="k">version</code>）。<code class="k">pinned</code> 标记用来保护「正在被使用」的注册表不被回收。</p>
+
+      <div class="grid g3 reveal">
+        <div class="card">
+          <div class="ic">view · active</div>
+          <h3>activeRegistry 主视角</h3>
+          <p>当前生效的注册表，配 <code class="k">activeVersion</code>，每次热替换自增以标记代际。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">view · http</div>
+          <h3>httpRoute 路由视角</h3>
+          <p>HTTP 路由维度的注册表视图，独立持有 <code class="k">pinned</code> 与 <code class="k">version</code>。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">view · channel</div>
+          <h3>channel 渠道视角</h3>
+          <p>消息渠道维度的注册表视图，同样独立追踪 <code class="k">pinned</code> 与 <code class="k">version</code>。</p>
+        </div>
+      </div>
+
+      <div class="note cy reveal"><b>回收前的双重检查：</b><code class="kc">cleanupPreviousPluginHostRegistry()</code> 在回收旧的宿主注册表前，会先用 <code class="kc">isRegistryLive()</code> 与 <code class="kc">isRegistryPinned()</code> 双重确认——被 pin 住（仍在服务请求）的注册表会被跳过，避免把还在用的能力拆掉。</div>
+    </section>
+
+    <!-- ============ 05 · COLD PLANE ============ -->
+    <section id="cold-plane">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">cold plane · activation boundary</div>
+        <h2><em>冷控制面</em>与激活边界</h2>
+        <p class="lead">深读源码时浮现出一条关键设计线——<strong>插件激活边界（plugin-activation-boundary）</strong>：manifest 解析、模型目录、ID 归一化这些路径，刻意<strong>不</strong>导入插件运行时代码。</p>
+      </div>
+
+      <p class="reveal">这意味着「选哪个模型」「列出有哪些能力」这类操作，可以在插件真正激活<strong>之前</strong>完成。冷路径不触碰 runtime，因此既快又稳定，还有一个额外好处：因为这些前置步骤不引入随插件激活而变化的状态，它们对<strong>提示缓存（prompt caching）</strong>友好——模型目录与归一化结果在激活前后保持一致，缓存命中不被打破。</p>
+
+      <p class="reveal">而真正的「热路径」发生在激活时：runtime 的 <code class="k">registerApiProvider()</code> 把每个 provider 的 API 类型字符串（如 <code class="kc">anthropic-messages</code> / <code class="kc">openai-completions</code> / <code class="kc">google-generative-ai</code> ……）连同它的 <strong>stream 函数</strong>一起登记进一张表。只有走到这一步，provider 才真正具备发起流式请求的能力。</p>
+
+      <div class="note reveal"><b>边界即性能：</b>把「读元数据/选模型/归一化」与「激活/注册 stream」清晰分开，是这套架构能在大量插件下保持启动可控、缓存稳定的关键。冷路径永不触发激活。</div>
+
+      <div class="grid g2 reveal">
+        <div class="card cy">
+          <div class="ic">cold path</div>
+          <h3>冷路径 · 不触发激活</h3>
+          <p>manifest 解析、模型目录、ID 归一化——均不导入插件 runtime，可在激活前运行，且对 prompt caching 友好。</p>
+        </div>
+        <div class="card">
+          <div class="ic">hot path</div>
+          <h3>热路径 · registerApiProvider</h3>
+          <p>激活时 <code class="k">registerApiProvider()</code> 注册 API 类型字符串与 stream 函数，provider 至此才能真正发流。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 06 · ECOSYSTEM ============ -->
+    <section id="ecosystem">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">ecosystem · the numbers</div>
+        <h2>插件<em>生态规模</em></h2>
+        <p class="lead">把镜头拉远看数字：<strong>141 个扩展</strong>覆盖了从模型供应到消息渠道、记忆后端、基础设施的全部能力——而这一切都建立在前面那套统一的注册接口之上。</p>
+      </div>
+
+      <p class="reveal">在这 141 个扩展中，约 <strong>68 个是 provider</strong>（模型/语音/图像供应方），约 <strong>20 个是 channel</strong>（消息渠道），其余为记忆后端、工具与基础设施类。供应侧有 30+ 家厂商，但它们最终收敛到约 <strong>10 个 API 家族</strong>；工具 schema 会按家族做归一化——例如 Gemini 会剥掉 <code class="k">pattern</code>/<code class="k">minLength</code>，OpenAI 则把工具包进 strict JSON。</p>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">表 02 · 141 个扩展按类型拆分</div>
+        <table class="tbl">
+          <tr><th>类型</th><th>数量</th><th>说明</th></tr>
+          <tr><td>Provider（模型/语音/图像）</td><td><span class="cy">~68</span></td><td>30+ 厂商收敛到 ~10 个 API 家族，schema 按家族归一化</td></tr>
+          <tr><td>Channel（消息渠道）</td><td><span class="ph">~20</span></td><td>新增渠道经 <code>registerChannel</code> 接入</td></tr>
+          <tr><td>记忆 / 工具 / 基础设施</td><td><span class="mono">其余</span></td><td>memory 后端、工具集与底层基础设施扩展</td></tr>
+          <tr><td>合计</td><td><span class="ro">141</span></td><td>分布在 16 个包中，全部经统一注册接口接入</td></tr>
+        </table>
+      </div>
+
+      <div class="note reveal"><b>为什么 plugin-first 能 scale：</b>每一项能力都是一个<strong>隔离、可独立发版</strong>的扩展——provider 升级 API、channel 接入新平台、工具修补 schema，都不必触碰内核，也不会互相牵连。内核只做协调，规模便随插件数量线性铺开而非耦合膨胀。</div>
+    </section>
+
+    <!-- ============ FOOT ============ -->
+    <div class="foot reveal">
+      <div class="big">Plugin · <b>插件系统</b></div>
+      <div class="meta">src/plugins/ · types · manifest · api-builder · runtime<br/><a href="../openclaw.html">← 返回总览</a> · <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github ↗</a></div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+/* starfield */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* scroll spy + reveals */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+})();
+
+/* copy buttons */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
+</body>
+</html>

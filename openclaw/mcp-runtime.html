@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MCP 运行时 · 深度解析 · OpenClaw</title>
+<meta name="description" content="OpenClaw MCP 运行时完整解析——基于 @modelcontextprotocol/sdk 的 BundleMcpSession、三种传输（stdio/sse/streamable-http）、超时与失败冷却常量、工具调用链与会话级配置指纹。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-back{
+  font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:color .25s var(--ease);
+}
+.nav-back:hover{ color:var(--star); }
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:64px; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h1{ font-family:var(--serif); font-weight:560; font-size:clamp(38px,6vw,72px); line-height:0.98; letter-spacing:-0.025em; margin:0 0 20px; }
+h1 em{ font-style:italic; color:var(--star); font-weight:500; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:20px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* ---- flow ---- */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+.foot .meta a{ color:var(--text-dim); text-decoration:none; }
+.foot .meta a:hover{ color:var(--signal); }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar a.mback{ font-family:var(--mono); font-size:12px; color:var(--star); text-decoration:none; }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <a class="mback" href="../openclaw.html">← 总览</a>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <a class="nav-back" href="../openclaw.html">← 返回 OpenClaw 总览</a>
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">MCP 运行时 · agent-bundle-mcp-runtime.ts</div>
+    </div>
+    <span class="nav-ver">深度阅读 · deep dive</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">01</span>MCP 运行时</a></li>
+        <li><a href="#session"><span class="idx">02</span>BundleMcpSession 会话结构</a></li>
+        <li><a href="#transports"><span class="idx">03</span>三种传输类型</a></li>
+        <li><a href="#toolcall"><span class="idx">04</span>工具调用链与超时</a></li>
+        <li><a href="#lifecycle"><span class="idx">05</span>配置指纹与连接复用</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      源码级深度解析 · src/<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ===== 01 · intro ===== -->
+    <section id="intro">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">mcp · model context protocol</div>
+        <h2>MCP <em>运行时</em></h2>
+        <p class="lead">OpenClaw 把 <strong>Model Context Protocol</strong> 客户端能力收敛在 <code class="k">src/agents/agent-bundle-mcp-runtime.ts</code> 一处。它构建于官方 <code class="kc">@modelcontextprotocol/sdk</code> 之上，把外部 MCP server 暴露的工具接入到 agent 的工具空间——但接入的粒度不是全局，而是<strong>每会话一组</strong>。</p>
+      </div>
+
+      <p class="reveal">MCP server 在 OpenClaw 中是<strong>会话作用域</strong>（session-scoped）的：每个会话拥有自己独立的一组 MCP 客户端连接。两个并行会话即使读取同一份服务器配置，也会各自建立 <code class="kc">Client</code> + <code class="kc">Transport</code>，互不串扰。这样工具调用的状态、子进程、长连接都被严格隔离在会话边界内，会话销毁时连接随之拆除。</p>
+
+      <p class="reveal">但连接的<strong>生命周期</strong>并不与会话一对一绑死。运行时之上有一个进程级的单例 manager（由 <code class="k">SESSION_MCP_RUNTIME_MANAGER_KEY</code> 锚定），它负责为各会话登记、复用与回收连接。当一个会话的 MCP 配置指纹未变化时，已有连接被直接复用，避免重复握手与子进程冷启动；只有配置真正变化或会话空闲超时，才会触发重建或回收。</p>
+
+      <div class="grid g3 reveal">
+        <div class="card">
+          <div class="ic">scope</div>
+          <h3>会话级隔离</h3>
+          <p>每个会话获得独立的 MCP 客户端连接集合，工具状态、子进程与长连接不跨会话共享。</p>
+        </div>
+        <div class="card">
+          <div class="ic">process</div>
+          <h3>进程单例 manager</h3>
+          <p>由全局 Symbol 注册表锚定的唯一 manager 统管所有会话的连接登记、复用与回收。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">reuse</div>
+          <h3>配置指纹复用</h3>
+          <p>会话级 MCP 配置被哈希成指纹，指纹不变即复用既有连接，跳过重复握手与冷启动。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 02 · session ===== -->
+    <section id="session">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">session · the connection record</div>
+        <h2>BundleMcpSession <em>会话结构</em></h2>
+        <p class="lead">运行时把一条 MCP 连接的全部状态压缩进一个 <code class="k">BundleMcpSession</code> 记录——服务器名、SDK 客户端、底层传输、传输类型、请求超时、是否支持并行调用，以及一个可选的 stderr 分离回调。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">agent-bundle-mcp-runtime.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">import</span> <span class="t-pun">{</span> Client <span class="t-pun">}</span> <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/client/index.js"</span><span class="t-pun">;</span>
+<span class="t-key">import</span> <span class="t-pun">{</span> StreamableHTTPClientTransport <span class="t-pun">}</span> <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/client/streamableHttp.js"</span><span class="t-pun">;</span>
+<span class="t-key">import type</span> <span class="t-pun">{</span> Transport <span class="t-pun">}</span> <span class="t-key">from</span> <span class="t-str">"@modelcontextprotocol/sdk/shared/transport.js"</span><span class="t-pun">;</span>
+
+<span class="t-key">type</span> <span class="t-typ">BundleMcpSession</span> <span class="t-pun">=</span> <span class="t-pun">{</span>
+  serverName<span class="t-pun">:</span> <span class="t-typ">string</span><span class="t-pun">;</span>
+  client<span class="t-pun">:</span> <span class="t-typ">Client</span><span class="t-pun">;</span>
+  transport<span class="t-pun">:</span> <span class="t-typ">Transport</span><span class="t-pun">;</span>
+  transportType<span class="t-pun">:</span> <span class="t-str">"stdio"</span> <span class="t-pun">|</span> <span class="t-str">"sse"</span> <span class="t-pun">|</span> <span class="t-str">"streamable-http"</span><span class="t-pun">;</span>
+  requestTimeoutMs<span class="t-pun">:</span> <span class="t-typ">number</span><span class="t-pun">;</span>
+  supportsParallelToolCalls<span class="t-pun">:</span> <span class="t-typ">boolean</span><span class="t-pun">;</span>
+  detachStderr<span class="t-pun">?:</span> <span class="t-pun">()</span> <span class="t-pun">=&gt;</span> <span class="t-key">void</span><span class="t-pun">;</span>
+<span class="t-pun">};</span>
+
+<span class="t-key">const</span> SESSION_MCP_RUNTIME_MANAGER_KEY <span class="t-pun">=</span> <span class="t-typ">Symbol</span><span class="t-pun">.</span><span class="t-fn">for</span><span class="t-pun">(</span><span class="t-str">"openclaw.sessionMcpRuntimeManager"</span><span class="t-pun">);</span></code></pre>
+      </div>
+
+      <ul class="body reveal">
+        <li><strong>serverName</strong> — 该连接对应的 MCP server 在配置中的逻辑名，用作工具命名空间前缀与日志标识。</li>
+        <li><strong>client</strong> — SDK 的 <code class="kc">Client</code> 实例，承载 <code class="k">listTools()</code> / <code class="k">callTool()</code> 等协议级请求。</li>
+        <li><strong>transport</strong> — 实现 <code class="kc">Transport</code> 接口的底层载体，client 通过它收发 JSON-RPC 消息。</li>
+        <li><strong>transportType</strong> — 三选一的字面量联合，标明该连接走的是 stdio、sse 还是 streamable-http。</li>
+        <li><strong>requestTimeoutMs</strong> — 单次协议请求的超时上限，源自服务器配置，避免请求无限挂起。</li>
+        <li><strong>supportsParallelToolCalls</strong> — 是否允许对该 server 并发派发多个工具调用，作为并行执行的开关。</li>
+        <li><strong>detachStderr</strong> — 可选回调，仅 stdio 传输有意义，用于在拆除连接时解除对子进程 stderr 的监听。</li>
+      </ul>
+
+      <div class="grid g2 reveal">
+        <div class="card">
+          <div class="ic">Symbol.for(...)</div>
+          <h3>进程单例锚点</h3>
+          <p>用全局 Symbol 注册表的 <code class="k">Symbol.for("openclaw.sessionMcpRuntimeManager")</code> 作为键，确保即便模块被多次加载，整个进程也只有<strong>一个</strong> manager 实例被反复取用。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">detachStderr</div>
+          <h3>子进程 stderr 分离</h3>
+          <p>当传输是 stdio 时，MCP server 是一个本地子进程；<code class="kc">detachStderr</code> 在连接销毁阶段被调用，解除 stderr 转发，防止句柄与监听器泄漏。其它传输类型该字段为空。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 03 · transports ===== -->
+    <section id="transports">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">transport · three carriers</div>
+        <h2>三种<em>传输类型</em></h2>
+        <p class="lead">同一套 <code class="kc">Client</code> 协议逻辑可以跑在三种不同的物理载体上。<code class="k">transportType</code> 字段记录的就是当前连接落在哪一种之上——从本地子进程管道，到远端长连接，再到可恢复的 HTTP 会话。</p>
+      </div>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">表 01 · 三种 MCP 传输</div>
+        <table class="tbl">
+          <tr><th>transportType</th><th>载体</th><th>典型场景</th></tr>
+          <tr><td><code>stdio</code></td><td>子进程 stdin/stdout 管道</td><td>本地 MCP server 可执行文件</td></tr>
+          <tr><td><span class="cy mono">sse</span></td><td>Server-Sent Events 长连接</td><td>远端只读流式 server</td></tr>
+          <tr><td><span class="ph mono">streamable-http</span></td><td>StreamableHTTPClientTransport</td><td>HTTP 双向 / 可恢复会话</td></tr>
+        </table>
+      </div>
+
+      <p class="reveal">配置入口在 <code class="k">embedded-agent-mcp.ts</code> 的 <code class="k">loadEmbeddedAgentMcpConfig()</code>：它读取并物化嵌入式 agent 的 MCP 服务器声明。读出的配置记录交由 <code class="k">mcp-config-shared.ts</code> 的 <code class="k">isMcpConfigRecord()</code> 做结构校验，确保每条 server 记录字段合法。真正把一条配置记录解析为可用的 <code class="kc">Transport</code> 实例，则发生在 <code class="k">mcp-transport.ts</code> 中——它根据记录里声明的传输形态分派构造对应的 transport。</p>
+
+      <div class="note reveal"><b>传输选择：</b>采用哪一种传输并非运行时硬编码，而是由每个 server 的配置记录驱动——带命令/参数的记录解析为 <code class="k">stdio</code> 子进程，带 URL 的记录则按声明落到 <code class="k">sse</code> 或 <code class="k">streamable-http</code>。运行时只持有解析后的 <code class="kc">transport</code> 与 <code class="kc">transportType</code>，对上层调用完全透明。</div>
+    </section>
+
+    <!-- ===== 04 · toolcall ===== -->
+    <section id="toolcall">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">tools · the call chain</div>
+        <h2>工具调用链与<em>超时</em></h2>
+        <p class="lead">接入一个 MCP server 后，运行时先拉取它的工具目录，再按需调用。整条链路上每一步都有显式的超时与失败冷却保护，避免一个失灵的 server 拖垮整个会话。</p>
+      </div>
+
+      <p class="reveal">工具调用链路始于 <code class="k">Client.listTools()</code>——拉取 server 暴露的工具列表，把每个工具的名称与 JSON Schema 注册进 agent 的工具空间。实际执行时调用 <code class="k">Client.callTool()</code>，传入工具名与参数，结果以 SDK 的 <code class="kc">CallToolResult</code> 类型返回（含内容块与可选的 <code class="k">isError</code> 标记）。两步都受 <code class="kc">requestTimeoutMs</code> 约束。</p>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">表 02 · 超时与冷却常量</div>
+        <table class="tbl">
+          <tr><th>常量</th><th>值</th><th>含义</th></tr>
+          <tr><td><code>BUNDLE_MCP_CATALOG_LIST_TIMEOUT_MS</code></td><td><span class="cy mono">1500ms</span></td><td>listTools() 目录拉取超时</td></tr>
+          <tr><td><code>BUNDLE_MCP_FAILURE_COOLDOWN_MS</code></td><td><span class="ro mono">60000ms</span></td><td>失败后指数退避冷却窗</td></tr>
+          <tr><td><span class="mono">idle TTL</span></td><td><span class="ph mono">10 分钟</span></td><td>resolveSessionMcpRuntimeIdleTtlMs() 空闲回收</td></tr>
+        </table>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">agent-bundle-mcp-runtime.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export function</span> <span class="t-fn">createBundleMcpJsonSchemaValidator</span><span class="t-pun">():</span> <span class="t-typ">jsonSchemaValidator</span><span class="t-pun">;</span>
+<span class="t-key">export function</span> <span class="t-fn">resolveSessionMcpConfigSummary</span><span class="t-pun">(</span>params<span class="t-pun">:</span> <span class="t-pun">{...}):</span> <span class="t-pun">{...};</span>
+<span class="t-key">export function</span> <span class="t-fn">resolveSessionMcpConfigFingerprint</span><span class="t-pun">(</span>params<span class="t-pun">:</span> <span class="t-pun">{...}):</span> <span class="t-typ">string</span><span class="t-pun">;</span>
+<span class="t-key">function</span> <span class="t-fn">resolveSessionMcpRuntimeIdleTtlMs</span><span class="t-pun">(</span>cfg<span class="t-pun">?:</span> <span class="t-typ">OpenClawConfig</span><span class="t-pun">):</span> <span class="t-typ">number</span><span class="t-pun">;</span> <span class="t-com">// 默认 10 分钟</span></code></pre>
+      </div>
+
+      <div class="note reveal"><b>并行门控：</b><code class="k">supportsParallelToolCalls</code> 决定能否对同一个 server 并发派发多个 <code class="k">callTool()</code>。为 <code class="kc">false</code> 时调用被串行化，确保不支持并发的 server 不会因同时收到多个请求而错乱。</div>
+    </section>
+
+    <!-- ===== 05 · lifecycle ===== -->
+    <section id="lifecycle">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">lifecycle · fingerprint &amp; reuse</div>
+        <h2>配置指纹与<em>连接复用</em></h2>
+        <p class="lead">manager 用一枚配置指纹决定一条会话的 MCP 连接该复用还是重建。指纹不变就沿用既有连接，配置一变就重建，长时间无人问津则按 TTL 回收——把握手与子进程冷启动成本压到最低。</p>
+      </div>
+
+      <p class="reveal"><code class="k">resolveSessionMcpConfigFingerprint()</code> 把会话级 MCP 配置（服务器集合、传输声明、超时等）哈希成一个稳定的指纹字符串。每次会话需要 MCP 运行时，manager 先比对指纹：若与登记中的连接指纹一致，则<strong>直接复用</strong>现有 <code class="kc">Client</code> 与 <code class="kc">Transport</code>，跳过重新握手与 <code class="k">listTools()</code> 目录拉取；只有指纹变化才会拆除旧连接并重建会话。</p>
+
+      <p class="reveal">空闲的会话连接由 <code class="k">resolveSessionMcpRuntimeIdleTtlMs()</code> 给出的 TTL（默认 <strong>10 分钟</strong>）管控——超过该窗口仍无调用的连接被回收，stdio 子进程随之关闭、<code class="kc">detachStderr</code> 被调用。工具参数的合法性则由 <code class="k">createBundleMcpJsonSchemaValidator()</code> 产出的校验器按 server 暴露的 JSON Schema 把关。</p>
+
+      <div class="grid g2 reveal">
+        <div class="card">
+          <div class="ic">fingerprint</div>
+          <h3>配置指纹</h3>
+          <p><code class="k">resolveSessionMcpConfigFingerprint()</code> 把会话配置哈希成稳定字符串；指纹一致即复用连接，变化才触发重建。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">idle TTL</div>
+          <h3>空闲回收</h3>
+          <p>超过 <code class="kc">resolveSessionMcpRuntimeIdleTtlMs()</code> 给出的 10 分钟空闲窗口的连接被回收，释放子进程与长连接资源。</p>
+        </div>
+      </div>
+
+      <div class="note cy reveal"><b>一句话收束：</b>一个进程一个 manager，每会话一组连接，指纹不变就复用、空闲就回收。</div>
+
+      <div class="foot reveal">
+        <div class="big">MCP · <b>运行时</b></div>
+        <div class="meta">src/agents/agent-bundle-mcp-runtime.ts<br/><a href="../openclaw.html">← 返回总览</a> · <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github ↗</a></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* starfield */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* scroll spy + reveals */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+})();
+
+/* copy buttons */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
+</body>
+</html>

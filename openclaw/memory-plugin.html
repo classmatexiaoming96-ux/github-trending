@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>记忆插件 · 深度解析 · OpenClaw</title>
+<meta name="description" content="OpenClaw 记忆插件完整解析——memory-host-sdk 的 MemorySearchManager 统一契约，三种可插拔后端 memory-lancedb（向量 L2 距离）、memory-wiki（Markdown vault 原子写入）、active-memory（会话滑动窗口），agent_end 自动沉淀与 0.95 判重，以及嵌入不可用时的降级路径。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-back{
+  font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:color .25s var(--ease);
+}
+.nav-back:hover{ color:var(--star); }
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:64px; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h1{ font-family:var(--serif); font-weight:560; font-size:clamp(38px,6vw,72px); line-height:0.98; letter-spacing:-0.025em; margin:0 0 20px; }
+h1 em{ font-style:italic; color:var(--star); font-weight:500; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:20px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* ---- flow ---- */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+.foot .meta a{ color:var(--text-dim); text-decoration:none; }
+.foot .meta a:hover{ color:var(--signal); }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar a.mback{ font-family:var(--mono); font-size:12px; color:var(--star); text-decoration:none; }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <a class="mback" href="../openclaw.html">← 总览</a>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <a class="nav-back" href="../openclaw.html">← 返回 OpenClaw 总览</a>
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">记忆插件 · extensions/memory-*</div>
+    </div>
+    <span class="nav-ver">深度阅读 · deep dive</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">01</span>记忆系统总览</a></li>
+        <li><a href="#sdk"><span class="idx">02</span>memory-host-sdk 契约</a></li>
+        <li><a href="#lancedb"><span class="idx">03</span>memory-lancedb · 向量</a></li>
+        <li><a href="#wiki"><span class="idx">04</span>memory-wiki · vault</a></li>
+        <li><a href="#active"><span class="idx">05</span>active-memory · 会话</a></li>
+        <li><a href="#recall"><span class="idx">06</span>召回与跨平台</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      源码级深度解析 · src/<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ---------- 01 总览 ---------- -->
+    <section id="intro">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">memory · pluggable backends</div>
+        <h2>记忆系统<em>总览</em></h2>
+        <p class="lead">OpenClaw 的记忆系统不是「套壳向量库」，而是一套<strong>可插拔的记忆后端</strong>。三个内置后端——<code class="k">memory-lancedb</code>、<code class="k">memory-wiki</code>、<code class="kc">active-memory</code>——共用一份 <strong>MemorySearchManager</strong> 契约，分别满足语义搜索、结构化 vault、即时会话状态三类需求。</p>
+      </div>
+
+      <div class="reveal">
+        <p>OpenClaw 把「记忆」拆成三层而不是一个大向量库，是因为这三类检索问题本质不同：<strong>"和这句话最像的旧记忆是什么"</strong>（语义相似）、<strong>"这个主题/这个人持久积累了什么"</strong>（结构化 vault）、<strong>"当前这轮对话里刚刚发生了什么"</strong>（即时上下文）。把它们塞进一个后端只会互相拖累，所以 OpenClaw 让三者各跑各的，统一在 <code class="k">memory-host-sdk</code> 的接口之下。</p>
+        <p>三个后端都是 <code class="k">extensions/memory-*</code> 下的独立插件，按 <code class="k">openclaw.plugin.json</code> 声明式注册，可以单独启用/停用，也可以被第三方后端替换。记忆的<strong>自动沉淀</strong>挂在 agent 生命周期钩子 <code class="kc">agent_end</code> 上——一轮对话结束就把值得记的东西抽出来、嵌入、入库，全程不阻塞 agent 主流程。</p>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">memory-lancedb</div><h3>语义搜索</h3><p>向量嵌入检索。把文本 embed 成向量存进 LanceDB，按 <strong>L2 距离</strong>找最近邻，回答"和当前语境最像的旧记忆"。</p></div>
+          <div class="card cy"><div class="ic">memory-wiki</div><h3>结构化 vault</h3><p>Markdown vault + 全文检索。原子写入 <code class="kc">.md</code> 文件，可被 Obsidian / git 直接读，回答"持久积累了什么"。</p></div>
+          <div class="card"><div class="ic">active-memory</div><h3>即时会话</h3><p>按会话滑动窗口的活跃上下文，由 <strong>SessionMemoryState</strong> 三增量门控抽取，回答"这轮刚发生了什么"。</p></div>
+        </div>
+        <div class="note reveal" style="margin-top:8px"><b>本地优先：</b>三种后端的存储都落在用户自己的机器上——LanceDB 文件、Markdown vault、会话状态都不出本机。「一个助手、一套记忆」靠的是 <code class="k">agentId + sessionKey</code> 这把跨平台锚点，而不是云端账户。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 02 SDK 契约 ---------- -->
+    <section id="sdk">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">contract · the shared interface</div>
+        <h2><em>memory-host-sdk</em> 契约</h2>
+        <p class="lead">源码：<code class="k">packages/memory-host-sdk</code>。所有记忆后端实现同一个 <strong>MemorySearchManager</strong> 接口——宿主只认接口，不关心后端是向量、vault 还是会话窗口。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">packages/memory-host-sdk · MemorySearchManager</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">export interface</span> <span class="t-typ">MemorySearchManager</span> {
+  <span class="t-fn">search</span>(query: <span class="t-typ">string</span>, opts: <span class="t-typ">MemorySearchOptions</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">MemoryHit</span>[]&gt;;
+  <span class="t-fn">readFile</span>(ref: <span class="t-typ">string</span>): <span class="t-typ">Promise</span>&lt;<span class="t-typ">string</span>&gt;;          <span class="t-com">// 把命中条目展开成原文</span>
+  <span class="t-fn">status</span>(): <span class="t-typ">Promise</span>&lt;<span class="t-typ">MemoryBackendStatus</span>&gt;;          <span class="t-com">// 后端健康/容量上报</span>
+  <span class="t-fn">probeEmbeddingAvailability</span>(): <span class="t-typ">Promise</span>&lt;<span class="t-typ">boolean</span>&gt;;  <span class="t-com">// 嵌入端点可用？</span>
+  <span class="t-fn">probeVectorAvailability</span>(): <span class="t-typ">Promise</span>&lt;<span class="t-typ">boolean</span>&gt;;     <span class="t-com">// 向量存储可用？</span>
+}</code></pre>
+        </div>
+        <p class="reveal">五个方法把记忆后端的能力面收敛到最小：<code class="k">search()</code> 做检索、<code class="k">readFile()</code> 把命中条目展开回原文、<code class="k">status()</code> 上报后端状态，两个 <code class="k">probe*()</code> 探针让宿主在<strong>运行时</strong>探测嵌入与向量存储是否可用——这正是降级逻辑的支点：探针返回 <code class="kc">false</code> 时，宿主自动把记忆退回到纯全文检索，而不是抛错中断 agent。</p>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">search / readFile</div><h3>检索 + 展开</h3><p><code class="k">search()</code> 返回命中列表，<code class="k">readFile()</code> 把某条命中一路展开成完整原文——"先摘要后展开"的两段式读取。</p></div>
+          <div class="card cy"><div class="ic">status()</div><h3>状态上报</h3><p>后端把自己的健康度、容量、就绪状态报给宿主，用于诊断与 UI 展示。</p></div>
+          <div class="card"><div class="ic">probe*()</div><h3>能力探针</h3><p>两个探针把"嵌入是否可用"与"向量库是否可用"分开探测，让降级可以分级——可全文不可向量时仍能跑。</p></div>
+        </div>
+        <div class="note cy reveal"><b>为什么是接口而不是实现：</b>把记忆抽象成 <code class="k">MemorySearchManager</code> 之后，"换记忆后端"就是换一个插件——LanceDB / wiki / active 三选一甚至并存，第三方也能实现同一接口接进来。宿主代码对此完全无感。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 03 lancedb ---------- -->
+    <section id="lancedb">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">lancedb · vector recall</div>
+        <h2><em>memory-lancedb</em> · 向量嵌入检索</h2>
+        <p class="lead">源码：<code class="k">extensions/memory-lancedb/index.ts</code>。把记忆文本嵌入成向量存进 LanceDB，按 <strong>L2 距离</strong>找最近邻，相似度用 <code class="k">1 / (1 + d)</code> 归一化。自动沉淀挂在 <code class="kc">agent_end</code> 钩子上。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">extensions/memory-lancedb/index.ts — agent_end 自动沉淀 + 判重</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// agent_end 钩子：一轮对话结束，抽取用户消息并尝试沉淀</span>
+<span class="t-key">const</span> vector = <span class="t-key">await</span> embeddings.<span class="t-fn">embed</span>(text);
+<span class="t-key">const</span> existing = <span class="t-key">await</span> db.<span class="t-fn">search</span>(vector, <span class="t-num">1</span>, <span class="t-num">0.95</span>);  <span class="t-com">// 0.95 相似 = 重复</span>
+<span class="t-key">if</span> (existing.length &gt; <span class="t-num">0</span>) <span class="t-key">return</span>;                  <span class="t-com">// 判重命中 → 跳过，不重复入库</span>
+<span class="t-key">await</span> db.<span class="t-fn">store</span>({ text, vector, importance: <span class="t-num">0.7</span>, category });
+
+<span class="t-com">// embedding 端点挂了 → probeEmbeddingAvailability=false</span>
+<span class="t-com">// → 退回纯全文检索，沉淀暂停，不抛错、不阻塞 agent</span></code></pre>
+        </div>
+        <p class="reveal">沉淀流程：<code class="k">agent_end</code> 触发 → 抽取本轮用户消息 → <code class="k">embeddings.embed()</code> 嵌入成向量 → 用 <strong>0.95 相似阈值</strong>查一次库做判重 → 命中即跳过（避免把"早上好/谢谢"这类高度重复的内容反复入库），未命中才 <code class="k">db.store()</code> 落盘，带上 <code class="k">importance</code> 与 <code class="k">category</code>。</p>
+        <p class="reveal">检索侧：LanceDB 返回 L2 距离 <code class="k">d</code>，OpenClaw 用 <code class="k">1 / (1 + d)</code> 把它转成 0–1 的相似度分数——距离越近分数越高，方便和其他后端的命中分数统一排序。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">表 01 · memory-lancedb 关键常量与字段</div>
+          <table class="tbl">
+            <tr><th>项</th><th>值 / 公式</th><th>作用</th></tr>
+            <tr><td>判重阈值</td><td><span class="mono">0.95</span></td><td><code>db.search(vector, 1, 0.95)</code> 命中即视为重复，跳过入库</td></tr>
+            <tr><td>相似度</td><td><span class="mono">1 / (1 + d)</span></td><td>把 L2 距离 <code>d</code> 归一化为 0–1 分数</td></tr>
+            <tr><td><code>importance</code></td><td><span class="mono">0.7</span></td><td>新记忆的默认重要度权重</td></tr>
+            <tr><td>沉淀时机</td><td><code class="ph">agent_end</code></td><td>对话结束钩子，异步沉淀不阻塞主流程</td></tr>
+          </table>
+        </div>
+
+        <div class="grid g2 reveal" style="margin-top:22px">
+          <div class="card"><div class="ic">embed → search → store</div><h3>三步沉淀</h3><p>嵌入、判重、入库三步走，把可确定的部分（哈希、查重、落盘）做稳，把 LLM/嵌入这类<strong>能容忍失败</strong>的重活放在能降级的位置。</p></div>
+          <div class="card cy"><div class="ic">probeEmbeddingAvailability</div><h3>嵌入不可用即降级</h3><p>探针返回 <code class="kc">false</code> 时记忆退回纯全文检索，<strong>新记忆沉淀暂停</strong>；不抛错、不阻塞 agent，等端点恢复再续。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 04 wiki ---------- -->
+    <section id="wiki">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">wiki · the markdown vault</div>
+        <h2><em>memory-wiki</em> · Markdown vault</h2>
+        <p class="lead">源码：<code class="k">extensions/memory-wiki</code>。把记忆持久化成 <strong>Markdown vault</strong>——YAML frontmatter + 正文，通过 <code class="k">content_store</code> <strong>原子写入</strong>（temp → fsync → rename），配全文检索，命中后注入 prompt 段。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">content_store — 原子写入（崩溃安全）</span><button class="copy">复制</button></div>
+<pre><code><span class="t-com">// 原子写入：先写临时文件、fsync、再 rename</span>
+<span class="t-key">async function</span> <span class="t-fn">writeAtomic</span>(path: <span class="t-typ">string</span>, body: <span class="t-typ">string</span>) {
+  <span class="t-key">const</span> tmp = <span class="t-str">`${path}.tmp`</span>;
+  <span class="t-key">await</span> fs.<span class="t-fn">writeFile</span>(tmp, body);
+  <span class="t-key">await</span> fs.<span class="t-fn">fsync</span>(tmp);            <span class="t-com">// 落盘后再换名</span>
+  <span class="t-key">await</span> fs.<span class="t-fn">rename</span>(tmp, path);     <span class="t-com">// rename 原子，崩在中间也不留半截文件</span>
+}
+
+<span class="t-com">// vault 里的一条记忆：YAML frontmatter + Markdown 正文</span>
+<span class="t-com">// ---\ntitle: ...\ntags: [...]\n---\n正文……</span></code></pre>
+        </div>
+        <p class="reveal">memory-wiki 把记忆当成<strong>文件</strong>而不是数据库行：每条记忆是一个 <code class="kc">.md</code> 文件，头部 YAML frontmatter 存元数据（标题、标签、时间），正文是 Markdown。写入走 <code class="k">content_store</code> 的原子写入——先写 <code class="k">.tmp</code>、<code class="k">fsync</code> 落盘、再 <code class="k">rename</code> 到位；<code class="k">rename</code> 在同一文件系统上是原子操作，所以进程<strong>崩在写入中途也不会留下半截损坏文件</strong>。</p>
+        <p class="reveal">检索是<strong>全文检索</strong>而非向量——这正是 lancedb 不可用时的天然降级目标。命中后，wiki 把相关条目组织成一个 prompt 段注入 system prompt，让 agent 直接读到结构化的持久记忆。</p>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">temp → fsync → rename</div><h3>原子写入</h3><p>崩溃安全的三步写盘，保证 vault 永远是一致状态，不会出现写了一半的 <code class="kc">.md</code>。</p></div>
+          <div class="card cy"><div class="ic">YAML + Markdown</div><h3>人类可读</h3><p>每条记忆是一个 <code class="kc">.md</code> 文件，可以直接用 Obsidian 打开、git 版本化、手工审计与删除。</p></div>
+          <div class="card"><div class="ic">全文检索</div><h3>降级目标</h3><p>不依赖嵌入/向量，所以是 lancedb 探针失败时的退路——向量挂了，wiki 全文检索照常工作。</p></div>
+        </div>
+        <div class="note reveal"><b>本地优先不是口号：</b>vault 是一堆你硬盘上的 Markdown 文件。可以 <code class="k">git</code> 化、可以备份、可以审计、可以删——记忆从云服务的私有 schema 抢回到了用户自己的文件路径里。</div>
+      </div>
+    </section>
+
+    <!-- ---------- 05 active-memory ---------- -->
+    <section id="active">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">active · session working memory</div>
+        <h2><em>active-memory</em> · 会话间活跃上下文</h2>
+        <p class="lead">按会话<strong>滑动窗口</strong>维护的即时上下文。由 <strong>SessionMemoryState</strong> 跟踪当前会话的累计 token / tool 调用数 / turn 数，三个增量<strong>同时</strong>越线才触发后台抽取——避免每隔几句话就启一次抽取作业。</p>
+      </div>
+
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">SessionMemoryState — 三增量门控</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">type</span> <span class="t-typ">SessionMemoryState</span> = {
+  tokensSinceExtract: <span class="t-typ">number</span>;   <span class="t-com">// 距上次抽取累计 token</span>
+  toolCallsSinceExtract: <span class="t-typ">number</span>;
+  turnsSinceExtract: <span class="t-typ">number</span>;
+};
+
+<span class="t-com">// 只有三个增量【同时】跨过门槛才抽取</span>
+<span class="t-key">const</span> shouldExtract =
+  state.tokensSinceExtract &gt;= <span class="t-num">4000</span> &amp;&amp;     <span class="t-com">// token +4000</span>
+  state.toolCallsSinceExtract &gt;= <span class="t-num">8</span> &amp;&amp;   <span class="t-com">// tool  +8</span>
+  state.turnsSinceExtract &gt;= <span class="t-num">4</span>;          <span class="t-com">// turn  +4</span></code></pre>
+        </div>
+        <p class="reveal">active-memory 关心的是「<strong>当前这轮对话刚刚发生了什么</strong>」——它维护一个按会话的滑动窗口，让 agent 在多轮之间保有即时工作记忆，而不必每次都回向量库/vault 捞。但是把会话压成结构化长期记忆是一笔<strong>有成本</strong>的后台作业（要跑 LLM 抽取），所以不能每句话都做。</p>
+        <p class="reveal"><code class="k">SessionMemoryState</code> 用<strong>三个增量门控</strong>解决这个节流问题：跟踪距上次抽取以来累计的 token、tool 调用数、turn 数，只有这三者<strong>同时</strong>跨过门槛（<code class="kc">token +4000</code>、<code class="kc">tool +8</code>、<code class="kc">turn +4</code>）才触发后台抽取，把会话压成结构化记忆条目（再交给 lancedb/wiki 沉淀）。三条件取「与」，意味着既要谈得够久、又要做了够多事、还要来回够多轮，才值得动用一次抽取——一次轻量寒暄绝不会触发。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">表 02 · 抽取触发门槛（三者取 AND）</div>
+          <table class="tbl">
+            <tr><th>增量</th><th>门槛</th><th>含义</th></tr>
+            <tr><td><code>tokensSinceExtract</code></td><td><span class="mono">+4000</span></td><td>对话累计够长</td></tr>
+            <tr><td><code>toolCallsSinceExtract</code></td><td><span class="mono">+8</span></td><td>做了够多事（工具调用）</td></tr>
+            <tr><td><code>turnsSinceExtract</code></td><td><span class="mono">+4</span></td><td>来回够多轮</td></tr>
+          </table>
+          <div class="note cy"><b>为什么取 AND 而不是 OR：</b>三条件全满足才抽取，把"档案管理员"子作业的触发频率压到最低——避免每隔几句话就启一次昂贵的抽取，又保证真正信息密集的会话不会漏记。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 06 召回与跨平台 ---------- -->
+    <section id="recall">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">recall · one memory, all platforms</div>
+        <h2>召回与<em>跨平台共享</em></h2>
+        <p class="lead">记忆按 <code class="k">agentId + sessionKey</code> 检索——同一用户在 Telegram、Discord、Slack… 任意平台发消息都路由回<strong>同一份记忆</strong>。这是 OpenClaw "一个助手、一套记忆、20+ 渠道" 真正成立的地方。</p>
+      </div>
+
+      <div class="reveal">
+        <p>三个后端的检索都以 <code class="k">agentId + sessionKey</code> 为键。<code class="kc">sessionKey</code> 是 OpenClaw 的<strong>跨平台身份锚点</strong>（如 <code class="k">telegram:123</code>、<code class="k">discord:u_456</code>），由 channel 层在入站时归一化产生。因为记忆挂在这把锚点上而不是某个平台账户上，所以"用户→记忆"的绑定可以跨平台共享：你在 Telegram 上告诉助手的偏好，切到 Discord 仍然记得。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:8px">
+          <div class="kicker">图 01 · 召回 → 注入 → 沉淀闭环</div>
+          <div class="flow">
+            <div class="flow-node"><div class="ttl">用户消息</div><div class="meta">任意平台</div></div>
+            <div class="flow-arr"><span class="flow-stage">recall</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+            <div class="flow-node"><div class="ttl am">search()</div><div class="meta">agentId+sessionKey</div></div>
+            <div class="flow-arr"><span class="flow-stage">inject</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.4s"/></svg></div>
+            <div class="flow-node"><div class="ttl cy">注入 prompt 段</div><div class="meta">相关记忆</div></div>
+            <div class="flow-arr cy"><span class="flow-stage">agent_end</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.8s"/></svg></div>
+            <div class="flow-node"><div class="ttl">沉淀 store()</div><div class="meta">判重后入库</div></div>
+          </div>
+        </div>
+        <p class="reveal" style="margin-top:22px">每次用户发消息：先以 <code class="k">agentId + sessionKey</code> 调 <code class="k">search()</code> 召回相关记忆，组织成 prompt 段注入 system prompt 让 agent 读到；对话结束时 <code class="kc">agent_end</code> 钩子触发沉淀——抽取、嵌入、<strong>0.95 判重</strong>、入库。召回与沉淀首尾相接，构成一个跨会话、跨平台的记忆闭环。</p>
+
+        <div class="grid g3 reveal" style="margin-top:8px">
+          <div class="card"><div class="ic">sessionKey</div><h3>跨平台锚点</h3><p>记忆绑在 <code class="k">agentId + sessionKey</code> 上而非平台账户，所以同一用户跨 20+ 渠道共享同一份记忆。</p></div>
+          <div class="card cy"><div class="ic">recall → inject</div><h3>召回即注入</h3><p>每条用户消息先召回相关记忆并注入 system prompt，agent 带着上下文回答。</p></div>
+          <div class="card"><div class="ic">agent_end → store</div><h3>对话即沉淀</h3><p>对话结束自动沉淀，判重后入库——无需用户显式"保存记忆"。</p></div>
+        </div>
+        <div class="note cy reveal"><b>三后端 + 跨平台 sessionKey：</b>这是 OpenClaw 记忆设计相对 Kimi Code（以 compaction 为主）与 Odysseus（ChromaDB 混合检索）的差异点——记忆是<strong>可插拔后端</strong>，且天生跨平台。</div>
+      </div>
+
+      <div class="foot reveal">
+        <div class="big">记忆 · <b>三后端可插拔</b></div>
+        <div class="meta">
+          extensions/memory-lancedb · memory-wiki · active-memory<br/>
+          packages/memory-host-sdk · MemorySearchManager 契约<br/>
+          <a href="../openclaw.html">← 返回 OpenClaw 总览</a> · <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github ↗</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* starfield */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* scroll spy + reveals */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+})();
+
+/* copy buttons */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
+</body>
+</html>

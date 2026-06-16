@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ACP 会话生成 · 深度解析 · OpenClaw</title>
+<meta name="description" content="OpenClaw ACP（Agent Client Protocol）会话生成完整解析——acp-spawn.ts 1708 行的导入链、会话生成流程、父子进程 stdout relay、子代理派生限制与孤儿回收。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-back{
+  font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:color .25s var(--ease);
+}
+.nav-back:hover{ color:var(--star); }
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:64px; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h1{ font-family:var(--serif); font-weight:560; font-size:clamp(38px,6vw,72px); line-height:0.98; letter-spacing:-0.025em; margin:0 0 20px; }
+h1 em{ font-style:italic; color:var(--star); font-weight:500; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:20px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* ---- flow ---- */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+.foot .meta a{ color:var(--text-dim); text-decoration:none; }
+.foot .meta a:hover{ color:var(--signal); }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar a.mback{ font-family:var(--mono); font-size:12px; color:var(--star); text-decoration:none; }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <a class="mback" href="../openclaw.html">← 总览</a>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <a class="nav-back" href="../openclaw.html">← 返回 OpenClaw 总览</a>
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">ACP 会话生成 · acp-spawn.ts</div>
+    </div>
+    <span class="nav-ver">深度阅读 · deep dive</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">01</span> ACP 会话生成</a></li>
+        <li><a href="#imports"><span class="idx">02</span> 导入链与 acp-core</a></li>
+        <li><a href="#flow"><span class="idx">03</span> 会话生成流程</a></li>
+        <li><a href="#relay"><span class="idx">04</span> 父子 stdout relay</a></li>
+        <li><a href="#limits"><span class="idx">05</span> 派生限制与孤儿回收</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      源码级深度解析 · src/<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <section id="intro">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">ACP · agent client protocol</div>
+        <h2>ACP <em>会话生成</em></h2>
+        <p class="lead"><strong>ACP（Agent Client Protocol）</strong>是 OpenClaw 与外部智能体编排框架之间的双向接口约定。核心实现集中在 <code class="k">src/agents/acp-spawn.ts</code>——这是一个长达 <strong>1708 行</strong>的文件，负责把一次 ACP 会话从「策略校验」一路推进到「子进程派生」与「父子流接续」。</p>
+      </div>
+
+      <p>OpenClaw 在 ACP 这条协议上同时站在<strong>两端</strong>。一端是<strong>被集成方</strong>：它可以作为子代理被外部 harness（例如 Claude Code、Codex 这类宿主）拉起，对外暴露符合 ACP 约定的会话能力，宿主通过协议向它下达任务、接收增量输出。另一端是<strong>编排方</strong>：OpenClaw 自身也能把外部 ACP harness 当作子代理来调度。</p>
+
+      <p>作为编排方时，它并不是在自己进程内「内联」运行外部 harness，而是派生出一个<strong>独立子进程</strong>来承载该 harness，再让这个子进程<strong>反连（reverse-connect，「反连」）</strong>回父进程的控制面。这种「父派生、子反连」的拓扑把外部代理彻底隔离在独立进程里，既划清了崩溃域，也让父进程能以统一的会话句柄来管理任意数量的异构子代理。</p>
+
+      <p><code class="k">acp-spawn.ts</code> 正是承接这套拓扑的枢纽：它先经过<strong>策略闸门</strong>判定本次派生是否被允许，再向<strong>会话管理器</strong>登记句柄，随后派生子进程并建立 stdout 接续；任何一步失败都会触发回滚清理，避免资源泄漏或留下孤儿进程。</p>
+
+      <div class="grid g3 reveal">
+        <div class="card">
+          <div class="ic">role · 01</div>
+          <h3>会话生成</h3>
+          <p>校验策略后向会话管理器登记句柄，派生独立子进程承载外部 ACP harness，完成一次会话的冷启动。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">role · 02</div>
+          <h3>父子 relay</h3>
+          <p>子进程的 stdout 经 parent-stream 接续回父进程的会话流，让外部代理的增量输出在父侧统一可见。</p>
+        </div>
+        <div class="card">
+          <div class="ic">role · 03</div>
+          <h3>派生限制</h3>
+          <p>以最大子会话数与最大派生深度双重约束扇出与递归，并在父进程崩溃后回收孤儿子运行。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="imports">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">imports · the dependency graph</div>
+        <h2>导入链与 <em>acp-core</em></h2>
+        <p class="lead"><code class="k">acp-spawn.ts</code> 的导入头部就是它的依赖地图：会话管理、失败清理、策略闸门、会话元数据、以及来自独立包 <code class="kc">@openclaw/acp-core</code> 的标识符解析与运行时类型，共同拼出整条派生链。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/agents/acp-spawn.ts · 导入链</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">import</span> { getAcpSessionManager } <span class="t-key">from</span> <span class="t-str">"../acp/control-plane/manager.js"</span>;
+<span class="t-key">import</span> { cleanupFailedAcpSpawn, <span class="t-key">type</span> <span class="t-typ">AcpSpawnRuntimeCloseHandle</span> } <span class="t-key">from</span> <span class="t-str">"../acp/control-plane/spawn.js"</span>;
+<span class="t-key">import</span> { isAcpEnabledByPolicy, resolveAcpAgentPolicyError } <span class="t-key">from</span> <span class="t-str">"../acp/policy.js"</span>;
+<span class="t-key">import</span> { readAcpSessionMeta } <span class="t-key">from</span> <span class="t-str">"../acp/runtime/session-meta.js"</span>;
+<span class="t-key">import</span> { resolveAcpSessionCwd, resolveAcpThreadSessionDetailLines } <span class="t-key">from</span> <span class="t-str">"@openclaw/acp-core/runtime/session-identifiers"</span>;
+<span class="t-key">import</span> <span class="t-key">type</span> { <span class="t-typ">AcpRuntimeSessionMode</span> } <span class="t-key">from</span> <span class="t-str">"@openclaw/acp-core/runtime/types"</span>;</code></pre>
+      </div>
+
+      <p>这条导入链横跨两个边界。前四行落在仓库内部的 <code class="k">src/acp/</code> 子树——控制面（control-plane）、策略（policy）与运行时（runtime）；后两行则越过包边界，指向独立发布的 <code class="kc">@openclaw/acp-core</code>。</p>
+
+      <p><code class="kc">@openclaw/acp-core</code> 是一个<strong>独立包</strong>，把 ACP 协议中与具体宿主无关的「纯逻辑」抽离出来：会话标识符解析（session identifier resolution）、运行时类型定义（如 <code class="k">AcpRuntimeSessionMode</code>），以及会话元数据的读写（<code class="k">session-meta.js</code>）。把这些下沉到独立包，既让被集成方与编排方共享同一份标识符语义，也避免了仓库内部代码与协议核心相互纠缠。</p>
+
+      <div class="grid g3 reveal">
+        <div class="card">
+          <div class="ic">manager.js</div>
+          <h3>会话管理器</h3>
+          <p><code class="k">getAcpSessionManager()</code> 返回进程级的会话管理器，负责对每个 ACP 会话句柄做登记、查找与回收，是父侧统一管理子代理的中枢。</p>
+        </div>
+        <div class="card">
+          <div class="ic">spawn.js</div>
+          <h3>失败清理</h3>
+          <p><code class="k">cleanupFailedAcpSpawn()</code> 在派生中途失败时回滚已分配的资源；<code class="k">AcpSpawnRuntimeCloseHandle</code> 是对应的关闭句柄类型。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">policy.js</div>
+          <h3>策略闸门</h3>
+          <p><code class="kc">isAcpEnabledByPolicy()</code> 判定某代理是否被允许使用 ACP；<code class="kc">resolveAcpAgentPolicyError()</code> 在被拒绝时给出具体的拒绝原因。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="flow">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">lifecycle · spawn sequence</div>
+        <h2>会话<em>生成流程</em></h2>
+        <p class="lead">一次 ACP 会话的冷启动是一条线性流水线：从策略校验、句柄登记，到子进程派生，再到反连建立父子流。每一阶段都依赖上一阶段的产物，任一环节失败都会触发回滚。</p>
+      </div>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">图 01 · acp-spawn 派生序列</div>
+        <div class="flow">
+          <div class="flow-node"><div class="ttl am">acp-spawn.ts</div><div class="meta">入口 · 1708 行</div></div>
+          <div class="flow-arr"><span class="flow-stage"><b>policy</b></span><svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+          <div class="flow-node"><div class="ttl">isAcpEnabledByPolicy()</div><div class="meta">策略校验</div></div>
+          <div class="flow-arr"><span class="flow-stage"><b>manager</b></span><svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+          <div class="flow-node"><div class="ttl">getAcpSessionManager()</div><div class="meta">登记句柄</div></div>
+          <div class="flow-arr"><span class="flow-stage"><b>spawn child</b></span><svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+          <div class="flow-node"><div class="ttl cy">child process</div><div class="meta">独立子进程</div></div>
+          <div class="flow-arr cy"><span class="flow-stage"><b>反连</b></span><svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+          <div class="flow-node"><div class="ttl cy">parent-stream relay</div><div class="meta">stdout 接续</div></div>
+        </div>
+      </div>
+
+      <p><strong>第一步 · 策略校验。</strong>派生开始前，<code class="k">acp-spawn.ts</code> 先调用 <code class="k">isAcpEnabledByPolicy()</code> 判定发起方代理是否被允许使用 ACP。若不被允许，则用 <code class="k">resolveAcpAgentPolicyError()</code> 取出具体拒绝原因并提前终止——这一步是整条链的闸门，杜绝未授权的派生。</p>
+
+      <p><strong>第二步 · 登记句柄。</strong>通过校验后，调用 <code class="k">getAcpSessionManager()</code> 取得进程级会话管理器，并在其中登记本次会话的句柄。此后子进程的查找、状态更新与最终回收都以这个句柄为索引。</p>
+
+      <p><strong>第三步 · 派生子进程。</strong>会话管理器就位后，派生出独立的子进程来承载外部 ACP harness。<code class="k">resolveAcpSessionCwd()</code> 在此前确定子进程的工作目录，<code class="k">AcpRuntimeSessionMode</code> 决定其运行时模式。</p>
+
+      <p><strong>第四步 · 反连接续。</strong>子进程启动后<strong>反连</strong>回父进程，由 parent-stream 把子进程的 stdout 接续进父侧的会话流，至此一次会话冷启动完成，外部代理的增量输出开始在父侧可见。</p>
+
+      <div class="note reveal"><b>失败回滚：</b>上述任一阶段中途失败（句柄已登记但子进程未起、或反连未建立等），都会调用 <code class="k">cleanupFailedAcpSpawn()</code> 回滚已分配的资源，确保不残留半成品会话或孤儿进程。</div>
+    </section>
+
+    <section id="relay">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">relay · parent-child stream</div>
+        <h2>父子进程 <em>stdout relay</em></h2>
+        <p class="lead">外部 ACP harness 运行在<strong>子进程</strong>里，它的 stdout 不会被父进程直接消费，而是经由 <code class="k">acp-spawn-parent-stream.ts</code> 接续进父进程的会话流——这一层 relay 是「父派生、子反连」拓扑能统一可见的关键。</p>
+      </div>
+
+      <p>子进程并不知道父侧会话流的内部结构，它只管把增量输出写到自己的 stdout。relay 层负责消费这条 stdout，逐段解析后写回父进程对应的会话流。会话的标识与定位则下沉到 <code class="kc">@openclaw/acp-core</code> 一侧：<code class="k">resolveAcpThreadSessionDetailLines()</code> 解析线程会话的明细行，<code class="k">readAcpSessionMeta()</code> 读取会话元数据，二者共同把一段裸输出还原成「属于哪个会话、处于什么状态」的结构化信息。<code class="k">resolveAcpSessionCwd()</code> 则负责解析子进程的工作目录。</p>
+
+      <table class="tbl reveal">
+        <tr><th>relay 组件</th><th>职责</th></tr>
+        <tr><td><code>acp-spawn-parent-stream.ts</code></td><td>消费<span class="cy">子进程 stdout</span>，逐段接续回父进程会话流，是父子之间的数据通道。</td></tr>
+        <tr><td><code>resolveAcpThreadSessionDetailLines()</code></td><td>解析线程会话的明细行，定位输出所属的会话上下文。<span class="ph">acp-core 侧</span></td></tr>
+        <tr><td><code>readAcpSessionMeta()</code></td><td>读取会话元数据（<code>session-meta.js</code>），还原会话的状态与身份。<span class="ph">acp-core 侧</span></td></tr>
+        <tr><td><code>resolveAcpSessionCwd()</code></td><td>解析子进程的工作目录，确保 harness 在正确的路径下运行。</td></tr>
+      </table>
+
+      <div class="note cy reveal"><b>为何用独立进程：</b>把外部 harness 放进独立子进程而非内联运行，换来的是<strong>隔离</strong>与<strong>独立崩溃域</strong>——子代理的崩溃、内存膨胀或异常退出都被关在子进程边界内，不会拖垮父进程；父侧只需通过 relay 与会话句柄观察其行为，崩溃后还能凭句柄做清理与回收。</div>
+    </section>
+
+    <section id="limits">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">limits · fan-out &amp; depth</div>
+        <h2>派生限制与<em>孤儿回收</em></h2>
+        <p class="lead">允许子代理派生子代理，就必须防止它失控地无限繁殖。OpenClaw 在 <code class="k">src/config/agent-limits.ts</code> 里用两条默认限制——扇出宽度与递归深度——共同框住派生规模，并在父进程崩溃后回收孤儿子运行。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">src/config/agent-limits.ts · 派生限制</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">const</span> <span class="t-typ">DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT</span> = <span class="t-num">...</span>;  <span class="t-com">// 每个 agent 最大子会话数</span>
+<span class="t-key">const</span> <span class="t-typ">DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</span>        = <span class="t-num">...</span>;  <span class="t-com">// 最大 spawn 深度（防止嵌套失控）</span></code></pre>
+      </div>
+
+      <p>两条限制管的是<strong>两个不同维度</strong>。<code class="k">MAX_CHILDREN_PER_AGENT</code> 限制<strong>扇出宽度</strong>——单个 agent 同时拥有的子会话数量上限；<code class="k">MAX_SPAWN_DEPTH</code> 限制<strong>递归深度</strong>——子代理派生子代理、再派生孙代理的嵌套层数上限。前者防「横向爆炸」，后者防「纵向失控」，二者相乘才是一棵派生树的规模上界，缺一则约束就会被另一维度绕过。</p>
+
+      <div class="grid g2 reveal">
+        <div class="card">
+          <div class="ic">MAX_CHILDREN_PER_AGENT</div>
+          <h3>扇出宽度</h3>
+          <p>限定单个 agent 同时持有的子会话数量。超出上限的派生请求会被拒绝，防止某个代理一次性拉起过多子进程。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">MAX_SPAWN_DEPTH</div>
+          <h3>递归深度</h3>
+          <p>限定派生链的嵌套层数。子代理派生子代理时深度逐级累加，触顶即停，杜绝无限递归式的自我繁殖。</p>
+        </div>
+      </div>
+
+      <div class="note reveal"><b>孤儿回收：</b>当父进程崩溃，其名下的子运行会变成无人认领的孤儿。<code class="k">reconcileOrphanedRun()</code> 负责在重新对账时识别并回收这些孤儿子运行——释放其占用的句柄与进程资源，让会话状态重新收敛到一致。</div>
+
+      <div class="foot reveal">
+        <div class="big">ACP · <b>会话生成</b></div>
+        <div class="meta">src/agents/acp-spawn.ts · 1708 行<br/><a href="../openclaw.html">← 返回总览</a> · <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github ↗</a></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* starfield */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* scroll spy + reveals */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+})();
+
+/* copy buttons */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>沙箱隔离模型 · 深度解析 · OpenClaw</title>
+<meta name="description" content="OpenClaw 沙箱隔离完整解析——shouldSandboxSession 的三种 mode（off/all/non-main）判定、resolveSandboxRuntimeStatus 状态解析、tool-policy.ts 逐工具放行、Docker/SSH 隔离配置，以及 net-policy 与 exec 批准的失败模式。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   OpenClaw — Source-level Observatory (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* orange accent — OpenClaw */
+  --star:       #e8825a;
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(232,130,90,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
+
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(232,130,90,0.06);
+}
+.nav-back{
+  font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; transition:color .25s var(--ease);
+}
+.nav-back:hover{ color:var(--star); }
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
+
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
+
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:64px; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h1{ font-family:var(--serif); font-weight:560; font-size:clamp(38px,6vw,72px); line-height:0.98; letter-spacing:-0.025em; margin:0 0 20px; }
+h1 em{ font-style:italic; color:var(--star); font-weight:500; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+ul.body{ max-width:72ch; color:var(--text-2); padding-left:20px; }
+ul.body li{ margin:7px 0; }
+ul.body li strong{ color:var(--text); font-weight:600; }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(232,130,90,0.09); border:1px solid rgba(232,130,90,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); }
+
+/* ---- files ---- */
+.files{ list-style:none; margin:0; padding:0; }
+.files li{ font-family:var(--mono); font-size:12px; padding:5px 0; color:var(--text-2); display:flex; gap:10px; border-bottom:1px solid var(--line-2); }
+.files li:last-child{ border:none; }
+.files li b{ color:var(--signal-soft); font-weight:400; }
+.files li span{ color:var(--text-dim); font-family:var(--sans); font-size:12px; margin-left:auto; }
+
+/* ---- flow ---- */
+.flow{ display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin-top:8px; }
+.flow-node{
+  flex:1; min-width:120px; padding:18px 14px; text-align:center; border:1px solid var(--line);
+  border-radius:12px; background:var(--panel); position:relative;
+}
+.flow-node .ttl{ font-family:var(--mono); font-size:12px; color:var(--text); letter-spacing:0.02em; }
+.flow-node .ttl.cy{ color:var(--signal-soft); } .flow-node .ttl.am{ color:var(--star-soft); }
+.flow-node .meta{ font-size:11px; color:var(--text-dim); margin-top:4px; }
+.flow-arr{ flex:0 0 48px; display:flex; align-items:center; justify-content:center; position:relative; }
+.flow-arr svg{ width:100%; height:24px; overflow:visible; }
+.flow-arr .dash{ stroke:var(--line-amber); stroke-width:1.5; stroke-dasharray:4 4; }
+.flow-arr .particle{ fill:var(--star); animation:flowDot 1.8s linear infinite; }
+.flow-arr.cy .dash{ stroke:var(--line-cyan); } .flow-arr.cy .particle{ fill:var(--signal); }
+@keyframes flowDot{ 0%{ transform:translateX(0); opacity:0; } 15%{opacity:1;} 85%{opacity:1;} 100%{ transform:translateX(40px); opacity:0; } }
+.flow-stage{ font-family:var(--mono); font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); position:absolute; top:-16px; left:50%; transform:translateX(-50%); white-space:nowrap; }
+.flow-stage b{ color:var(--star); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+.foot .meta a{ color:var(--text-dim); text-decoration:none; }
+.foot .meta a:hover{ color:var(--signal); }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
+  }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar a.mback{ font-family:var(--mono); font-size:12px; color:var(--star); text-decoration:none; }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">Open<b>Claw</b></div>
+  <a class="mback" href="../openclaw.html">← 总览</a>
+</div>
+
+<div class="shell">
+
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <a class="nav-back" href="../openclaw.html">← 返回 OpenClaw 总览</a>
+    <div class="nav-brand">
+      <div class="glyph">Open<b>Claw</b></div>
+      <div class="sub">沙箱隔离 · src/agents/sandbox/</div>
+    </div>
+    <span class="nav-ver">深度阅读 · deep dive</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">01</span>沙箱隔离模型</a></li>
+        <li><a href="#decide"><span class="idx">02</span>谁进沙箱</a></li>
+        <li><a href="#policy"><span class="idx">03</span>逐工具放行策略</a></li>
+        <li><a href="#isolation"><span class="idx">04</span>Docker / SSH 隔离</a></li>
+        <li><a href="#failure"><span class="idx">05</span>失败模式 · 默认锁定</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      openclaw/openclaw<br/>
+      源码级深度解析 · src/<br/>
+      <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github.com/openclaw/openclaw ↗</a>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ============ 01 · INTRO ============ -->
+    <section id="intro">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">sandbox · isolation model</div>
+        <h2>沙箱<em>隔离模型</em></h2>
+        <p class="lead">沙箱是 OpenClaw 默认锁定（default-deny）安全姿态的第一层。是否把一个 session 关进沙箱，由配置项 <code class="k">sandbox.mode</code> 单点驱动；真正落地这个决策的核心源文件是 <code class="kc">src/agents/sandbox/runtime-status.ts</code>。</p>
+      </div>
+
+      <p class="reveal">整个沙箱子系统遵循一条朴素原则：<strong>先把一切锁死，再按需放宽</strong>。系统不会假设某个 session 是可信的；恰恰相反，除非配置明确豁免，否则派生出来的会话默认被隔离。这种姿态把"忘记加限制"这一最常见的人为失误，从"默默放行"变成了"默认拒绝"。</p>
+
+      <p class="reveal">沙箱的实现被拆成三个职责清晰的文件，分别回答三个不同的问题——<strong>谁</strong>要进沙箱、<strong>进沙箱后能做什么</strong>、以及<strong>沙箱用什么后端实现</strong>。<code class="kc">runtime-status.ts</code> 负责"是否隔离"的判定，<code class="kc">config.ts</code> 负责"如何隔离"的后端与约束，<code class="kc">tool-policy.ts</code> 负责"逐工具放行"的细粒度分类。三者解耦，互不越界。</p>
+
+      <div class="grid g3 reveal">
+        <div class="card">
+          <div class="ic">runtime-status.ts</div>
+          <h3>是否隔离</h3>
+          <p>由 <code class="k">shouldSandboxSession</code> 依据 <code class="k">sandbox.mode</code> 决定某个 session 是否进沙箱，并由 <code class="k">resolveSandboxRuntimeStatus</code> 解析出每个 agent 的运行时状态。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">config.ts</div>
+          <h3>如何隔离</h3>
+          <p>定义隔离后端与约束：Docker 容器隔离的挂载/网络限制，或 SSH 远端隔离的目标主机。只管"怎么关"，不管"关不关"。</p>
+        </div>
+        <div class="card">
+          <div class="ic">tool-policy.ts</div>
+          <h3>能做什么</h3>
+          <p>在沙箱 session 内对每一次工具调用做分类，由 <code class="k">classifyToolAgainstSandboxToolPolicy</code> 决定放行、降权还是拦截。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 02 · DECIDE ============ -->
+    <section id="decide">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">decision · who gets sandboxed</div>
+        <h2><em>谁</em>进沙箱</h2>
+        <p class="lead">隔离与否的判定收敛在一个纯函数里。<code class="k">shouldSandboxSession</code> 不做任何 IO，只读三个入参——配置、当前 session key、主 session key——返回一个布尔值。</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">sandbox/runtime-status.ts</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key">function</span> <span class="t-fn">shouldSandboxSession</span>(
+  cfg<span class="t-pun">:</span> <span class="t-typ">SandboxConfig</span>,
+  sessionKey<span class="t-pun">:</span> <span class="t-typ">string</span>,
+  mainSessionKey<span class="t-pun">:</span> <span class="t-typ">string</span>,
+) {
+  <span class="t-key">if</span> (cfg.mode === <span class="t-str">"off"</span>) <span class="t-key">return</span> <span class="t-num">false</span>;   <span class="t-com">// 关闭沙箱</span>
+  <span class="t-key">if</span> (cfg.mode === <span class="t-str">"all"</span>) <span class="t-key">return</span> <span class="t-num">true</span>;    <span class="t-com">// 所有 session 都沙箱</span>
+  <span class="t-com">// 默认：main session 不沙箱，其他沙箱</span>
+  <span class="t-key">return</span> sessionKey.<span class="t-fn">trim</span>() !== mainSessionKey.<span class="t-fn">trim</span>();
+}
+
+<span class="t-key">export function</span> <span class="t-fn">resolveSandboxRuntimeStatus</span>(params<span class="t-pun">:</span> {
+  cfg<span class="t-pun">?:</span> <span class="t-typ">OpenClawConfig</span>;
+  sessionKey<span class="t-pun">?:</span> <span class="t-typ">string</span>;
+  agentId<span class="t-pun">:</span> <span class="t-typ">string</span>;
+})<span class="t-pun">:</span> <span class="t-typ">SandboxRuntimeStatus</span>;</code></pre>
+      </div>
+
+      <table class="tbl reveal">
+        <tr><th>mode</th><th>行为</th><th>说明</th></tr>
+        <tr><td><code class="ro">off</code></td><td>不隔离</td><td>所有 session 直接跑在宿主环境；函数在第一行短路返回 <code class="ro">false</code>。</td></tr>
+        <tr><td><span class="ph">all</span></td><td>全部隔离</td><td>每个 session 都进沙箱，包括 main session；第二行短路返回 <code class="ph">true</code>。</td></tr>
+        <tr><td><code class="cy">non-main</code> <span class="mono">(默认)</span></td><td>仅非主 session 隔离</td><td>main session 保持原生权限，其余派生 session 进沙箱；走最后一行的 key 比较。</td></tr>
+      </table>
+
+      <div class="note reveal"><b>判定优先级：</b><code class="k">off</code> → 永不隔离；<code class="k">all</code> → 永远隔离；默认 <code class="kc">non-main</code> 只比较 <code class="k">sessionKey.trim() !== mainSessionKey.trim()</code> —— 主会话原生，派生会话进沙箱。两次 <code class="k">.trim()</code> 是为了让前后空白不会意外把主会话错判成派生会话。</div>
+    </section>
+
+    <!-- ============ 03 · POLICY ============ -->
+    <section id="policy">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">policy · per-tool gating</div>
+        <h2>逐工具<em>放行策略</em></h2>
+        <p class="lead">一旦某个 session 被判定进沙箱，它发起的每一次工具调用都不再无条件可信。<code class="k">tool-policy.ts</code> 中的 <code class="k">classifyToolAgainstSandboxToolPolicy()</code> 对沙箱 session 内的每次工具调用逐一分类，决定<strong>允许 / 降权 / 拦截</strong>。</p>
+      </div>
+
+      <p class="reveal"><code class="kc">resolveSandboxRuntimeStatus()</code> 从 <code class="k">cfg</code> / <code class="k">sessionKey</code> / <code class="k">agentId</code> 计算出该 agent 的 <code class="k">SandboxRuntimeStatus</code>——它把"该不该沙箱"的判定结果固化成一份逐 agent 的运行时状态，供后续的工具放行逻辑读取。两个函数构成"先定状态、再定每次调用"的两级判定链。</p>
+
+      <div class="panel pad tick reveal">
+        <div class="kicker">图 01 · per-tool gating</div>
+        <div class="flow">
+          <div class="flow-node">
+            <div class="ttl">tool call</div>
+            <div class="meta">沙箱 session 发起</div>
+          </div>
+          <div class="flow-arr">
+            <span class="flow-stage">classify</span>
+            <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg>
+          </div>
+          <div class="flow-node">
+            <div class="ttl am">classifyToolAgainstSandboxToolPolicy()</div>
+            <div class="meta">逐工具分类</div>
+          </div>
+          <div class="flow-arr cy">
+            <span class="flow-stage"><b>decide</b></span>
+            <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg>
+          </div>
+          <div class="flow-node">
+            <div class="ttl cy">允许 / 降权 / 拦截</div>
+            <div class="meta">放行裁决</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g2 reveal">
+        <div class="card cy">
+          <div class="ic">resolveSandboxRuntimeStatus</div>
+          <h3>状态解析</h3>
+          <p>读取 <code class="k">cfg</code>、<code class="k">sessionKey</code>、<code class="k">agentId</code>，输出该 agent 的 <code class="k">SandboxRuntimeStatus</code>。是"是否隔离"判定的运行时落地形态，逐 agent 缓存其沙箱状态。</p>
+        </div>
+        <div class="card">
+          <div class="ic">classifyToolAgainstSandboxToolPolicy</div>
+          <h3>逐工具放行</h3>
+          <p>在沙箱 session 内对每一次工具调用做分类裁决——允许、降权或拦截。细粒度策略发生在这里，而非在"是否进沙箱"那一层。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 04 · ISOLATION ============ -->
+    <section id="isolation">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">isolation · docker &amp; ssh</div>
+        <h2>Docker / SSH <em>隔离实现</em></h2>
+        <p class="lead">"判定进沙箱"之后，真正把 session 关进隔离环境的是 <code class="k">sandbox/config.ts</code> 配置的隔离后端。OpenClaw 提供两种实现：Docker 容器隔离与 SSH 远端隔离。</p>
+      </div>
+
+      <div class="grid g2 reveal">
+        <div class="card">
+          <div class="ic">backend · docker</div>
+          <h3>Docker 容器隔离</h3>
+          <p>把沙箱 session 跑在一个容器里，挂载与网络都被收紧——只暴露明确允许的目录，网络按需放行。文件系统与宿主隔离，越权写入被容器边界挡在外面。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">backend · ssh</div>
+          <h3>SSH 远端隔离</h3>
+          <p>把沙箱 session 跑在一台远端主机上，从物理上把执行环境与本地宿主分开。适用于需要把不可信工作负载彻底移出开发者机器的场景。</p>
+        </div>
+      </div>
+
+      <div class="note cy reveal"><b>职责边界：</b><code class="k">runtime-status.ts</code> 只决定<strong>是否</strong>沙箱（WHETHER）；<code class="k">config.ts</code> 决定<strong>如何</strong>沙箱（HOW）——用哪种后端、施加什么约束。两层一旦混在一起，就会出现"判定要隔离却没有可用后端"或"配了后端却忘了启用"的危险缝隙，所以源码刻意把它们分开。</div>
+    </section>
+
+    <!-- ============ 05 · FAILURE ============ -->
+    <section id="failure">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">failure modes · default-deny</div>
+        <h2>失败模式 · <em>默认锁定</em></h2>
+        <p class="lead">沙箱不是孤立存在的——它与 net-policy 网络层、exec 批准链共同构成默认锁定的纵深防御。每一层的失败模式都被设计成"拒绝"而非"放行"。</p>
+      </div>
+
+      <div class="grid g2 reveal">
+        <div class="card">
+          <div class="ic">net-policy</div>
+          <h3>SSRF / 私网访问</h3>
+          <p>net-policy 在网络层直接拒绝私网与云元数据 IP，<strong>无 fallback</strong>；URL 写入日志前先剥离 userinfo 凭证，避免把密钥泄进日志。请求被挡时不会退化成"先试一下"。</p>
+        </div>
+        <div class="card cy">
+          <div class="ic">exec approval</div>
+          <h3>exec 批准超时</h3>
+          <p>bash 默认走 allowlist，未命中则进入 ask 批准流程；批准请求一旦超时即失效，agent 必须重试或升级，<strong>绝不静默执行</strong>。超时的语义是"没批准"，而不是"默认通过"。</p>
+        </div>
+      </div>
+
+      <div class="note cy reveal"><b>安全哲学：</b>宁可拒绝也不静默放行——沙箱（隔离决策）+ net-policy（网络层拒绝）+ exec allowlist（执行批准）三层<strong>默认锁定</strong>，按需放宽。每一层在不确定时都倒向"拒绝"，把人为遗漏从"悄悄打开缺口"变成"显式触发拦截"。</div>
+
+      <div class="foot reveal">
+        <div class="big">Sandbox · <b>隔离模型</b></div>
+        <div class="meta">src/agents/sandbox/runtime-status.ts · config.ts · tool-policy.ts<br/><a href="../openclaw.html">← 返回总览</a> · <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">github ↗</a></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* starfield */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(232,130,90,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* scroll spy + reveals */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+})();
+
+/* copy buttons */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
+</body>
+</html>
