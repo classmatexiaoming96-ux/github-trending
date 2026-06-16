@@ -1,666 +1,785 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>guard-skills — LLM Code Quality Gates</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>guard-skills · LLM 代码质量闸门 · 14 失效模式 / 23 准则 / 三模式</title>
+<meta name="description" content="amElnagdy/guard-skills 源码级解析——反应式二次质量闸门，在交付前拦截 LLM 系统性失效模式。含三种触发模式（guard-pass / live / review）、14 种 LLM 失效模式、23 条强制准则、交付前 8 步自检、评审模式输出模板与五个 guard 技能参考。" />
+<meta property="og:title" content="guard-skills · LLM 代码质量闸门" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%236e56cf'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%239b8fff'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%236e56cf' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
 <style>
-  :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #21253a;
-    --border: #2a2f45;
-    --accent: #6e56cf;
-    --accent2: #9b8fff;
-    --green: #3fb950;
-    --red: #f85149;
-    --yellow: #d29922;
-    --blue: #58a6ff;
-    --text: #c9d1d9;
-    --muted: #8b949e;
-    --code-bg: #161b22;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-    font-size: 15px;
-  }
-  a { color: var(--accent2); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+/* ============================================================
+   guard-skills — LLM Code Quality Gates (pi-guide layout)
+   ============================================================ */
+:root{
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
 
-  /* HEADER */
-  header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
-  .badge-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 0.4rem;
-    background: var(--accent); color: #fff;
-    font-size: 0.75rem; font-weight: 600;
-    padding: 0.2rem 0.65rem; border-radius: 999px;
-    letter-spacing: 0.03em;
-  }
-  .badge.green { background: var(--green); color: #000; }
-  h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; color: #fff; margin-bottom: 0.4rem; }
-  .subtitle { color: var(--muted); font-size: 1rem; }
+  /* purple accent — guard-skills */
+  --star:       #6e56cf;
+  --star-soft:  #9b8fff;
+  --star-deep:  #5a45b0;
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* live / running / good */
+  --rose:       #f08a8a;   /* error / bad */
+  --violet:     #b3a4f0;
 
-  /* NAV */
-  nav { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 2rem; }
-  nav a {
-    padding: 0.35rem 0.75rem; border-radius: 6px;
-    background: var(--surface); color: var(--text); font-size: 0.85rem;
-    border: 1px solid var(--border);
-    transition: background 0.15s;
-  }
-  nav a:hover { background: var(--surface2); text-decoration: none; }
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
 
-  /* SECTION */
-  h2 {
-    font-size: 1.3rem; font-weight: 700; color: #fff;
-    margin-bottom: 0.75rem; padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 0.5rem;
-  }
-  h3 { font-size: 1.05rem; font-weight: 600; color: var(--accent2); margin: 1.5rem 0 0.5rem; }
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(110,86,207,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
 
-  /* MODE CARDS */
-  .mode-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem; margin: 1.5rem 0;
-  }
-  .mode-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 1.25rem;
-  }
-  .mode-card h3 { margin: 0 0 0.5rem; color: #fff; font-size: 1rem; }
-  .mode-card .tag {
-    display: inline-block; font-size: 0.7rem; font-weight: 600;
-    padding: 0.15rem 0.5rem; border-radius: 4px; margin-bottom: 0.6rem;
-  }
-  .mode-card .tag.pass { background: rgba(63,185,80,0.2); color: var(--green); }
-  .mode-card .tag.live { background: rgba(218,140,40,0.2); color: var(--yellow); }
-  .mode-card .tag.review { background: rgba(88,166,255,0.2); color: var(--blue); }
-  .mode-card p { font-size: 0.875rem; color: var(--muted); }
-  .mode-card ul { margin: 0.5rem 0 0 1rem; font-size: 0.85rem; }
-  .mode-card li { margin-bottom: 0.25rem; }
+  --glow-amber: rgba(110,86,207,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
 
-  /* FAILURE MODE TABLE */
-  .fm-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.875rem; }
-  .fm-table th {
-    text-align: left; padding: 0.6rem 0.75rem;
-    background: var(--surface2); color: var(--muted);
-    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-  }
-  .fm-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-  .fm-table tr:last-child td { border-bottom: none; }
-  .fm-table .num { color: var(--accent2); font-weight: 700; min-width: 2rem; }
-  .fm-table .pattern { color: #fff; font-weight: 500; }
-  .fm-table .rule { color: var(--muted); }
-  .fm-table .source { color: var(--blue); font-size: 0.8rem; }
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
 
-  /* 8-STEP SELF-CHECK */
-  .steps { counter-reset: steps; }
-  .step {
-    display: flex; gap: 1rem; margin-bottom: 1rem;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 1rem 1.25rem;
-  }
-  .step::before {
-    counter-increment: steps;
-    content: counter(steps);
-    flex-shrink: 0; width: 2rem; height: 2rem;
-    background: var(--accent); color: #fff;
-    border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 0.9rem;
-  }
-  .step-body { flex: 1; }
-  .step-title { font-weight: 600; color: #fff; margin-bottom: 0.25rem; }
-  .step-desc { font-size: 0.875rem; color: var(--muted); }
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
 
-  /* IMPERATIVES */
-  .imp-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-    gap: 0.75rem; margin: 1rem 0;
-  }
-  .imp-item {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 0.85rem 1rem;
-    font-size: 0.875rem;
-  }
-  .imp-item strong { color: var(--accent2); }
-  .imp-item span { color: var(--muted); }
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.6;
+  font-weight:340;
+  font-size:16.5px;
+  letter-spacing:0.005em;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
 
-  /* CODE BLOCK */
-  pre {
-    background: var(--code-bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 1rem; overflow-x: auto;
-    font-size: 0.82rem; line-height: 1.5; margin: 0.75rem 0;
-  }
-  code { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; color: #e6edf3; }
-  .bad { color: var(--red); }
-  .good { color: var(--green); }
-  .comment { color: var(--muted); }
+/* ---- atmosphere : fixed background layers ---- */
+.bg-stars{ position:fixed; inset:0; z-index:-3; display:block; }
+.bg-glow{
+  position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(110,86,207,0.14), transparent 60%),
+    radial-gradient(820px 600px at 8% 8%, rgba(84,214,224,0.10), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(30,26,55,0.5), transparent 70%);
+}
+.bg-grid{
+  position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%);
+}
+.bg-grain{
+  position:fixed; inset:0; width:100%; height:100%; z-index:-1; pointer-events:none; opacity:.45; mix-blend-mode:overlay;
+}
 
-  /* CROSS-CUTTING */
-  .callout {
-    background: rgba(110,86,207,0.1); border: 1px solid var(--accent);
-    border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0;
-    font-size: 0.9rem;
-  }
-  .callout strong { color: var(--accent2); }
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
 
-  /* COMPARISON TABLE */
-  .compare-table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.875rem; }
-  .compare-table th {
-    text-align: left; padding: 0.6rem 0.75rem;
-    background: var(--surface2); color: var(--muted);
-    font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-  }
-  .compare-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
-  .compare-table tr:last-child td { border-bottom: none; }
+/* ---- side nav ---- */
+.nav{
+  position:sticky; top:0; align-self:start; height:100vh;
+  padding:30px 22px 30px 30px;
+  display:flex; flex-direction:column; gap:22px;
+  border-right:1px solid var(--line-2);
+}
+.nav-brand{ display:flex; flex-direction:column; gap:6px; }
+.nav-brand .glyph{
+  font-family:var(--serif); font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-0.01em; color:var(--text);
+}
+.nav-brand .glyph b{ color:var(--star); font-weight:600; font-style:italic; }
+.nav-brand .sub{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:0.2em; text-transform:uppercase;
+  color:var(--text-dim);
+}
+.nav-ver{
+  font-family:var(--mono); font-size:10px; color:var(--star); border:1px solid var(--line-amber);
+  border-radius:99px; padding:2px 9px; align-self:flex-start; letter-spacing:0.1em;
+  background:rgba(110,86,207,0.06);
+}
+.nav-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.nav-list a{
+  display:flex; align-items:baseline; gap:11px;
+  text-decoration:none; color:var(--text-dim);
+  font-size:13px; padding:7px 11px; border-radius:8px;
+  transition:color .25s var(--ease), background .25s var(--ease);
+  position:relative; letter-spacing:0.01em;
+}
+.nav-list a .idx{ font-family:var(--mono); font-size:10px; color:var(--text-faint); width:16px; flex:none; }
+.nav-list a:hover{ color:var(--text); background:rgba(255,255,255,0.025); }
+.nav-list a.active{ color:var(--star); background:linear-gradient(90deg, rgba(110,86,207,0.12), transparent); }
+.nav-list a.active .idx{ color:var(--star); }
+.nav-list a.active::before{
+  content:""; position:absolute; left:-30px; top:50%; transform:translateY(-50%);
+  width:3px; height:18px; background:var(--star); border-radius:2px; box-shadow:0 0 12px var(--glow-amber);
+}
+.nav-foot{ margin-top:auto; font-family:var(--mono); font-size:10px; color:var(--text-faint); line-height:1.7; }
+.nav-foot a{ color:var(--text-dim); text-decoration:none; }
+.nav-foot a:hover{ color:var(--signal); }
 
-  /* SKILL GRID */
-  .skill-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 0.75rem; margin: 1rem 0;
-  }
-  .skill-chip {
-    display: flex; align-items: center; gap: 0.6rem;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 8px; padding: 0.75rem 1rem;
-  }
-  .skill-chip .dot {
-    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-  }
-  .skill-chip .dot.green { background: var(--green); }
-  .skill-chip .dot.yellow { background: var(--yellow); }
-  .skill-chip .dot.blue { background: var(--blue); }
-  .skill-chip .dot.purple { background: var(--accent); }
+/* ---- main ---- */
+.main{ min-width:0; padding:0 clamp(20px,5vw,84px) 120px; }
 
-  /* FOOTER */
-  footer {
-    margin-top: 3rem; padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
-    color: var(--muted); font-size: 0.8rem;
+section{ padding-top:96px; scroll-margin-top:20px; }
+section:first-of-type{ padding-top:0; }
+
+/* ---- shared bits ---- */
+.kicker{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase;
+  color:var(--signal); display:inline-flex; align-items:center; gap:9px; margin:0 0 18px;
+}
+.kicker::before{ content:""; width:22px; height:1px; background:var(--signal); opacity:.7; }
+.sec-head{ position:relative; margin-bottom:40px; }
+.sec-num{
+  position:absolute; right:0; top:-22px; font-family:var(--serif); font-style:italic;
+  font-size:clamp(60px,9vw,128px); font-weight:300; line-height:1; color:transparent;
+  -webkit-text-stroke:1px rgba(255,255,255,0.06); pointer-events:none; user-select:none; z-index:0;
+}
+h1,h2,h3{ font-family:var(--serif); font-weight:560; letter-spacing:-0.015em; line-height:1.08; }
+h2{ font-size:clamp(28px,4vw,46px); margin:0 0 16px; color:var(--text); position:relative; z-index:1; }
+h2 em{ font-style:italic; color:var(--star); font-weight:500; }
+h3{ font-size:20px; margin:0 0 10px; color:var(--text); }
+.lead{ font-size:clamp(16px,1.4vw,18.5px); color:var(--text-2); max-width:66ch; font-weight:340; }
+.lead strong{ color:var(--text); font-weight:600; }
+p{ max-width:72ch; color:var(--text-2); }
+p strong{ color:var(--text); font-weight:600; }
+a.inl{ color:var(--signal); text-decoration:none; border-bottom:1px solid var(--line-cyan); }
+a.inl:hover{ color:var(--signal-soft); }
+code.k{
+  font-family:var(--mono); font-size:0.86em; color:var(--star-soft);
+  background:rgba(110,86,207,0.09); border:1px solid rgba(110,86,207,0.18);
+  padding:1px 6px; border-radius:5px; white-space:nowrap;
+}
+code.kc{ color:var(--signal-soft); background:rgba(84,214,224,0.08); border-color:rgba(84,214,224,0.16); }
+
+/* ---- deep-read link ---- */
+.deep-link{
+  display:inline-flex; align-items:center; gap:8px; margin-top:16px;
+  font-family:var(--mono); font-size:11.5px; letter-spacing:0.06em;
+  color:var(--star); text-decoration:none; border:1px solid var(--line-amber);
+  border-radius:99px; padding:6px 15px; background:rgba(110,86,207,0.06);
+  transition:background .25s var(--ease), transform .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover{ background:rgba(110,86,207,0.15); border-color:var(--star); }
+.deep-link .arr{ transition:transform .25s var(--ease); }
+.deep-link:hover .arr{ transform:translateX(4px); }
+.deep-link b{ color:var(--star-soft); font-weight:500; }
+
+/* ---- panels ---- */
+.panel{
+  position:relative; background:var(--panel);
+  border:1px solid var(--line); border-radius:14px;
+  backdrop-filter:blur(8px);
+}
+.panel.pad{ padding:26px 28px; }
+.panel.tick::before,.panel.tick::after{
+  content:""; position:absolute; width:13px; height:13px; pointer-events:none;
+  border-color:var(--line-amber); border-style:solid;
+}
+.panel.tick::before{ top:9px; left:9px; border-width:1px 0 0 1px; }
+.panel.tick::after{ bottom:9px; right:9px; border-width:0 1px 1px 0; }
+.grid{ display:grid; gap:18px; }
+.g2{ grid-template-columns:repeat(2,1fr); }
+.g3{ grid-template-columns:repeat(3,1fr); }
+.g4{ grid-template-columns:repeat(4,1fr); }
+
+/* ---- code blocks ---- */
+.code{
+  position:relative; background:var(--panel-2); border:1px solid var(--line);
+  border-radius:12px; overflow:hidden; margin:18px 0;
+}
+.code-bar{
+  display:flex; align-items:center; gap:8px; padding:10px 14px;
+  border-bottom:1px solid var(--line-2); background:rgba(0,0,0,0.25);
+}
+.code-bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--line); }
+.code-bar .dot.a{ background:var(--star); } .code-bar .dot.b{ background:var(--signal); } .code-bar .dot.c{ background:var(--rose); }
+.code-bar .name{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-left:6px; letter-spacing:0.05em; }
+.code-bar .name.bad{ color:var(--rose); } .code-bar .name.good{ color:var(--phosphor); }
+.code-bar .copy{
+  margin-left:auto; font-family:var(--mono); font-size:10.5px; letter-spacing:0.08em;
+  color:var(--text-dim); background:none; border:1px solid var(--line); border-radius:6px;
+  padding:4px 10px; cursor:pointer; transition:all .2s var(--ease); text-transform:uppercase;
+}
+.code-bar .copy:hover{ color:var(--star); border-color:var(--line-amber); }
+.code-bar .copy.ok{ color:var(--phosphor); border-color:rgba(127,207,158,0.4); }
+pre{ margin:0; padding:18px 20px; overflow-x:auto; }
+pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cdd3e0; white-space:pre; }
+/* token tints */
+.t-key{ color:var(--violet); } .t-str{ color:var(--phosphor); } .t-fn{ color:var(--signal-soft); }
+.t-com{ color:var(--text-faint); font-style:italic; } .t-typ{ color:var(--star-soft); } .t-num{ color:var(--rose); }
+.t-pun{ color:var(--text-dim); }
+.t-bad{ color:var(--rose); } .t-good{ color:var(--phosphor); }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px 0 40px; position:relative; }
+.hero-top{ display:flex; align-items:center; gap:14px; margin-bottom:30px; flex-wrap:wrap; }
+.hero-top .pill{
+  font-family:var(--mono); font-size:11px; letter-spacing:0.12em; color:var(--text-dim);
+  border:1px solid var(--line); border-radius:99px; padding:5px 13px;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.hero-top .pill b{ color:var(--star); font-weight:500; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:var(--phosphor); box-shadow:0 0 10px var(--phosphor); animation:pulse 2.2s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.hero-grid{ display:grid; grid-template-columns:1.15fr 0.85fr; gap:48px; align-items:center; }
+.hero-title{
+  font-family:var(--serif); font-weight:560; font-size:clamp(44px,7.5vw,98px); line-height:0.94;
+  letter-spacing:-0.03em; margin:0 0 22px;
+}
+.hero-title .l1{ display:block; color:var(--text); }
+.hero-title .l2{ display:block; }
+.hero-title .l2 em{ font-style:italic; color:var(--star); font-weight:500; }
+.hero-title .l2 .core{ color:var(--signal); font-style:normal; }
+.hero-sub{ font-size:clamp(16px,1.6vw,20px); color:var(--text-2); max-width:56ch; margin:0 0 14px; font-weight:340; }
+.hero-sub b{ color:var(--text); font-weight:600; }
+.hero-pkg{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin:26px 0 30px; }
+.hero-pkg b{ color:var(--star-soft); font-weight:400; }
+.hero-cta{ display:flex; gap:14px; flex-wrap:wrap; }
+.btn{
+  font-family:var(--mono); font-size:12.5px; letter-spacing:0.04em; text-decoration:none;
+  padding:13px 22px; border-radius:10px; transition:all .25s var(--ease); cursor:pointer;
+  display:inline-flex; align-items:center; gap:9px; border:1px solid transparent;
+}
+.btn.primary{ background:var(--star); color:#fff; font-weight:600; box-shadow:0 8px 30px -10px var(--glow-amber); }
+.btn.primary:hover{ background:var(--star-soft); transform:translateY(-2px); box-shadow:0 14px 40px -12px var(--glow-amber); }
+.btn.ghost{ border-color:var(--line); color:var(--text-2); }
+.btn.ghost:hover{ border-color:var(--line-cyan); color:var(--signal-soft); }
+
+.hero-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:54px; }
+.hero-stats .cell{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; }
+.hero-stats .n{ font-family:var(--mono); font-size:15px; color:var(--star-soft); word-break:break-all; }
+.hero-stats .l{ font-size:12px; color:var(--text-dim); margin-top:5px; }
+
+/* radar */
+.radar-wrap{ position:relative; aspect-ratio:1; max-width:440px; margin-left:auto; width:100%; }
+.radar{ width:100%; height:100%; overflow:visible; }
+.radar .ring{ fill:none; stroke:rgba(255,255,255,0.07); }
+.radar .ring.amb{ stroke:rgba(110,86,207,0.16); }
+.radar .cross{ stroke:rgba(255,255,255,0.05); }
+.sweep{ transform-origin:200px 200px; animation:rotate 7s linear infinite; }
+@keyframes rotate{ to{ transform:rotate(360deg); } }
+.radar .blip{ animation:blip 7s linear infinite; transform-origin:center; }
+@keyframes blip{ 0%,8%{ opacity:1; r:5; } 22%,100%{ opacity:.28; r:3; } }
+.radar .blip-core{ animation:none; }
+.radar-center{ font-family:var(--serif); font-style:italic; }
+.radar-lbl{ font-family:var(--mono); font-size:9px; fill:var(--text-dim); letter-spacing:0.06em; }
+
+.scroll-hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:10px; letter-spacing:0.2em; color:var(--text-faint); text-transform:uppercase; display:flex; flex-direction:column; align-items:center; gap:8px; }
+.scroll-hint .ln{ width:1px; height:34px; background:linear-gradient(var(--star),transparent); }
+
+/* ---- cards ---- */
+.card{
+  border:1px solid var(--line); border-radius:13px; background:var(--panel); padding:22px 22px;
+  transition:all .3s var(--ease); position:relative; overflow:hidden;
+}
+.card:hover{ border-color:var(--line-amber); transform:translateY(-3px); }
+.card .ic{ font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:10px; }
+.card h3{ font-size:17px; margin-bottom:8px; }
+.card p{ font-size:13.5px; color:var(--text-2); margin:0; }
+.card.cy:hover{ border-color:var(--line-cyan); } .card.cy .ic{ color:var(--signal); }
+.card.gr .ic{ color:var(--phosphor); } .card.gr:hover{ border-color:rgba(127,207,158,0.4); }
+
+/* numbered cards (imperatives / steps) */
+.card .num-badge{
+  font-family:var(--mono); font-size:11px; color:var(--star); letter-spacing:0.08em; margin-bottom:8px;
+  display:inline-flex; align-items:center; gap:7px;
+}
+.card .num-badge b{ color:var(--star-soft); font-weight:600; }
+.card.cy .num-badge{ color:var(--signal); } .card.cy .num-badge b{ color:var(--signal-soft); }
+
+/* ---- compare table ---- */
+.tbl{ width:100%; border-collapse:collapse; margin:18px 0; font-size:13.5px; }
+.tbl th{ text-align:left; font-family:var(--mono); font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--line); font-weight:400; }
+.tbl td{ padding:11px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); vertical-align:top; }
+.tbl tr:hover td{ background:rgba(255,255,255,0.015); }
+.tbl td code,.tbl td .mono{ font-family:var(--mono); font-size:12px; color:var(--star-soft); }
+.tbl td .cy{ color:var(--signal-soft); } .tbl td .ph{ color:var(--phosphor); } .tbl td .ro{ color:var(--rose); } .tbl td .am{ color:var(--star-soft); }
+.tbl td .num{ font-family:var(--mono); color:var(--star-soft); font-weight:700; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line); margin-top:80px; padding-top:34px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:20px; }
+.foot .big{ font-family:var(--serif); font-style:italic; font-size:clamp(26px,4vw,42px); color:var(--text); line-height:1; }
+.foot .big b{ color:var(--star); font-weight:500; }
+.foot .meta{ font-family:var(--mono); font-size:11px; color:var(--text-faint); line-height:1.8; text-align:right; }
+
+/* reveal */
+.reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s var(--ease), transform .8s var(--ease); }
+.reveal.in{ opacity:1; transform:none; }
+@keyframes fadeUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;} }
+
+.note{ border-left:2px solid var(--star); padding:4px 0 4px 18px; margin:18px 0; color:var(--text-2); font-size:14px; }
+.note b{ color:var(--star-soft); }
+.note.cy{ border-color:var(--signal); } .note.cy b{ color:var(--signal-soft); }
+
+.mobile-bar{ display:none; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:1080px){
+  .hero-grid{ grid-template-columns:1fr; gap:36px; }
+  .radar-wrap{ max-width:340px; margin:0 auto; }
+  .hero-stats{ grid-template-columns:repeat(2,1fr); }
+}
+@media (max-width:860px){
+  .shell{ grid-template-columns:1fr; }
+  .nav{ display:none; }
+  .mobile-bar{
+    display:flex; position:sticky; top:0; z-index:50; align-items:center; justify-content:space-between;
+    padding:14px 20px; background:var(--panel-2); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);
   }
+  .mobile-bar .glyph{ font-family:var(--serif); font-size:20px; } .mobile-bar .glyph b{ color:var(--star); font-style:italic; }
+  .mobile-bar select{
+    font-family:var(--mono); font-size:12px; background:var(--ink-2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px;
+  }
+  .main{ padding:0 20px 80px; }
+  .g2,.g3,.g4,.hero-stats{ grid-template-columns:1fr; }
+  .sec-num{ font-size:64px; top:-12px; }
+}
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.001s !important; transition-duration:.12s !important; }
+  html{ scroll-behavior:auto; }
+}
 </style>
 </head>
 <body>
-<div class="container">
 
-<!-- ============================================================
-     HEADER
-     ============================================================ -->
-<header>
-  <div class="badge-row">
-    <span class="badge green">skills.sh</span>
-    <span class="badge">v1.0</span>
-    <span class="badge">AI Code Quality</span>
-  </div>
-  <h1>guard-skills</h1>
-  <p class="subtitle">Reactive second-pass quality gates that catch systematic LLM failure modes before they ship.</p>
-</header>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
 
-<nav>
-  <a href="#modes">Three Modes</a>
-  <a href="#14failures">14 LLM Failure Modes</a>
-  <a href="#imperatives">23 Imperatives</a>
-  <a href="#selfcheck">8-Step Delivery Check</a>
-  <a href="#skills">Skill Reference</a>
-  <a href="#sources">Sources</a>
-</nav>
-
-<!-- ============================================================
-     SECTION 1: THREE MODES
-     ============================================================ -->
-<section id="modes">
-<h2>Three Trigger Modes</h2>
-<p style="color:var(--muted); margin-bottom:1.25rem;">Every guard skill (clean-code-guard, test-guard, docs-guard, wp-guard, woo-guard) operates in one of three modes. The user's request determines which mode activates.</p>
-
-<div class="mode-grid">
-
-<!-- GUARD-PASS -->
-<div class="mode-card">
-  <span class="tag pass">Guard-Pass</span>
-  <h3>Recommended — Reactive Review</h3>
-  <p>Run after code has been generated, edited, refactored, or fixed. Check the diff or target files against all <em>Always-applied imperatives</em> before presenting, committing, or merging.</p>
-  <ul>
-    <li>After a coding agent writes or edits implementation</li>
-    <li>After a refactor — preserve behavior exactly</li>
-    <li>Before a PR is presented or a commit is made</li>
-  </ul>
-  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "review this PR", "is this safe to merge?", "check this diff", "should I commit this?"</p>
+<!-- mobile bar -->
+<div class="mobile-bar">
+  <div class="glyph">guard<b>skills</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
 </div>
 
-<!-- LIVE -->
-<div class="mode-card">
-  <span class="tag live">Live</span>
-  <h3>Explicit — Constrained Writing</h3>
-  <p>When the user explicitly invokes the guard before a risky code edit, apply the same imperatives <em>while writing</em>, then run the <em>Self-check before delivery</em> before showing the result.</p>
-  <ul>
-    <li>User says "use clean-code-guard while implementing this"</li>
-    <li>Risky structural changes (extraction, abstraction, rewrite)</li>
-    <li>When you want the constraint active during generation</li>
-  </ul>
-  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "use $clean-code-guard while you write", "implement this endpoint using clean-code-guard"</p>
-</div>
+<div class="shell">
 
-<!-- REVIEW -->
-<div class="mode-card">
-  <span class="tag review">Review</span>
-  <h3>Triggered — Structured Audit</h3>
-  <p>When the user asks to review, audit, critique, or rate code, walk the full <em>Review-Mode Checklist</em> against the target files and produce a structured findings report. Do not edit code unless asked.</p>
-  <ul>
-    <li>User asks "review this PR" or "audit this code"</li>
-    <li>Code-review for correctness — behavior changes in scope</li>
-    <li>Structured output with severity ratings (Critical / Important / Nit)</li>
-  </ul>
-  <p style="margin-top:0.6rem; font-size:0.8rem;"><strong>Trigger phrases:</strong> "review", "audit", "critique", "rate this code", "assess this"</p>
-</div>
+  <!-- =================== NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">guard<b>skills</b></div>
+      <div class="sub">LLM 代码质量闸门</div>
+    </div>
+    <span class="nav-ver">reactive · 二次质量闸门</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#modes"><span class="idx">01</span>三种触发模式</a></li>
+        <li><a href="#14failures"><span class="idx">02</span>14 种失效模式</a></li>
+        <li><a href="#imperatives"><span class="idx">03</span>23 条强制准则</a></li>
+        <li><a href="#selfcheck"><span class="idx">04</span>交付前 8 步自检</a></li>
+        <li><a href="#review"><span class="idx">05</span>评审模式模板</a></li>
+        <li><a href="#skills"><span class="idx">06</span>技能参考</a></li>
+        <li><a href="#examples"><span class="idx">07</span>正反例速查</a></li>
+        <li><a href="#sources"><span class="idx">08</span>来源</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      amElnagdy/guard-skills<br/>
+      AI 代码 · 测试 · 文档质量闸门<br/>
+      <a href="https://github.com/amElnagdy/guard-skills" target="_blank" rel="noopener">github.com/amElnagdy/guard-skills ↗</a>
+    </div>
+  </aside>
 
-</div>
+  <!-- =================== MAIN =================== -->
+  <main class="main">
 
-<div class="callout">
-  <strong>Decision tree:</strong> Did code get written or changed → <em>guard-pass</em>. Did you invoke before writing → <em>live</em>. Did the user ask to review/audit → <em>review</em>. Never blend modes: a review does not edit; a guard-pass does not produce a findings report.
-</div>
-</section>
+    <!-- ---------- HERO ---------- -->
+    <section id="overview" class="hero">
+      <div class="hero-top">
+        <span class="pill"><span class="live-dot"></span>amElnagdy/guard-skills · skills.sh</span>
+        <span class="pill">反应式 <b>二次质量闸门</b></span>
+      </div>
+      <div class="hero-grid">
+        <div>
+          <h1 class="hero-title">
+            <span class="l1">在交付前</span>
+            <span class="l2">拦住 <em>LLM</em> 的<span class="core">坏代码</span></span>
+          </h1>
+          <p class="hero-sub">guard-skills 是一组<b>反应式二次质量闸门</b>，在代码、测试、文档落地之前，系统性地拦截 LLM 反复犯的失效模式——过度防御、虚假成功、过早抽象、注释污染、参数爆炸。</p>
+          <p class="hero-pkg"># <b>npx skills add amElnagdy/guard-skills</b> · MIT · skills.sh</p>
+          <div class="hero-cta">
+            <a href="#14failures" class="btn primary">▸ 看 14 种失效模式</a>
+            <a href="#imperatives" class="btn ghost">23 条强制准则</a>
+          </div>
+          <div class="hero-stats">
+            <div class="cell"><div class="n">14</div><div class="l">系统性失效模式</div></div>
+            <div class="cell"><div class="n">23</div><div class="l">强制准则</div></div>
+            <div class="cell"><div class="n">8 步</div><div class="l">交付前自检</div></div>
+            <div class="cell"><div class="n">5 guards</div><div class="l">分层技能</div></div>
+          </div>
+        </div>
 
-<!-- ============================================================
-     SECTION 2: 14 LLM FAILURE MODES
-     ============================================================ -->
-<section id="14failures">
-<h2>14 Systematic LLM Failure Modes</h2>
-<p style="color:var(--muted); margin-bottom:1rem;">These are the highest-leverage checks. Eight of the 14 trace to one root cause: the model is biased toward emitting more code, more parameters, more guards, more abstractions — anything but the minimum required by the spec. Walk these before every delivery.</p>
+        <!-- radar -->
+        <div class="radar-wrap">
+          <svg class="radar" viewBox="0 0 400 400" aria-hidden="true">
+            <circle class="ring" cx="200" cy="200" r="60"/>
+            <circle class="ring amb" cx="200" cy="200" r="110"/>
+            <circle class="ring" cx="200" cy="200" r="160"/>
+            <line class="cross" x1="40" y1="200" x2="360" y2="200"/>
+            <line class="cross" x1="200" y1="40" x2="200" y2="360"/>
+            <line class="cross" x1="87" y1="87" x2="313" y2="313"/>
+            <line class="cross" x1="313" y1="87" x2="87" y2="313"/>
+            <g class="sweep">
+              <defs>
+                <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#6e56cf" stop-opacity="0.32"/>
+                  <stop offset="1" stop-color="#6e56cf" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M200 200 L200 40 A160 160 0 0 1 312 88 Z" fill="url(#sw)"/>
+              <line x1="200" y1="200" x2="200" y2="40" stroke="#6e56cf" stroke-width="1.5" stroke-opacity="0.6"/>
+            </g>
+            <circle class="blip" cx="200" cy="90"  r="4" fill="#6e56cf" style="animation-delay:0s"/>
+            <circle class="blip" cx="290" cy="150" r="4" fill="#54d6e0" style="animation-delay:-1.2s"/>
+            <circle class="blip" cx="278" cy="262" r="4" fill="#7fcf9e" style="animation-delay:-2.6s"/>
+            <circle class="blip" cx="150" cy="295" r="4" fill="#54d6e0" style="animation-delay:-4.1s"/>
+            <circle class="blip" cx="98"  cy="170" r="4" fill="#6e56cf" style="animation-delay:-5.5s"/>
+            <circle class="blip-core" cx="200" cy="200" r="28" fill="rgba(110,86,207,0.08)" stroke="rgba(110,86,207,0.4)"/>
+            <text class="radar-center" x="200" y="197" text-anchor="middle" fill="#6e56cf" font-size="14">guard</text>
+            <text class="radar-lbl" x="200" y="214" text-anchor="middle">skills</text>
+            <text class="radar-lbl" x="200" y="78"  text-anchor="middle">Modes</text>
+            <text class="radar-lbl" x="312" y="150" text-anchor="middle">Failures</text>
+            <text class="radar-lbl" x="300" y="278" text-anchor="middle">Imperatives</text>
+            <text class="radar-lbl" x="150" y="313" text-anchor="middle">Self-check</text>
+            <text class="radar-lbl" x="86"  y="166" text-anchor="middle">Review</text>
+          </svg>
+        </div>
+      </div>
+      <div class="scroll-hint"><span>向下探索</span><span class="ln"></span></div>
+    </section>
 
-<table class="fm-table">
-<thead>
-<tr>
-  <th>#</th>
-  <th>Pattern</th>
-  <th>Rule (Self-Check)</th>
-  <th>Source</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-  <td class="num">1</td>
-  <td class="pattern">Catch-all error handling that swallows failures</td>
-  <td class="rule">Catch only the specific error type you can recover from. Never use broad <code>catch any</code> or return null/empty success from a handler unless the contract documents it.</td>
-  <td class="source">Karpathy; field reports on LLM error suppression</td>
-</tr>
-<tr>
-  <td class="num">2</td>
-  <td class="pattern">Defensive guards for impossible cases</td>
-  <td class="rule">Do not add null checks or runtime type checks for values whose type annotation or caller contract already excludes that case. Trust the contract.</td>
-  <td class="source">arXiv 2409.19182</td>
-</tr>
-<tr>
-  <td class="num">3</td>
-  <td class="pattern">Premature abstraction</td>
-  <td class="rule">Do not introduce an interface, abstract class, factory, registry, strategy, or plugin pattern unless two or more concrete implementations exist today. One implementation = inline it.</td>
-  <td class="source">Fowler, "Patterns for Reducing Friction"</td>
-</tr>
-<tr>
-  <td class="num">4</td>
-  <td class="pattern">Comment pollution</td>
-  <td class="rule">Comments explain <em>why</em>, never <em>what</em>. Strip restating-code comments, step-number scaffolding, and docstrings that paraphrase the signature.</td>
-  <td class="source">HN #43929768; arXiv 2402.13013</td>
-</tr>
-<tr>
-  <td class="num">5</td>
-  <td class="pattern">Code duplication instead of reuse</td>
-  <td class="rule">Before writing a block of ≥5 lines, search the codebase for a similar existing function. Duplicated knowledge is a violation; duplicated text matching existing helpers is also a violation.</td>
-  <td class="source">GitClear 2025 — 211M-LoC, 8× growth 2021–2024</td>
-</tr>
-<tr>
-  <td class="num">6</td>
-  <td class="pattern">Hallucinated APIs and packages</td>
-  <td class="rule">Every import and external API call must be verified against the actual installed version. Read the package, check the lockfile, or import and inspect. Do not call a method based on what "should" exist.</td>
-  <td class="source">USENIX Security '25 — 16 models, 19.6% avg hallucination rate</td>
-</tr>
-<tr>
-  <td class="num">7</td>
-  <td class="pattern">Generic, intent-less naming</td>
-  <td class="rule">Ban <code>data</code>, <code>result</code>, <code>item</code>, <code>temp</code>, <code>value</code>, <code>obj</code>, <code>info</code>, <code>helper</code>, <code>manager</code>, <code>handle_*</code>, <code>process_*</code>, <code>do_*</code> unless qualified. Names must reveal intent.</td>
-  <td class="source">arXiv 2512.01141; arXiv 2510.03178</td>
-</tr>
-<tr>
-  <td class="num">8</td>
-  <td class="pattern">Long functions doing many things</td>
-  <td class="rule">A function does one thing. Hard caps: ≤50 lines, ≤4 parameters, cyclomatic complexity ≤8. If the prompt asked for N things, produce N functions and a small composer.</td>
-  <td class="source">GitClear 2025 — file size 142→267 LoC; arXiv 2512.11922</td>
-</tr>
-<tr>
-  <td class="num">9</td>
-  <td class="pattern">Parameter explosion</td>
-  <td class="rule">When a function reaches 5 parameters, stop and introduce a typed request/config object (record, struct, DTO). Do not keep adding positional args.</td>
-  <td class="source">arXiv 2304.10778; Fowler's overeagerness pattern</td>
-</tr>
-<tr>
-  <td class="num">10</td>
-  <td class="pattern">Inconsistency with surrounding code</td>
-  <td class="rule">Before writing in a file, read the file and at least one neighbor. Match casing, import style, error handling pattern, and logging style. Reuse existing utilities.</td>
-  <td class="source">Pullflow "The Context Illusion"; Honeycomb field reports</td>
-</tr>
-<tr>
-  <td class="num">11</td>
-  <td class="pattern">Dead code, unused imports, half-implementations</td>
-  <td class="rule">Run a linter or grep pass for unused imports, unused symbols, unreachable branches, and "just in case" exports. Remove them before delivery.</td>
-  <td class="source">arXiv 2411.01414; GitClear "added-code dominates deleted"</td>
-</tr>
-<tr>
-  <td class="num">12</td>
-  <td class="pattern">Declares success — mock fallbacks in production code</td>
-  <td class="rule">Never return hardcoded "success" values or fixture data from a function the spec says should perform real work. If you cannot implement, fail explicitly and say what is missing.</td>
-  <td class="source">Fowler "Patterns for Reducing Friction"; Claude Code #6984</td>
-</tr>
-<tr>
-  <td class="num">13</td>
-  <td class="pattern">Plausible-but-wrong code</td>
-  <td class="rule">For any boundary, range, off-by-one, or null-semantic question, write the case enumeration in a comment first. Never copy a similar function and adapt — re-derive from the spec.</td>
-  <td class="source">arXiv 2411.01414; Katanaquant "Plausible Code"</td>
-</tr>
-<tr>
-  <td class="num">14</td>
-  <td class="pattern">YAGNI violations — speculative configurability</td>
-  <td class="rule">No optional parameter, config flag, env var, or feature toggle without a present-day caller. If you find yourself adding <code>enable_*</code>, <code>use_*</code>, or <code>*_mode</code>, delete it and ship the concrete behavior.</td>
-  <td class="source">Fowler "YAGNI"; HN defensive-code thread</td>
-</tr>
-</tbody>
-</table>
+    <!-- ---------- 01 三种触发模式 ---------- -->
+    <section id="modes">
+      <div class="sec-head reveal">
+        <div class="sec-num">01</div>
+        <div class="kicker">modes · three triggers</div>
+        <h2>三种<em>触发模式</em></h2>
+        <p class="lead">每个 guard 技能（<code class="k">clean-code-guard</code> / <code class="k">test-guard</code> / <code class="k">docs-guard</code> / <code class="k">wp-guard</code> / <code class="k">woo-guard</code>）都运行在三种模式之一。由<strong>用户请求</strong>决定激活哪一种。</p>
+      </div>
 
-<div class="callout">
-  <strong>Cross-cutting root cause:</strong> Eight of the 14 failure modes (1, 2, 3, 9, 12, 14, plus pieces of 8 and 11) come from one bias — the model is rewarded for emitting more code. The cure is restraint. Before writing each line, ask: <em>does the spec require this, today?</em> If no, do not write it.
-</div>
-</section>
+      <div class="reveal">
+        <div class="grid g3">
+          <div class="card">
+            <div class="ic">Guard-Pass · 推荐</div>
+            <h3>反应式复查</h3>
+            <p>代码已生成 / 编辑 / 重构 / 修复<strong>之后</strong>运行。在呈现、提交或合并前，把 diff 或目标文件对照所有<em>常驻准则</em>检查一遍。</p>
+            <ul style="margin:10px 0 0 1.1rem; font-size:13px; color:var(--text-dim);">
+              <li>编码 agent 写完或改完实现之后</li>
+              <li>重构之后——必须严格保持行为不变</li>
+              <li>PR 呈现前、commit 落地前</li>
+            </ul>
+            <p style="margin-top:10px; font-size:12.5px;"><strong style="color:var(--star-soft)">触发语：</strong>"review this PR"、"is this safe to merge?"、"check this diff"、"should I commit this?"</p>
+          </div>
+          <div class="card cy">
+            <div class="ic">Live · 显式</div>
+            <h3>约束式写作</h3>
+            <p>用户在一次<strong>有风险的编辑前</strong>显式调用 guard，则在<em>写作时</em>就套用同一批准则，写完后再跑<em>交付前自检</em>才展示结果。</p>
+            <ul style="margin:10px 0 0 1.1rem; font-size:13px; color:var(--text-dim);">
+              <li>用户说 "use clean-code-guard while implementing this"</li>
+              <li>有风险的结构性变更（抽取、抽象、重写）</li>
+              <li>希望约束在生成过程中持续生效时</li>
+            </ul>
+            <p style="margin-top:10px; font-size:12.5px;"><strong style="color:var(--signal-soft)">触发语：</strong>"use $clean-code-guard while you write"、"implement this endpoint using clean-code-guard"</p>
+          </div>
+          <div class="card">
+            <div class="ic">Review · 被触发</div>
+            <h3>结构化审计</h3>
+            <p>用户要求 review / audit / critique / rate 代码时，对目标文件走完整<em>评审模式清单</em>，产出结构化发现报告。<strong>未被要求则不改代码。</strong></p>
+            <ul style="margin:10px 0 0 1.1rem; font-size:13px; color:var(--text-dim);">
+              <li>用户说 "review this PR" 或 "audit this code"</li>
+              <li>面向正确性的代码评审——行为变更在范围内</li>
+              <li>带严重度评级的结构化输出（Critical / Important / Nit）</li>
+            </ul>
+            <p style="margin-top:10px; font-size:12.5px;"><strong style="color:var(--star-soft)">触发语：</strong>"review"、"audit"、"critique"、"rate this code"、"assess this"</p>
+          </div>
+        </div>
 
-<!-- ============================================================
-     SECTION 3: 23 ALWAYS-APPLIED IMPERATIVES
-     ============================================================ -->
-<section id="imperatives">
-<h2>23 Always-Applied Imperatives</h2>
-<p style="color:var(--muted); margin-bottom:1rem;">These rules apply to every code change in guard-pass and live modes. They are imperative, not suggestions.</p>
+        <div class="note cy" style="margin-top:24px"><b>决策树：</b>有代码被写或被改 → <b>guard-pass</b>；写之前主动调用 → <b>live</b>；用户要求 review/audit → <b>review</b>。<strong>绝不混用模式</strong>——review 不改代码，guard-pass 不产出发现报告。</div>
+      </div>
+    </section>
 
-<div class="imp-grid">
+    <!-- ---------- 02 14 种失效模式 ---------- -->
+    <section id="14failures">
+      <div class="sec-head reveal">
+        <div class="sec-num">02</div>
+        <div class="kicker">failure modes · highest leverage</div>
+        <h2>14 种系统性<em>失效模式</em></h2>
+        <p class="lead">这是杠杆最高的检查项。14 项中有 8 项追溯到同一根因：<strong>模型偏向于多写代码、多加参数、多设防御、多搞抽象</strong>——任何东西，就是不肯只写规格要求的最小实现。每次交付前都要走一遍。</p>
+      </div>
 
-<div class="imp-item"><strong>1.</strong> <span><strong>Names reveal intent.</strong> Never use <code>data</code>, <code>result</code>, <code>item</code>, <code>temp</code>, <code>value</code>, <code>obj</code>, <code>info</code>, <code>helper</code>, <code>manager</code>, <code>utils</code>, or <code>handle_*</code>/<code>process_*</code>/<code>do_*</code> without a qualifier. A name must answer <em>why it exists and what it does</em>. (Clean Code Ch. 2)</span></div>
+      <div class="reveal">
+        <div class="panel pad tick">
+          <div class="kicker">表 02 · 14 种模式 · 模式 / 自检规则 / 来源</div>
+          <table class="tbl">
+            <thead>
+              <tr><th>#</th><th>模式</th><th>规则（自检）</th><th>来源</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="num">1</span></td><td class="am">吞掉失败的 catch-all 错误处理</td><td>只 catch 你能恢复的那个具体错误类型。除非契约写明，绝不用宽泛的 <code class="k">catch any</code>，也不从 handler 返回 null/空成功。</td><td><span class="cy">Karpathy；LLM 错误抑制实地报告</span></td></tr>
+              <tr><td><span class="num">2</span></td><td class="am">为不可能情况加防御性守卫</td><td>不要为类型注解或调用方契约已排除的值再加 null 检查或运行时类型检查。<strong>相信契约。</strong></td><td><span class="cy">arXiv 2409.19182</span></td></tr>
+              <tr><td><span class="num">3</span></td><td class="am">过早抽象</td><td>除非今天就存在两个及以上具体实现，否则不要引入 interface / 抽象类 / factory / registry / strategy / plugin 模式。只有一个实现 = 内联。</td><td><span class="cy">Fowler, "Patterns for Reducing Friction"</span></td></tr>
+              <tr><td><span class="num">4</span></td><td class="am">注释污染</td><td>注释解释 <em>why</em>，绝不解释 <em>what</em>。删掉复述代码的注释、步骤编号脚手架、复述签名的 docstring。</td><td><span class="cy">HN #43929768；arXiv 2402.13013</span></td></tr>
+              <tr><td><span class="num">5</span></td><td class="am">复制代码而非复用</td><td>写 ≥5 行的块之前，先在代码库里搜相似的现成函数。复制知识是违规；复制能匹配现有 helper 的文本也是违规。</td><td><span class="cy">GitClear 2025 — 2.11 亿行，2021–2024 增长 8×</span></td></tr>
+              <tr><td><span class="num">6</span></td><td class="am">幻觉 API 与依赖包</td><td>每个 import 与外部 API 调用都必须对照<strong>实际安装的版本</strong>核实。读包、查 lockfile，或 import 后 inspect。绝不凭"应该有"去调方法。</td><td><span class="cy">USENIX Security '25 — 16 模型，平均 19.6% 幻觉率</span></td></tr>
+              <tr><td><span class="num">7</span></td><td class="am">泛化、无意图的命名</td><td>禁用 <code class="k">data</code> <code class="k">result</code> <code class="k">item</code> <code class="k">temp</code> <code class="k">value</code> <code class="k">obj</code> <code class="k">info</code> <code class="k">helper</code> <code class="k">manager</code> <code class="k">handle_*</code> <code class="k">process_*</code> <code class="k">do_*</code>（除非有限定词）。名字必须揭示意图。</td><td><span class="cy">arXiv 2512.01141；arXiv 2510.03178</span></td></tr>
+              <tr><td><span class="num">8</span></td><td class="am">长函数干多件事</td><td>一个函数只做一件事。硬上限：≤50 行、≤4 参数、圈复杂度 ≤8。规格要求 N 件事就产出 N 个函数加一个小 composer。</td><td><span class="cy">GitClear 2025 — 文件 142→267 行；arXiv 2512.11922</span></td></tr>
+              <tr><td><span class="num">9</span></td><td class="am">参数爆炸</td><td>函数参数达到 5 个就停下，引入一个有类型的 request/config 对象（record、struct、DTO）。不要继续堆位置参数。</td><td><span class="cy">arXiv 2304.10778；Fowler 过度热心模式</span></td></tr>
+              <tr><td><span class="num">10</span></td><td class="am">与周围代码不一致</td><td>在文件里写之前，先读这个文件和至少一个邻居。对齐大小写、import 风格、错误处理模式、日志风格。复用既有工具。</td><td><span class="cy">Pullflow "The Context Illusion"；Honeycomb 实地报告</span></td></tr>
+              <tr><td><span class="num">11</span></td><td class="am">死代码、未用 import、半成品</td><td>跑 linter 或 grep，扫未用 import、未用符号、不可达分支、"以防万一"的导出。交付前删掉。</td><td><span class="cy">arXiv 2411.01414；GitClear "新增码远多于删除码"</span></td></tr>
+              <tr><td><span class="num">12</span></td><td class="am">宣告成功——生产代码里的 mock 兜底</td><td>规格说要做真实工作的函数，绝不返回硬编码"成功"值或夹具数据。实现不了就<strong>显式失败</strong>并说明缺什么。</td><td><span class="cy">Fowler "Reducing Friction"；Claude Code #6984</span></td></tr>
+              <tr><td><span class="num">13</span></td><td class="am">看似合理实则错误的代码</td><td>任何边界、范围、差一、null 语义的问题，先在注释里写出 case 枚举。绝不复制相似函数再改——从规格重新推导。</td><td><span class="cy">arXiv 2411.01414；Katanaquant "Plausible Code"</span></td></tr>
+              <tr><td><span class="num">14</span></td><td class="am">YAGNI 违规——投机式可配置</td><td>没有当下调用方就别加可选参数、config flag、env var、feature toggle。发现自己在加 <code class="k">enable_*</code> <code class="k">use_*</code> <code class="k">*_mode</code> 就删掉，发布具体行为。</td><td><span class="cy">Fowler "YAGNI"；HN 防御代码讨论</span></td></tr>
+            </tbody>
+          </table>
+        </div>
 
-<div class="imp-item"><strong>2.</strong> <span><strong>Functions stay small.</strong> Target ≤20 lines, one level of abstraction, one thing. If you can extract a function with a name that doesn't restate the body, the parent was doing more than one thing. (Clean Code Ch. 3)</span></div>
+        <div class="note" style="margin-top:24px"><b>横切根因：</b>14 种失效模式中的 8 种（1、2、3、9、12、14，外加 8 和 11 的部分）来自同一个偏差——<strong>模型因多写代码而被奖励</strong>。解药是克制。写每一行之前问一句：<em>规格今天真的需要它吗？</em>不需要，就别写。</div>
+      </div>
+    </section>
 
-<div class="imp-item"><strong>3.</strong> <span><strong>Four arguments is the hard ceiling.</strong> At five, stop and introduce a request/config object (record, struct, DTO). Never use boolean flag arguments — split into two functions instead.</span></div>
+    <!-- ---------- 03 23 条强制准则 ---------- -->
+    <section id="imperatives">
+      <div class="sec-head reveal">
+        <div class="sec-num">03</div>
+        <div class="kicker">imperatives · always applied</div>
+        <h2>23 条<em>强制准则</em></h2>
+        <p class="lead">在 <strong>guard-pass</strong> 与 <strong>live</strong> 模式下，这些规则适用于每一次代码变更。它们是<strong>命令式</strong>的，不是建议。</p>
+      </div>
 
-<div class="imp-item"><strong>4.</strong> <span><strong>No output arguments.</strong> A function either returns a value (query) or has a side effect (command). Never both. Command names use verbs; query names use nouns or getter-style names. (CQS)</span></div>
+      <div class="reveal">
+        <div class="grid g2">
+          <div class="card"><div class="num-badge"><b>01</b> 命名揭示意图</div><p>绝不在无限定词时用 <code class="k">data</code> <code class="k">result</code> <code class="k">item</code> <code class="k">temp</code> <code class="k">value</code> <code class="k">obj</code> <code class="k">info</code> <code class="k">helper</code> <code class="k">manager</code> <code class="k">utils</code> 或 <code class="k">handle_*</code>/<code class="k">process_*</code>/<code class="k">do_*</code>。名字必须回答<em>它为何存在、做什么</em>。(Clean Code Ch.2)</p></div>
+          <div class="card cy"><div class="num-badge"><b>02</b> 函数保持小</div><p>目标 ≤20 行、一个抽象层级、一件事。若能抽出一个名字不复述函数体的子函数，说明父函数干了不止一件事。(Clean Code Ch.3)</p></div>
+          <div class="card"><div class="num-badge"><b>03</b> 四参数是硬上限</div><p>到第五个就停下，引入 request/config 对象（record、struct、DTO）。绝不用布尔 flag 参数——拆成两个函数。</p></div>
+          <div class="card cy"><div class="num-badge"><b>04</b> 不用输出参数</div><p>函数要么返回值（query），要么有副作用（command），绝不两者兼有。command 用动词，query 用名词或 getter 式名字。(CQS)</p></div>
+          <div class="card"><div class="num-badge"><b>05</b> 注释解释 why</div><p>删掉任何复述下一行的注释。删掉步骤编号脚手架。删掉注释掉的代码——版本控制就是干这个的。(Clean Code Ch.4)</p></div>
+          <div class="card cy"><div class="num-badge"><b>06</b> 匹配文件既有风格</div><p>写之前读你要改的文件和至少一个邻居。对齐大小写、import 顺序、错误处理、日志、HTTP/DB client 选型。不要引入第二套模式。</p></div>
+          <div class="card"><div class="num-badge"><b>07</b> 每模块一个 actor</div><p>一个类只对一个利益相关方群体（Accounting、Auth、Reporting）负责。两个不相关子系统都伸手进同一个类，就拆开。(SRP, Uncle Bob 2014)</p></div>
+          <div class="card cy"><div class="num-badge"><b>08</b> 靠新代码扩展，而非改</div><p>若加新变体要在既有函数里再加一个 type-tag 分支，先重构成 registry、strategy 或多态分派。(OCP)</p></div>
+          <div class="card"><div class="num-badge"><b>09</b> 子类不拒绝父契约</div><p>绝不为发"未实现/不支持"信号而 override 方法。绝不在 override 里强化前置条件或弱化后置条件。要这么做，说明继承用错了。(LSP)</p></div>
+          <div class="card cy"><div class="num-badge"><b>10</b> 抽象归属于客户端</div><p>引入 interface、protocol 或抽象契约时，放在消费它的包里，而不是紧挨着具体类。(DIP)</p></div>
+          <div class="card"><div class="num-badge"><b>11</b> 删重复知识，非重复文本</div><p>两个长得像但编码不同规则的函数不是 DRY 违规。一条规则同时出现在 代码+文档+schema 才是。(Pragmatic Programmer, "DRY")</p></div>
+          <div class="card cy"><div class="num-badge"><b>12</b> 错抽象比重复更糟</div><p>抽象若为每个调用方的特例堆满了分支，把它重新内联回调用方，删掉死分支，再重新抽象。(Sandi Metz, "The Wrong Abstraction")</p></div>
+          <div class="card"><div class="num-badge"><b>13</b> 复杂度上限</div><p>圈复杂度 ≤10，嵌套深度 ≤5。超限前先重构。(McCabe 1976)</p></div>
+          <div class="card cy"><div class="num-badge"><b>14</b> 不做任何投机</div><p>没有当下调用方就别加可选参数、config flag、env var、feature toggle、interface、factory 或基类。发现自己加 <code class="k">enable_*</code> <code class="k">use_*_v2</code> <code class="k">*_mode</code> 就删掉，发布具体行为。(Fowler, "YAGNI")</p></div>
+          <div class="card"><div class="num-badge"><b>15</b> 绝不用宽泛 catch 吞错</div><p>只 catch 你能恢复的具体错误类型。无法恢复就让错误传播。除非函数契约写明，从 catch handler 返回 null/none/空成功是禁止的。(Karpathy)</p></div>
+          <div class="card cy"><div class="num-badge"><b>16</b> 不为不可能情况加守卫</div><p>不要为声明类型或调用方契约已排除的值再加 null 检查或运行时类型检查。相信契约。(arXiv 2409.19182)</p></div>
+          <div class="card"><div class="num-badge"><b>17</b> 核实每个 import 与外部调用</div><p>调库方法前，确认它在<strong>已安装的版本</strong>里存在（读包、查 lockfile，或 import 后 inspect）。不要凭 API "应该长什么样"生成代码。(USENIX Security '25)</p></div>
+          <div class="card cy"><div class="num-badge"><b>18</b> 生产代码无硬编码成功/mock</div><p>规格说做真实工作的函数，绝不返回 <code class="k">{"status":"ok",...}</code> 或罐头数据。实现不了就用语言的 unimplemented/unsupported 机制<strong>显式失败</strong>并说明。绝不为让测试通过而禁用、跳过或弱化它。(Fowler, Claude Code #6984)</p></div>
+          <div class="card"><div class="num-badge"><b>19</b> 重新推导，不从相似复制</div><p>想复制一个函数改改时，停下。从规格重新推导。差一和错 null 语义的 bug 几乎都从"复制相似"溜进来。(arXiv 2411.01414)</p></div>
+          <div class="card cy"><div class="num-badge"><b>20</b> 写前先枚举边界 case</div><p>任何范围、差一、null/空/一个/多个、奇偶、unicode/byte 边界，先在注释里写出 case 清单。逐个在代码里覆盖再往下。</p></div>
+          <div class="card"><div class="num-badge"><b>21</b> 交付前清除死代码</div><p>跑 linter 或 grep，扫未用 import、未用符号、不可达分支、"以防万一"的导出，删掉。今天没人调的函数不许为"将来"活着。</p></div>
+          <div class="card cy"><div class="num-badge"><b>22</b> 先读后写</div><p>在陌生仓库写之前，读你要改的文件、一个邻居，以及任何项目规则文件（CLAUDE.md、AGENTS.md、README 的 conventions 段）。用项目既有的 helper、错误类型与日志。</p></div>
+          <div class="card"><div class="num-badge"><b>23</b> 重构保持可观察行为</div><p>相同输入产出相同输出、抛相同异常、相同副作用、相同顺序保证。重构时发现 bug，单独标记并先问再改。重构定义为<em>改内部结构使其更易理解而不改变可观察行为</em>(Fowler, <em>Refactoring</em>)。修 bug 与重构是两个操作——绝不打包。</p></div>
+        </div>
+      </div>
+    </section>
 
-<div class="imp-item"><strong>5.</strong> <span><strong>Comments explain why, never what.</strong> Delete any comment that paraphrases the line below it. Delete step-number scaffolding. Delete commented-out code — version control exists. (Clean Code Ch. 4)</span></div>
+    <!-- ---------- 04 交付前 8 步自检 ---------- -->
+    <section id="selfcheck">
+      <div class="sec-head reveal">
+        <div class="sec-num">04</div>
+        <div class="kicker">self-check · before delivery</div>
+        <h2>交付前 <em>8 步自检</em></h2>
+        <p class="lead">在向用户展示你写或改的任何代码之前，跑这份清单。<strong>每一步都答"是"</strong>才能交付，否则先修。</p>
+      </div>
 
-<div class="imp-item"><strong>6.</strong> <span><strong>Match the file's existing style.</strong> Read the file you're editing and at least one neighbor before writing. Mirror casing, import order, error handling, logging, and HTTP/DB client choices. Do not introduce a second pattern.</span></div>
+      <div class="reveal">
+        <div class="grid g2">
+          <div class="card"><div class="num-badge"><b>步骤 1</b> 走准则 1–23 对照 diff</div><p>常驻准则里的每一条都适用于每次变更。扫完整个 diff，确认 23 条无一被违反。逐个修掉。</p></div>
+          <div class="card cy"><div class="num-badge"><b>步骤 2</b> 新函数数一数</div><p>行数 ≤20？参数 ≤4？复杂度感觉 ≤10？名字揭示意图？套用准则 1–3 的硬上限。超限的函数几乎一定多做了一件事或藏了抽象。</p></div>
+          <div class="card"><div class="num-badge"><b>步骤 3</b> 新注释问一句</div><p>它解释 why 吗？若解释 what，删掉。准则 5 是过滤器：复述下一行的注释只加噪声不加信号；残留的步骤编号脚手架也删。</p></div>
+          <div class="card cy"><div class="num-badge"><b>步骤 4</b> 新错误处理</div><p>catch 的错误类型够具体吗？handler 除了静默返回还做别的吗？准则 15 与 18：无文档化恢复路径却返回 null/空成功就是失败。只 catch 你能行动的。</p></div>
+          <div class="card"><div class="num-badge"><b>步骤 5</b> 新抽象</div><p>interface / factory / 基类 / registry：今天有第二个具体使用方吗？没有就内联。准则 3 与 12：单实现的抽象是过早；分支按调用方堆积的抽象是错抽象。</p></div>
+          <div class="card cy"><div class="num-badge"><b>步骤 6</b> 读了吗</div><p>你读了要改的文件和至少一个邻居吗？风格对齐了吗？准则 6 与 22：风格不一致是 LLM 代码评审三大高频发现之一。写前先读。</p></div>
+          <div class="card"><div class="num-badge"><b>步骤 7</b> 有硬编码 "ok" 吗</div><p>有没有硬编码 "ok" 返回或夹具数据？有就换成真实实现，或显式的 unimplemented/unsupported 失败。准则 18：这是<strong>最危险</strong>的 AI 模式——让代码看似能跑却交付虚构，必须交付前抓住。</p></div>
+          <div class="card cy"><div class="num-badge"><b>步骤 8</b> 若是重构</div><p>你改了可观察行为吗？改了就说明你打包了 bug 修复——拆出来问用户。准则 23：重构与修 bug 是两个独立操作，混在一个 diff 里两者都没法干净评审。</p></div>
+        </div>
+      </div>
+    </section>
 
-<div class="imp-item"><strong>7.</strong> <span><strong>One actor per module.</strong> A class should be answerable to one stakeholder group (Accounting, Auth, Reporting). If two unrelated subsystems both reach into the same class, split it. (SRP, Uncle Bob 2014)</span></div>
+    <!-- ---------- 05 评审模式模板 ---------- -->
+    <section id="review">
+      <div class="sec-head reveal">
+        <div class="sec-num">05</div>
+        <div class="kicker">review · structured findings</div>
+        <h2>评审模式<em>输出模板</em></h2>
+        <p class="lead">当用户要求 review / audit / critique 代码时，产出<strong>这一确切格式</strong>。评审模式下未被要求不改代码。交付发现前走完全部五个小节。</p>
+      </div>
 
-<div class="imp-item"><strong>8.</strong> <span><strong>Extension via new code, not edits.</strong> If adding a new variant requires another type-tag branch in an existing function, refactor to a registry, strategy, or polymorphic dispatch first. (OCP)</span></div>
+      <div class="reveal">
+        <div class="code">
+          <div class="code-bar"><span class="dot a"></span><span class="dot b"></span><span class="dot c"></span><span class="name">review-output.md · 输出模板</span><button class="copy">复制</button></div>
+<pre><code><span class="t-key"># Code review: &lt;file or scope&gt;</span>
 
-<div class="imp-item"><strong>9.</strong> <span><strong>No subclass refuses its parent's contract.</strong> Never override a method to signal "not implemented" or "unsupported operation." Never strengthen preconditions or weaken postconditions in an override. If you need to do that, the inheritance is wrong. (LSP)</span></div>
+<span class="t-key">## Summary</span>
+<span class="t-com">&lt;2–3 sentence verdict: ship / needs work / rewrite&gt;</span>
 
-<div class="imp-item"><strong>10.</strong> <span><strong>Abstractions live with the client, not the implementation.</strong> When you introduce an interface, protocol, or abstract contract, put it in the package that consumes it, not next to the concrete class. (DIP)</span></div>
-
-<div class="imp-item"><strong>11.</strong> <span><strong>Delete duplicated knowledge, not duplicated text.</strong> Two functions that look alike but encode different rules are not a DRY violation. One rule expressed in code + docs + schema is. (Pragmatic Programmer, "DRY")</span></div>
-
-<div class="imp-item"><strong>12.</strong> <span><strong>The wrong abstraction is worse than duplication.</strong> If an abstraction has accumulated branches for each caller's special case, re-inline it back into callers, then delete the dead branches before re-abstracting. (Sandi Metz, "The Wrong Abstraction")</span></div>
-
-<div class="imp-item"><strong>13.</strong> <span><strong>Complexity ceiling: cyclomatic ≤10, nesting depth ≤5.</strong> Refactor before exceeding. (McCabe 1976)</span></div>
-
-<div class="imp-item"><strong>14.</strong> <span><strong>No speculative anything.</strong> No optional parameter, config flag, env var, feature toggle, interface, factory, or base class without a present-day caller. If you find yourself adding <code>enable_*</code>, <code>use_*_v2</code>, or <code>*_mode</code>, delete it and ship the concrete behavior. (Fowler, "YAGNI")</span></div>
-
-<div class="imp-item"><strong>15.</strong> <span><strong>Never swallow errors with broad catch-all handling.</strong> Catch only the specific error type you can recover from. If you cannot recover, let the error propagate. Returning null/none/empty success from a catch handler is forbidden unless the function contract documents that behavior. (Karpathy)</span></div>
-
-<div class="imp-item"><strong>16.</strong> <span><strong>No defensive guards for impossible cases.</strong> Do not add null checks or runtime type checks for values whose declared type or caller contract already excludes that case. Trust the contract. (arXiv 2409.19182)</span></div>
-
-<div class="imp-item"><strong>17.</strong> <span><strong>Verify every import and external call.</strong> Before calling a method on a library, confirm it exists in the version installed (read the package, check the lockfile, or import and inspect). Do not generate code based on what the API "should" look like. (USENIX Security '25)</span></div>
-
-<div class="imp-item"><strong>18.</strong> <span><strong>No hardcoded "success" returns or mock fixtures in production code.</strong> Never return <code>{"status": "ok", ...}</code> or canned data from a function whose spec says it does real work. If you cannot implement, fail explicitly with the language's unimplemented or unsupported-operation mechanism and say so. Never disable, skip, or weaken a test to make it pass. (Fowler, Claude Code #6984)</span></div>
-
-<div class="imp-item"><strong>19.</strong> <span><strong>Re-derive, do not copy from similar.</strong> When tempted to copy a function and modify it, stop. Re-derive from the spec. Off-by-one and wrong-null-semantic bugs almost always enter through copy-from-similar. (arXiv 2411.01414)</span></div>
-
-<div class="imp-item"><strong>20.</strong> <span><strong>Enumerate boundary cases before writing them.</strong> For any range, off-by-one, null/empty/one/many, even/odd, or unicode/byte boundary, write the case list in a comment first. Cover each case in code before moving on.</span></div>
-
-<div class="imp-item"><strong>21.</strong> <span><strong>Strip dead code before delivery.</strong> Run a linter or grep pass for unused imports, unused symbols, unreachable branches, and "just in case" exports. Remove them. A function that nothing calls today does not get to live for "someday."</span></div>
-
-<div class="imp-item"><strong>22.</strong> <span><strong>Read before write.</strong> Before writing in an unfamiliar repo, read the file you'll edit, one neighbor, and any project rules file (CLAUDE.md, AGENTS.md, README's "conventions" section). Use the project's existing helpers, error types, and logging.</span></div>
-
-<div class="imp-item"><strong>23.</strong> <span><strong>Preserve observable behavior when refactoring.</strong> Same inputs produce the same outputs, same exceptions raised, same side effects, same ordering guarantees. If you spot a bug while refactoring, flag it separately and ask before changing it. Refactoring is defined as <em>a change to internal structure to make it easier to understand without changing observable behavior</em> (Fowler, <em>Refactoring</em>). Bug fixes and refactors are two operations — never bundle them.</span></div>
-
-</div>
-</section>
-
-<!-- ============================================================
-     SECTION 4: 8-STEP SELF-CHECK BEFORE DELIVERY
-     ============================================================ -->
-<section id="selfcheck">
-<h2>8-Step Self-Check Before Delivery</h2>
-<p style="color:var(--muted); margin-bottom:1.25rem;">Run this checklist before showing the user any code you wrote or edited. If you cannot answer yes to every step, fix before shipping.</p>
-
-<div class="steps">
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">Walk imperatives 1–23 against your diff. Fix every violation.</div>
-    <div class="step-desc">Every rule in the Always-Applied Imperatives section applies to every change. Scan the full diff and confirm none of the 23 are violated.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">For new functions, count: lines ≤ 20? params ≤ 4? complexity feels ≤ 10? names reveal intent?</div>
-    <div class="step-desc">Apply the hard caps from imperatives 1–3. A function that exceeds these limits almost certainly does more than one thing or carries a hidden abstraction.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">For new comments, ask: does this explain why? If it explains what, delete it.</div>
-    <div class="step-desc">Imperative 5 is the filter. If a comment paraphrases the line below it, it adds noise, not signal. If a step-number scaffold remains, remove it.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">For new error handling: is the caught error type specific? Does the handler do something other than silently return?</div>
-    <div class="step-desc">Imperatives 15 and 18. A catch handler that returns null or empty success without a documented recovery path is a failure. Catch only what you can act on.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">For new abstractions (interface, factory, base class, registry): is there a second concrete user today? If no, inline it.</div>
-    <div class="step-desc">Imperative 3 and 12. An abstraction with a single implementation is premature. An abstraction with per-caller branches accumulating is the wrong abstraction.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">Did you read the file you edited and at least one neighbor? Did your style match?</div>
-    <div class="step-desc">Imperative 6 and 22. Style inconsistency is one of the top three findings in LLM code reviews. Read the file before writing in it.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">Is there any hardcoded "ok" return or fixture data? If yes, replace with real implementation or an explicit unimplemented/unsupported-operation failure.</div>
-    <div class="step-desc">Imperative 18. This is the most dangerous AI pattern — it makes the code appear to work while shipping fiction. It must be caught before delivery.</div>
-  </div>
-</div>
-
-<div class="step">
-  <div class="step-body">
-    <div class="step-title">If this is a refactor: did you change observable behavior? If yes, you bundled a bug fix — split it out and ask the user.</div>
-    <div class="step-desc">Imperative 23. Refactoring and bug fixing are two separate operations. Combining them in a single diff means neither can be reviewed cleanly.</div>
-  </div>
-</div>
-
-</div>
-</section>
-
-<!-- ============================================================
-     SECTION 5: REVIEW MODE — STRUCTURED FINDINGS REPORT
-     ============================================================ -->
-<section id="review">
-<h2>Review-Mode Output Template</h2>
-<p style="color:var(--muted); margin-bottom:1rem;">When the user asks to review/audit/critique code, produce this exact output format. Do not edit code in review mode unless asked. Walk all five sections before delivering findings.</p>
-
-<pre><code># Code review: &lt;file or scope&gt;
-
-## Summary
-&lt;2–3 sentence verdict: ship / needs work / rewrite&gt;
-
-## Critical findings
-&lt;must-fix before merge&gt;
+<span class="t-key">## Critical findings</span>
+<span class="t-com">&lt;must-fix before merge&gt;</span>
 - **&lt;short title&gt;** — `&lt;file&gt;:&lt;line&gt;`
   Evidence: &lt;quoted code or behavior&gt;
   Principle violated: &lt;e.g., LSP, catch-all error swallowing&gt;
   Suggested fix: &lt;concrete&gt;
 
-## Important findings
-&lt;should fix but not blocking&gt;
+<span class="t-key">## Important findings</span>
+<span class="t-com">&lt;should fix but not blocking&gt;</span>
 - ...
 
-## Nits
-&lt;style, naming, minor structure&gt;
+<span class="t-key">## Nits</span>
+<span class="t-com">&lt;style, naming, minor structure&gt;</span>
 - ...
 
-## What's good
-&lt;at least 2–3 specific positives — naming, structure, test coverage&gt;
+<span class="t-key">## What's good</span>
+<span class="t-com">&lt;at least 2–3 specific positives — naming, structure, test coverage&gt;</span>
 
-## Self-check coverage
-- [ ] Walked Section A (naming & functions)
-- [ ] Walked Section B (comments & formatting)
+<span class="t-key">## Self-check coverage</span>
+- [ ] Walked Section A (naming &amp; functions)
+- [ ] Walked Section B (comments &amp; formatting)
 - [ ] Walked Section C (SOLID)
 - [ ] Walked Section D (DRY/KISS/YAGNI)
 - [ ] Walked Section E (AI failure modes)</code></pre>
+        </div>
 
-<h3>Severity definitions</h3>
-<table class="compare-table">
-<thead>
-<tr><th>Severity</th><th>Examples</th></tr>
-</thead>
-<tbody>
-<tr><td><strong style="color:var(--red)">Critical</strong></td><td>Security flaw, correctness bug, data loss, swallowed exceptions, hardcoded "success" returns</td></tr>
-<tr><td><strong style="color:var(--yellow)">Important</strong></td><td>SOLID violations, premature abstractions, parameter explosion, generic naming, DRY violations</td></tr>
-<tr><td><strong style="color:var(--muted)">Nit</strong></td><td>Style inconsistencies, single-letter names outside loops, missing docstring contracts on public APIs</td></tr>
-</tbody>
-</table>
+        <div class="grid g2 reveal" style="margin-top:24px">
+          <div class="panel pad tick">
+            <div class="kicker">表 05a · 严重度定义</div>
+            <table class="tbl">
+              <thead><tr><th>严重度</th><th>示例</th></tr></thead>
+              <tbody>
+                <tr><td><span class="ro" style="font-weight:700">Critical</span></td><td>安全漏洞、正确性 bug、数据丢失、吞掉的异常、硬编码 "success" 返回</td></tr>
+                <tr><td><span class="am" style="font-weight:700">Important</span></td><td>SOLID 违规、过早抽象、参数爆炸、泛化命名、DRY 违规</td></tr>
+                <tr><td><span style="color:var(--text-dim); font-weight:700">Nit</span></td><td>风格不一致、循环外的单字母命名、公共 API 缺少 docstring 契约</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="panel pad tick">
+            <div class="kicker">表 05b · 小节走查顺序</div>
+            <table class="tbl">
+              <thead><tr><th>小节</th><th>检查</th></tr></thead>
+              <tbody>
+                <tr><td><span class="am">A — 命名与函数</span></td><td>泛化命名、函数大小、参数数量、CQS 违规、布尔 flag</td></tr>
+                <tr><td><span class="am">B — 注释与格式</span></td><td>复述型注释、步骤编号脚手架、注释掉的代码、风格不一致</td></tr>
+                <tr><td><span class="am">C — SOLID</span></td><td>SRP 多 actor 模块；OCP type-tag 分派膨胀；LSP 不支持-操作 override；ISP 胖接口；DIP 错层 import</td></tr>
+                <tr><td><span class="am">D — DRY/KISS/YAGNI</span></td><td>知识重复、错抽象分支、圈复杂度 &gt;10、嵌套 &gt;5、投机式可配置</td></tr>
+                <tr><td><span class="ph">E — AI 失效模式</span></td><td>全部 14 种模式。与 A–D 交叉核对。<strong>杠杆最高的小节。</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
 
-<h3>Section walk order (review mode)</h3>
-<table class="compare-table">
-<thead>
-<tr><th>Section</th><th>Checks</th></tr>
-</thead>
-<tbody>
-<tr><td><strong>A — Naming & Functions</strong></td><td>Generic names, function size, parameter count, CQS violations, boolean flags</td></tr>
-<tr><td><strong>B — Comments & Formatting</strong></td><td>Restating comments, step-number scaffolds, commented-out code, style inconsistencies</td></tr>
-<tr><td><strong>C — SOLID</strong></td><td>SRP: multi-actor modules; OCP: type-tag dispatch growth; LSP: unsupported-operation overrides; ISP:fat interfaces; DIP: wrong-layer imports</td></tr>
-<tr><td><strong>D — DRY/KISS/YAGNI</strong></td><td>Knowledge duplication, wrong abstraction branches, cyclomatic >10, nesting >5, speculative configurability</td></tr>
-<tr><td><strong>E — AI Failure Modes</strong></td><td>All 14 patterns. Cross-check with Sections A–D. Highest leverage section.</td></tr>
-</tbody>
-</table>
-</section>
+    <!-- ---------- 06 技能参考 ---------- -->
+    <section id="skills">
+      <div class="sec-head reveal">
+        <div class="sec-num">06</div>
+        <div class="kicker">skills · the five guards</div>
+        <h2>技能<em>参考</em></h2>
+        <p class="lead">每个 guard 技能针对一类特定的 agent 产出。它们<strong>层叠</strong>：平台专属 guard（<code class="k">wp-guard</code>、<code class="k">woo-guard</code>）在 <code class="k">clean-code-guard</code> 之后运行。</p>
+      </div>
 
-<!-- ============================================================
-     SECTION 6: SKILL REFERENCE
-     ============================================================ -->
-<section id="skills">
-<h2>Skill Reference</h2>
-<p style="color:var(--muted); margin-bottom:1rem;">Each guard skill targets a specific type of agent output. They layer on top of each other: platform-specific guards (wp-guard, woo-guard) run after clean-code-guard.</p>
+      <div class="reveal">
+        <div class="grid g3">
+          <div class="card"><div class="ic">● clean-code-guard</div><h3>任意语言</h3><p>LLM 代码异味、SOLID/DRY/KISS/YAGNI、14 种 AI 失效模式。</p></div>
+          <div class="card gr"><div class="ic">● test-guard</div><h3>pytest · PHPUnit · Jest · Go · WP/Woo</h3><p>mock 滥用、重复测试、断言实现细节。</p></div>
+          <div class="card cy"><div class="ic">● docs-guard</div><h3>README · docstring · API 文档 · changelog</h3><p>幻觉符号、坏掉的示例、文档与代码漂移。</p></div>
+          <div class="card"><div class="ic" style="color:var(--yellow,#d29922)">● wp-guard</div><h3>WordPress 插件 · 主题 · REST · AJAX</h3><p>转义、消毒、nonce、capability、预处理查询、i18n。</p></div>
+          <div class="card"><div class="ic" style="color:var(--yellow,#d29922)">● woo-guard</div><h3>WooCommerce 扩展 · 结账 · 订单</h3><p>HPOS 安全访问、CRUD 优于 meta、金额错误、服务端校验。</p></div>
+        </div>
 
-<div class="skill-grid">
-  <div class="skill-chip">
-    <span class="dot purple"></span>
-    <div>
-      <strong>clean-code-guard</strong> — any language<br>
-      <span style="color:var(--muted); font-size:0.8rem;">LLM smells, SOLID/DRY/KISS/YAGNI, 14 AI failure modes</span>
-    </div>
-  </div>
-  <div class="skill-chip">
-    <span class="dot green"></span>
-    <div>
-      <strong>test-guard</strong> — pytest, PHPUnit, Jest, Go, WP/Woo<br>
-      <span style="color:var(--muted); font-size:0.8rem;">Mock abuse, duplicate tests, implementation-detail assertions</span>
-    </div>
-  </div>
-  <div class="skill-chip">
-    <span class="dot blue"></span>
-    <div>
-      <strong>docs-guard</strong> — READMEs, docstrings, API docs, changelogs<br>
-      <span style="color:var(--muted); font-size:0.8rem;">Hallucinated symbols, broken samples, docs-vs-code drift</span>
-    </div>
-  </div>
-  <div class="skill-chip">
-    <span class="dot yellow"></span>
-    <div>
-      <strong>wp-guard</strong> — WordPress plugins, themes, REST, AJAX<br>
-      <span style="color:var(--muted); font-size:0.8rem;">Escaping, sanitization, nonces, capabilities, prepared queries, i18n</span>
-    </div>
-  </div>
-  <div class="skill-chip">
-    <span class="dot yellow"></span>
-    <div>
-      <strong>woo-guard</strong> — WooCommerce extensions, checkout, orders<br>
-      <span style="color:var(--muted); font-size:0.8rem;">HPOS-safe access, CRUD over meta, money errors, server-side validation</span>
-    </div>
-  </div>
-</div>
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">表 06 · 配对指南</div>
+          <table class="tbl">
+            <thead><tr><th>Guard</th><th>能抓什么</th><th>配对</th></tr></thead>
+            <tbody>
+              <tr><td><code>clean-code-guard</code></td><td>LLM 代码异味、过度抽象、宽泛错误吞噬、坏命名、SOLID/DRY 违规</td><td>平台专属 guard</td></tr>
+              <tr><td><code class="ph">test-guard</code></td><td>mock 滥用、重复测试、断言实现细节、什么都抓不到的测试</td><td>测试 helper 含真实逻辑时配 <code>clean-code-guard</code></td></tr>
+              <tr><td><code class="cy">docs-guard</code></td><td>幻觉符号、坏示例、文档与代码漂移、不可验证声明</td><td>任何行为被写进文档的 guard</td></tr>
+              <tr><td><code>wp-guard</code></td><td>转义、消毒、nonce、capability、预处理查询、i18n、查询/缓存错误</td><td><code>clean-code-guard</code>；出现 Woo API 时配 <code>woo-guard</code></td></tr>
+              <tr><td><code>woo-guard</code></td><td>直接读订单 meta、HPOS 破坏、缺兼容声明、绕过结账、金额错误</td><td>WordPress 层配 <code>wp-guard</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
-<h3>Pairing guide</h3>
-<table class="compare-table">
-<thead>
-<tr><th>Guard</th><th>Catches</th><th>Pair with</th></tr>
-</thead>
-<tbody>
-<tr><td><code>clean-code-guard</code></td><td>LLM code smells, over-abstraction, broad error swallowing, bad names, SOLID/DRY violations</td><td>Platform-specific guards</td></tr>
-<tr><td><code>test-guard</code></td><td>Mock abuse, duplicate tests, implementation-detail assertions, tests that catch nothing</td><td><code>clean-code-guard</code> when test helpers contain real logic</td></tr>
-<tr><td><code>docs-guard</code></td><td>Hallucinated symbols, broken samples, docs-vs-code drift, unverifiable claims</td><td>Any guard whose behavior is documented</td></tr>
-<tr><td><code>wp-guard</code></td><td>Escaping, sanitization, nonces, capabilities, prepared queries, i18n, query/caching mistakes</td><td><code>clean-code-guard</code>; <code>woo-guard</code> when Woo APIs appear</td></tr>
-<tr><td><code>woo-guard</code></td><td>Direct order meta, HPOS breakage, missing compatibility declarations, checkout bypasses, money errors</td><td><code>wp-guard</code> for the WordPress layer</td></tr>
-</tbody>
-</table>
-</section>
+    <!-- ---------- 07 正反例速查 ---------- -->
+    <section id="examples">
+      <div class="sec-head reveal">
+        <div class="sec-num">07</div>
+        <div class="kicker">examples · bad / good</div>
+        <h2>正反例<em>速查</em></h2>
+        <p class="lead">最常见的失效模式，配上具体的 before / after。</p>
+      </div>
 
-<!-- ============================================================
-     SECTION 7: QUICK REFERENCE — BAD / GOOD EXAMPLES
-     ============================================================ -->
-<section id="examples">
-<h2>Quick-Reference Bad / Good Examples</h2>
-<p style="color:var(--muted); margin-bottom:1rem;">The most common failure patterns with concrete before/after.</p>
-
-<h3>Failure Mode 1 — Catch-all error swallowing</h3>
-<pre><code class="bad"># BAD — a database outage is now indistinguishable from "user has no email"
-getEmail(userId):
+      <div class="reveal">
+        <h3 style="color:var(--star-soft); margin-top:6px">失效模式 1 — catch-all 错误吞噬</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 数据库宕机现在和"用户没邮箱"无法区分</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">getEmail(userId):
   attempt:
     user = userStore.get(userId)
     return user.email
   catch anyError:
     return null</code></pre>
-<pre><code class="good"># GOOD — storage errors propagate; null only means the user has no email
-getEmail(userId):
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 存储错误传播；null 只表示用户没邮箱</span><button class="copy">复制</button></div>
+<pre><code class="t-good">getEmail(userId):
   user = userStore.get(userId)  # errors propagate
   return user.email</code></pre>
+        </div>
 
-<h3>Failure Mode 2 — Defensive guards for impossible cases</h3>
-<pre><code class="bad"># BAD — the contract says orderItems is a collection; none of these guards can fire
-total(orderItems):
+        <h3 style="color:var(--star-soft)">失效模式 2 — 为不可能情况加防御守卫</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 契约说 orderItems 是集合；这些守卫一个都触发不了</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">total(orderItems):
   if orderItems is null: return 0
   if orderItems is not a collection: return 0
   return sum(order.amount for each non-null order in orderItems)</code></pre>
-<pre><code class="good"># GOOD — trust the contract
-total(orderItems):
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 相信契约</span><button class="copy">复制</button></div>
+<pre><code class="t-good">total(orderItems):
   return sum(order.amount for each order in orderItems)</code></pre>
+        </div>
 
-<h3>Failure Mode 3 — Premature abstraction</h3>
-<pre><code class="bad"># BAD — exactly one payment processor; the abstract interface and factory are pure ceremony
-PaymentProcessor interface
+        <h3 style="color:var(--star-soft)">失效模式 3 — 过早抽象</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 只有一个支付处理器；抽象接口与工厂纯属仪式</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">PaymentProcessor interface
   charge(amount)
 CardPaymentProcessor implements PaymentProcessor
   charge(amount):
@@ -668,96 +787,216 @@ CardPaymentProcessor implements PaymentProcessor
 PaymentProcessorFactory
   create():
     return new CardPaymentProcessor()</code></pre>
-<pre><code class="good"># GOOD — one concrete function, no ceremony
-charge(amount):
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 一个具体函数，零仪式</span><button class="copy">复制</button></div>
+<pre><code class="t-good">charge(amount):
   return paymentProvider.createCharge(amount).id</code></pre>
+        </div>
 
-<h3>Failure Mode 7 — Generic, intent-less naming</h3>
-<pre><code class="bad"># BAD — none of these names reveal intent
-processData(data):
+        <h3 style="color:var(--star-soft)">失效模式 7 — 泛化、无意图命名</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 没有一个名字揭示意图</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">processData(data):
   result = []
   for item in data:
     temp = item.value * 2
     result.add(temp)
   return result</code></pre>
-<pre><code class="good"># GOOD — names answer why the function exists and what it does
-doublePrices(orders):
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 名字回答函数为何存在、做什么</span><button class="copy">复制</button></div>
+<pre><code class="t-good">doublePrices(orders):
   return orders.map(order -> order.priceCents * 2)</code></pre>
+        </div>
 
-<h3>Failure Mode 9 — Parameter explosion</h3>
-<pre><code class="bad"># BAD — should be a typed config object
-sendEmail(to, subject, body, retry=true, backoff="exp",
+        <h3 style="color:var(--star-soft)">失效模式 9 — 参数爆炸</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 应该用有类型的 config 对象</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">sendEmail(to, subject, body, retry=true, backoff="exp",
           html=false, fromAddress=null, encoding="utf-8",
           internal=false, verbose=false)</code></pre>
-<pre><code class="good"># GOOD — a typed request object scales cleanly
-EmailRequest
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 有类型的 request 对象可干净扩展</span><button class="copy">复制</button></div>
+<pre><code class="t-good">EmailRequest
   to
   subject
   body
   html = false
 
 sendEmail(request: EmailRequest)</code></pre>
+        </div>
 
-<h3>Failure Mode 12 — Declares success with mock fallback</h3>
-<pre><code class="bad"># BAD — shipped as the implementation, function body is fiction
-getUserBalance(userId):
+        <h3 style="color:var(--star-soft)">失效模式 12 — 宣告成功，mock 兜底</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 作为实现交付，函数体是虚构</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">getUserBalance(userId):
   return 1000  # TODO: actual provider call</code></pre>
-<pre><code class="good"># GOOD — explicit failure, clearly states what is missing
-getUserBalance(userId):
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 显式失败，明确说明缺什么</span><button class="copy">复制</button></div>
+<pre><code class="t-good">getUserBalance(userId):
   raise NotImplemented("Wire to billing.getBalance() after auth is available")</code></pre>
+        </div>
 
-<h3>Failure Mode 13 — Plausible-but-wrong (copy-from-similar)</h3>
-<pre><code class="bad"># BAD — off-by-one for odd-length arrays
-median = (values[values.length / 2] + values[values.length / 2 + 1]) / 2
+        <h3 style="color:var(--star-soft)">失效模式 13 — 看似合理实则错误（复制相似）</h3>
+        <div class="code">
+          <div class="code-bar"><span class="dot c"></span><span class="name bad">BAD · 奇数长度数组差一；静默丢掉 items[0]</span><button class="copy">复制</button></div>
+<pre><code class="t-bad">median = (values[values.length / 2] + values[values.length / 2 + 1]) / 2
 
 # BAD — silently drops items[0]
 for index from 1 to items.length - 1:
   ...</code></pre>
-<pre><code class="good"># GOOD — case enumeration first, then code
-# cases: empty / one / even / odd
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="dot b"></span><span class="name good">GOOD · 先枚举 case，再写代码</span><button class="copy">复制</button></div>
+<pre><code class="t-good"># cases: empty / one / even / odd
 median(values):
   sorted = values.sort()
   mid = sorted.length / 2
   return sorted.length % 2 == 0
     ? (sorted[mid-1] + sorted[mid]) / 2
     : sorted[mid]</code></pre>
-</section>
+        </div>
+      </div>
+    </section>
 
-<!-- ============================================================
-     SECTION 8: SOURCES
-     ============================================================ -->
-<section id="sources">
-<h2>Sources</h2>
-<table class="compare-table">
-<thead>
-<tr><th>Source</th><th>Claims supported</th></tr>
-</thead>
-<tbody>
-<tr><td><a href="https://www.gitness.com/h/repos/clear/pulls/1171">GitClear 2025 — AI Copilot Code Quality</a></td><td>Code duplication grew 8× between 2021–2024; function size 142→267 LoC; complexity 4.2→8.1</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2409.19182">arXiv 2409.19182 — AI-Generated Code Considered Harmful</a></td><td>Defensive code overuse; runtime type checks for impossible cases</td></tr>
-<tr><td><a href="https://www.usenix.org/conference/usenixsecurity25">USENIX Security '25 — Package Hallucinations</a></td><td>16 models, 19.6% average package hallucination rate; commercial ~5%, open source ~21%</td></tr>
-<tr><td><a href="https://martinfowler.com/articles/patterns-for-reducing-llm-friction.html">Fowler — Patterns for Reducing Friction in AI-Assisted Development</a></td><td>Overeagerness, declaring success despite failing tests, brute-force fixes</td></tr>
-<tr><td><a href="https://martinfowler.com/bliki/Yagni.html">Fowler — YAGNI</a></td><td>Speculative configurability cost; optional parameters without callers</td></tr>
-<tr><td><a href="https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction">Metz — The Wrong Abstraction</a></td><td>Re-inline rule; branches accumulating per caller in shared abstractions</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2411.01414">arXiv 2411.01414 — LLM Code Generation Mistakes</a></td><td>7-category taxonomy; copy-from-similar semantic errors; half-implementations</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2402.13013">arXiv 2402.13013 — Code Needs Comments</a></td><td>LLM comments average ~5 words vs 19-word author comments; answer "what?" not "why?"</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2512.01141">arXiv 2512.01141 — Neural Variable Name Repair</a></td><td>Generic identifiers are explicit target of name-repair models; LLM code over-produces them</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2510.03178">arXiv 2510.03178 — When Names Disappear</a></td><td>Semantic names act as anchors during generation; generic names degrade code quality</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2512.11922">arXiv 2512.11922 — Vibe Coding in Practice</a></td><td>Canonical symptom: 300-line functions handling four unrelated concerns from AI-generated fragments</td></tr>
-<tr><td><a href="https://arxiv.org/abs/2304.10778">arXiv 2304.10778 — Copilot/CodeWhisperer/ChatGPT comparison</a></td><td>Parameter explosion, function complexity growth in LLM-assisted commits</td></tr>
-<tr><td><a href="https://news.ycombinator.com/item?id=43929768">HN #43929768</a></td><td>Comment pollution is the most common thing making agentic code ugly</td></tr>
-<tr><td><a href="https://github.com/anthropic/claude-code/issues/6984">Claude Code #6984 — Systematic Mock Data Generation Bias</a></td><td>Hardcoded "success" returns and fixture data in production code</td></tr>
-</tbody>
-</table>
-</section>
+    <!-- ---------- 08 来源 ---------- -->
+    <section id="sources">
+      <div class="sec-head reveal">
+        <div class="sec-num">08</div>
+        <div class="kicker">sources · the evidence</div>
+        <h2>来源<em>与证据</em></h2>
+        <p class="lead">每条规则背后的研究与实地报告。下表把每个来源与它支撑的声明对应起来。</p>
+      </div>
 
-<footer>
-  <p>guard-skills &mdash; Reactive quality gates for AI-generated code, tests, and docs.</p>
-  <p style="margin-top:0.4rem;">Install: <code>npx skills add amElnagdy/guard-skills</code> &nbsp;|&nbsp; 
-  Repo: <a href="https://github.com/amElnagdy/guard-skills">github.com/amElnagdy/guard-skills</a> &nbsp;|&nbsp; 
-  License: MIT</p>
-</footer>
+      <div class="reveal">
+        <div class="panel pad tick">
+          <div class="kicker">表 08 · 来源 / 支撑的声明</div>
+          <table class="tbl">
+            <thead><tr><th>来源</th><th>支撑的声明</th></tr></thead>
+            <tbody>
+              <tr><td><a class="inl" href="https://www.gitness.com/h/repos/clear/pulls/1171" target="_blank" rel="noopener">GitClear 2025 — AI Copilot Code Quality</a></td><td>2021–2024 代码重复增长 8×；函数大小 142→267 行；复杂度 4.2→8.1</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2409.19182" target="_blank" rel="noopener">arXiv 2409.19182 — AI-Generated Code Considered Harmful</a></td><td>防御代码过度使用；为不可能情况加运行时类型检查</td></tr>
+              <tr><td><a class="inl" href="https://www.usenix.org/conference/usenixsecurity25" target="_blank" rel="noopener">USENIX Security '25 — Package Hallucinations</a></td><td>16 模型，平均 19.6% 包幻觉率；商业 ~5%，开源 ~21%</td></tr>
+              <tr><td><a class="inl" href="https://martinfowler.com/articles/patterns-for-reducing-llm-friction.html" target="_blank" rel="noopener">Fowler — Patterns for Reducing Friction</a></td><td>过度热心、测试未过却宣告成功、暴力修复</td></tr>
+              <tr><td><a class="inl" href="https://martinfowler.com/bliki/Yagni.html" target="_blank" rel="noopener">Fowler — YAGNI</a></td><td>投机式可配置的成本；无调用方的可选参数</td></tr>
+              <tr><td><a class="inl" href="https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction" target="_blank" rel="noopener">Metz — The Wrong Abstraction</a></td><td>重新内联规则；共享抽象中按调用方堆积的分支</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2411.01414" target="_blank" rel="noopener">arXiv 2411.01414 — LLM Code Generation Mistakes</a></td><td>7 类分类法；复制相似的语义错误；半成品</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2402.13013" target="_blank" rel="noopener">arXiv 2402.13013 — Code Needs Comments</a></td><td>LLM 注释平均 ~5 词 vs 作者 19 词；回答 "what" 而非 "why"</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2512.01141" target="_blank" rel="noopener">arXiv 2512.01141 — Neural Variable Name Repair</a></td><td>泛化标识符是命名修复模型的明确目标；LLM 代码过度产出它们</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2510.03178" target="_blank" rel="noopener">arXiv 2510.03178 — When Names Disappear</a></td><td>语义名在生成时充当锚点；泛化名劣化代码质量</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2512.11922" target="_blank" rel="noopener">arXiv 2512.11922 — Vibe Coding in Practice</a></td><td>典型症状：300 行函数处理四个不相关关注点</td></tr>
+              <tr><td><a class="inl" href="https://arxiv.org/abs/2304.10778" target="_blank" rel="noopener">arXiv 2304.10778 — Copilot/CodeWhisperer/ChatGPT 对比</a></td><td>参数爆炸、LLM 辅助提交中的函数复杂度增长</td></tr>
+              <tr><td><a class="inl" href="https://news.ycombinator.com/item?id=43929768" target="_blank" rel="noopener">HN #43929768</a></td><td>注释污染是让 agentic 代码变丑的最常见因素</td></tr>
+              <tr><td><a class="inl" href="https://github.com/anthropic/claude-code/issues/6984" target="_blank" rel="noopener">Claude Code #6984 — Systematic Mock Data Generation Bias</a></td><td>生产代码中硬编码 "success" 返回与夹具数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-</div><!-- .container -->
+      <div class="foot reveal">
+        <div class="big">guard<b>skills</b> · 克制即质量</div>
+        <div class="meta">
+          amElnagdy/guard-skills · 面向 AI 代码 / 测试 / 文档的反应式质量闸门<br/>
+          安装：npx skills add amElnagdy/guard-skills · License MIT<br/>
+          <a class="inl" href="https://github.com/amElnagdy/guard-skills" target="_blank" rel="noopener">github.com/amElnagdy/guard-skills ↗</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   starfield
+   ============================================================ */
+(function(){
+  const cv = document.getElementById('stars');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  let w, h, stars = [];
+  function resize(){
+    w = cv.width = innerWidth; h = cv.height = innerHeight;
+    const n = Math.min(150, Math.floor(w*h/14000));
+    stars = Array.from({length:n}, (_,i)=>({
+      x: (i*97.13)%w, y: (i*57.31)%h,
+      r: 0.4 + ((i*13)%10)/10*1.1,
+      a: 0.3 + ((i*7)%10)/10*0.5,
+      sp: 0.002 + ((i*11)%10)/10*0.01,
+      t: (i*0.37)%6.28,
+      amber: (i%7)===0
+    }));
+  }
+  function draw(){
+    ctx.clearRect(0,0,w,h);
+    for(const s of stars){
+      s.t += s.sp;
+      const tw = (Math.sin(s.t)+1)/2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      const al = s.a*(0.4+0.6*tw);
+      ctx.fillStyle = s.amber ? 'rgba(110,86,207,'+al+')' : 'rgba(220,228,255,'+al+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  }
+  resize(); draw();
+  addEventListener('resize', resize, {passive:true});
+})();
+
+/* ============================================================
+   scroll spy + reveals + mobile select
+   ============================================================ */
+(function(){
+  const links = [...document.querySelectorAll('.nav-list a')];
+  const map = {};
+  links.forEach(a=> map[a.getAttribute('href').slice(1)] = a);
+  const secs = [...document.querySelectorAll('section')];
+
+  const spy = new IntersectionObserver((es)=>{
+    es.forEach(e=>{
+      if(e.isIntersecting){
+        links.forEach(l=>l.classList.remove('active'));
+        const a = map[e.target.id]; if(a) a.classList.add('active');
+        const sel = document.getElementById('msel'); if(sel) sel.value = e.target.id;
+      }
+    });
+  }, {rootMargin:'-40% 0px -55% 0px'});
+  secs.forEach(s=>spy.observe(s));
+
+  const rev = new IntersectionObserver((es)=>{
+    es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); rev.unobserve(e.target); } });
+  }, {rootMargin:'0px 0px -8% 0px', threshold:0.05});
+  document.querySelectorAll('.reveal').forEach(el=>rev.observe(el));
+
+  // mobile select
+  const sel = document.getElementById('msel');
+  links.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.getAttribute('href').slice(1);
+    o.textContent = a.textContent.trim();
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', ()=>{
+    document.getElementById(sel.value)?.scrollIntoView({behavior:'smooth'});
+  });
+})();
+
+/* ============================================================
+   copy buttons
+   ============================================================ */
+document.querySelectorAll('.code .copy').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    const code = btn.closest('.code').querySelector('code');
+    navigator.clipboard.writeText(code.textContent).then(()=>{
+      const o = btn.textContent; btn.textContent = '✓ 已复制'; btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent = o; btn.classList.remove('ok'); }, 1400);
+    });
+  });
+});
+</script>
 </body>
 </html>
