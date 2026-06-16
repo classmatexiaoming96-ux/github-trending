@@ -509,6 +509,32 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
         </div>
         <p class="reveal">启动链路：<code class="k">entry.ts</code> → <code class="k">resolveEntryInstallRoot()</code> → <code class="k">respawnWithoutOpenClawCompileCacheIfNeeded()</code>（编译缓存优化）→ <code class="k">parseCliProfileArgs()</code>（加载 profile 环境变量）→ <code class="k">runCli()</code>。Gateway 模式下实际跑的是 <code class="k">runCli</code> 内部的 <code class="kc">gateway</code> 子命令。</p>
         <p class="reveal">编译缓存通过 <code class="k">entry.compile-cache.ts</code> 管理，用 <code class="k">OPENCLAW_COMPILE_CACHE_DIR</code> 环境变量定位缓存目录，重 spawn 时不带缓存标志以避免递归。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:28px">
+          <div class="kicker" style="margin-bottom:30px">图 01 · Gateway 冷启动管线</div>
+          <div class="flow">
+            <div class="flow-node"><div class="ttl">entry.ts</div><div class="meta">CLI 入口点</div></div>
+            <div class="flow-arr"><span class="flow-stage">resolve</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5"/></svg></div>
+            <div class="flow-node"><div class="ttl am">resolveEntryInstallRoot()</div><div class="meta">定位安装根</div></div>
+            <div class="flow-arr"><span class="flow-stage">respawn?</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.4s"/></svg></div>
+            <div class="flow-node"><div class="ttl">compile-cache spawn</div><div class="meta">缓存命中检查</div></div>
+            <div class="flow-arr"><span class="flow-stage">profile</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:.8s"/></svg></div>
+            <div class="flow-node"><div class="ttl am">parseCliProfileArgs()</div><div class="meta">注入 env</div></div>
+            <div class="flow-arr cy"><span class="flow-stage">cli</span>
+              <svg viewBox="0 0 48 24"><line class="dash" x1="0" y1="12" x2="48" y2="12"/><circle class="particle" cx="0" cy="12" r="2.5" style="animation-delay:1.1s"/></svg></div>
+            <div class="flow-node"><div class="ttl cy">runCli() → gateway</div><div class="meta">主循环</div></div>
+          </div>
+          <div class="note cy" style="margin-top:30px"><b>为什么要 respawn？</b>首次进入时若检测到编译缓存可用但当前进程未带缓存标志，<code class="kc">respawnWithoutOpenClawCompileCacheIfNeeded()</code> 会以正确标志重启一个干净子进程；重 spawn 时<b>剥掉缓存标志</b>正是为了避免无限递归自我重启。</div>
+        </div>
+
+        <div class="grid g3 reveal" style="margin-top:22px">
+          <div class="card"><div class="ic">measure("cli")</div><h3>启动 trace</h3><p><code class="k">gatewayEntryStartupTrace.measure()</code> 把 CLI 解析包成一段可观测的计时区间，冷启动耗时由此打点。</p></div>
+          <div class="card cy"><div class="ic">profile env</div><h3>多 profile 隔离</h3><p><code class="k">parseCliProfileArgs()</code> 先于 <code class="k">runCli()</code> 执行，把 profile 对应的环境变量套到进程上，实现多账号/多环境切换。</p></div>
+          <div class="card"><div class="ic">gateway 子命令</div><h3>常驻模式</h3><p>Gateway 模式实际是 <code class="k">runCli</code> 内部的 <code class="kc">gateway</code> 子命令，启动后转入 WebSocket 服务长循环。</p></div>
+        </div>
       </div>
     </section>
 
@@ -543,6 +569,15 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
 <pre><code><span class="t-typ">DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT</span>  <span class="t-com">// 每个 agent 最大子会话数</span>
 <span class="t-typ">DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH</span>         <span class="t-com">// 最大 spawn 深度（防止嵌套失控）</span></code></pre>
         </div>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">manager.ts</div><h3>会话管理器</h3><p><code class="k">getAcpSessionManager()</code> 返回进程级 ACP session manager，负责登记、查找与回收每个 ACP 会话句柄。</p></div>
+          <div class="card cy"><div class="ic">spawn.js</div><h3>失败清理</h3><p><code class="k">cleanupFailedAcpSpawn()</code> 在 spawn 半途失败时回滚已分配资源，<code class="k">AcpSpawnRuntimeCloseHandle</code> 是对应的关闭句柄类型。</p></div>
+          <div class="card"><div class="ic">policy.js</div><h3>策略闸门</h3><p><code class="k">isAcpEnabledByPolicy()</code> 决定该 agent 是否允许走 ACP，<code class="k">resolveAcpAgentPolicyError()</code> 给出被拒原因。</p></div>
+        </div>
+
+        <div class="note reveal" style="margin-top:8px"><b>父子进程 relay：</b>ACP harness 跑在子进程里，<code class="k">acp-spawn-parent-stream.ts</code> 负责把子进程 stdout 转回父进程的会话流——<code class="k">resolveAcpThreadSessionDetailLines()</code> / <code class="k">readAcpSessionMeta()</code> 则在 <code class="k">@openclaw/acp-core</code> 一侧解析会话标识与元数据。</div>
+        <div class="note cy reveal"><b>嵌套防爆：</b>子会话受 <code class="kc">MAX_CHILDREN_PER_AGENT</code>（扇出宽度）与 <code class="kc">MAX_SPAWN_DEPTH</code>（递归深度）双重约束，二者共同防止 sub-agent 失控自我繁殖。</div>
       </div>
     </section>
 
@@ -635,6 +670,27 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
   <span class="t-com">// 默认值：10 分钟 idle TTL</span></code></pre>
         </div>
         <p class="reveal">MCP 服务器配置通过 <code class="k">loadEmbeddedAgentMcpConfig()</code> 加载（<code class="k">embedded-agent-mcp.ts</code>），由 <code class="k">mcp-config-shared.ts</code> 的 <code class="k">isMcpConfigRecord()</code> 做类型校验，传输解析在 <code class="k">mcp-transport.ts</code> 中。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">表 01 · 三种传输与会话级常量</div>
+          <table class="tbl">
+            <tr><th>transportType</th><th>承载方式</th><th>典型场景</th></tr>
+            <tr><td><code>stdio</code></td><td>子进程 stdin/stdout 管道</td><td>本地 MCP server 可执行文件</td></tr>
+            <tr><td><code class="cy">sse</code></td><td>Server-Sent Events 长连接</td><td>远端只读流式 server</td></tr>
+            <tr><td><code class="ph">streamable-http</code></td><td><code>StreamableHTTPClientTransport</code></td><td>HTTP 双向 / 可恢复会话</td></tr>
+          </table>
+          <table class="tbl" style="margin-top:6px">
+            <tr><th>常量</th><th>值</th><th>作用</th></tr>
+            <tr><td><code>BUNDLE_MCP_CATALOG_LIST_TIMEOUT_MS</code></td><td><span class="mono">1500ms</span></td><td><code>listTools()</code> 目录拉取超时</td></tr>
+            <tr><td><code>BUNDLE_MCP_FAILURE_COOLDOWN_MS</code></td><td><span class="mono">60000ms</span></td><td>失败后指数退避冷却窗</td></tr>
+            <tr><td>idle TTL</td><td><span class="mono">10 分钟</span></td><td><code>resolveSessionMcpRuntimeIdleTtlMs()</code> 空闲回收</td></tr>
+          </table>
+        </div>
+
+        <div class="grid g2 reveal" style="margin-top:22px">
+          <div class="card"><div class="ic">Symbol.for(...)</div><h3>进程单例</h3><p><code class="k">SESSION_MCP_RUNTIME_MANAGER_KEY</code> 用全局 Symbol 注册表锚定 manager，保证每进程<strong>唯一一个</strong> MCP runtime manager，跨模块复用同一实例。</p></div>
+          <div class="card cy"><div class="ic">fingerprint</div><h3>配置指纹</h3><p><code class="k">resolveSessionMcpConfigFingerprint()</code> 把会话级 MCP 配置哈希成指纹；配置不变则复用已建连接，变更才重建 session。</p></div>
+        </div>
       </div>
     </section>
 
@@ -674,6 +730,18 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
 };</code></pre>
         </div>
         <p class="reveal">每个注册方法对应一个具体的功能领域。例如 <code class="k">registerTool</code> 让插件声明自己的工具，<code class="k">registerHook</code> 注入生命周期回调（start/stop/enable/disable 等），<code class="k">registerAgentHarness</code> 是 ACP 外部 harness 接入的正式入口。</p>
+
+        <div class="panel pad tick reveal" style="margin-top:24px">
+          <div class="kicker">表 02 · 注册方法按能力域分组（节选自 30+ 项）</div>
+          <table class="tbl">
+            <tr><th>能力域</th><th>注册方法</th><th>插件能做什么</th></tr>
+            <tr><td>模型与执行</td><td><code>registerTool</code> · <code>registerProvider</code> · <code class="cy">registerMcpServer</code></td><td>暴露工具、接入模型/语音/图像 provider、挂载 MCP server</td></tr>
+            <tr><td>外部 Agent</td><td><code>registerAgentHarness</code></td><td>把 Claude Code / Codex 等 ACP harness 接进来</td></tr>
+            <tr><td>消息与路由</td><td><code>registerChannel</code> · <code>registerHttpRoute</code> · <code>registerGatewayMethod</code></td><td>新增渠道、HTTP 端点、Gateway RPC 方法</td></tr>
+            <tr><td>生命周期与 CLI</td><td><code>registerHook</code> · <code>registerCli</code></td><td>注入 start/stop/enable/disable 钩子、扩展 CLI 命令</td></tr>
+          </table>
+          <div class="note"><b>handlers 是 Partial：</b><code class="k">BuildPluginApiParams.handlers</code> 用 <code class="k">Partial&lt;Pick&lt;OpenClawPluginApi, …&gt;&gt;</code> 描述——插件只实现自己关心的注册方法，未提供的能力域自动缺省，宿主据此裁剪 API 表面。</div>
+        </div>
       </div>
     </section>
 
@@ -704,6 +772,14 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
 <span class="t-key">export function</span> <span class="t-fn">clearPluginManifestLoadCache</span>(): <span class="t-typ">void</span>;</code></pre>
         </div>
         <p class="reveal">Manifest 中包含插件版本、入口点、config schema、commands、providers、hooks 等元数据。解析后缓存 512 条，缓存条目包含 <code class="k">mtimeMs</code>/<code class="k">ctimeMs</code> 以跟踪文件变化。Secret provider exec 参数长度限制等安全策略也在此文件校验。</p>
+
+        <div class="grid g4 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">文件名</div><h3>固定约定</h3><p><code class="k">PLUGIN_MANIFEST_FILENAME</code> = <code class="kc">openclaw.plugin.json</code>，发现插件即按此名查找。</p></div>
+          <div class="card cy"><div class="ic">256 KiB</div><h3>体积上限</h3><p><code class="k">MAX_PLUGIN_MANIFEST_BYTES</code> = <code class="kc">256 * 1024</code>，超限直接拒绝解析。</p></div>
+          <div class="card"><div class="ic">SLRU · 512</div><h3>解析缓存</h3><p><code class="k">PluginLruCache</code> 缓存 512 条解析结果，重复加载走缓存。</p></div>
+          <div class="card cy"><div class="ic">mtime/ctime</div><h3>失效跟踪</h3><p>缓存条目记录 <code class="k">mtimeMs</code>/<code class="k">ctimeMs</code>，文件一变即作废重读。</p></div>
+        </div>
+        <div class="note reveal"><b>测试钩子：</b><code class="k">createPluginCacheKey()</code> 生成稳定缓存键，<code class="k">clearPluginManifestLoadCache()</code> 供测试清空——保证用例之间不串缓存。</div>
       </div>
     </section>
 
@@ -746,6 +822,13 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
 <span class="t-key">function</span> <span class="t-fn">isRegistryPinned</span>(registry: <span class="t-typ">PluginRegistry</span>): <span class="t-typ">boolean</span>;</code></pre>
         </div>
         <p class="reveal">运行时状态设计：每个进程只有一个全局 registry（存在 <code class="k">globalThis</code> 上），通过 <code class="k">activeRegistry</code> / <code class="k">httpRoute</code> / <code class="k">channel</code> 三个视角观察同一份 registry。<code class="k">pinned</code> 标记用于防止正在使用的 registry 被意外清理。</p>
+
+        <div class="grid g3 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">activeRegistry</div><h3>主视角</h3><p>当前生效的 registry 与 <code class="k">activeVersion</code> 版本号；热替换时版本自增，旧引用据此识别过期。</p></div>
+          <div class="card cy"><div class="ic">httpRoute</div><h3>路由视角</h3><p>HTTP 路由专属的 <code class="k">{ registry, pinned, version }</code> 三元组——独立 pin，避免请求中途路由表被换。</p></div>
+          <div class="card"><div class="ic">channel</div><h3>渠道视角</h3><p>渠道注册同样独立 pin/version，让消息渠道在重载窗口内保持稳定指向。</p></div>
+        </div>
+        <div class="note cy reveal"><b>安全清理：</b><code class="k">isRegistryLive()</code> / <code class="k">isRegistryPinned()</code> 双判后，<code class="k">cleanupPreviousPluginHostRegistry()</code> 才回收旧 host registry——<code class="k">pinned</code> 为真时跳过，确保正在服务请求的 registry 不被拔掉。</div>
       </div>
     </section>
 
@@ -786,6 +869,12 @@ pre code{ font-family:var(--mono); font-size:12.5px; line-height:1.72; color:#cd
           <tr><td><code class="ph">all</code></td><td>全部隔离，每个 session 都进沙箱。</td></tr>
           <tr><td><code>non-main</code> <span style="color:var(--text-faint)">(默认)</span></td><td>只对非主 session 隔离；main session 保持原生权限。</td></tr>
         </table>
+
+        <div class="grid g2 reveal" style="margin-top:24px">
+          <div class="card"><div class="ic">resolveSandboxRuntimeStatus()</div><h3>状态解析</h3><p>按 <code class="k">cfg</code> / <code class="k">sessionKey</code> / <code class="k">agentId</code> 算出该 agent 的 <code class="k">SandboxRuntimeStatus</code>——是否隔离、用哪种隔离。</p></div>
+          <div class="card cy"><div class="ic">tool-policy.ts</div><h3>逐工具放行</h3><p><code class="k">classifyToolAgainstSandboxToolPolicy()</code> 对每次工具调用分类，决定在沙箱内是允许、降权还是拦截。</p></div>
+        </div>
+        <div class="note reveal"><b>判定优先级：</b><code class="kc">off</code> → 永不隔离；<code class="kc">all</code> → 永远隔离；默认 <code class="kc">non-main</code> 只比较 <code class="k">sessionKey.trim() !== mainSessionKey.trim()</code>——主会话保持原生，派生会话进沙箱。真正的 Docker/SSH 隔离细节落在 <code class="k">sandbox/config.ts</code>。</div>
       </div>
     </section>
 
