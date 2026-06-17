@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenHuman Memory Tree · 会自己长大的私人 AI 记忆 · 源码级解析</title>
+<meta name="description" content="tinyhumansai/openhuman 源码级深度解析——内容寻址写入流水线、三棵树与桶封热度公式、两段式打分准入门、六种作业队列、四元混合排序检索原语与本地安全模型。" />
+<meta property="og:title" content="OpenHuman Memory Tree · 会自己长大的私人 AI 记忆 · 源码级解析" />
+<meta property="og:description" content="tinyhumansai/openhuman 源码级深度解析——内容寻址写入流水线、三棵树与桶封热度公式、两段式打分准入门、六种作业队列、四元混合排序检索原语与本地安全模型。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   CodeGraph · Understand-Anything · Claude Plugins
+   Technical deep-dive — design system
+   ============================================================ */
+
+:root {
+  /* surfaces */
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* text */
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+
+  /* accents */
+  --gold:   #e0b07a;   /* global warm accent */
+  --gold-2: #d4a574;
+  --cyan:   #54d6e0;   /* codegraph */
+  --amber:  #e9b873;   /* understand-anything */
+  --coral:  #e08a64;   /* claude plugins (Anthropic clay) */
+  --green:  #7fcf9e;
+
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius: 16px;
+  --maxw: 1080px;
+
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp: "Space Grotesk", var(--sans);
+  --serif:"Fraunces", Georgia, serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* layered background glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(224, 176, 122, 0.10), transparent 60%),
+    radial-gradient(720px 460px at 8% 12%, rgba(84, 214, 224, 0.07), transparent 55%),
+    radial-gradient(820px 600px at 50% 108%, rgba(224, 138, 100, 0.07), transparent 60%),
+    var(--bg);
+}
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 80%);
+}
+
+a { color: inherit; text-decoration: none; }
+::selection { background: rgba(224,176,122,.3); color: #fff; }
+
+/* ---------- layout ---------- */
+.wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+.narrow { max-width: 820px; }
+
+section { padding: 96px 0; position: relative; }
+section + section { border-top: 1px solid var(--border); }
+
+/* ---------- scroll progress ---------- */
+#progress {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+  background: linear-gradient(90deg, var(--cyan), var(--gold), var(--coral));
+  z-index: 100; transition: width .1s linear;
+}
+
+/* ---------- nav ---------- */
+/* ---------- site index (top nav) ---------- */
+.site-index {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 95;
+  background: rgba(8, 9, 11, 0.96);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.site-index .wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.site-index-label {
+  font-size: 12px; font-family: var(--mono); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-faint); white-space: nowrap;
+}
+.site-index-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.site-index-links a {
+  display: inline-block; font-size: 13px; font-weight: 600;
+  color: var(--text-dim); padding: 7px 14px; border-radius: 9px;
+  border: 1px solid transparent; text-decoration: none;
+  transition: color .2s, background .2s, border-color .2s;
+  line-height: 1.3;
+}
+.site-index-links a:hover {
+  color: var(--text); background: rgba(255,255,255,.06); border-color: var(--border);
+}
+.site-index-links a span { display: block; font-size: 11px; font-weight: 400; color: var(--text-faint); margin-top: 2px; }
+
+header.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 90;
+  backdrop-filter: blur(14px);
+  background: rgba(10, 11, 14, 0.72);
+  border-bottom: 1px solid transparent;
+  transition: border-color .3s, background .3s;
+}
+header.nav.scrolled { border-bottom-color: var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 11px; font-family: var(--disp); font-weight: 700; letter-spacing: -.02em; }
+.brand .dot { width: 11px; height: 11px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--coral)); box-shadow: 0 0 14px var(--gold); }
+.brand span { font-size: 15px; }
+.nav-links { display: flex; gap: 6px; align-items: center; }
+.nav-links a {
+  font-size: 13.5px; color: var(--text-dim); padding: 8px 13px; border-radius: 9px;
+  transition: color .2s, background .2s; font-weight: 500;
+}
+.nav-links a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.nav-toggle { display: none; background: none; border: 1px solid var(--border); color: var(--text);
+  border-radius: 9px; width: 40px; height: 40px; font-size: 18px; cursor: pointer; }
+
+/* ---------- hero ---------- */
+.hero { padding: 150px 0 88px; text-align: center; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono);
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 7px 16px;
+  background: rgba(224,176,122,.05); margin-bottom: 30px;
+}
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(127,207,158,.6); animation: pulse 2.4s infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(127,207,158,.5)} 70%{box-shadow:0 0 0 9px rgba(127,207,158,0)} 100%{box-shadow:0 0 0 0 rgba(127,207,158,0)} }
+
+.hero h1 {
+  font-family: var(--disp); font-weight: 700; letter-spacing: -.035em;
+  font-size: clamp(2.6rem, 7vw, 5rem); line-height: 1.02; margin-bottom: 26px;
+}
+.hero h1 .ital { font-family: var(--serif); font-style: italic; font-weight: 400;
+  background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p.lead { max-width: 680px; margin: 0 auto 18px; font-size: clamp(1.05rem, 2.2vw, 1.3rem); color: var(--text-dim); }
+.hero .sub { font-family: var(--mono); font-size: 13px; color: var(--text-faint); letter-spacing: .02em; }
+.hero .sub b { color: var(--gold-2); font-weight: 500; }
+
+/* ---------- project tri-cards in hero ---------- */
+.tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 58px; }
+.pcard {
+  position: relative; text-align: left; background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; overflow: hidden;
+  transition: transform .25s ease, border-color .25s ease;
+}
+.pcard:hover { transform: translateY(-4px); border-color: var(--accent, var(--gold)); }
+.pcard::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background: var(--accent); opacity:.8; }
+.pcard .rank { font-family: var(--mono); font-size: 11px; color: var(--text-faint); letter-spacing: .1em; }
+.pcard h3 { font-family: var(--disp); font-size: 1.18rem; margin: 6px 0 4px; letter-spacing: -.02em; }
+.pcard h3 a:hover { color: var(--accent); }
+.pcard .tag { font-size: 12.5px; color: var(--text-dim); min-height: 38px; }
+.pcard .stats { display: flex; gap: 14px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pcard .stat .n { font-family: var(--disp); font-weight: 700; font-size: 1.15rem; color: var(--accent); }
+.pcard .stat .l { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.pcard.cg { --accent: var(--cyan); }
+.pcard.ua { --accent: var(--amber); }
+.pcard.cp { --accent: var(--coral); }
+
+/* ---------- section heading ---------- */
+.shead { margin-bottom: 44px; }
+.shead .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent, var(--gold)); }
+.shead h2 { font-family: var(--disp); font-weight: 700; letter-spacing: -.03em; font-size: clamp(1.8rem, 4.2vw, 2.8rem); margin: 12px 0 14px; line-height: 1.08; }
+.shead p { color: var(--text-dim); max-width: 720px; }
+
+/* ---------- prose ---------- */
+.prose p { margin: 0 0 18px; color: var(--text-dim); }
+.prose h4 { font-family: var(--disp); font-size: 1.12rem; color: var(--text); margin: 34px 0 12px; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+.prose h4::before { content:""; width: 16px; height: 2px; background: var(--accent, var(--gold)); border-radius: 2px; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose code { font-family: var(--mono); font-size: .86em; background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 5px; color: var(--gold-2); }
+.prose ul { margin: 0 0 18px; padding-left: 0; list-style: none; }
+.prose ul li { position: relative; padding-left: 26px; margin-bottom: 11px; color: var(--text-dim); }
+.prose ul li::before { content: "▹"; position: absolute; left: 4px; color: var(--accent, var(--gold)); }
+.prose ul li strong { color: var(--text); }
+.prose a.inline { color: var(--accent, var(--gold)); border-bottom: 1px solid rgba(255,255,255,.18); }
+.prose a.inline:hover { border-bottom-color: var(--accent, var(--gold)); }
+
+/* ---------- project section frame ---------- */
+.project { scroll-margin-top: 80px; }
+.project.cg { --accent: var(--cyan); }
+.project.ua { --accent: var(--amber); }
+.project.cp { --accent: var(--coral); }
+.project.oh { --accent: var(--green); }
+/* compact stat strip for single-project page */
+.statstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 38px 0; }
+.statstrip .cell { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px; text-align: left; }
+.statstrip .cell .n { font-family: var(--disp); font-weight: 700; font-size: 1.7rem; color: var(--accent, var(--gold)); line-height: 1; }
+.statstrip .cell .l { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-top: 8px; }
+@media (max-width: 720px){ .statstrip { grid-template-columns: 1fr 1fr; } }
+/* tree-diagram primitive used by the three-trees section */
+.trees3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin: 26px 0; }
+.trees3 .t { background: linear-gradient(180deg, var(--bg-card), var(--bg-elev)); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+.trees3 .t h5 { font-family: var(--disp); font-size: 1.1rem; margin-bottom: 4px; }
+.trees3 .t .badge { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 999px; margin-bottom: 12px; background: rgba(127,207,158,.12); color: var(--green); border: 1px solid rgba(127,207,158,.3); }
+.trees3 .t p { color: var(--text-dim); font-size: 14.5px; margin: 0 0 12px; }
+.trees3 .t ul { margin: 0; padding-left: 0; list-style: none; font-size: 13.5px; }
+.trees3 .t li { padding-left: 18px; position: relative; margin-bottom: 6px; color: var(--text-dim); }
+.trees3 .t li::before { content: "•"; position: absolute; left: 4px; color: var(--accent, var(--green)); }
+@media (max-width: 880px){ .trees3 { grid-template-columns: 1fr; } }
+
+/* ============================================================
+   Tab strip — project switcher in nav
+   ============================================================ */
+header.nav.has-tabs { padding-bottom: 0; }
+header.nav.has-tabs .nav-inner { height: 60px; }
+.tabs-wrap { border-top: 1px solid var(--border); background: rgba(10, 11, 14, 0.55); }
+.tabs {
+  display: flex; gap: 4px; max-width: var(--maxw); margin: 0 auto; padding: 0 24px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button {
+  font-family: var(--disp); font-weight: 500; font-size: 13.5px; letter-spacing: -.005em;
+  color: var(--text-dim); background: none; border: none; cursor: pointer;
+  padding: 14px 18px 13px; position: relative; white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+  display: flex; align-items: center; gap: 9px;
+}
+.tabs button .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--tab-color, var(--text-faint));
+  transition: box-shadow .2s, transform .2s;
+}
+.tabs button[data-tab="cg"] { --tab-color: var(--cyan); }
+.tabs button[data-tab="ua"] { --tab-color: var(--amber); }
+.tabs button[data-tab="cp"] { --tab-color: var(--coral); }
+.tabs button[data-tab="oh"] { --tab-color: var(--green); }
+.tabs button:hover { color: var(--text); }
+.tabs button.active {
+  color: var(--text); border-bottom-color: var(--tab-color);
+}
+.tabs button.active .dot { box-shadow: 0 0 12px var(--tab-color); transform: scale(1.15); }
+.tabs button .pill {
+  font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.05); color: var(--text-faint); letter-spacing: .03em;
+}
+
+/* push body content down to clear nav + tabs */
+body.tabs-active { padding-top: 0; }
+
+/* tab panels — hide all by default; the one with .active shows */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn .35s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tab-panel.active { animation: none; } }
+
+/* per-tab accent color for sections inside */
+.tab-panel[data-tab="cg"] section { --accent: var(--cyan); }
+.tab-panel[data-tab="ua"] section { --accent: var(--amber); }
+.tab-panel[data-tab="cp"] section { --accent: var(--coral); }
+.tab-panel[data-tab="oh"] section { --accent: var(--green); }
+.tab-panel[data-tab="cg"] .shead .kicker,
+.tab-panel[data-tab="cg"] .eyebrow { color: var(--cyan); border-color: rgba(84,214,224,.3); background: rgba(84,214,224,.06); }
+.tab-panel[data-tab="ua"] .shead .kicker,
+.tab-panel[data-tab="ua"] .eyebrow { color: var(--amber); border-color: rgba(233,184,115,.3); background: rgba(233,184,115,.06); }
+.tab-panel[data-tab="cp"] .shead .kicker,
+.tab-panel[data-tab="cp"] .eyebrow { color: var(--coral); border-color: rgba(224,138,100,.3); background: rgba(224,138,100,.06); }
+.tab-panel[data-tab="oh"] .shead .kicker,
+.tab-panel[data-tab="oh"] .eyebrow { color: var(--green); border-color: rgba(127,207,158,.3); background: rgba(127,207,158,.06); }
+
+/* the hero's gradient italic text per tab */
+.tab-panel[data-tab="cg"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tab-panel[data-tab="oh"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--green) 50%, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* When nav has tabs, account for taller header in scroll-padding */
+html.has-tabs { scroll-padding-top: 130px; }
+
+/* scroll-back-to-top affordance */
+.totop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 80;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text-dim);
+  cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s, color .2s, border-color .2s;
+  font-size: 18px;
+}
+.totop.show { opacity: 1; pointer-events: auto; }
+.totop:hover { color: var(--text); border-color: var(--accent, var(--gold)); transform: translateY(-2px); }
+
+@media (max-width: 600px) {
+  .tabs button { padding: 12px 13px 11px; font-size: 12.5px; }
+  .tabs button .pill { display: none; }
+}
+.proj-head { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 12px; }
+.proj-badge {
+  flex: 0 0 auto; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+  font-family: var(--disp); font-weight: 700; font-size: 1.4rem; color: var(--bg);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
+  box-shadow: 0 10px 30px -8px var(--accent);
+}
+.proj-title h2 { font-family: var(--disp); font-weight: 700; font-size: clamp(1.7rem, 4vw, 2.5rem); letter-spacing: -.03em; line-height: 1.05; }
+.proj-title .repo { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.proj-title .repo:hover { text-decoration: underline; }
+
+/* stat row */
+.statrow { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 38px; }
+.statrow .chip {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 18px; min-width: 130px;
+}
+.statrow .chip .n { font-family: var(--disp); font-weight: 700; font-size: 1.5rem; color: var(--accent); line-height: 1; }
+.statrow .chip .l { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+
+/* ---------- cards grid ---------- */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card {
+  background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: 14px; padding: 22px;
+  transition: border-color .25s, transform .25s;
+}
+.card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+.card .ico { font-size: 1.4rem; margin-bottom: 12px; display: block; }
+.card h5 { font-family: var(--disp); font-size: 1.02rem; margin-bottom: 8px; letter-spacing: -.01em; }
+.card p { font-size: 14.5px; color: var(--text-dim); margin: 0; }
+.card .accent { color: var(--accent, var(--gold)); }
+
+/* ---------- code block ---------- */
+.code {
+  position: relative; background: #0b0d12; border: 1px solid var(--border);
+  border-radius: 14px; margin: 24px 0; overflow: hidden; box-shadow: var(--shadow);
+}
+.code .bar { display: flex; align-items: center; gap: 7px; padding: 11px 16px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.code .bar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.code .bar i:nth-child(1){ background:#ff5f56 } .code .bar i:nth-child(2){ background:#ffbd2e } .code .bar i:nth-child(3){ background:#27c93f }
+.code .bar .fname { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.code pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; }
+.code pre code { background: none; padding: 0; color: #cdd3e0; font-size: 13px; }
+.tok-c { color: #6b7280; font-style: italic; }   /* comment */
+.tok-k { color: #c792ea; }                         /* keyword */
+.tok-s { color: #c3e88d; }                         /* string */
+.tok-f { color: #82aaff; }                         /* function */
+.tok-t { color: #ffcb6b; }                         /* type */
+.tok-n { color: #f78c6c; }                         /* number/const */
+.tok-p { color: #89ddff; }                         /* punctuation accent */
+
+/* ---------- pipeline diagram ---------- */
+.pipe { display: flex; flex-direction: column; gap: 0; margin: 26px 0; }
+.pipe .stage {
+  display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+}
+.pipe .arrow { align-self: center; color: var(--accent, var(--gold)); font-size: 18px; padding: 4px 0; }
+.pipe .stage .sn { font-family: var(--mono); font-size: 12px; color: var(--accent); flex: 0 0 28px; }
+.pipe .stage .st b { font-family: var(--disp); font-size: 1rem; }
+.pipe .stage .st small { display: block; font-size: 13px; color: var(--text-faint); }
+
+/* ---------- file tree ---------- */
+.tree { font-family: var(--mono); font-size: 13px; line-height: 1.9; color: var(--text-dim);
+  background: #0b0d12; border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin: 22px 0;
+  white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch; tab-size: 2; }
+.tree .d { color: var(--accent, var(--gold)); }
+.tree .c { color: var(--text-faint); }
+.tree .h { color: var(--text); }
+
+/* ---------- comparison table ---------- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; margin: 8px 0; }
+table.cmp { width: 100%; border-collapse: collapse; min-width: 640px; font-size: 14.5px; }
+table.cmp th, table.cmp td { text-align: left; padding: 15px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.cmp thead th { font-family: var(--disp); font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); background: rgba(255,255,255,.02); }
+table.cmp tbody tr:last-child td { border-bottom: none; }
+table.cmp td:first-child { color: var(--text); font-weight: 500; }
+table.cmp .c-cg { color: var(--cyan); } table.cmp .c-ua { color: var(--amber); } table.cmp .c-cp { color: var(--coral); }
+table.cmp tbody tr:hover { background: rgba(255,255,255,.015); }
+
+/* ---------- callout ---------- */
+.callout {
+  border-left: 3px solid var(--accent, var(--gold)); background: rgba(255,255,255,.03);
+  border-radius: 0 12px 12px 0; padding: 18px 22px; margin: 26px 0; font-size: 15px; color: var(--text-dim);
+}
+.callout b { color: var(--text); }
+
+/* ---------- benchmark bars ---------- */
+.bench { display: grid; gap: 14px; margin: 24px 0; }
+.bench .row { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 14px; }
+.bench .row .lbl { font-size: 13.5px; color: var(--text-dim); }
+.bench .row .track { height: 10px; background: rgba(255,255,255,.06); border-radius: 6px; overflow: hidden; }
+.bench .row .fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--cyan), var(--gold)); width: 0; transition: width 1.1s cubic-bezier(.2,.8,.2,1); }
+.bench .row .val { font-family: var(--disp); font-weight: 700; font-size: 14px; color: var(--gold); text-align: right; }
+
+/* ---------- ecosystem / synthesis ---------- */
+.eco { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; align-items: stretch; margin: 30px 0; }
+.eco .node { text-align: center; padding: 26px 18px; border: 1px solid var(--border); background: var(--bg-card); }
+.eco .node:nth-child(1){ border-radius: 14px 0 0 14px; border-right: none; }
+.eco .node:nth-child(3){ border-radius: 0 14px 14px 0; border-left: none; }
+.eco .node h5 { font-family: var(--disp); font-size: 1.05rem; margin-bottom: 8px; }
+.eco .node.cg h5 { color: var(--cyan); } .eco .node.ua h5 { color: var(--amber); } .eco .node.cp h5 { color: var(--coral); }
+.eco .node p { font-size: 13px; color: var(--text-dim); }
+.eco .node .layer { font-family: var(--mono); font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
+
+/* ---------- footer ---------- */
+footer { padding: 60px 0 80px; border-top: 1px solid var(--border); text-align: center; }
+footer .fbrand { font-family: var(--disp); font-weight: 700; font-size: 1.2rem; margin-bottom: 10px; }
+footer p { color: var(--text-faint); font-size: 13.5px; margin: 6px auto; max-width: 560px; }
+footer .links { display: flex; gap: 18px; justify-content: center; margin: 22px 0; flex-wrap: wrap; }
+footer .links a { font-size: 13.5px; color: var(--text-dim); border-bottom: 1px solid transparent; }
+footer .links a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+footer .meta { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); margin-top: 16px; }
+
+/* ---------- reveal animation ---------- */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 880px) {
+  .tri { grid-template-columns: 1fr; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .eco { grid-template-columns: 1fr; }
+  .eco .node { border-radius: 0 !important; border: 1px solid var(--border) !important; border-bottom: none !important; }
+  .eco .node:first-child { border-radius: 14px 14px 0 0 !important; }
+  .eco .node:last-child { border-radius: 0 0 14px 14px !important; border-bottom: 1px solid var(--border) !important; }
+  .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column;
+    background: rgba(12,14,20,.97); backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); padding: 14px 24px; gap: 2px; }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 12px 10px; }
+  .nav-toggle { display: block; }
+  .bench .row { grid-template-columns: 96px 1fr 48px; }
+  section { padding: 70px 0; }
+}
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .proj-head { flex-direction: row; }
+  .statrow .chip { min-width: calc(50% - 6px); flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* ============ NAV-TOC SIDEBAR (left rail TOC) ============ */
+.nav-toc {
+  position: fixed;
+  top: 150px;
+  left: max(12px, calc((100vw - var(--maxw)) / 2 - 212px));
+  width: 200px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px;
+  z-index: 40;
+  display: none;
+  scrollbar-width: thin;
+}
+@media (min-width: 1520px) { .nav-toc { display: block; } }
+.nav-toc h3 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 10px;
+  padding: 0 8px;
+}
+.nav-toc ul { list-style: none; margin: 0; padding: 0; }
+.nav-toc li { margin: 1px 0; }
+.nav-toc a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color .15s, background .15s;
+}
+.nav-toc a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-toc a.active {
+  color: var(--accent, var(--gold));
+  background: rgba(255,255,255,.05);
+  border-left-color: var(--accent, var(--gold));
+}
+.nav-toc li.toc-sub a { padding-left: 18px; font-size: 12px; color: var(--text-faint); }
+.nav-toc li.toc-sub a:hover, .nav-toc li.toc-sub a.active { color: var(--accent, var(--gold)); }
+
+/* ============================================================
+   Standalone-page chrome — sticky left sidebar + scroll-spy
+   (layered on top of the shared design system above)
+   ============================================================ */
+html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+body { padding-left: 264px; }
+body::after { mask-image: radial-gradient(circle at 62% 28%, black, transparent 82%); }
+
+aside.nav {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 264px; z-index: 90;
+  background: rgba(8, 9, 11, 0.96); border-right: 1px solid var(--border);
+  border-bottom: none; backdrop-filter: blur(14px);
+  overflow-y: auto; scrollbar-width: thin;
+}
+aside.nav .nav-inner { display: block; height: auto; padding: 30px 22px 44px; }
+aside.nav .back {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--text-faint);
+  display: inline-block; margin-bottom: 28px; transition: color .2s;
+}
+aside.nav .back:hover { color: var(--accent, var(--gold)); }
+aside.nav h3 { font-family: var(--disp); font-weight: 700; font-size: 1.16rem; letter-spacing: -.02em; line-height: 1.2; }
+aside.nav .nav-sub { font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em; color: var(--text-faint); margin: 7px 0 22px; }
+aside.nav > .nav-inner > nav { display: flex; flex-direction: column; gap: 1px; border-top: 1px solid var(--border); padding-top: 18px; }
+aside.nav > .nav-inner > nav a {
+  display: flex; gap: 11px; align-items: baseline; font-size: 13.5px; line-height: 1.4;
+  color: var(--text-dim); padding: 8px 12px; border-radius: 8px; border-left: 2px solid transparent;
+  transition: color .15s, background .15s, border-color .15s;
+}
+aside.nav > .nav-inner > nav a .ix { font-family: var(--mono); font-size: 11px; color: var(--text-faint); flex: none; }
+aside.nav > .nav-inner > nav a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+aside.nav > .nav-inner > nav a.active { color: var(--accent, var(--gold)); background: rgba(255,255,255,.05); border-left-color: var(--accent, var(--gold)); }
+aside.nav > .nav-inner > nav a.active .ix { color: var(--accent, var(--gold)); }
+
+main .hero { padding-top: 92px !important; text-align: left; }
+main .hero .statstrip { margin-left: 0; margin-right: 0; }
+main .project, main section[id], main .prose h4[id] { scroll-margin-top: 24px; }
+
+@media (max-width: 1080px) {
+  body { padding-left: 0; }
+  aside.nav { position: static; width: auto; height: auto; bottom: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  aside.nav .nav-inner { padding: 18px 24px; }
+  aside.nav .nav-sub { margin-bottom: 14px; }
+  aside.nav > .nav-inner > nav { flex-direction: row; flex-wrap: wrap; gap: 5px; border-top: 1px solid var(--border); }
+  aside.nav > .nav-inner > nav a { border-left: none; border-radius: 999px; padding: 6px 13px; background: rgba(255,255,255,.03); }
+  aside.nav > .nav-inner > nav a.active { border-left: none; }
+  main .hero { padding-top: 52px !important; }
+}
+
+:root { --accent: #7fcf9e; }
+
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<aside class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="back">← 索引</a>
+    <h3>OpenHuman Memory Tree</h3>
+    <p class="nav-sub">记忆层 · 本地知识库</p>
+    <nav aria-label="章节导航">
+      <a href="#overview"><span class="ix">00</span>概览</a>
+      <a href="#why"><span class="ix">01</span>向量库做坏的事</a>
+      <a href="#pipeline"><span class="ix">02</span>写入流水线</a>
+      <a href="#trees"><span class="ix">03</span>三棵树</a>
+      <a href="#jobs"><span class="ix">04</span>作业队列</a>
+      <a href="#retrieval"><span class="ix">05</span>检索原语</a>
+      <a href="#security"><span class="ix">06</span>本地安全</a>
+      <a href="#vs"><span class="ix">07</span>为何不是向量库</a>
+    </nav>
+  </div>
+</aside>
+
+<main>
+  <section id="overview" class="hero">
+  <div class="wrap">
+    <span class="eyebrow reveal"><span class="pulse"></span>tinyhumansai/openhuman · Rust + Tauri · 28,588 ★ · 源码级深拆</span>
+    <h1 class="reveal">一棵会自己<br /><span class="ital">长大的</span>私人 AI 记忆</h1>
+    <p class="lead reveal">大多数"AI 记忆"产品本质上是 <em>套了壳的向量库</em>。OpenHuman 走的是另一条路——把你每天的聊天、邮件、文档喂进一条<strong>确定性桶封流水线</strong>，长出三棵互补的"摘要树"，全部活在你自己的硬盘里。</p>
+    <p class="sub reveal"><b>Memory Tree</b> · 一份 SQLite + 一个 Markdown vault · 三棵树 · 六种作业 · 零云依赖</p>
+
+    <div class="statstrip reveal">
+      <div class="cell"><div class="n">3</div><div class="l">记忆树（源 / 主题 / 全局）</div></div>
+      <div class="cell"><div class="n">50k</div><div class="l">L0 封口 token 阈值</div></div>
+      <div class="cell"><div class="n">3k</div><div class="l">单 chunk 最大 token</div></div>
+      <div class="cell"><div class="n">100%</div><div class="l">本地，无外发</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== INTRO: THE PROBLEM ===================== -->
+<section id="why">
+  <div class="wrap narrow prose">
+    <div class="shead reveal">
+      <div class="kicker">问题</div>
+      <h2>"记忆" 这件事，被向量库做坏了</h2>
+      <p>大多数 AI 记忆系统的结构是这样的：把每条消息切碎 → 跑 embedding → 塞进 pgvector / chroma / pinecone → 查询时 top-K 相似。这能回答"和我现在说的话最像的旧记忆是什么"，<strong>但回答不了真正的记忆问题</strong>。</p>
+    </div>
+
+    <p class="reveal">OpenHuman 的 gitbook 直白地写：</p>
+    <div class="callout reveal"><em>"The Memory Tree is OpenHuman's knowledge base. <b>It is not a vector database with a thin 'memory' wrapper.</b> It is a deterministic, bucket-sealed pipeline that turns the messy stream of your day into structured, queryable, summary-backed Markdown that lives on your machine."</em></div>
+
+    <p class="reveal">向量库失败在三件事上：</p>
+    <ul class="reveal">
+      <li><strong>"今天发生了什么？"</strong> —— 这是一个<em>全局摘要</em>问题，没有 query 向量可以和它对齐。</li>
+      <li><strong>"Alice 最近怎么样？"</strong> —— 这是一个<em>实体路由 + 时间衰减</em>问题，需要专门为某个实体维护视图。</li>
+      <li><strong>"上周二下午 3 点那个 Stripe webhook 说了啥？"</strong> —— 这是一个<em>来源 + 时间精确定位</em>问题，需要溯源能力。</li>
+    </ul>
+
+    <p class="reveal">Memory Tree 给出的答案是：<strong>把"压缩"和"导航"同时做掉</strong>。embedding 仍然存在用于语义搜索，但结构层是真正让记忆"像大脑而不是碎片袋"的东西。下面我们逐层拆开这条流水线。</p>
+  </div>
+</section>
+
+<!-- ===================== PIPELINE ===================== -->
+<section id="pipeline" class="project oh">
+  <div class="wrap narrow">
+    <div class="shead reveal">
+      <div class="kicker">第一层 · 热路径</div>
+      <h2>从一条 Slack 消息到一行 SQLite，三毫秒内完成</h2>
+      <p>"热路径"承诺三件事：<strong>确定性、快、有界写</strong>。所有 LLM 调用、embedding、摘要生成<em>统统不在这条路径上</em>——它们被推进一个持久化的作业队列，由后台 worker 处理。UI 永远不阻塞。</p>
+    </div>
+
+    <div class="pipe reveal">
+      <div class="stage"><span class="sn">01</span><div class="st"><b>canonicalize</b><small>chat / email / document → 统一的 Markdown + provenance metadata</small></div></div>
+      <div class="arrow">↓</div>
+      <div class="stage"><span class="sn">02</span><div class="st"><b>chunker</b><small>按源类型切分（chat 按 <code>## </code>、email 按 <code>---\nFrom:</code>），单 chunk ≤ 3000 token</small></div></div>
+      <div class="arrow">↓</div>
+      <div class="stage"><span class="sn">03</span><div class="st"><b>content_store</b><small>原子写入 <code>wiki/raw/*.md</code>（temp → fsync → rename），YAML frontmatter + 正文</small></div></div>
+      <div class="arrow">↓</div>
+      <div class="stage"><span class="sn">04</span><div class="st"><b>fast-score</b><small>纯启发式：token 数、词汇多样性、来源权重——不调 LLM</small></div></div>
+      <div class="arrow">↓</div>
+      <div class="stage"><span class="sn">05</span><div class="st"><b>SQLite 事务</b><small>chunk + score + jobs 全部在一个 transaction 里入库，要么全成要么全无</small></div></div>
+      <div class="arrow">↓</div>
+      <div class="stage"><span class="sn">06</span><div class="st"><b>wake workers</b><small>同步路径返回；后台 worker 被 Notify condvar 唤醒，开始干重活</small></div></div>
+    </div>
+
+    <div class="prose">
+      <h4 class="reveal">Canonicalize：把异构源压成同一种 Markdown</h4>
+      <p class="reveal"><code>src/openhuman/memory/tree/canonicalize/</code> 下每种源一个适配器，全部产出同一个 <code>CanonicalisedSource { markdown, metadata }</code>。各适配器的处理细节很<em>克制</em>——拒绝在这一层做"理解"：</p>
+      <ul class="reveal">
+        <li><strong>chat.rs</strong>：消息按时间戳防御性排序，每条以 <code>## YYYY-MM-DDTHH:MM:SSZ — User</code> 起头；空 batch 直接返回 <code>Ok(None)</code> 让上层跳过。</li>
+        <li><strong>email.rs</strong>：每封邮件之间用 <code>---\nFrom:</code> 分隔；正文先过 <code>email_clean::clean_body()</code> 把引用历史、退订链接、营销页脚剥掉——给后面的摘要器一个信号干净的输入。</li>
+        <li><strong>document.rs</strong>：本身已经是 Markdown 或纯文本，加一点 front-matter 就送下游。</li>
+      </ul>
+
+      <h4 class="reveal">Chunker：内容寻址的确定性 ID</h4>
+      <p class="reveal">这是整个系统能"幂等"的根因。chunk 的 ID 不是自增的，而是<strong>对内容求 SHA-256 取前 32 位十六进制</strong>。同一段输入永远算出同一个 ID，重复 ingest 直接 upsert，从源头杜绝重复。</p>
+    </div>
+
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/openhuman/memory/tree/types.rs — 确定性 chunk_id</span></div>
+      <pre><code><span class="tok-k">pub fn</span> <span class="tok-f">chunk_id</span>(
+    source_kind<span class="tok-p">:</span> <span class="tok-t">SourceKind</span><span class="tok-p">,</span>
+    source_id<span class="tok-p">:</span> <span class="tok-t">&amp;str</span><span class="tok-p">,</span>
+    seq_in_source<span class="tok-p">:</span> <span class="tok-t">u32</span><span class="tok-p">,</span>
+    content<span class="tok-p">:</span> <span class="tok-t">&amp;str</span><span class="tok-p">,</span>
+) <span class="tok-p">-&gt;</span> <span class="tok-t">String</span> <span class="tok-p">{</span>
+    <span class="tok-k">let mut</span> hasher <span class="tok-p">=</span> <span class="tok-t">Sha256</span><span class="tok-p">::</span><span class="tok-f">new</span>()<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>(source_kind<span class="tok-p">.</span><span class="tok-f">as_str</span>()<span class="tok-p">.</span><span class="tok-f">as_bytes</span>())<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>([<span class="tok-n">0u8</span>])<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>(source_id<span class="tok-p">.</span><span class="tok-f">as_bytes</span>())<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>([<span class="tok-n">0u8</span>])<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>(seq_in_source<span class="tok-p">.</span><span class="tok-f">to_be_bytes</span>())<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>([<span class="tok-n">0u8</span>])<span class="tok-p">;</span>
+    hasher<span class="tok-p">.</span><span class="tok-f">update</span>(content<span class="tok-p">.</span><span class="tok-f">as_bytes</span>())<span class="tok-p">;</span>
+    <span class="tok-c">// → SHA256 取前 32 位 hex（128-bit，单用户 workspace 抗碰撞绰绰有余）</span>
+<span class="tok-p">}</span></code></pre>
+    </div>
+
+    <div class="prose">
+      <p class="reveal">注意 <strong><code>content</code> 也参与了哈希</strong>——这就允许同一来源在不同时间窗内有相同 <code>seq_in_source</code> 而仍然产生唯一 ID（比如 Slack 每 6 小时一桶，每桶 <code>seq=0</code> 起，但内容不同所以 ID 不同）。这是个不张扬但关键的设计取舍。</p>
+
+      <h4 class="reveal">Content Store：vault 里的每个 .md 文件都是一笔"凭证"</h4>
+      <p class="reveal">chunk 写盘有两层冗余：<strong>SQLite 存索引和截断后的 content（≤2000 字符）</strong>，<strong>原文以 <code>.md</code> 形式存到 <code>wiki/raw/</code>，YAML frontmatter + 正文</strong>。写入用 <code>atomic::write_if_new()</code>——先写临时文件、fsync、再 rename——保证就算进程崩在中间也不会留下半截文件。读回时还要核对 SHA256 防止 vault 被外部工具篡改。</p>
+    </div>
+
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">wiki/raw/chat/slack-eng/0003-abc.md — 一个真实的 chunk 文件</span></div>
+      <pre><code><span class="tok-p">---</span>
+<span class="tok-k">chunk_id</span><span class="tok-p">:</span> <span class="tok-s">abc1234567890123</span>
+<span class="tok-k">source_kind</span><span class="tok-p">:</span> <span class="tok-s">chat</span>
+<span class="tok-k">source_id</span><span class="tok-p">:</span> <span class="tok-s">slack:#eng</span>
+<span class="tok-k">owner</span><span class="tok-p">:</span> <span class="tok-s">alice@example.com</span>
+<span class="tok-k">timestamp_ms</span><span class="tok-p">:</span> <span class="tok-n">1700000000000</span>
+<span class="tok-k">seq_in_source</span><span class="tok-p">:</span> <span class="tok-n">3</span>
+<span class="tok-k">token_count</span><span class="tok-p">:</span> <span class="tok-n">847</span>
+<span class="tok-k">tags</span><span class="tok-p">:</span>
+  <span class="tok-p">-</span> <span class="tok-s">eng</span>
+  <span class="tok-p">-</span> <span class="tok-s">on-call</span>
+<span class="tok-p">---</span>
+
+## <span class="tok-n">2026-04-21T10:12:00Z</span> — Alice
+Storage scaled to 3× this morning, CDN warm-up looks healthy.
+
+## <span class="tok-n">2026-04-21T10:12:40Z</span> — Bob
+Worried about the API rate limit during the burst window...</code></pre>
+    </div>
+
+    <div class="prose">
+      <h4 class="reveal">SQLite 持久化：八张表撑起整棵树</h4>
+      <p class="reveal">所有结构化状态压在一个 SQLite 文件里：<code>&lt;workspace&gt;/memory_tree/chunks.db</code>，用 <code>rusqlite</code>，<code>WAL</code> + <code>busy_timeout = 15s</code> 让 ingest / worker / scheduler / scheduler 并发写不打架。核心表：</p>
+      <ul class="reveal">
+        <li><code>mem_tree_chunks</code> —— 主表，128-bit ID + 来源/时间/owner 索引。</li>
+        <li><code>mem_tree_chunk_embeddings</code> —— 按 <code>model_signature</code> 存向量 BLOB，<strong>支持多模型并存</strong>方便迁移。</li>
+        <li><code>mem_tree_score</code> —— 每条 chunk 的全部信号分项（token / unique words / metadata / source / interaction / entity_density），可审计。</li>
+        <li><code>mem_tree_entity_index</code> —— 实体倒排表，<code>(entity_id, node_id)</code> 主键，节点跨 chunk 与 summary。</li>
+        <li><code>mem_tree_trees</code> / <code>mem_tree_summaries</code> / <code>mem_tree_buffers</code> —— 三棵树的状态机。</li>
+        <li><code>mem_tree_hotness</code> —— 实体热度分（驱动 topic tree 物化）。</li>
+        <li><code>mem_tree_jobs</code> —— 持久化作业队列（下一节展开）。</li>
+      </ul>
+
+      <h4 class="reveal">Scoring：两段式打分 + 准入门</h4>
+      <p class="reveal">分数控制"这条 chunk 配不配进树"。设计上分两段：<strong>快速路径在 ingest 同步阶段就跑</strong>，只用 token 数、词汇多样性这种<em>纯启发式</em>；<strong>慢速路径在 worker 上跑</strong>，做 LLM 实体抽取与 embedding。两个阈值把分数切成三段：</p>
+    </div>
+
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/openhuman/memory/tree/score/mod.rs — 准入决策</span></div>
+      <pre><code><span class="tok-k">pub struct</span> <span class="tok-t">ScoringConfig</span> <span class="tok-p">{</span>
+    <span class="tok-c">// ...</span>
+    <span class="tok-k">pub</span> drop_threshold<span class="tok-p">:</span> <span class="tok-t">f32</span><span class="tok-p">,</span>                <span class="tok-c">// 默认 0.30</span>
+    <span class="tok-k">pub</span> definite_keep_threshold<span class="tok-p">:</span> <span class="tok-t">f32</span><span class="tok-p">,</span>     <span class="tok-c">// 默认 0.85 — 这分以上免 LLM 直接收</span>
+    <span class="tok-k">pub</span> definite_drop_threshold<span class="tok-p">:</span> <span class="tok-t">f32</span><span class="tok-p">,</span>     <span class="tok-c">// 默认 0.15 — 这分以下免 LLM 直接丢</span>
+<span class="tok-p">}</span>
+
+<span class="tok-c">// 决策伪码：</span>
+<span class="tok-c">// fast >= 0.85   → admit                    (no LLM)</span>
+<span class="tok-c">// fast &lt;= 0.15   → drop                     (no LLM)</span>
+<span class="tok-c">// 0.15 .. 0.85   → 调 LLM 实体抽取做二次判定 (borderline 才烧 token)</span></code></pre>
+    </div>
+
+    <div class="prose">
+      <p class="reveal">这个设计意图明确：<strong>用启发式吃掉两端的"显然要 / 显然不要"，把宝贵的 LLM 调用集中在中间灰区</strong>。准入失败的 chunk 不会被删——<code>mem_tree_score.dropped = 1</code> 记着，原文还在 vault 里，只是不会再被树或检索引用。这保留了完整溯源能力。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== THE THREE TREES ===================== -->
+<section id="trees" class="project oh">
+  <div class="wrap narrow">
+    <div class="shead reveal">
+      <div class="kicker">第二层 · 系统之心</div>
+      <h2>三棵树，三种问题</h2>
+      <p>Memory Tree 的招牌不是"一棵更复杂的树"，而是<strong>三棵独立、互不干扰的树同时生长</strong>，每棵回答一类不同的检索需求。它们都吃同一个 leaf 流，但封口规则、标签策略、时间窗各不相同。</p>
+    </div>
+
+    <div class="trees3 reveal">
+      <div class="t">
+        <div class="badge">SOURCE</div>
+        <h5>源树 · per-source 滚动缓冲</h5>
+        <p>每个 Slack 频道 / Gmail label / 文档一棵。新 leaf 进 L0 buffer，攒够就封成 L1 摘要，继续往上级联。</p>
+        <ul>
+          <li>L0 封口：50k token 或 10 个 sibling</li>
+          <li>L1+ 封口：10 个 sibling（按数不按 token）</li>
+          <li>过期强封：7 天没动也封</li>
+        </ul>
+      </div>
+      <div class="t">
+        <div class="badge">TOPIC</div>
+        <h5>主题树 · 按"热度"懒物化</h5>
+        <p>每个高热度实体（人、项目、ticker、repo）一棵。冷实体连树都不建；热度越高，刷新越积极。</p>
+        <ul>
+          <li>热度 = ln(30d 提及数) + 跨源数 + 近期衰减 + 中心度 + 用户查询权重</li>
+          <li>由 <code>topic_route</code> 作业按门槛触发建树</li>
+          <li>结构和源树相同，schema 共用</li>
+        </ul>
+      </div>
+      <div class="t">
+        <div class="badge">GLOBAL</div>
+        <h5>全局树 · 每日一节点</h5>
+        <p>单例。每天 UTC 零点后调度器跑一次，把昨天<em>跨所有来源</em>的最佳 L1+ 摘要合成成一节日报。</p>
+        <ul>
+          <li>L0 = 日报；攒够 10 个升级 L1（周）</li>
+          <li>L1 升 L2（月）、L3（年）逐级展开</li>
+          <li>跑出来的标签是 <em>UnionFromChildren</em>，免再调一次 LLM</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="prose">
+      <h4 class="reveal">桶封 (bucket-sealing) 的关键常量</h4>
+      <p class="reveal"><code>tree_source/types.rs</code> 直接把这套规则写成常量：</p>
+    </div>
+
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/openhuman/memory/tree/tree_source/types.rs:188</span></div>
+      <pre><code><span class="tok-k">pub const</span> <span class="tok-t">INPUT_TOKEN_BUDGET</span><span class="tok-p">:</span> <span class="tok-t">u32</span> <span class="tok-p">=</span> <span class="tok-n">50_000</span><span class="tok-p">;</span>
+<span class="tok-k">pub const</span> <span class="tok-t">OUTPUT_TOKEN_BUDGET</span><span class="tok-p">:</span> <span class="tok-t">u32</span> <span class="tok-p">=</span> <span class="tok-n">5_000</span><span class="tok-p">;</span>
+<span class="tok-k">pub const</span> <span class="tok-t">SUMMARY_FANOUT</span><span class="tok-p">:</span> <span class="tok-t">u32</span> <span class="tok-p">=</span> <span class="tok-n">10</span><span class="tok-p">;</span>
+<span class="tok-k">pub const</span> <span class="tok-t">DEFAULT_FLUSH_AGE_SECS</span><span class="tok-p">:</span> <span class="tok-t">i64</span> <span class="tok-p">=</span> <span class="tok-n">7</span> <span class="tok-p">*</span> <span class="tok-n">24</span> <span class="tok-p">*</span> <span class="tok-n">60</span> <span class="tok-p">*</span> <span class="tok-n">60</span><span class="tok-p">;</span>
+
+<span class="tok-c">// should_seal: L0 看 token 预算，L1+ 看兄弟数</span>
+<span class="tok-k">pub fn</span> <span class="tok-f">should_seal</span>(buf<span class="tok-p">:</span> <span class="tok-t">&amp;Buffer</span>) <span class="tok-p">-&gt;</span> <span class="tok-t">bool</span> <span class="tok-p">{</span>
+    <span class="tok-k">if</span> buf<span class="tok-p">.</span>level <span class="tok-p">==</span> <span class="tok-n">0</span> <span class="tok-p">{</span>
+        buf<span class="tok-p">.</span>token_sum <span class="tok-p">&gt;=</span> <span class="tok-t">INPUT_TOKEN_BUDGET</span> <span class="tok-k">as</span> <span class="tok-t">i64</span>
+            <span class="tok-p">||</span> buf<span class="tok-p">.</span>item_ids<span class="tok-p">.</span><span class="tok-f">len</span>() <span class="tok-k">as</span> <span class="tok-t">u32</span> <span class="tok-p">&gt;=</span> <span class="tok-t">SUMMARY_FANOUT</span>
+    <span class="tok-p">}</span> <span class="tok-k">else</span> <span class="tok-p">{</span>
+        buf<span class="tok-p">.</span>item_ids<span class="tok-p">.</span><span class="tok-f">len</span>() <span class="tok-k">as</span> <span class="tok-t">u32</span> <span class="tok-p">&gt;=</span> <span class="tok-t">SUMMARY_FANOUT</span>
+    <span class="tok-p">}</span>
+<span class="tok-p">}</span></code></pre>
+    </div>
+
+    <div class="prose">
+      <p class="reveal"><strong>为什么 L0 按 token、L1+ 按数？</strong>一个非常工程师的考虑：summarizer 的输出长度有时长有时短。如果 L1 也按 token 封，万一摘要器吐得很短，L1 buffer 就要凑很多条才达到 50k token，造成"长链条窄树"。改成<em>按 10 个 sibling 封口</em>能保证树形结构稳定地"宽展开"——一棵看起来像树的树，而不是退化的链表。</p>
+
+      <div class="callout reveal"><b>级联封口（cascade seal）：</b>当 L0 封成 L1，会立刻检查 L1 buffer 是否也到达门槛；到了就再封一层。一次 50k token 的注入可能<b>一路级联到 L3</b>。这套递归在 <code>bucket_seal.rs::cascade_seals()</code> 里完成，全程在一个 SQLite 事务内。</div>
+
+      <h4 class="reveal">主题树的热度公式：用对数压住头部、奖励跨源</h4>
+      <p class="reveal">这是 <code>tree_topic/hotness.rs:32</code> 里非常值得品的设计——它在五个因子上做加权和，每个都有明确的物理意义：</p>
+    </div>
+
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/openhuman/memory/tree/tree_topic/hotness.rs</span></div>
+      <pre><code><span class="tok-k">pub fn</span> <span class="tok-f">hotness</span>(entity_id<span class="tok-p">:</span> <span class="tok-t">&amp;str</span><span class="tok-p">,</span> idx<span class="tok-p">:</span> <span class="tok-t">&amp;EntityIndexStats</span>) <span class="tok-p">-&gt;</span> <span class="tok-t">f32</span> <span class="tok-p">{</span>
+    <span class="tok-k">let</span> mention <span class="tok-p">=</span> ((idx<span class="tok-p">.</span>mention_count_30d <span class="tok-k">as</span> <span class="tok-t">f32</span>) <span class="tok-p">+</span> <span class="tok-n">1.0</span>)<span class="tok-p">.</span><span class="tok-f">ln</span>()<span class="tok-p">;</span>     <span class="tok-c">// log 压头部</span>
+    <span class="tok-k">let</span> source  <span class="tok-p">=</span> (idx<span class="tok-p">.</span>distinct_sources <span class="tok-k">as</span> <span class="tok-t">f32</span>) <span class="tok-p">*</span> <span class="tok-n">0.5</span><span class="tok-p">;</span>           <span class="tok-c">// 跨源加分</span>
+    <span class="tok-k">let</span> recency <span class="tok-p">=</span> <span class="tok-f">recency_decay</span>(idx<span class="tok-p">.</span>last_seen_ms<span class="tok-p">,</span> now_ms)<span class="tok-p">;</span>     <span class="tok-c">// 分段线性衰减</span>
+    <span class="tok-k">let</span> central <span class="tok-p">=</span> idx<span class="tok-p">.</span>graph_centrality<span class="tok-p">.</span><span class="tok-f">unwrap_or</span>(<span class="tok-n">0.0</span>)<span class="tok-p">;</span>           <span class="tok-c">// 图中心度 (Phase 4+)</span>
+    <span class="tok-k">let</span> query   <span class="tok-p">=</span> (idx<span class="tok-p">.</span>query_hits_30d <span class="tok-k">as</span> <span class="tok-t">f32</span>) <span class="tok-p">*</span> <span class="tok-n">2.0</span><span class="tok-p">;</span>             <span class="tok-c">// 用户问了几次</span>
+    mention <span class="tok-p">+</span> source <span class="tok-p">+</span> recency <span class="tok-p">+</span> central <span class="tok-p">+</span> query
+<span class="tok-p">}</span></code></pre>
+    </div>
+
+    <div class="prose">
+      <p class="reveal"><strong>recency_decay</strong> 是分段线性的：≤1 天 = 1.0，1–7 天线性降到 0.5，7–30 天降到 0，再老不计入。这避免了指数衰减把"两个月前但很重要"的实体直接清零，又让 30 天的天花板硬性截断。<strong>query 权重 ×2</strong> 表达了一个朴素但正确的偏好：你查过的，比别人提过的更值得维护一棵树。</p>
+
+      <h4 class="reveal">标签策略：三种打标方式</h4>
+      <p class="reveal">摘要节点封口时还要决定"这一节摘要的标签从哪来"。<code>LabelStrategy</code> 给了三个选项：</p>
+      <ul class="reveal">
+        <li><strong>ExtractFromContent</strong>：对刚生成的摘要文本再跑一次实体抽取——能捕捉到"几条 leaf 各说一点、合起来才浮现的主题"。源树、主题树用这个。</li>
+        <li><strong>UnionFromChildren</strong>：把子节点已有的实体/topic 去重并取并集——免一次 LLM 调用。<strong>全局树用这个</strong>，因为它的子节点本身就是已经被 L1 抽取过的源摘要。</li>
+        <li><strong>Empty</strong>：留空，留给后续阶段填，防止跨树污染。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== JOBS & SCHEDULER ===================== -->
+<section id="jobs" class="project oh">
+  <div class="wrap narrow">
+    <div class="shead reveal">
+      <div class="kicker">第三层 · 作业系统</div>
+      <h2>慢活全部丢给队列，UI 永不阻塞</h2>
+      <p>ingest 在热路径上只做"切碎、快速打分、入库、入队"。所有真正烧资源的事情——embedding、实体抽取、摘要生成、级联封口、日报合成——都被推进一个<strong>持久化的 SQLite 作业队列</strong>，由后台 worker 池跑。</p>
+    </div>
+
+    <h4 class="reveal" style="font-family:var(--disp);font-size:1.1rem;margin:14px 0 6px">六种作业类型</h4>
+    <div class="tablewrap reveal">
+      <table class="cmp">
+        <thead>
+          <tr><th>Kind</th><th>做什么</th><th>同步 / 异步</th><th>调 LLM</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>extract_chunk</code></td><td>深度打分 + 实体抽取；决定 admitted / dropped</td><td>异步</td><td>是</td></tr>
+          <tr><td><code>append_buffer</code></td><td>把 admitted leaf 推进树的 L0 buffer；可能触发 seal</td><td>异步</td><td>否</td></tr>
+          <tr><td><code>seal</code></td><td>把 buffer 压成一节摘要；视情况向上级联</td><td>异步</td><td>是（summarizer）</td></tr>
+          <tr><td><code>topic_route</code></td><td>把 leaf 按实体路由进主题树（热度门控）</td><td>异步</td><td>是</td></tr>
+          <tr><td><code>digest_daily</code></td><td>合成全局日报；满 10 天后级联到周/月节点</td><td>异步</td><td>是（summarizer）</td></tr>
+          <tr><td><code>flush_stale</code></td><td>巡视 L0 buffer，强制封口超过 7 天没动的</td><td>异步</td><td>否</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <h4 class="reveal">Workers：三个协程 + 一个 LLM 信号量</h4>
+      <p class="reveal">默认 3 个 worker 协程，循环从 <code>mem_tree_jobs</code> 表里抢 <code>status='ready'</code> 且 <code>available_at_ms &lt;= now</code> 的作业。一个细节非常用心：<strong>所有标记 <code>is_llm_bound()=true</code> 的作业，在执行前必须从一个全局信号量获取许可</strong>——这把 LLM 并发调用上限锁住，防止"一次性接入 10 个 Slack 频道"把 embedding API 打到 rate-limited。</p>
+
+      <p class="reveal">领到作业后，worker 立刻把行标记成 <code>running</code>，写入自己的 <code>worker_id</code> 与 <code>lease_until_ms</code>。如果它崩在中间，下一轮启动时 <code>recover_stale_locks()</code> 会扫到 lease 已过期的行，把它们重置回 <code>ready</code> 让别的 worker 重做。</p>
+
+      <h4 class="reveal">失败处理：指数退避 + 显式 Defer</h4>
+      <p class="reveal">作业返回三种结果：<code>Done</code> 完成；<code>Defer { until_ms, reason }</code> <strong>不消耗重试预算</strong>地延后（用于 LLM 限流这种瞬时不可用）；<code>Err</code> 真失败——按 <code>2^attempts</code> 秒指数退避丢回队列；超过 <code>max_attempts</code>（默认 5）就标 <code>failed</code> 进死信。</p>
+
+      <h4 class="reveal">Scheduler：唯一的"墙钟"心跳</h4>
+      <p class="reveal">日历驱动的工作（日报、周强封）由一个独立的 scheduler 协程发起。它每天 UTC 大约 00:05 醒一次，向队列推两件事：</p>
+      <ul class="reveal">
+        <li><code>DigestDaily(yesterday)</code> —— 合成昨天的全局日报</li>
+        <li><code>FlushStale(today)</code> —— 检查所有 L0 buffer 中年龄 ≥7 天的，强制封口</li>
+      </ul>
+      <p class="reveal"><strong>scheduler 自己绝不执行 summarizer</strong>——它只发作业，让重试、去重、stale-lock 恢复都从作业队列统一走。这是个非常老练的"职责分离"设计。</p>
+
+      <div class="callout reveal"><b>Dedupe key 防重发：</b><code>mem_tree_jobs.dedupe_key</code> 是 <code>UNIQUE</code> 列，<code>"digest_daily:2026-04-21"</code> 这种键的第二次插入会直接被 SQLite 约束挡掉。即使 scheduler 重启两次，也只会有一份日报作业排队。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== RETRIEVAL ===================== -->
+<section id="retrieval" class="project oh">
+  <div class="wrap narrow">
+    <div class="shead reveal">
+      <div class="kicker">第四层 · 出口</div>
+      <h2>六个检索原语，覆盖所有问法</h2>
+      <p>树建得再好，对 agent 没用就是白搭。OpenHuman 把检索拆成六个明确的入口，每个回答一类不同的问题，统一返回 <code>RetrievalHit</code>——它把 leaf 和 summary 包装成同一种壳，<strong>agent 不用关心命中的是原始 chunk 还是某层摘要</strong>。</p>
+    </div>
+
+    <div class="grid2 reveal">
+      <div class="card"><span class="ico">📡</span><h5 class="accent">query_source</h5><p>在某个源树里搜（或不指定源、跨所有源）。支持时间窗 + 自然语言 query；无 query 时按时间倒序。</p></div>
+      <div class="card"><span class="ico">👤</span><h5 class="accent">query_topic</h5><p>给一个实体 ID（人/项目/repo），把它的主题树过一遍。这是"Alice 最近在干嘛"的标准入口。</p></div>
+      <div class="card"><span class="ico">🌍</span><h5 class="accent">query_global</h5><p>查全局树，配合日期参数取"昨天" / "上周" / "本月" 的整体摘要。</p></div>
+      <div class="card"><span class="ico">🔬</span><h5 class="accent">drill_down</h5><p>给一个 summary 节点 ID，把它的 child_ids 全部展开——一路下钻到原始 chunk + provenance。</p></div>
+      <div class="card"><span class="ico">🎯</span><h5 class="accent">fetch</h5><p>按 ID 精确取节点（leaf 或 summary）。给 UI 跳转 / IDE 链接用。</p></div>
+      <div class="card"><span class="ico">🩺</span><h5 class="accent">sync_status_list</h5><p>不是检索而是监控：每个 provider 已同步 / 待处理 chunk 数 + "freshness"（active/recent/idle）。</p></div>
+    </div>
+
+    <div class="prose">
+      <h4 class="reveal">混合排序：结构信号 + 语义相似 + 时间衰减 + 实体匹配</h4>
+      <p class="reveal">有 query 时走 hybrid：embedding 算余弦相似 → 与 BM25-ish 结构分加权 → 加入 recency → 如果 query 里包含已知实体名，命中实体的节点再加权。<strong>无 query 时则纯按时间和结构分排序</strong>，这让"列出最近的"和"语义搜索"是同一个入口的两种用法。</p>
+
+      <h4 class="reveal">溯源：每个 hit 都带 provenance</h4>
+      <p class="reveal">命中里有 <code>source_ref</code>（永久指向 Slack 消息 / Gmail 线程 / 文档段落的不透明指针），UI 上点 hit 就跳回 Obsidian vault 的原文件。这一点彻底解决了"AI 模糊地引用一句话但说不出哪来"的问题——<strong>所有摘要都能被打开还原成它的全部子节点和原始 chunk</strong>。</p>
+
+      <h4 class="reveal">Agent 怎么用：DefaultMemoryLoader 注入</h4>
+      <p class="reveal">agent 端的 <code>memory_loader.rs</code> 在每次用户发消息时调 <code>memory.recall(user_msg)</code> 取相关条目，然后把它们组织成四个段落注入 system prompt：</p>
+      <ul class="reveal">
+        <li><strong>[Memory context]</strong> —— 语义召回的相关记忆</li>
+        <li><strong>[User working memory]</strong> —— ≤3 条用户画像（时区、偏好）</li>
+        <li><strong>[Cross-chat context]</strong> —— 其他对话线程里的近期命中</li>
+        <li><strong>[Prior conversations]</strong> —— 之前会话里的高优先 episodic 条目</li>
+      </ul>
+
+      <h4 class="reveal">SessionMemoryState：用三个增量决定何时抽取</h4>
+      <p class="reveal"><code>context/session_memory.rs</code> 跟踪当前会话的累计 token、tool 调用数、turn 数。只有这三个增量<strong>同时</strong>跨过门槛（token +4000、tool +8、turn +4）才会触发后台的"档案管理员"子代理把会话压成结构化记忆条目——避免每隔几句话就启一次抽取作业。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SAFETY ===================== -->
+<section id="security" class="project oh">
+  <div class="wrap narrow prose">
+    <div class="shead reveal">
+      <div class="kicker">护栏</div>
+      <h2>本地存储，但不等于裸奔</h2>
+      <p>所有数据都不出机器，但"不出机器"不代表"可以随便存"。<code>memory/safety/mod.rs</code> 在<strong>写入与索引时</strong>就做了四类拦截，故意倾向于宁可误删也别留下密钥的"保守派"策略。</p>
+    </div>
+    <ul class="reveal">
+      <li><strong>Block 模式（直接删）：</strong>PEM 私钥（RSA / EC / OpenSSH / PGP 各变体），高熵 base64 段。</li>
+      <li><strong>Redact 模式（替换为 <code>[REDACTED]</code>）：</strong>Bearer token、AWS <code>AKIA…</code>、GitHub <code>gh*_</code>、Anthropic <code>sk-ant-…</code>、Google <code>AIza…</code>、OpenAI / Stripe <code>sk|rk_live|test_…</code>、Slack <code>xox[abprs]-…</code>、JWT、OAuth。</li>
+      <li><strong>Key Redaction：</strong>JSON 里 <code>"api_key" / "token" / "password" / "secret"</code> 这种键的值，直接擦掉——不管值长啥样。</li>
+      <li><strong>Depth Limit：</strong>深嵌套 JSON 做截断防 DoS。</li>
+    </ul>
+    <p class="reveal">这套清洗发生在三个时机：写入 chunk 前、抽取实体前、把记忆切片写进日志前。<strong>"宁可误擦"的取向</strong>意味着偶尔会把无害字符串当成 token 扔掉，但绝不会让一个真 token 进入摘要再被某天的检索意外暴露给 LLM。</p>
+  </div>
+</section>
+
+<!-- ===================== VS VECTOR STORE ===================== -->
+<section id="vs">
+  <div class="wrap narrow prose">
+    <div class="shead reveal" style="--accent:var(--gold)">
+      <div class="kicker">合而观之</div>
+      <h2>为什么不是又一个向量库</h2>
+      <p>把所有细节合起来看，Memory Tree 与"套壳向量库"差的不是某一个特性，而是<strong>把记忆当作什么</strong>的根本分歧。</p>
+    </div>
+
+    <div class="tablewrap reveal">
+      <table class="cmp">
+        <thead><tr><th>问题</th><th>向量库</th><th>Memory Tree</th></tr></thead>
+        <tbody>
+          <tr><td>今天发生了什么？</td><td>无解（没有 query 向量）</td><td>全局树昨日 L0 节点</td></tr>
+          <tr><td>Alice 最近怎么样？</td><td>top-K 相似，可能漏掉关键</td><td>她的 topic tree，热度自动维护</td></tr>
+          <tr><td>上周二 3 点 Stripe 说了什么？</td><td>需要全文 + 时间过滤补打</td><td>源树 + time range 直接命中</td></tr>
+          <tr><td>这条摘要从哪来？</td><td>top-K 命中没有溯源链</td><td>summary.child_ids → 原 chunk → vault .md</td></tr>
+          <tr><td>重新 ingest 相同内容？</td><td>会产生重复向量</td><td>SHA-256 chunk ID 直接 upsert</td></tr>
+          <tr><td>能 git 化、和团队共享？</td><td>难（向量是 blob）</td><td>vault 就是 Markdown，可 commit</td></tr>
+          <tr><td>断电恢复？</td><td>看实现</td><td>持久化 job 队列 + lease 过期回收</td></tr>
+          <tr><td>LLM 用量？</td><td>每次查询都嵌入</td><td>双阈值切灰区，只在 0.15–0.85 调 LLM</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout reveal" style="--accent:var(--gold)"><b>核心立场：</b>向量库回答 <em>"和这句话最像的旧记忆是什么"</em>；Memory Tree 回答 <em>"今天/这个人/这个源最重要的事情是什么，并能把它一路展开成原文"</em>。前者是<b>相似性检索</b>，后者是<b>结构化记忆</b>。两者的输入相似，但输出完全不在同一类问题里。</div>
+
+    <h4 class="reveal">可选后端：兼容 agentmemory</h4>
+    <p class="reveal">值得一提的是 OpenHuman 没有把自己锁死。<code>MemoryConfig.backend = "agentmemory"</code> 可以让它<strong>把存储层换成另一个独立项目 agentmemory 的 REST 服务</strong>——这样多个 coding agent（Claude Code、Cursor、Codex、OpenCode、OpenHuman）可以共享同一个持久化记忆。Memory Tree 流水线本身仍在跑，但底层 Memory trait 的存储被换掉。这种"流水线 + 后端"解耦的态度，比大多数声称要做生态的项目都更脚踏实地。</p>
+
+    <h4 class="reveal">对个人 AI 的意义</h4>
+    <p class="reveal">Memory Tree 的真正价值在两件事上。第一，它示范了<strong>"确定性流水线 + LLM 重活异步化"</strong>这种组合拳——把可以确定的部分（切分、哈希、入库、调度）做得像数据库一样稳，把 LLM 调用约束在借灰区判断、摘要生成这种<em>能容忍重试和失败</em>的位置。第二，它把"个人 AI 的记忆"<strong>从云服务的私有 schema 抢回了用户的硬盘</strong>——你可以打开 <code>~/.openhuman/wiki/</code> 直接用 Obsidian 读，可以 git 化、可以备份、可以审计、可以删。本地优先不是宣传话术，而是体现在每一个文件路径里。</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">Agent Infrastructure Teardown</div>
+    <p>源码级深度解析系列 · 从源码看下一代 AI 基础设施</p>
+    <div class="links">
+      <a href="index.html">← 返回索引</a>
+      <a href="https://github.com/trending" target="_blank" rel="noopener">GitHub Trending ↗</a>
+    </div>
+    <div class="meta">© 2026 · 单文件独立页面 · 复用共享设计系统</div>
+  </div>
+</footer>
+
+<button class="totop" aria-label="返回顶部">↑</button>
+
+<script>
+(function () {
+  var prog = document.getElementById('progress');
+  var links = [].slice.call(document.querySelectorAll('aside.nav nav a[href^="#"]'));
+  var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  var totop = document.querySelector('.totop');
+
+  function onScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop;
+    if (prog) {
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      prog.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
+    }
+    var idx = -1, mark = y + window.innerHeight * 0.3;
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i] && targets[i].offsetTop <= mark) idx = i;
+    }
+    links.forEach(function (a, i) { a.classList.toggle('active', i === idx); });
+    if (totop) totop.classList.toggle('show', y > 600);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+
+  function fillBars(root) {
+    (root.querySelectorAll ? root.querySelectorAll('.fill[data-w]') : []).forEach &&
+      root.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        fillBars(e.target);
+        io.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+    document.querySelectorAll('.bench').forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+    document.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if (totop) totop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+})();
+</script>
+
+<!--
+嵌套深度阅读候选（CC 评估）：
+- #trees → bucket-sealing：桶封（bucket-sealing）关键常量 + 主题树用对数压头部/奖励跨源的热度公式，
+  是"会自己长大的记忆树"最独特的机制，值得单独一页讲清楚三棵树各自的封桶/晋升规则。
+- #pipeline → chunker-content-addressing：内容寻址的确定性 chunk ID + Canonicalize 把异构源压成统一 Markdown，
+  让每个 .md 都是可复现"凭证"，是整套写入流水线可进 git、可去重的根基，适合深拆。
+- #pipeline → scoring-admission：两段式打分 + 准入门（什么记忆值得写进树）决定了记忆库不膨胀，
+  与 #retrieval 的混合排序是一对，可合并成"打分体系"深度页。
+- #retrieval → hybrid-ranking：结构信号 + 语义相似 + 时间衰减 + 实体匹配的四元混合排序 + provenance 溯源，
+  是六个检索原语的核心，值得单列。
+- #jobs → job-queue：六种作业类型 + 三协程 + LLM 信号量 + 指数退避/显式 Defer 的异步队列，
+  是"UI 永不阻塞"的工程实现，可做并发模型深度页。
+-->
+</body>
+</html>
