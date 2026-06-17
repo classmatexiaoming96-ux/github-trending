@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenHuman Memory Tree · Bucket-Sealing · 热度计数与封桶 · 深度解析</title>
+<meta name="description" content="tinyhumansai/openhuman 的 hotness.rs 源码级拆解——mem_tree_entity_hotness 计数器 schema、七个热度输入信号、distinct_sources 奖励跨源、ingests_since_check 摊还重算、对数压头部的热度公式形状、topic 树与结构树的封桶差异。" />
+<meta property="og:title" content="OpenHuman Memory Tree · Bucket-Sealing · 热度计数与封桶 · 深度解析" />
+<meta property="og:description" content="tinyhumansai/openhuman 的 hotness.rs 源码级拆解——热度计数器 schema、奖励跨源、摊还重算与对数压头部的热度公式。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   CodeGraph · Understand-Anything · Claude Plugins
+   Technical deep-dive — design system
+   ============================================================ */
+
+:root {
+  /* surfaces */
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* text */
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+
+  /* accents */
+  --gold:   #e0b07a;   /* global warm accent */
+  --gold-2: #d4a574;
+  --cyan:   #54d6e0;   /* codegraph */
+  --amber:  #e9b873;   /* understand-anything */
+  --coral:  #e08a64;   /* claude plugins (Anthropic clay) */
+  --green:  #7fcf9e;
+
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius: 16px;
+  --maxw: 1080px;
+
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp: "Space Grotesk", var(--sans);
+  --serif:"Fraunces", Georgia, serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* layered background glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(224, 176, 122, 0.10), transparent 60%),
+    radial-gradient(720px 460px at 8% 12%, rgba(84, 214, 224, 0.07), transparent 55%),
+    radial-gradient(820px 600px at 50% 108%, rgba(224, 138, 100, 0.07), transparent 60%),
+    var(--bg);
+}
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 80%);
+}
+
+a { color: inherit; text-decoration: none; }
+::selection { background: rgba(224,176,122,.3); color: #fff; }
+
+/* ---------- layout ---------- */
+.wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+.narrow { max-width: 820px; }
+
+section { padding: 96px 0; position: relative; }
+section + section { border-top: 1px solid var(--border); }
+
+/* ---------- scroll progress ---------- */
+#progress {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+  background: linear-gradient(90deg, var(--cyan), var(--gold), var(--coral));
+  z-index: 100; transition: width .1s linear;
+}
+
+/* ---------- nav ---------- */
+/* ---------- site index (top nav) ---------- */
+.site-index {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 95;
+  background: rgba(8, 9, 11, 0.96);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.site-index .wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.site-index-label {
+  font-size: 12px; font-family: var(--mono); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-faint); white-space: nowrap;
+}
+.site-index-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.site-index-links a {
+  display: inline-block; font-size: 13px; font-weight: 600;
+  color: var(--text-dim); padding: 7px 14px; border-radius: 9px;
+  border: 1px solid transparent; text-decoration: none;
+  transition: color .2s, background .2s, border-color .2s;
+  line-height: 1.3;
+}
+.site-index-links a:hover {
+  color: var(--text); background: rgba(255,255,255,.06); border-color: var(--border);
+}
+.site-index-links a span { display: block; font-size: 11px; font-weight: 400; color: var(--text-faint); margin-top: 2px; }
+
+header.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 90;
+  backdrop-filter: blur(14px);
+  background: rgba(10, 11, 14, 0.72);
+  border-bottom: 1px solid transparent;
+  transition: border-color .3s, background .3s;
+}
+header.nav.scrolled { border-bottom-color: var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 11px; font-family: var(--disp); font-weight: 700; letter-spacing: -.02em; }
+.brand .dot { width: 11px; height: 11px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--coral)); box-shadow: 0 0 14px var(--gold); }
+.brand span { font-size: 15px; }
+.nav-links { display: flex; gap: 6px; align-items: center; }
+.nav-links a {
+  font-size: 13.5px; color: var(--text-dim); padding: 8px 13px; border-radius: 9px;
+  transition: color .2s, background .2s; font-weight: 500;
+}
+.nav-links a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.nav-toggle { display: none; background: none; border: 1px solid var(--border); color: var(--text);
+  border-radius: 9px; width: 40px; height: 40px; font-size: 18px; cursor: pointer; }
+
+/* ---------- hero ---------- */
+.hero { padding: 150px 0 88px; text-align: center; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono);
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 7px 16px;
+  background: rgba(224,176,122,.05); margin-bottom: 30px;
+}
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(127,207,158,.6); animation: pulse 2.4s infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(127,207,158,.5)} 70%{box-shadow:0 0 0 9px rgba(127,207,158,0)} 100%{box-shadow:0 0 0 0 rgba(127,207,158,0)} }
+
+.hero h1 {
+  font-family: var(--disp); font-weight: 700; letter-spacing: -.035em;
+  font-size: clamp(2.6rem, 7vw, 5rem); line-height: 1.02; margin-bottom: 26px;
+}
+.hero h1 .ital { font-family: var(--serif); font-style: italic; font-weight: 400;
+  background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p.lead { max-width: 680px; margin: 0 auto 18px; font-size: clamp(1.05rem, 2.2vw, 1.3rem); color: var(--text-dim); }
+.hero .sub { font-family: var(--mono); font-size: 13px; color: var(--text-faint); letter-spacing: .02em; }
+.hero .sub b { color: var(--gold-2); font-weight: 500; }
+
+/* ---------- project tri-cards in hero ---------- */
+.tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 58px; }
+.pcard {
+  position: relative; text-align: left; background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; overflow: hidden;
+  transition: transform .25s ease, border-color .25s ease;
+}
+.pcard:hover { transform: translateY(-4px); border-color: var(--accent, var(--gold)); }
+.pcard::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background: var(--accent); opacity:.8; }
+.pcard .rank { font-family: var(--mono); font-size: 11px; color: var(--text-faint); letter-spacing: .1em; }
+.pcard h3 { font-family: var(--disp); font-size: 1.18rem; margin: 6px 0 4px; letter-spacing: -.02em; }
+.pcard h3 a:hover { color: var(--accent); }
+.pcard .tag { font-size: 12.5px; color: var(--text-dim); min-height: 38px; }
+.pcard .stats { display: flex; gap: 14px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pcard .stat .n { font-family: var(--disp); font-weight: 700; font-size: 1.15rem; color: var(--accent); }
+.pcard .stat .l { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.pcard.cg { --accent: var(--cyan); }
+.pcard.ua { --accent: var(--amber); }
+.pcard.cp { --accent: var(--coral); }
+
+/* ---------- section heading ---------- */
+.shead { margin-bottom: 44px; }
+.shead .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent, var(--gold)); }
+.shead h2 { font-family: var(--disp); font-weight: 700; letter-spacing: -.03em; font-size: clamp(1.8rem, 4.2vw, 2.8rem); margin: 12px 0 14px; line-height: 1.08; }
+.shead p { color: var(--text-dim); max-width: 720px; }
+
+/* ---------- prose ---------- */
+.prose p { margin: 0 0 18px; color: var(--text-dim); }
+.prose h4 { font-family: var(--disp); font-size: 1.12rem; color: var(--text); margin: 34px 0 12px; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+.prose h4::before { content:""; width: 16px; height: 2px; background: var(--accent, var(--gold)); border-radius: 2px; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose code { font-family: var(--mono); font-size: .86em; background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 5px; color: var(--gold-2); }
+.prose ul { margin: 0 0 18px; padding-left: 0; list-style: none; }
+.prose ul li { position: relative; padding-left: 26px; margin-bottom: 11px; color: var(--text-dim); }
+.prose ul li::before { content: "▹"; position: absolute; left: 4px; color: var(--accent, var(--gold)); }
+.prose ul li strong { color: var(--text); }
+.prose a.inline { color: var(--accent, var(--gold)); border-bottom: 1px solid rgba(255,255,255,.18); }
+.prose a.inline:hover { border-bottom-color: var(--accent, var(--gold)); }
+
+/* ---------- project section frame ---------- */
+.project { scroll-margin-top: 80px; }
+.project.cg { --accent: var(--cyan); }
+.project.ua { --accent: var(--amber); }
+.project.cp { --accent: var(--coral); }
+.project.oh { --accent: var(--green); }
+/* compact stat strip for single-project page */
+.statstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 38px 0; }
+.statstrip .cell { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px; text-align: left; }
+.statstrip .cell .n { font-family: var(--disp); font-weight: 700; font-size: 1.7rem; color: var(--accent, var(--gold)); line-height: 1; }
+.statstrip .cell .l { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-top: 8px; }
+@media (max-width: 720px){ .statstrip { grid-template-columns: 1fr 1fr; } }
+/* tree-diagram primitive used by the three-trees section */
+.trees3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin: 26px 0; }
+.trees3 .t { background: linear-gradient(180deg, var(--bg-card), var(--bg-elev)); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+.trees3 .t h5 { font-family: var(--disp); font-size: 1.1rem; margin-bottom: 4px; }
+.trees3 .t .badge { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 999px; margin-bottom: 12px; background: rgba(127,207,158,.12); color: var(--green); border: 1px solid rgba(127,207,158,.3); }
+.trees3 .t p { color: var(--text-dim); font-size: 14.5px; margin: 0 0 12px; }
+.trees3 .t ul { margin: 0; padding-left: 0; list-style: none; font-size: 13.5px; }
+.trees3 .t li { padding-left: 18px; position: relative; margin-bottom: 6px; color: var(--text-dim); }
+.trees3 .t li::before { content: "•"; position: absolute; left: 4px; color: var(--accent, var(--green)); }
+@media (max-width: 880px){ .trees3 { grid-template-columns: 1fr; } }
+
+/* ============================================================
+   Tab strip — project switcher in nav
+   ============================================================ */
+header.nav.has-tabs { padding-bottom: 0; }
+header.nav.has-tabs .nav-inner { height: 60px; }
+.tabs-wrap { border-top: 1px solid var(--border); background: rgba(10, 11, 14, 0.55); }
+.tabs {
+  display: flex; gap: 4px; max-width: var(--maxw); margin: 0 auto; padding: 0 24px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button {
+  font-family: var(--disp); font-weight: 500; font-size: 13.5px; letter-spacing: -.005em;
+  color: var(--text-dim); background: none; border: none; cursor: pointer;
+  padding: 14px 18px 13px; position: relative; white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+  display: flex; align-items: center; gap: 9px;
+}
+.tabs button .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--tab-color, var(--text-faint));
+  transition: box-shadow .2s, transform .2s;
+}
+.tabs button[data-tab="cg"] { --tab-color: var(--cyan); }
+.tabs button[data-tab="ua"] { --tab-color: var(--amber); }
+.tabs button[data-tab="cp"] { --tab-color: var(--coral); }
+.tabs button[data-tab="oh"] { --tab-color: var(--green); }
+.tabs button:hover { color: var(--text); }
+.tabs button.active {
+  color: var(--text); border-bottom-color: var(--tab-color);
+}
+.tabs button.active .dot { box-shadow: 0 0 12px var(--tab-color); transform: scale(1.15); }
+.tabs button .pill {
+  font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.05); color: var(--text-faint); letter-spacing: .03em;
+}
+
+/* push body content down to clear nav + tabs */
+body.tabs-active { padding-top: 0; }
+
+/* tab panels — hide all by default; the one with .active shows */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn .35s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tab-panel.active { animation: none; } }
+
+/* per-tab accent color for sections inside */
+.tab-panel[data-tab="cg"] section { --accent: var(--cyan); }
+.tab-panel[data-tab="ua"] section { --accent: var(--amber); }
+.tab-panel[data-tab="cp"] section { --accent: var(--coral); }
+.tab-panel[data-tab="oh"] section { --accent: var(--green); }
+.tab-panel[data-tab="cg"] .shead .kicker,
+.tab-panel[data-tab="cg"] .eyebrow { color: var(--cyan); border-color: rgba(84,214,224,.3); background: rgba(84,214,224,.06); }
+.tab-panel[data-tab="ua"] .shead .kicker,
+.tab-panel[data-tab="ua"] .eyebrow { color: var(--amber); border-color: rgba(233,184,115,.3); background: rgba(233,184,115,.06); }
+.tab-panel[data-tab="cp"] .shead .kicker,
+.tab-panel[data-tab="cp"] .eyebrow { color: var(--coral); border-color: rgba(224,138,100,.3); background: rgba(224,138,100,.06); }
+.tab-panel[data-tab="oh"] .shead .kicker,
+.tab-panel[data-tab="oh"] .eyebrow { color: var(--green); border-color: rgba(127,207,158,.3); background: rgba(127,207,158,.06); }
+
+/* the hero's gradient italic text per tab */
+.tab-panel[data-tab="cg"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tab-panel[data-tab="oh"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--green) 50%, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* When nav has tabs, account for taller header in scroll-padding */
+html.has-tabs { scroll-padding-top: 130px; }
+
+/* scroll-back-to-top affordance */
+.totop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 80;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text-dim);
+  cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s, color .2s, border-color .2s;
+  font-size: 18px;
+}
+.totop.show { opacity: 1; pointer-events: auto; }
+.totop:hover { color: var(--text); border-color: var(--accent, var(--gold)); transform: translateY(-2px); }
+
+@media (max-width: 600px) {
+  .tabs button { padding: 12px 13px 11px; font-size: 12.5px; }
+  .tabs button .pill { display: none; }
+}
+.proj-head { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 12px; }
+.proj-badge {
+  flex: 0 0 auto; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+  font-family: var(--disp); font-weight: 700; font-size: 1.4rem; color: var(--bg);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
+  box-shadow: 0 10px 30px -8px var(--accent);
+}
+.proj-title h2 { font-family: var(--disp); font-weight: 700; font-size: clamp(1.7rem, 4vw, 2.5rem); letter-spacing: -.03em; line-height: 1.05; }
+.proj-title .repo { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.proj-title .repo:hover { text-decoration: underline; }
+
+/* stat row */
+.statrow { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 38px; }
+.statrow .chip {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 18px; min-width: 130px;
+}
+.statrow .chip .n { font-family: var(--disp); font-weight: 700; font-size: 1.5rem; color: var(--accent); line-height: 1; }
+.statrow .chip .l { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+
+/* ---------- cards grid ---------- */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card {
+  background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: 14px; padding: 22px;
+  transition: border-color .25s, transform .25s;
+}
+.card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+.card .ico { font-size: 1.4rem; margin-bottom: 12px; display: block; }
+.card h5 { font-family: var(--disp); font-size: 1.02rem; margin-bottom: 8px; letter-spacing: -.01em; }
+.card p { font-size: 14.5px; color: var(--text-dim); margin: 0; }
+.card .accent { color: var(--accent, var(--gold)); }
+
+/* ---------- code block ---------- */
+.code {
+  position: relative; background: #0b0d12; border: 1px solid var(--border);
+  border-radius: 14px; margin: 24px 0; overflow: hidden; box-shadow: var(--shadow);
+}
+.code .bar { display: flex; align-items: center; gap: 7px; padding: 11px 16px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.code .bar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.code .bar i:nth-child(1){ background:#ff5f56 } .code .bar i:nth-child(2){ background:#ffbd2e } .code .bar i:nth-child(3){ background:#27c93f }
+.code .bar .fname { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.code pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; }
+.code pre code { background: none; padding: 0; color: #cdd3e0; font-size: 13px; }
+.tok-c { color: #6b7280; font-style: italic; }   /* comment */
+.tok-k { color: #c792ea; }                         /* keyword */
+.tok-s { color: #c3e88d; }                         /* string */
+.tok-f { color: #82aaff; }                         /* function */
+.tok-t { color: #ffcb6b; }                         /* type */
+.tok-n { color: #f78c6c; }                         /* number/const */
+.tok-p { color: #89ddff; }                         /* punctuation accent */
+
+/* ---------- pipeline diagram ---------- */
+.pipe { display: flex; flex-direction: column; gap: 0; margin: 26px 0; }
+.pipe .stage {
+  display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+}
+.pipe .arrow { align-self: center; color: var(--accent, var(--gold)); font-size: 18px; padding: 4px 0; }
+.pipe .stage .sn { font-family: var(--mono); font-size: 12px; color: var(--accent); flex: 0 0 28px; }
+.pipe .stage .st b { font-family: var(--disp); font-size: 1rem; }
+.pipe .stage .st small { display: block; font-size: 13px; color: var(--text-faint); }
+
+/* ---------- file tree ---------- */
+.tree { font-family: var(--mono); font-size: 13px; line-height: 1.9; color: var(--text-dim);
+  background: #0b0d12; border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin: 22px 0;
+  white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch; tab-size: 2; }
+.tree .d { color: var(--accent, var(--gold)); }
+.tree .c { color: var(--text-faint); }
+.tree .h { color: var(--text); }
+
+/* ---------- comparison table ---------- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; margin: 8px 0; }
+table.cmp { width: 100%; border-collapse: collapse; min-width: 640px; font-size: 14.5px; }
+table.cmp th, table.cmp td { text-align: left; padding: 15px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.cmp thead th { font-family: var(--disp); font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); background: rgba(255,255,255,.02); }
+table.cmp tbody tr:last-child td { border-bottom: none; }
+table.cmp td:first-child { color: var(--text); font-weight: 500; }
+table.cmp .c-cg { color: var(--cyan); } table.cmp .c-ua { color: var(--amber); } table.cmp .c-cp { color: var(--coral); }
+table.cmp tbody tr:hover { background: rgba(255,255,255,.015); }
+
+/* ---------- callout ---------- */
+.callout {
+  border-left: 3px solid var(--accent, var(--gold)); background: rgba(255,255,255,.03);
+  border-radius: 0 12px 12px 0; padding: 18px 22px; margin: 26px 0; font-size: 15px; color: var(--text-dim);
+}
+.callout b { color: var(--text); }
+
+/* ---------- benchmark bars ---------- */
+.bench { display: grid; gap: 14px; margin: 24px 0; }
+.bench .row { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 14px; }
+.bench .row .lbl { font-size: 13.5px; color: var(--text-dim); }
+.bench .row .track { height: 10px; background: rgba(255,255,255,.06); border-radius: 6px; overflow: hidden; }
+.bench .row .fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--cyan), var(--gold)); width: 0; transition: width 1.1s cubic-bezier(.2,.8,.2,1); }
+.bench .row .val { font-family: var(--disp); font-weight: 700; font-size: 14px; color: var(--gold); text-align: right; }
+
+/* ---------- ecosystem / synthesis ---------- */
+.eco { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; align-items: stretch; margin: 30px 0; }
+.eco .node { text-align: center; padding: 26px 18px; border: 1px solid var(--border); background: var(--bg-card); }
+.eco .node:nth-child(1){ border-radius: 14px 0 0 14px; border-right: none; }
+.eco .node:nth-child(3){ border-radius: 0 14px 14px 0; border-left: none; }
+.eco .node h5 { font-family: var(--disp); font-size: 1.05rem; margin-bottom: 8px; }
+.eco .node.cg h5 { color: var(--cyan); } .eco .node.ua h5 { color: var(--amber); } .eco .node.cp h5 { color: var(--coral); }
+.eco .node p { font-size: 13px; color: var(--text-dim); }
+.eco .node .layer { font-family: var(--mono); font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
+
+/* ---------- footer ---------- */
+footer { padding: 60px 0 80px; border-top: 1px solid var(--border); text-align: center; }
+footer .fbrand { font-family: var(--disp); font-weight: 700; font-size: 1.2rem; margin-bottom: 10px; }
+footer p { color: var(--text-faint); font-size: 13.5px; margin: 6px auto; max-width: 560px; }
+footer .links { display: flex; gap: 18px; justify-content: center; margin: 22px 0; flex-wrap: wrap; }
+footer .links a { font-size: 13.5px; color: var(--text-dim); border-bottom: 1px solid transparent; }
+footer .links a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+footer .meta { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); margin-top: 16px; }
+
+/* ---------- reveal animation ---------- */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 880px) {
+  .tri { grid-template-columns: 1fr; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .eco { grid-template-columns: 1fr; }
+  .eco .node { border-radius: 0 !important; border: 1px solid var(--border) !important; border-bottom: none !important; }
+  .eco .node:first-child { border-radius: 14px 14px 0 0 !important; }
+  .eco .node:last-child { border-radius: 0 0 14px 14px !important; border-bottom: 1px solid var(--border) !important; }
+  .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column;
+    background: rgba(12,14,20,.97); backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); padding: 14px 24px; gap: 2px; }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 12px 10px; }
+  .nav-toggle { display: block; }
+  .bench .row { grid-template-columns: 96px 1fr 48px; }
+  section { padding: 70px 0; }
+}
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .proj-head { flex-direction: row; }
+  .statrow .chip { min-width: calc(50% - 6px); flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* ============ NAV-TOC SIDEBAR (left rail TOC) ============ */
+.nav-toc {
+  position: fixed;
+  top: 150px;
+  left: max(12px, calc((100vw - var(--maxw)) / 2 - 212px));
+  width: 200px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px;
+  z-index: 40;
+  display: none;
+  scrollbar-width: thin;
+}
+@media (min-width: 1520px) { .nav-toc { display: block; } }
+.nav-toc h3 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 10px;
+  padding: 0 8px;
+}
+.nav-toc ul { list-style: none; margin: 0; padding: 0; }
+.nav-toc li { margin: 1px 0; }
+.nav-toc a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color .15s, background .15s;
+}
+.nav-toc a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-toc a.active {
+  color: var(--accent, var(--gold));
+  background: rgba(255,255,255,.05);
+  border-left-color: var(--accent, var(--gold));
+}
+.nav-toc li.toc-sub a { padding-left: 18px; font-size: 12px; color: var(--text-faint); }
+.nav-toc li.toc-sub a:hover, .nav-toc li.toc-sub a.active { color: var(--accent, var(--gold)); }
+
+/* ============================================================
+   Standalone-page chrome — sticky left sidebar + scroll-spy
+   (layered on top of the shared design system above)
+   ============================================================ */
+html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+body { padding-left: 264px; }
+body::after { mask-image: radial-gradient(circle at 62% 28%, black, transparent 82%); }
+
+aside.nav {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 264px; z-index: 90;
+  background: rgba(8, 9, 11, 0.96); border-right: 1px solid var(--border);
+  border-bottom: none; backdrop-filter: blur(14px);
+  overflow-y: auto; scrollbar-width: thin;
+}
+aside.nav .nav-inner { display: block; height: auto; padding: 30px 22px 44px; }
+aside.nav .back {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--text-faint);
+  display: inline-block; margin-bottom: 28px; transition: color .2s;
+}
+aside.nav .back:hover { color: var(--accent, var(--gold)); }
+aside.nav h3 { font-family: var(--disp); font-weight: 700; font-size: 1.16rem; letter-spacing: -.02em; line-height: 1.2; }
+aside.nav .nav-sub { font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em; color: var(--text-faint); margin: 7px 0 22px; }
+aside.nav > .nav-inner > nav { display: flex; flex-direction: column; gap: 1px; border-top: 1px solid var(--border); padding-top: 18px; }
+aside.nav > .nav-inner > nav a {
+  display: flex; gap: 11px; align-items: baseline; font-size: 13.5px; line-height: 1.4;
+  color: var(--text-dim); padding: 8px 12px; border-radius: 8px; border-left: 2px solid transparent;
+  transition: color .15s, background .15s, border-color .15s;
+}
+aside.nav > .nav-inner > nav a .ix { font-family: var(--mono); font-size: 11px; color: var(--text-faint); flex: none; }
+aside.nav > .nav-inner > nav a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+aside.nav > .nav-inner > nav a.active { color: var(--accent, var(--gold)); background: rgba(255,255,255,.05); border-left-color: var(--accent, var(--gold)); }
+aside.nav > .nav-inner > nav a.active .ix { color: var(--accent, var(--gold)); }
+
+main .hero { padding-top: 92px !important; text-align: left; }
+main .hero .statstrip { margin-left: 0; margin-right: 0; }
+main .project, main section[id], main .prose h4[id] { scroll-margin-top: 24px; }
+
+@media (max-width: 1080px) {
+  body { padding-left: 0; }
+  aside.nav { position: static; width: auto; height: auto; bottom: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  aside.nav .nav-inner { padding: 18px 24px; }
+  aside.nav .nav-sub { margin-bottom: 14px; }
+  aside.nav > .nav-inner > nav { flex-direction: row; flex-wrap: wrap; gap: 5px; border-top: 1px solid var(--border); }
+  aside.nav > .nav-inner > nav a { border-left: none; border-radius: 999px; padding: 6px 13px; background: rgba(255,255,255,.03); }
+  aside.nav > .nav-inner > nav a.active { border-left: none; }
+  main .hero { padding-top: 52px !important; }
+}
+
+:root { --accent: #e9b873; }
+
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<aside class="nav">
+  <div class="nav-inner">
+    <a href="openhuman-memory-tree.html#trees" class="back">← OpenHuman · 三棵树</a>
+    <h3>Bucket-Sealing</h3>
+    <p class="nav-sub">深度 · 热度计数与封桶</p>
+    <nav aria-label="章节导航">
+      <a href="#overview"><span class="ix">00</span>概览</a>
+      <a href="#counters"><span class="ix">01</span>热度计数器 schema</a>
+      <a href="#inputs"><span class="ix">02</span>七个输入信号</a>
+      <a href="#cross-source"><span class="ix">03</span>奖励跨源</a>
+      <a href="#amortize"><span class="ix">04</span>封桶触发：摊还</a>
+      <a href="#formula"><span class="ix">05</span>热度公式的形状</a>
+      <a href="#trees"><span class="ix">06</span>topic 树 vs 结构树</a>
+      <a href="#tradeoff"><span class="ix">07</span>内存与重算频率</a>
+      <a href="#significance"><span class="ix">08</span>意义</a>
+    </nav>
+  </div>
+</aside>
+
+<main>
+  <section id="overview" class="hero project oh" style="padding:130px 0 30px">
+  <div class="wrap">
+    <span class="eyebrow reveal"><span class="pulse"></span>tinyhumansai/openhuman · src/openhuman/memory_store/trees/hotness.rs</span>
+    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px">一棵树<span class="ital">怎么决定</span>什么该浮上来</h1>
+    <p class="lead reveal" style="margin-bottom:0">"会自己长大的记忆树"里，真正决定<strong>哪些实体/主题该浮到顶部</strong>的，是一张很小的热度计数表。本页基于 <code>hotness.rs</code> 的真实表结构与计数器拆解：热度由哪些信号喂养、跨源为什么被奖励、重算为什么要摊还，以及封桶在内存增长与新鲜度之间怎么取舍。</p>
+    <div class="callout reveal" style="max-width:760px;margin:30px auto 0;text-align:left"><b>关于这一页的依据：</b>下面的<strong>表结构、列、计数器语义</strong>全部来自 <code>hotness.rs</code> 源码（真实可查）。而把这些计数器<em>合成单一热度分</em>的精确算术（系数、对数底、晋升阈值）住在 <code>tree_policy.rs</code> 的重算路径里——本页对公式只描述其<strong>形状与设计意图</strong>，不杜撰具体常数。</div>
+  </div>
+</section>
+
+  <section id="counters" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">热度计数器：一张侧表，而不是树的一行</h4>
+      <p class="reveal">源码里有一句关键注释：<em>"hotness 是唯一区分 topic 树与 source/global 树的状态——而且即便如此，它也只是一张侧表，不是树里的行。"</em> 这定下了整个设计的基调：<strong>树的结构是稳定的，热度是挂在旁边、随时可重算的派生量</strong>。它存在 <code>mem_tree_entity_hotness</code> 表里，每个实体一行：</p>
+    </div>
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">hotness.rs — HotnessCounters（mem_tree_entity_hotness 的一行）</span></div>
+      <pre><code><span class="tok-k">struct</span> <span class="tok-t">HotnessCounters</span> {
+    entity_id:           <span class="tok-t">String</span>,
+    mention_count_30d:   <span class="tok-t">u32</span>,          <span class="tok-c">// 近 30 天被提及次数</span>
+    distinct_sources:    <span class="tok-t">u32</span>,          <span class="tok-c">// 跨多少个不同的源/树出现</span>
+    last_seen_ms:        <span class="tok-t">Option</span>&lt;<span class="tok-t">i64</span>&gt;,   <span class="tok-c">// 最近一次出现（recency）</span>
+    query_hits_30d:      <span class="tok-t">u32</span>,          <span class="tok-c">// 近 30 天被检索命中次数</span>
+    graph_centrality:    <span class="tok-t">Option</span>&lt;<span class="tok-t">f64</span>&gt;,   <span class="tok-c">// 图中心性</span>
+    ingests_since_check: <span class="tok-t">u32</span>,          <span class="tok-c">// 距上次热度重算的 ingest 数</span>
+    last_hotness:        <span class="tok-t">Option</span>&lt;<span class="tok-t">f64</span>&gt;,   <span class="tok-c">// 上次算出的热度（缓存）</span>
+    last_updated_ms:     <span class="tok-t">i64</span>,
+}</code></pre>
+    </div>
+    <div class="prose">
+      <p class="reveal"><code>get_or_fresh()</code> 对没见过的实体返回一个<strong>全零行但不落库</strong>——调用方 bump 完计数器后必须显式 <code>upsert()</code>；<code>upsert</code> 以 <code>entity_id</code> 为主键 <code>ON CONFLICT DO UPDATE</code>，幂等。也就是说，<strong>"没见过"和"热度为 0"被刻意区分开</strong>，新实体不会凭空占一行。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="inputs" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">七个输入，各自挡住一种"假热"</h4>
+      <p class="reveal">把这几列读成"热度函数的自变量"，能看出每一列都在防一种退化：</p>
+      <ul class="reveal">
+        <li><strong>mention_count_30d</strong>：被提及的频率，但开了 <em>30 天窗口</em>——热度天然会随时间退潮，不会因为半年前刷过屏就永久占顶。</li>
+        <li><strong>query_hits_30d</strong>：被<em>检索命中</em>的次数。提及多 ≠ 有用；真正被翻出来用过，才是更强的重要性信号。</li>
+        <li><strong>distinct_sources</strong>：在多少个<em>不同的源</em>里出现——跨源出现的实体比单一来源刷量的更可信（见下一节）。</li>
+        <li><strong>graph_centrality</strong>：在实体图里的中心性，捕捉"很多东西都连到它"的结构重要性。</li>
+        <li><strong>last_seen_ms</strong>：最近一次出现的时间戳，是时间衰减项的输入。</li>
+        <li><strong>ingests_since_check</strong>：不是热度输入，而是<em>重算的节流器</em>（见"摊还"）。</li>
+        <li><strong>last_hotness</strong>：上次算出的值，缓存下来，避免每次都从零重算。</li>
+      </ul>
+    </div>
+  </div></div>
+</section>
+
+  <section id="cross-source" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">奖励跨源：distinct_sources 怎么数</h4>
+      <p class="reveal">"跨源"在源码里有精确定义——它数的是这个实体在实体索引里关联到<strong>多少个不同的 <code>tree_id</code></strong>：</p>
+    </div>
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">hotness.rs — distinct_sources_for</span></div>
+      <pre><code><span class="tok-k">SELECT</span> <span class="tok-f">COUNT</span>(<span class="tok-k">DISTINCT</span> tree_id)
+  <span class="tok-k">FROM</span> mem_tree_entity_index
+ <span class="tok-k">WHERE</span> entity_id = ?1 <span class="tok-k">AND</span> tree_id <span class="tok-k">IS NOT NULL</span></code></pre>
+    </div>
+    <div class="prose">
+      <p class="reveal">为什么要单独奖励它？因为<strong>单源高频很容易造假</strong>：一个聊天群里反复出现的梗、一封长邮件里重复的词，<code>mention_count</code> 都会很高，但它们只活在一个上下文里。<code>distinct_sources</code> 让"在邮件、Slack、笔记里<em>都</em>出现的人/项目"获得额外权重——跨源是"这真的重要"的强信号，也是把记忆树和"又一个按词频排序的向量库"区分开的地方。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="amortize" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">封桶触发：ingests_since_check 的摊还</h4>
+      <p class="reveal">如果每写入一条记忆就把所有受影响实体的热度全量重算一遍，记忆树会被自己拖垮。<code>ingests_since_check</code> 这一列正是为此存在——它是一个<strong>每次 ingest 都自增、重算后归零的计数器</strong>。重算（"封桶"）被摊还成：<em>平时只 bump 计数器（便宜），等某个实体累计的 ingest 数越过阈值，才真正重算它的热度分并把 <code>last_hotness</code> 落库</em>。</p>
+      <div class="callout reveal"><b>读这一列的方式：</b><code>ingests_since_check</code> 把"实时精确"换成了"最终一致"。一个实体越活跃（ingest 越频繁），就越快撞到阈值、越频繁被重算；冷门实体则可能很久才算一次——<strong>重算频率自适应地跟随活跃度</strong>，把算力花在真正在变的实体上。</div>
+    </div>
+  </div></div>
+</section>
+
+  <section id="formula" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">热度公式的形状：对数压头部</h4>
+      <p class="reveal">把上面的输入合成单一热度分，重算路径采用的形状（设计意图层面）是——<strong>对频次类信号取对数压住头部、对跨源与命中给正向权重、再乘一个随 <code>last_seen_ms</code> 衰减的时间因子</strong>。对数是关键：如果热度对 <code>mention_count</code> 线性，少数超高频实体会把分数尺度撑爆、永久霸榜；取对数后，"被提到 1000 次"和"被提到 100 次"的差距被压缩，让<em>中段</em>实体仍有机会靠跨源、命中、中心性浮上来。</p>
+      <p class="reveal">概念上可以读成：<code>hotness ≈ (w₁·log(1+mention) + w₂·log(1+query_hits) + w₃·distinct_sources + w₄·centrality) × decay(now − last_seen)</code>。<strong>精确的系数、对数底与晋升阈值在 <code>tree_policy.rs</code> 里</strong>；本页只刻画它"对数压头 + 跨源加权 + 时间衰减"的骨架，不替源码杜撰数字。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="trees" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">为什么只有 topic 树需要热度</h4>
+      <p class="reveal"><code>hotness.rs</code> 的开篇注释点明了树的分工：<strong>hotness 是唯一区分 topic 树与 source/global 树的状态</strong>。换句话说——</p>
+      <ul class="reveal">
+        <li><strong>source / global 树</strong>是<em>结构性</em>的：一条消息来自哪个源、全局时间线长什么样，由 ingest 的来源与时间天然决定，<strong>不需要"热度"来排序</strong>。</li>
+        <li><strong>topic 树</strong>是<em>涌现</em>的：哪些主题/实体值得成为一个被维护的"桶"、桶内谁该在顶部，没有天然答案——这正是热度分要回答的问题。所以热度计数表只为 topic 维度存在，作为一张<strong>侧表</strong>挂在树存储旁边，而不污染树本身的行。</li>
+      </ul>
+      <p class="reveal">这也解释了存储布局：注释说把 hotness 折叠进 <code>trees/</code> 目录，是为了让"memory_store 对树到底知道些什么"成为<strong>单目录可答</strong>的问题——结构的归结构，派生的热度归侧表。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="tradeoff" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">内存增长 ↔ 重算频率的权衡</h4>
+      <p class="reveal">把这几个设计决定串起来，能看到一条清晰的权衡线：</p>
+      <ul class="reveal">
+        <li><strong>不为"没见过"的实体占行</strong>（<code>get_or_fresh</code> 返回不落库的全零行）——把表的增长绑定到"真正出现过的实体"，而非"理论上可能的实体"。</li>
+        <li><strong>30 天窗口的计数器</strong>让久未出现的实体热度自然趋零，配合时间衰减，老桶会沉下去而不必显式删除。</li>
+        <li><strong>ingests_since_check 的摊还</strong>把重算成本与活跃度挂钩——表越大、写入越多，也不会变成"每次写入 O(实体数) 重算"，而是每个实体各自按自己的活跃节奏重算。</li>
+        <li><strong>last_hotness 缓存</strong>让两次重算之间的检索/展示可以直接读上次的分，不必为了排序而即时重算。</li>
+      </ul>
+      <p class="reveal">三者合力，回答了"一棵会自己长大的树为什么不会自己撑爆"：增长被绑定到真实出现、旧热度靠窗口与衰减自然退潮、重算成本被摊还到活跃度上。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="significance" class="project oh">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">意义：把"重要性"做成可重算的派生量</h4>
+      <p class="reveal">很多记忆系统把"重要性"写死进数据本身（打个 importance 字段、塞进向量），结果是改一次评分逻辑就要重写历史。OpenHuman 的做法相反：<strong>树的结构是稳定的事实，热度是一张随时可重算、可丢弃的侧表</strong>。它用一组朴素但互补的计数器（频次、命中、跨源、中心性、recency）喂养一个"对数压头 + 跨源加权 + 时间衰减"的热度分，再用 <code>ingests_since_check</code> 把重算摊还到活跃度上。这让"什么该浮上来"成为一个<em>可以随策略演进而重算</em>的问题，而不是一次性烙进数据的判断——也正是它敢叫"会自己长大"的底气。</p>
+    </div>
+  </div></div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">Agent Infrastructure Teardown</div>
+    <p>源码级深度解析系列 · 从源码看下一代 AI 基础设施</p>
+    <div class="links">
+      <a href="index.html">← 返回索引</a>
+      <a href="https://github.com/trending" target="_blank" rel="noopener">GitHub Trending ↗</a>
+    </div>
+    <div class="meta">© 2026 · 单文件独立页面 · 复用共享设计系统</div>
+  </div>
+</footer>
+
+<button class="totop" aria-label="返回顶部">↑</button>
+
+<script>
+(function () {
+  var prog = document.getElementById('progress');
+  var links = [].slice.call(document.querySelectorAll('aside.nav nav a[href^="#"]'));
+  var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  var totop = document.querySelector('.totop');
+
+  function onScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop;
+    if (prog) {
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      prog.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
+    }
+    var idx = -1, mark = y + window.innerHeight * 0.3;
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i] && targets[i].offsetTop <= mark) idx = i;
+    }
+    links.forEach(function (a, i) { a.classList.toggle('active', i === idx); });
+    if (totop) totop.classList.toggle('show', y > 600);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+
+  function fillBars(root) {
+    (root.querySelectorAll ? root.querySelectorAll('.fill[data-w]') : []).forEach &&
+      root.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        fillBars(e.target);
+        io.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+    document.querySelectorAll('.bench').forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+    document.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if (totop) totop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+})();
+</script>
+
+<!--
+嵌套深度阅读候选（CC 评估）：
+- #formula → tree-policy-constants：tree_policy.rs 里热度合成的精确算术（对数底、各信号系数、晋升/降级阈值）
+  本页未抓取，值得单独一页把 hotness 重算路径逐行拆出来，补上本页刻意没杜撰的常数。
+- #amortize → ingest-pipeline：ingests_since_check 如何在写入流水线里 bump、以及重算何时触发、谁来跑
+  （memory_tree/ingest.rs + jobs 队列），是"摊还式派生量维护"的完整闭环，可单列。
+- #cross-source → entity-index：mem_tree_entity_index（entity_id → tree_id 关联）如何建立与维护，
+  它既是 distinct_sources 的数据源，也是检索时实体匹配的索引，值得一页讲清楚实体抽取与去重。
+- #trees → retrieval-cover：memory_tree/retrieval/{cover,drill_down,fetch}.rs 如何用热度排序做
+  覆盖式检索与下钻，把"热度分"真正变成"浮上来的结果"，是热度机制的消费侧深度页。
+-->
+</body>
+</html>
