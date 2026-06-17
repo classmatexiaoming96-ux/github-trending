@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeGraph · SQLite + FTS5 · 用 SQLite 当代码图数据库 · 深度解析</title>
+<meta name="description" content="colbymchenry/codegraph 的 db/schema.sql 与 sync/ 源码级拆解——nodes/edges/files/unresolved_refs 四张核心表、FTS5 外部内容表与三个同步触发器、prefix→LIKE→fuzzy 三级检索、复合索引取舍、git 感知的增量 sync。" />
+<meta property="og:title" content="CodeGraph · SQLite + FTS5 · 深度解析" />
+<meta property="og:description" content="nodes/edges/files/unresolved_refs 表设计、FTS5 外部内容表与触发器、三级检索、git 感知增量 sync。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   CodeGraph · Understand-Anything · Claude Plugins
+   Technical deep-dive — design system
+   ============================================================ */
+
+:root {
+  /* surfaces */
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* text */
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+
+  /* accents */
+  --gold:   #e0b07a;   /* global warm accent */
+  --gold-2: #d4a574;
+  --cyan:   #54d6e0;   /* codegraph */
+  --amber:  #e9b873;   /* understand-anything */
+  --coral:  #e08a64;   /* claude plugins (Anthropic clay) */
+  --green:  #7fcf9e;
+
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius: 16px;
+  --maxw: 1080px;
+
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp: "Space Grotesk", var(--sans);
+  --serif:"Fraunces", Georgia, serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* layered background glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(900px 520px at 78% -8%, rgba(224, 176, 122, 0.10), transparent 60%),
+    radial-gradient(720px 460px at 8% 12%, rgba(84, 214, 224, 0.07), transparent 55%),
+    radial-gradient(820px 600px at 50% 108%, rgba(224, 138, 100, 0.07), transparent 60%),
+    var(--bg);
+}
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 80%);
+}
+
+a { color: inherit; text-decoration: none; }
+::selection { background: rgba(224,176,122,.3); color: #fff; }
+
+/* ---------- layout ---------- */
+.wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+.narrow { max-width: 820px; }
+
+section { padding: 96px 0; position: relative; }
+section + section { border-top: 1px solid var(--border); }
+
+/* ---------- scroll progress ---------- */
+#progress {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+  background: linear-gradient(90deg, var(--cyan), var(--gold), var(--coral));
+  z-index: 100; transition: width .1s linear;
+}
+
+/* ---------- nav ---------- */
+/* ---------- site index (top nav) ---------- */
+.site-index {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 95;
+  background: rgba(8, 9, 11, 0.96);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.site-index .wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.site-index-label {
+  font-size: 12px; font-family: var(--mono); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-faint); white-space: nowrap;
+}
+.site-index-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.site-index-links a {
+  display: inline-block; font-size: 13px; font-weight: 600;
+  color: var(--text-dim); padding: 7px 14px; border-radius: 9px;
+  border: 1px solid transparent; text-decoration: none;
+  transition: color .2s, background .2s, border-color .2s;
+  line-height: 1.3;
+}
+.site-index-links a:hover {
+  color: var(--text); background: rgba(255,255,255,.06); border-color: var(--border);
+}
+.site-index-links a span { display: block; font-size: 11px; font-weight: 400; color: var(--text-faint); margin-top: 2px; }
+
+header.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 90;
+  backdrop-filter: blur(14px);
+  background: rgba(10, 11, 14, 0.72);
+  border-bottom: 1px solid transparent;
+  transition: border-color .3s, background .3s;
+}
+header.nav.scrolled { border-bottom-color: var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { display: flex; align-items: center; gap: 11px; font-family: var(--disp); font-weight: 700; letter-spacing: -.02em; }
+.brand .dot { width: 11px; height: 11px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--coral)); box-shadow: 0 0 14px var(--gold); }
+.brand span { font-size: 15px; }
+.nav-links { display: flex; gap: 6px; align-items: center; }
+.nav-links a {
+  font-size: 13.5px; color: var(--text-dim); padding: 8px 13px; border-radius: 9px;
+  transition: color .2s, background .2s; font-weight: 500;
+}
+.nav-links a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.nav-toggle { display: none; background: none; border: 1px solid var(--border); color: var(--text);
+  border-radius: 9px; width: 40px; height: 40px; font-size: 18px; cursor: pointer; }
+
+/* ---------- hero ---------- */
+.hero { padding: 150px 0 88px; text-align: center; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono);
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 7px 16px;
+  background: rgba(224,176,122,.05); margin-bottom: 30px;
+}
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(127,207,158,.6); animation: pulse 2.4s infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(127,207,158,.5)} 70%{box-shadow:0 0 0 9px rgba(127,207,158,0)} 100%{box-shadow:0 0 0 0 rgba(127,207,158,0)} }
+
+.hero h1 {
+  font-family: var(--disp); font-weight: 700; letter-spacing: -.035em;
+  font-size: clamp(2.6rem, 7vw, 5rem); line-height: 1.02; margin-bottom: 26px;
+}
+.hero h1 .ital { font-family: var(--serif); font-style: italic; font-weight: 400;
+  background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p.lead { max-width: 680px; margin: 0 auto 18px; font-size: clamp(1.05rem, 2.2vw, 1.3rem); color: var(--text-dim); }
+.hero .sub { font-family: var(--mono); font-size: 13px; color: var(--text-faint); letter-spacing: .02em; }
+.hero .sub b { color: var(--gold-2); font-weight: 500; }
+
+/* ---------- project tri-cards in hero ---------- */
+.tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 58px; }
+.pcard {
+  position: relative; text-align: left; background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; overflow: hidden;
+  transition: transform .25s ease, border-color .25s ease;
+}
+.pcard:hover { transform: translateY(-4px); border-color: var(--accent, var(--gold)); }
+.pcard::before { content:""; position:absolute; top:0; left:0; right:0; height:3px; background: var(--accent); opacity:.8; }
+.pcard .rank { font-family: var(--mono); font-size: 11px; color: var(--text-faint); letter-spacing: .1em; }
+.pcard h3 { font-family: var(--disp); font-size: 1.18rem; margin: 6px 0 4px; letter-spacing: -.02em; }
+.pcard h3 a:hover { color: var(--accent); }
+.pcard .tag { font-size: 12.5px; color: var(--text-dim); min-height: 38px; }
+.pcard .stats { display: flex; gap: 14px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pcard .stat .n { font-family: var(--disp); font-weight: 700; font-size: 1.15rem; color: var(--accent); }
+.pcard .stat .l { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.pcard.cg { --accent: var(--cyan); }
+.pcard.ua { --accent: var(--amber); }
+.pcard.cp { --accent: var(--coral); }
+
+/* ---------- section heading ---------- */
+.shead { margin-bottom: 44px; }
+.shead .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent, var(--gold)); }
+.shead h2 { font-family: var(--disp); font-weight: 700; letter-spacing: -.03em; font-size: clamp(1.8rem, 4.2vw, 2.8rem); margin: 12px 0 14px; line-height: 1.08; }
+.shead p { color: var(--text-dim); max-width: 720px; }
+
+/* ---------- prose ---------- */
+.prose p { margin: 0 0 18px; color: var(--text-dim); }
+.prose h4 { font-family: var(--disp); font-size: 1.12rem; color: var(--text); margin: 34px 0 12px; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; }
+.prose h4::before { content:""; width: 16px; height: 2px; background: var(--accent, var(--gold)); border-radius: 2px; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose code { font-family: var(--mono); font-size: .86em; background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 5px; color: var(--gold-2); }
+.prose ul { margin: 0 0 18px; padding-left: 0; list-style: none; }
+.prose ul li { position: relative; padding-left: 26px; margin-bottom: 11px; color: var(--text-dim); }
+.prose ul li::before { content: "▹"; position: absolute; left: 4px; color: var(--accent, var(--gold)); }
+.prose ul li strong { color: var(--text); }
+.prose a.inline { color: var(--accent, var(--gold)); border-bottom: 1px solid rgba(255,255,255,.18); }
+.prose a.inline:hover { border-bottom-color: var(--accent, var(--gold)); }
+
+/* ---------- project section frame ---------- */
+.project { scroll-margin-top: 80px; }
+.project.cg { --accent: var(--cyan); }
+.project.ua { --accent: var(--amber); }
+.project.cp { --accent: var(--coral); }
+.project.oh { --accent: var(--green); }
+/* compact stat strip for single-project page */
+.statstrip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 38px 0; }
+.statstrip .cell { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 18px; text-align: left; }
+.statstrip .cell .n { font-family: var(--disp); font-weight: 700; font-size: 1.7rem; color: var(--accent, var(--gold)); line-height: 1; }
+.statstrip .cell .l { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin-top: 8px; }
+@media (max-width: 720px){ .statstrip { grid-template-columns: 1fr 1fr; } }
+/* tree-diagram primitive used by the three-trees section */
+.trees3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin: 26px 0; }
+.trees3 .t { background: linear-gradient(180deg, var(--bg-card), var(--bg-elev)); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+.trees3 .t h5 { font-family: var(--disp); font-size: 1.1rem; margin-bottom: 4px; }
+.trees3 .t .badge { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 999px; margin-bottom: 12px; background: rgba(127,207,158,.12); color: var(--green); border: 1px solid rgba(127,207,158,.3); }
+.trees3 .t p { color: var(--text-dim); font-size: 14.5px; margin: 0 0 12px; }
+.trees3 .t ul { margin: 0; padding-left: 0; list-style: none; font-size: 13.5px; }
+.trees3 .t li { padding-left: 18px; position: relative; margin-bottom: 6px; color: var(--text-dim); }
+.trees3 .t li::before { content: "•"; position: absolute; left: 4px; color: var(--accent, var(--green)); }
+@media (max-width: 880px){ .trees3 { grid-template-columns: 1fr; } }
+
+/* ============================================================
+   Tab strip — project switcher in nav
+   ============================================================ */
+header.nav.has-tabs { padding-bottom: 0; }
+header.nav.has-tabs .nav-inner { height: 60px; }
+.tabs-wrap { border-top: 1px solid var(--border); background: rgba(10, 11, 14, 0.55); }
+.tabs {
+  display: flex; gap: 4px; max-width: var(--maxw); margin: 0 auto; padding: 0 24px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button {
+  font-family: var(--disp); font-weight: 500; font-size: 13.5px; letter-spacing: -.005em;
+  color: var(--text-dim); background: none; border: none; cursor: pointer;
+  padding: 14px 18px 13px; position: relative; white-space: nowrap;
+  border-bottom: 2px solid transparent; transition: color .2s, border-color .2s;
+  display: flex; align-items: center; gap: 9px;
+}
+.tabs button .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--tab-color, var(--text-faint));
+  transition: box-shadow .2s, transform .2s;
+}
+.tabs button[data-tab="cg"] { --tab-color: var(--cyan); }
+.tabs button[data-tab="ua"] { --tab-color: var(--amber); }
+.tabs button[data-tab="cp"] { --tab-color: var(--coral); }
+.tabs button[data-tab="oh"] { --tab-color: var(--green); }
+.tabs button:hover { color: var(--text); }
+.tabs button.active {
+  color: var(--text); border-bottom-color: var(--tab-color);
+}
+.tabs button.active .dot { box-shadow: 0 0 12px var(--tab-color); transform: scale(1.15); }
+.tabs button .pill {
+  font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+  background: rgba(255,255,255,.05); color: var(--text-faint); letter-spacing: .03em;
+}
+
+/* push body content down to clear nav + tabs */
+body.tabs-active { padding-top: 0; }
+
+/* tab panels — hide all by default; the one with .active shows */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: fadeIn .35s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .tab-panel.active { animation: none; } }
+
+/* per-tab accent color for sections inside */
+.tab-panel[data-tab="cg"] section { --accent: var(--cyan); }
+.tab-panel[data-tab="ua"] section { --accent: var(--amber); }
+.tab-panel[data-tab="cp"] section { --accent: var(--coral); }
+.tab-panel[data-tab="oh"] section { --accent: var(--green); }
+.tab-panel[data-tab="cg"] .shead .kicker,
+.tab-panel[data-tab="cg"] .eyebrow { color: var(--cyan); border-color: rgba(84,214,224,.3); background: rgba(84,214,224,.06); }
+.tab-panel[data-tab="ua"] .shead .kicker,
+.tab-panel[data-tab="ua"] .eyebrow { color: var(--amber); border-color: rgba(233,184,115,.3); background: rgba(233,184,115,.06); }
+.tab-panel[data-tab="cp"] .shead .kicker,
+.tab-panel[data-tab="cp"] .eyebrow { color: var(--coral); border-color: rgba(224,138,100,.3); background: rgba(224,138,100,.06); }
+.tab-panel[data-tab="oh"] .shead .kicker,
+.tab-panel[data-tab="oh"] .eyebrow { color: var(--green); border-color: rgba(127,207,158,.3); background: rgba(127,207,158,.06); }
+
+/* the hero's gradient italic text per tab */
+.tab-panel[data-tab="cg"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--gold) 50%, var(--coral)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tab-panel[data-tab="oh"] .hero h1 .ital { background: linear-gradient(110deg, var(--cyan), var(--green) 50%, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* When nav has tabs, account for taller header in scroll-padding */
+html.has-tabs { scroll-padding-top: 130px; }
+
+/* scroll-back-to-top affordance */
+.totop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 80;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--bg-card); border: 1px solid var(--border-strong); color: var(--text-dim);
+  cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s, color .2s, border-color .2s;
+  font-size: 18px;
+}
+.totop.show { opacity: 1; pointer-events: auto; }
+.totop:hover { color: var(--text); border-color: var(--accent, var(--gold)); transform: translateY(-2px); }
+
+@media (max-width: 600px) {
+  .tabs button { padding: 12px 13px 11px; font-size: 12.5px; }
+  .tabs button .pill { display: none; }
+}
+.proj-head { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 12px; }
+.proj-badge {
+  flex: 0 0 auto; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+  font-family: var(--disp); font-weight: 700; font-size: 1.4rem; color: var(--bg);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #fff));
+  box-shadow: 0 10px 30px -8px var(--accent);
+}
+.proj-title h2 { font-family: var(--disp); font-weight: 700; font-size: clamp(1.7rem, 4vw, 2.5rem); letter-spacing: -.03em; line-height: 1.05; }
+.proj-title .repo { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.proj-title .repo:hover { text-decoration: underline; }
+
+/* stat row */
+.statrow { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 38px; }
+.statrow .chip {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 18px; min-width: 130px;
+}
+.statrow .chip .n { font-family: var(--disp); font-weight: 700; font-size: 1.5rem; color: var(--accent); line-height: 1; }
+.statrow .chip .l { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+
+/* ---------- cards grid ---------- */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card {
+  background: linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border); border-radius: 14px; padding: 22px;
+  transition: border-color .25s, transform .25s;
+}
+.card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+.card .ico { font-size: 1.4rem; margin-bottom: 12px; display: block; }
+.card h5 { font-family: var(--disp); font-size: 1.02rem; margin-bottom: 8px; letter-spacing: -.01em; }
+.card p { font-size: 14.5px; color: var(--text-dim); margin: 0; }
+.card .accent { color: var(--accent, var(--gold)); }
+
+/* ---------- code block ---------- */
+.code {
+  position: relative; background: #0b0d12; border: 1px solid var(--border);
+  border-radius: 14px; margin: 24px 0; overflow: hidden; box-shadow: var(--shadow);
+}
+.code .bar { display: flex; align-items: center; gap: 7px; padding: 11px 16px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+.code .bar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.code .bar i:nth-child(1){ background:#ff5f56 } .code .bar i:nth-child(2){ background:#ffbd2e } .code .bar i:nth-child(3){ background:#27c93f }
+.code .bar .fname { margin-left: 10px; font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+.code pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; }
+.code pre code { background: none; padding: 0; color: #cdd3e0; font-size: 13px; }
+.tok-c { color: #6b7280; font-style: italic; }   /* comment */
+.tok-k { color: #c792ea; }                         /* keyword */
+.tok-s { color: #c3e88d; }                         /* string */
+.tok-f { color: #82aaff; }                         /* function */
+.tok-t { color: #ffcb6b; }                         /* type */
+.tok-n { color: #f78c6c; }                         /* number/const */
+.tok-p { color: #89ddff; }                         /* punctuation accent */
+
+/* ---------- pipeline diagram ---------- */
+.pipe { display: flex; flex-direction: column; gap: 0; margin: 26px 0; }
+.pipe .stage {
+  display: flex; align-items: center; gap: 16px; padding: 16px 20px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+}
+.pipe .arrow { align-self: center; color: var(--accent, var(--gold)); font-size: 18px; padding: 4px 0; }
+.pipe .stage .sn { font-family: var(--mono); font-size: 12px; color: var(--accent); flex: 0 0 28px; }
+.pipe .stage .st b { font-family: var(--disp); font-size: 1rem; }
+.pipe .stage .st small { display: block; font-size: 13px; color: var(--text-faint); }
+
+/* ---------- file tree ---------- */
+.tree { font-family: var(--mono); font-size: 13px; line-height: 1.9; color: var(--text-dim);
+  background: #0b0d12; border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin: 22px 0;
+  white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch; tab-size: 2; }
+.tree .d { color: var(--accent, var(--gold)); }
+.tree .c { color: var(--text-faint); }
+.tree .h { color: var(--text); }
+
+/* ---------- comparison table ---------- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; margin: 8px 0; }
+table.cmp { width: 100%; border-collapse: collapse; min-width: 640px; font-size: 14.5px; }
+table.cmp th, table.cmp td { text-align: left; padding: 15px 18px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.cmp thead th { font-family: var(--disp); font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); background: rgba(255,255,255,.02); }
+table.cmp tbody tr:last-child td { border-bottom: none; }
+table.cmp td:first-child { color: var(--text); font-weight: 500; }
+table.cmp .c-cg { color: var(--cyan); } table.cmp .c-ua { color: var(--amber); } table.cmp .c-cp { color: var(--coral); }
+table.cmp tbody tr:hover { background: rgba(255,255,255,.015); }
+
+/* ---------- callout ---------- */
+.callout {
+  border-left: 3px solid var(--accent, var(--gold)); background: rgba(255,255,255,.03);
+  border-radius: 0 12px 12px 0; padding: 18px 22px; margin: 26px 0; font-size: 15px; color: var(--text-dim);
+}
+.callout b { color: var(--text); }
+
+/* ---------- benchmark bars ---------- */
+.bench { display: grid; gap: 14px; margin: 24px 0; }
+.bench .row { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 14px; }
+.bench .row .lbl { font-size: 13.5px; color: var(--text-dim); }
+.bench .row .track { height: 10px; background: rgba(255,255,255,.06); border-radius: 6px; overflow: hidden; }
+.bench .row .fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--cyan), var(--gold)); width: 0; transition: width 1.1s cubic-bezier(.2,.8,.2,1); }
+.bench .row .val { font-family: var(--disp); font-weight: 700; font-size: 14px; color: var(--gold); text-align: right; }
+
+/* ---------- ecosystem / synthesis ---------- */
+.eco { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; align-items: stretch; margin: 30px 0; }
+.eco .node { text-align: center; padding: 26px 18px; border: 1px solid var(--border); background: var(--bg-card); }
+.eco .node:nth-child(1){ border-radius: 14px 0 0 14px; border-right: none; }
+.eco .node:nth-child(3){ border-radius: 0 14px 14px 0; border-left: none; }
+.eco .node h5 { font-family: var(--disp); font-size: 1.05rem; margin-bottom: 8px; }
+.eco .node.cg h5 { color: var(--cyan); } .eco .node.ua h5 { color: var(--amber); } .eco .node.cp h5 { color: var(--coral); }
+.eco .node p { font-size: 13px; color: var(--text-dim); }
+.eco .node .layer { font-family: var(--mono); font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
+
+/* ---------- footer ---------- */
+footer { padding: 60px 0 80px; border-top: 1px solid var(--border); text-align: center; }
+footer .fbrand { font-family: var(--disp); font-weight: 700; font-size: 1.2rem; margin-bottom: 10px; }
+footer p { color: var(--text-faint); font-size: 13.5px; margin: 6px auto; max-width: 560px; }
+footer .links { display: flex; gap: 18px; justify-content: center; margin: 22px 0; flex-wrap: wrap; }
+footer .links a { font-size: 13.5px; color: var(--text-dim); border-bottom: 1px solid transparent; }
+footer .links a:hover { color: var(--gold); border-bottom-color: var(--gold); }
+footer .meta { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); margin-top: 16px; }
+
+/* ---------- reveal animation ---------- */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 880px) {
+  .tri { grid-template-columns: 1fr; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  .eco { grid-template-columns: 1fr; }
+  .eco .node { border-radius: 0 !important; border: 1px solid var(--border) !important; border-bottom: none !important; }
+  .eco .node:first-child { border-radius: 14px 14px 0 0 !important; }
+  .eco .node:last-child { border-radius: 0 0 14px 14px !important; border-bottom: 1px solid var(--border) !important; }
+  .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; flex-direction: column;
+    background: rgba(12,14,20,.97); backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); padding: 14px 24px; gap: 2px; }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 12px 10px; }
+  .nav-toggle { display: block; }
+  .bench .row { grid-template-columns: 96px 1fr 48px; }
+  section { padding: 70px 0; }
+}
+@media (max-width: 520px) {
+  body { font-size: 16px; }
+  .proj-head { flex-direction: row; }
+  .statrow .chip { min-width: calc(50% - 6px); flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* ============ NAV-TOC SIDEBAR (left rail TOC) ============ */
+.nav-toc {
+  position: fixed;
+  top: 150px;
+  left: max(12px, calc((100vw - var(--maxw)) / 2 - 212px));
+  width: 200px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 12px;
+  z-index: 40;
+  display: none;
+  scrollbar-width: thin;
+}
+@media (min-width: 1520px) { .nav-toc { display: block; } }
+.nav-toc h3 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 10px;
+  padding: 0 8px;
+}
+.nav-toc ul { list-style: none; margin: 0; padding: 0; }
+.nav-toc li { margin: 1px 0; }
+.nav-toc a {
+  display: block;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color .15s, background .15s;
+}
+.nav-toc a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.nav-toc a.active {
+  color: var(--accent, var(--gold));
+  background: rgba(255,255,255,.05);
+  border-left-color: var(--accent, var(--gold));
+}
+.nav-toc li.toc-sub a { padding-left: 18px; font-size: 12px; color: var(--text-faint); }
+.nav-toc li.toc-sub a:hover, .nav-toc li.toc-sub a.active { color: var(--accent, var(--gold)); }
+
+/* ============================================================
+   Standalone-page chrome — sticky left sidebar + scroll-spy
+   (layered on top of the shared design system above)
+   ============================================================ */
+html { scroll-behavior: smooth; scroll-padding-top: 28px; }
+body { padding-left: 264px; }
+body::after { mask-image: radial-gradient(circle at 62% 28%, black, transparent 82%); }
+
+aside.nav {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 264px; z-index: 90;
+  background: rgba(8, 9, 11, 0.96); border-right: 1px solid var(--border);
+  border-bottom: none; backdrop-filter: blur(14px);
+  overflow-y: auto; scrollbar-width: thin;
+}
+aside.nav .nav-inner { display: block; height: auto; padding: 30px 22px 44px; }
+aside.nav .back {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--text-faint);
+  display: inline-block; margin-bottom: 28px; transition: color .2s;
+}
+aside.nav .back:hover { color: var(--accent, var(--gold)); }
+aside.nav h3 { font-family: var(--disp); font-weight: 700; font-size: 1.16rem; letter-spacing: -.02em; line-height: 1.2; }
+aside.nav .nav-sub { font-family: var(--mono); font-size: 11.5px; letter-spacing: .03em; color: var(--text-faint); margin: 7px 0 22px; }
+aside.nav > .nav-inner > nav { display: flex; flex-direction: column; gap: 1px; border-top: 1px solid var(--border); padding-top: 18px; }
+aside.nav > .nav-inner > nav a {
+  display: flex; gap: 11px; align-items: baseline; font-size: 13.5px; line-height: 1.4;
+  color: var(--text-dim); padding: 8px 12px; border-radius: 8px; border-left: 2px solid transparent;
+  transition: color .15s, background .15s, border-color .15s;
+}
+aside.nav > .nav-inner > nav a .ix { font-family: var(--mono); font-size: 11px; color: var(--text-faint); flex: none; }
+aside.nav > .nav-inner > nav a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+aside.nav > .nav-inner > nav a.active { color: var(--accent, var(--gold)); background: rgba(255,255,255,.05); border-left-color: var(--accent, var(--gold)); }
+aside.nav > .nav-inner > nav a.active .ix { color: var(--accent, var(--gold)); }
+
+main .hero { padding-top: 92px !important; text-align: left; }
+main .hero .statstrip { margin-left: 0; margin-right: 0; }
+main .project, main section[id], main .prose h4[id] { scroll-margin-top: 24px; }
+
+@media (max-width: 1080px) {
+  body { padding-left: 0; }
+  aside.nav { position: static; width: auto; height: auto; bottom: auto; border-right: none; border-bottom: 1px solid var(--border); }
+  aside.nav .nav-inner { padding: 18px 24px; }
+  aside.nav .nav-sub { margin-bottom: 14px; }
+  aside.nav > .nav-inner > nav { flex-direction: row; flex-wrap: wrap; gap: 5px; border-top: 1px solid var(--border); }
+  aside.nav > .nav-inner > nav a { border-left: none; border-radius: 999px; padding: 6px 13px; background: rgba(255,255,255,.03); }
+  aside.nav > .nav-inner > nav a.active { border-left: none; }
+  main .hero { padding-top: 52px !important; }
+}
+
+:root { --accent: #58a6ff; }
+
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<aside class="nav">
+  <div class="nav-inner">
+    <a href="codegraph.html#storage" class="back">← CodeGraph · 存储层</a>
+    <h3>SQLite + FTS5</h3>
+    <p class="nav-sub">深度 · 用 SQLite 当代码图数据库</p>
+    <nav aria-label="章节导航">
+      <a href="#overview"><span class="ix">00</span>概览</a>
+      <a href="#schema"><span class="ix">01</span>四张核心表</a>
+      <a href="#fts5"><span class="ix">02</span>FTS5 外部内容表</a>
+      <a href="#search"><span class="ix">03</span>三级检索</a>
+      <a href="#indexes"><span class="ix">04</span>索引设计的取舍</a>
+      <a href="#sync"><span class="ix">05</span>git 感知增量 sync</a>
+      <a href="#resolver"><span class="ix">06</span>与 resolver 的衔接</a>
+      <a href="#significance"><span class="ix">07</span>意义</a>
+    </nav>
+  </div>
+</aside>
+
+<main>
+  <section id="overview" class="hero project cg" style="padding:130px 0 30px">
+  <div class="wrap">
+    <span class="eyebrow reveal"><span class="pulse"></span>colbymchenry/codegraph · src/db/schema.sql · src/sync/</span>
+    <h1 class="reveal" style="font-size:clamp(2.1rem,5vw,3.6rem);margin-bottom:18px"><span class="ital">一个文件</span>就是整张代码图</h1>
+    <p class="lead reveal" style="margin-bottom:0">CodeGraph 不用图数据库，而是把整张代码知识图谱塞进<strong>一个本地 SQLite 文件</strong>——靠 Node 内置的 <code>node:sqlite</code> + FTS5 全文索引，靠 <code>files</code> 表的内容哈希做增量同步。本页基于真实的 <code>schema.sql</code>（Version 1）与 <code>src/sync/</code> 拆解：表怎么设计、FTS 怎么保持同步、检索怎么三级回退、增量 sync 怎么只碰变了的文件。</p>
+    <div class="statstrip reveal" style="max-width:820px;margin:38px auto 0"><div class="cell"><div class="n">5</div><div class="l">核心表</div></div><div class="cell"><div class="n">FTS5</div><div class="l">外部内容 + 3 触发器</div></div><div class="cell"><div class="n">3 级</div><div class="l">prefix→LIKE→fuzzy</div></div><div class="cell"><div class="n">hash</div><div class="l">内容哈希增量</div></div></div>
+  </div>
+</section>
+
+  <section id="schema" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">四张核心表 + 元数据表</h4>
+      <p class="reveal">图的全部状态落在五张表里：<code>nodes</code>（符号）、<code>edges</code>（关系）、<code>files</code>（被追踪的源文件）、<code>unresolved_refs</code>（待解析引用），外加一张 <code>project_metadata</code> 记版本/来源；另有 <code>schema_versions</code> 跟踪迁移版本。<code>nodes</code> 的列直接反映了抽取层的产物：</p>
+    </div>
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/db/schema.sql — nodes（节选）</span></div>
+      <pre><code><span class="tok-k">CREATE TABLE</span> nodes (
+  id TEXT <span class="tok-k">PRIMARY KEY</span>,            <span class="tok-c">-- 稳定符号 ID</span>
+  kind TEXT <span class="tok-k">NOT NULL</span>,             <span class="tok-c">-- function / class / route …（22 种）</span>
+  name TEXT, qualified_name TEXT,
+  file_path TEXT, language TEXT,
+  start_line INTEGER, end_line INTEGER, start_column INTEGER, end_column INTEGER,
+  docstring TEXT, signature TEXT, visibility TEXT,
+  is_exported INTEGER, is_async INTEGER, is_static INTEGER, is_abstract INTEGER,
+  decorators TEXT,        <span class="tok-c">-- JSON 数组</span>
+  type_parameters TEXT,   <span class="tok-c">-- JSON 数组</span>
+  return_type TEXT,       <span class="tok-c">-- 归一化返回类型，供接收者类型推断</span>
+  updated_at INTEGER <span class="tok-k">NOT NULL</span>
+);</code></pre>
+    </div>
+    <div class="prose">
+      <p class="reveal"><code>edges</code> 用自增主键，带 <code>source</code>/<code>target</code>/<code>kind</code>/<code>metadata</code>(JSON)/<code>line</code>/<code>provenance</code>，并对 source、target 都加了 <code>ON DELETE CASCADE</code> 外键——<strong>删一个节点，连它的边自动清掉</strong>，这让增量重建一个文件时不留悬挂边。<code>files</code> 表是增量同步的账本：</p>
+    </div>
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/db/schema.sql — files / unresolved_refs</span></div>
+      <pre><code><span class="tok-k">CREATE TABLE</span> files (
+  path TEXT <span class="tok-k">PRIMARY KEY</span>,
+  content_hash TEXT <span class="tok-k">NOT NULL</span>,   <span class="tok-c">-- ← 变更检测的核心</span>
+  language TEXT, size INTEGER,
+  modified_at INTEGER, indexed_at INTEGER,
+  node_count INTEGER, errors TEXT       <span class="tok-c">-- JSON</span>
+);
+<span class="tok-k">CREATE TABLE</span> unresolved_refs (   <span class="tok-c">-- 全量索引后才能解析的引用</span>
+  id INTEGER <span class="tok-k">PRIMARY KEY AUTOINCREMENT</span>,
+  from_node_id TEXT, reference_name TEXT, reference_kind TEXT,
+  line INTEGER, col INTEGER, candidates TEXT,  <span class="tok-c">-- JSON 候选</span>
+  <span class="tok-k">FOREIGN KEY</span> (from_node_id) <span class="tok-k">REFERENCES</span> nodes(id) <span class="tok-k">ON DELETE CASCADE</span>
+);</code></pre>
+    </div>
+  </div></div>
+</section>
+
+  <section id="fts5" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">FTS5 外部内容表 + 三个触发器</h4>
+      <p class="reveal">全文检索不是另存一份文本，而是用 FTS5 的<strong>外部内容（external-content）模式</strong>——虚拟表 <code>nodes_fts</code> 声明 <code>content='nodes'</code>、<code>content_rowid='rowid'</code>，索引的列是 <code>name / qualified_name / docstring / signature</code>。它<em>不存自己的副本</em>，只对 <code>nodes</code> 表的这几列建倒排索引，省一份存储。</p>
+    </div>
+    <div class="code reveal">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">src/db/schema.sql — FTS5 + 同步触发器</span></div>
+      <pre><code><span class="tok-k">CREATE VIRTUAL TABLE</span> nodes_fts <span class="tok-k">USING</span> fts5(
+  id, name, qualified_name, docstring, signature,
+  content=<span class="tok-s">'nodes'</span>, content_rowid=<span class="tok-s">'rowid'</span>
+);
+<span class="tok-c">-- 插入：把新行喂进 FTS</span>
+<span class="tok-k">CREATE TRIGGER</span> nodes_ai <span class="tok-k">AFTER INSERT ON</span> nodes <span class="tok-k">BEGIN</span> … <span class="tok-k">END</span>;
+<span class="tok-c">-- 删除：用 'delete' 特殊指令把旧行从 FTS 撤回</span>
+<span class="tok-k">CREATE TRIGGER</span> nodes_ad <span class="tok-k">AFTER DELETE ON</span> nodes <span class="tok-k">BEGIN</span> … <span class="tok-k">END</span>;
+<span class="tok-c">-- 更新：先 'delete' 旧行，再插新行</span>
+<span class="tok-k">CREATE TRIGGER</span> nodes_au <span class="tok-k">AFTER UPDATE ON</span> nodes <span class="tok-k">BEGIN</span> … <span class="tok-k">END</span>;</code></pre>
+    </div>
+    <div class="prose">
+      <p class="reveal">外部内容 FTS5 有个众所周知的坑：删/改时必须显式用 <code>INSERT INTO nodes_fts(nodes_fts, …) VALUES ('delete', …)</code> 把旧行撤回，否则倒排索引会和真实数据漂移。三个触发器 <code>nodes_ai / nodes_ad / nodes_au</code> 正是把这件事<strong>下沉到数据库层自动完成</strong>——应用代码只管增删改 <code>nodes</code>，FTS 永远一致。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="search" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">三级检索：prefix → LIKE → fuzzy</h4>
+      <p class="reveal"><code>db/queries.ts</code> 的 <code>searchNodes()</code> 不是"FTS 查一把就完"，而是一条带回退的级联，专门对付 agent 那种<em>记不准全名</em>的查询：</p>
+      <ul class="reveal">
+        <li><strong>① FTS5 前缀匹配</strong>：先用 <code>query*</code> 做词首匹配（<code>searchNodesFTS</code>），用 BM25 排序。</li>
+        <li><strong>② LIKE 子串回退</strong>：FTS 无果时退到 <code>LIKE</code> 子串匹配——例如 <code>signIn</code> 能命中 <code>signInWithGoogle</code>（词首匹配做不到的）。</li>
+        <li><strong>③ 模糊兜底</strong>：前两者都空时才上 Levenshtein 模糊匹配；且只在查询<em>够长、值得模糊</em>时触发（1 字符查询会匹配太多，跳过）。</li>
+        <li><strong>精确名补充</strong>：BM25 会把短的精确名（如 <code>getBean</code>）埋在几百个结果之下，所以无论走哪条路，<strong>精确名匹配总会被补进候选</strong>。</li>
+      </ul>
+      <p class="reveal">过滤条件（<code>kinds</code> / <code>languages</code>）与文本检索<strong>组合</strong>：若用户只给了过滤、没给文本，则走一条"空文本"路径返回所有匹配过滤的节点。打分由 <code>search/query-utils</code> 的 <code>kindBonus / nameMatchBonus / scorePathRelevance</code> 叠加——FTS 的 BM25 只是起点，路径相关度与符号种类还会再加权。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="indexes" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">索引设计的取舍：少建一个索引</h4>
+      <p class="reveal">schema 里最"数据库工程师"的一笔，是 <strong>故意不建</strong> <code>idx_edges_source</code> 和 <code>idx_edges_target</code> 这两个窄索引。注释解释得很清楚：复合索引 <code>(source, kind)</code> 和 <code>(target, kind)</code> 已经能靠 SQLite 的<strong>最左前缀扫描</strong>覆盖"只按 source"或"只按 target"的查询——再单建窄索引就是纯粹给写入加负担的死重量。迁移 v4 还会在已有库上把它们 <code>DROP</code> 掉。</p>
+      <p class="reveal">其余索引覆盖了所有热查询路径：<code>nodes</code> 上有 <code>kind / name / qualified_name / file_path / language</code>、复合 <code>(file_path, start_line)</code>，以及一个 <strong>表达式索引</strong> <code>lower(name)</code> 支持大小写不敏感查找；<code>edges</code> 上有 <code>kind / (source,kind) / (target,kind) / provenance</code>（<code>provenance</code> 索引正是为了一句 SQL 筛出全部 <code>heuristic</code> 合成边）；<code>unresolved_refs</code> 上有 <code>from_node_id / reference_name / file_path</code> 及复合 <code>(from_node_id, reference_name)</code>。</p>
+    </div>
+  </div></div>
+</section>
+
+  <section id="sync" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">git 感知的增量 sync：只碰变了的文件</h4>
+      <p class="reveal"><code>src/sync/</code> 把"保持索引新鲜"拆成几块协作的机制，核心是<strong>用 <code>files.content_hash</code> 做变更检测</strong>，而不是每次全量重建：</p>
+      <ul class="reveal">
+        <li><strong>内容哈希 + 增量重索引</strong>：sync 时比对每个文件当前内容哈希与 <code>files</code> 表里存的哈希——没变就跳过，变了才重抽取；删除的文件连带其 <code>nodes</code>（及级联的 <code>edges</code> / <code>unresolved_refs</code>）一起清掉。</li>
+        <li><strong>git sync hooks</strong>（<code>sync/git-hooks.ts</code>）：当文件监视关闭时，可选地挂上 commit / merge / checkout 钩子，在这些时点触发一次增量 sync。</li>
+        <li><strong>文件监视 + 监视策略</strong>（<code>watcher.ts</code> / <code>watch-policy.ts</code>）：用 <code>fs.watch</code>，但带策略——例如 WSL2 + <code>/mnt/*</code> 上递归 <code>fs.watch</code> 太慢直接关掉（issue #199），避免启动慢到撞穿 host 的握手超时。</li>
+        <li><strong>worktree 感知</strong>（<code>sync/worktree.ts</code>）：检测一个查询是不是在"借用"另一棵 git worktree 的索引，避免跨 worktree 串味。</li>
+      </ul>
+    </div>
+  </div></div>
+</section>
+
+  <section id="resolver" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">与 resolver 的衔接：unresolved_refs 与 provenance 列</h4>
+      <p class="reveal">存储层和<a href="codegraph-reference-resolver.html#resolution" class="inline">解析层</a>是通过两个 schema 设计点咬合的：</p>
+      <ul class="reveal">
+        <li><strong><code>unresolved_refs</code> 表</strong>是抽取与解析之间的<em>暂存区</em>：抽取时遇到的、当下还无法定位定义的引用先连同 <code>candidates</code>(JSON) 落这张表；全量索引完成后，resolver 再回头消解它们、写成正式 <code>edges</code>。这把"单文件抽取"和"跨文件解析"在存储上解耦开。</li>
+        <li><strong><code>edges.provenance</code> 列 + <code>idx_edges_provenance</code></strong>：回调合成器写出的边统一带 <code>provenance='heuristic'</code> 与 <code>metadata.synthesizedBy</code>，索引让"筛出/审计全部合成边"成为一句 <code>WHERE provenance='heuristic'</code>。换言之，<strong>"这条边是谁推断出来的"被持久化进了 schema</strong>，可复现、可进 git、可追责。</li>
+      </ul>
+    </div>
+  </div></div>
+</section>
+
+  <section id="significance" class="project cg">
+  <div class="wrap"><div class="narrow">
+    <div class="prose">
+      <h4 class="reveal">意义：把图数据库的需求，压进一个 SQLite 文件</h4>
+      <p class="reveal">"代码知识图谱"听起来像要上 Neo4j，CodeGraph 的回答是——<strong>一个 SQLite 文件足矣</strong>。节点/边/文件/待解析引用四张表 + 外键级联给了图语义，FTS5 外部内容表 + 三触发器给了零额外存储的全文检索，复合索引的精打细算压住写入开销，<code>files.content_hash</code> 把同步变成增量，<code>provenance</code> 列把"推断来源"沉淀成可查询的事实。这套设计让 CodeGraph 的索引<strong>可进 git、可复现、零外部依赖</strong>——一个 <code>.codegraph/codegraph.db</code> 文件，就是 agent 共享的那张"代码索引标准件"。</p>
+    </div>
+  </div></div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">Agent Infrastructure Teardown</div>
+    <p>源码级深度解析系列 · 从源码看下一代 AI 基础设施</p>
+    <div class="links">
+      <a href="index.html">← 返回索引</a>
+      <a href="https://github.com/trending" target="_blank" rel="noopener">GitHub Trending ↗</a>
+    </div>
+    <div class="meta">© 2026 · 单文件独立页面 · 复用共享设计系统</div>
+  </div>
+</footer>
+
+<button class="totop" aria-label="返回顶部">↑</button>
+
+<script>
+(function () {
+  var prog = document.getElementById('progress');
+  var links = [].slice.call(document.querySelectorAll('aside.nav nav a[href^="#"]'));
+  var targets = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  var totop = document.querySelector('.totop');
+
+  function onScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop;
+    if (prog) {
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      prog.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
+    }
+    var idx = -1, mark = y + window.innerHeight * 0.3;
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i] && targets[i].offsetTop <= mark) idx = i;
+    }
+    links.forEach(function (a, i) { a.classList.toggle('active', i === idx); });
+    if (totop) totop.classList.toggle('show', y > 600);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+
+  function fillBars(root) {
+    (root.querySelectorAll ? root.querySelectorAll('.fill[data-w]') : []).forEach &&
+      root.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('in');
+        fillBars(e.target);
+        io.unobserve(e.target);
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    document.querySelectorAll('.reveal').forEach(function (el) { io.observe(el); });
+    document.querySelectorAll('.bench').forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (el) { el.classList.add('in'); });
+    document.querySelectorAll('.fill[data-w]').forEach(function (f) { f.style.width = f.getAttribute('data-w') + '%'; });
+  }
+
+  if (totop) totop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+})();
+</script>
+
+<!--
+嵌套深度阅读候选（CC 评估）：
+- #resolver → provenance-claims-reference：edges.provenance + unresolved_refs 如何承载 resolver 的命名引用消解
+  与 claimsReference 钩子（django _iterable_class 这类命名属性分发），是存储层与解析层咬合点的更深一层，可单列。
+- #search → adaptive-budget（mcp-tools）：searchNodes 的 BM25 + 路径相关度打分如何喂给 10 个 MCP 工具的
+  buildContext 自适应预算裁剪——"查得准"到"喂得省"的下一跳，值得做一篇 MCP 上下文预算深度页。
+- #fts5 → external-content-fts5：外部内容 FTS5 的 'delete' 撤回语义与触发器同步是通用陷阱，
+  可抽成"用 SQLite 触发器维护倒排索引一致性"的可复用模式页。
+- #sync → watch-policy：watch-policy.ts 按平台（WSL2/mnt、网络盘）裁剪 fs.watch 策略以躲开 host 握手超时，
+  是"文件监视在真实环境里的退化处理"实录（issue #199），可单列。
+-->
+</body>
+</html>
