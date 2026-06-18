@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MiMo Code · 模型与 Agent 共演化 · 源码级解析</title>
+<meta name="description" content="XiaomiMiMo/MiMo-Code 源码级深度解析——OpenCode 分叉、TUI 终端原生架构、三 Agent 体系（build/plan/compose）、SQLite FTS5 持久记忆、智能上下文管理、子 Agent 生命周期、Goal/Stop 独立裁判、Compose Skills 工作流、Dream &amp; Distill 自改进机制。" />
+<meta property="og:title" content="MiMo Code · 模型与 Agent 共演化 · 源码级解析" />
+<meta property="og:description" content="OpenCode 分叉 × 持久记忆 × 子 Agent × Goal 裁判闭环——MiMo Code 架构全景拆解。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="./assets/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   MiMo Code · Technical deep-dive
+   ============================================================ */
+:root {
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+  --gold:   #e0b07a;
+  --gold-2: #d4a574;
+  --cyan:   #54d6e0;
+  --amber:  #e9b873;
+  --coral:  #e08a64;
+  --green:  #7fcf9e;
+  --orange: #f0883e;
+  --purple: #c792ea;
+  --shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius: 16px;
+  --maxw: 1080px;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp: "Space Grotesk", var(--sans);
+  --serif:"Fraunces", Georgia, serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; text-decoration: none; }
+img { max-width: 100%; display: block; }
+code { font-family: var(--mono); }
+
+/* ── nav ── */
+.site-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 90;
+  backdrop-filter: blur(14px);
+  background: rgba(10, 11, 14, 0.72);
+  border-bottom: 1px solid transparent;
+  transition: border-color .3s, background .3s;
+}
+.site-nav.scrolled { border-bottom-color: var(--border); background: rgba(8,9,11,.9); }
+.site-nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.nav-brand { display: flex; align-items: center; gap: 10px; font-family: var(--disp); font-weight: 700; letter-spacing: -.02em; font-size: 14px; }
+.nav-brand .dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--coral), var(--orange)); box-shadow: 0 0 12px var(--coral); }
+.nav-links { display: flex; align-items: center; gap: 6px; }
+.nav-links a {
+  font-family: var(--mono); font-size: 13px; font-weight: 500;
+  color: var(--text-dim); padding: 6px 12px; border-radius: 8px;
+  transition: color .2s, background .2s;
+}
+.nav-links a:hover { color: var(--text); background: var(--bg-elev); }
+.nav-links a.active { color: var(--coral); background: rgba(224, 138, 100, 0.1); }
+
+/* ── hero ── */
+.hero {
+  padding: 128px 0 56px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-grad) 0%, var(--bg) 100%);
+}
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--coral); letter-spacing: .06em; text-transform: uppercase;
+  margin-bottom: 20px;
+}
+.hero-eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--coral); }
+.hero h1 { font-family: var(--disp); font-weight: 700; font-size: clamp(2.2rem, 5.5vw, 3.8rem); letter-spacing: -.025em; line-height: 1.06; margin-bottom: 20px; }
+.hero h1 .accent { color: var(--coral); }
+.hero h1 .serif { font-family: var(--serif); font-style: italic; font-weight: 500; }
+.hero .lead { max-width: 640px; color: var(--text-dim); font-size: 1.05rem; line-height: 1.65; margin-bottom: 32px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 10px; }
+.hero-meta span { font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 5px 13px; }
+.hero-links { display: flex; gap: 12px; margin-top: 26px; }
+.btn-gh { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--bg); background: var(--coral); border-radius: 10px; padding: 10px 20px; transition: opacity .2s, transform .2s; }
+.btn-gh:hover { opacity: .88; transform: translateY(-2px); }
+.btn-gh svg { width: 16px; height: 16px; }
+
+/* ── layout ── */
+.wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+.article { padding: 64px 0 80px; }
+.toc { position: sticky; top: 88px; float: right; width: 220px; margin-left: 40px; }
+.toc-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.toc-box h4 { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 14px; }
+.toc-box ol { list-style: none; }
+.toc-box li { margin-bottom: 8px; }
+.toc-box a { font-size: .85rem; color: var(--text-dim); transition: color .2s; }
+.toc-box a:hover, .toc-box a.active { color: var(--coral); }
+.content { overflow: hidden; }
+
+/* ── section ── */
+.section { margin-bottom: 72px; }
+.section-label {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--coral); margin-bottom: 16px;
+}
+.section-label .num { background: rgba(224,138,100,.15); border: 1px solid rgba(224,138,100,.3); border-radius: 6px; padding: 2px 8px; }
+h2 { font-family: var(--disp); font-weight: 600; font-size: 1.6rem; letter-spacing: -.01em; margin-bottom: 16px; }
+h3 { font-family: var(--disp); font-weight: 600; font-size: 1.15rem; letter-spacing: -.01em; margin-bottom: 12px; color: var(--text); }
+p { color: var(--text-dim); margin-bottom: 14px; }
+ul, ol { color: var(--text-dim); margin-bottom: 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+
+/* ── cards ── */
+.card-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); margin-bottom: 24px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 18px; }
+.card h4 { font-family: var(--mono); font-size: .8rem; font-weight: 600; color: var(--coral); margin-bottom: 8px; }
+.card p { font-size: .9rem; margin-bottom: 0; }
+
+/* ── code blocks ── */
+pre { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; overflow-x: auto; margin-bottom: 20px; font-size: .82rem; line-height: 1.65; font-family: var(--mono); color: var(--text); }
+pre .kw  { color: #c792ea; }
+pre .str { color: #7fcf9e; }
+pre .cmt { color: var(--text-faint); font-style: italic; }
+pre .fn  { color: #82aaff; }
+pre .num { color: #f78c6c; }
+pre .kwn { color: #ffcb6b; }
+
+/* ── mermaid diagram ── */
+.mermaid-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 24px; margin-bottom: 24px; text-align: center; }
+.mermaid-wrap .caption { font-family: var(--mono); font-size: .78rem; color: var(--text-faint); margin-top: 14px; letter-spacing: .04em; }
+
+/* ── callout ── */
+.callout { background: rgba(224,138,100,.07); border: 1px solid rgba(224,138,100,.2); border-radius: 12px; padding: 18px 20px; margin-bottom: 24px; }
+.callout strong { color: var(--coral); }
+.callout p { margin-bottom: 0; }
+
+/* ── tag chips ── */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+.chip { font-family: var(--mono); font-size: .72rem; letter-spacing: .05em; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; }
+
+/* ── table ── */
+.table-wrap { overflow-x: auto; margin-bottom: 24px; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th { font-family: var(--mono); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint); text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+td code { font-size: .82rem; color: var(--cyan); background: rgba(84,214,224,.1); padding: 2px 6px; border-radius: 4px; }
+
+/* ── highlight box ── */
+.hl-box { background: var(--bg-elev); border-left: 3px solid var(--coral); border-radius: 0 12px 12px 0; padding: 18px 20px; margin-bottom: 24px; }
+.hl-box p { margin-bottom: 0; }
+
+/* ── footer ── */
+.site-foot { border-top: 1px solid var(--border); padding: 36px 0 56px; }
+.site-foot .wrap { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.site-foot p { color: var(--text-faint); font-size: 13px; font-family: var(--mono); }
+.site-foot a { color: var(--text-dim); transition: color .2s; }
+.site-foot a:hover { color: var(--text); }
+
+@media (max-width: 768px) {
+  .toc { display: none; }
+  .hero h1 { font-size: 2rem; }
+}
+</style>
+</head>
+<body>
+
+<nav class="site-nav" id="siteNav">
+  <div class="wrap">
+    <a class="nav-brand" href="index.html"><span class="dot"></span><span>Agent Infrastructure Teardown</span></a>
+    <div class="nav-links">
+      <a href="index.html#top">首页</a>
+      <a href="index.html#kc">Kimi Code</a>
+      <a href="index.html#oc">OpenClaw</a>
+      <a href="https://github.com/XiaomiMiMo/MiMo-Code" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-eyebrow"><span class="dot"></span>XiaomiMiMo · 新建项目 · 2026-06-10</div>
+    <h1>MiMo Code<br><span class="serif"><span class="accent">模型</span>与 Agent</span> 共演化</h1>
+    <p class="lead">终端原生的 AI 编程助手，Built on OpenCode。从 Claude Code 迁移一步到位，支持任意 LLM Provider。核心创新：SQLite FTS5 持久记忆、上下文预算重建、子 Agent 生命周期管理、独立 Goal/Stop 裁判与 Dream Distill 自改进闭环。</p>
+    <div class="hero-meta">
+      <span>⭐ 9,736 Stars</span>
+      <span>TS / Bun / Effect</span>
+      <span>MIT License</span>
+      <span>2026-06-10</span>
+      <span>TUI Native</span>
+      <span>Subagent Orchestration</span>
+    </div>
+    <div class="hero-links">
+      <a class="btn-gh" href="https://github.com/XiaomiMiMo/MiMo-Code" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        github.com/XiaomiMiMo/MiMo-Code
+      </a>
+    </div>
+  </div>
+</header>
+
+<main class="article">
+<div class="wrap">
+
+<div style="display:flow-root">
+
+<nav class="toc">
+<div class="toc-box">
+<h4>目录</h4>
+<ol>
+<li><a href="#s1">项目定位与 OpenCode 关系</a></li>
+<li><a href="#s2">技术栈总览</a></li>
+<li><a href="#s3">架构分层全景</a></li>
+<li><a href="#s4">三 Agent 体系</a></li>
+<li><a href="#s5">持久记忆系统</a></li>
+<li><a href="#s6">智能上下文管理</a></li>
+<li><a href="#s7">子 Agent 生命周期</a></li>
+<li><a href="#s8">Goal / Stop 裁判闭环</a></li>
+<li><a href="#s9">Compose Skills 工作流</a></li>
+<li><a href="#s10">Dream &amp; Distill 自改进</a></li>
+<li><a href="#s11">核心代码解读</a></li>
+<li><a href="#s12">技术亮点与取舍</a></li>
+</ol>
+</div>
+</nav>
+
+<div class="content">
+
+<!-- ================================================================
+     S1: 项目定位
+     ================================================================ -->
+<section class="section" id="s1">
+<div class="section-label"><span class="num">01</span>项目定位与 OpenCode 关系</div>
+<h2>在 OpenCode 的肩膀上长出记忆</h2>
+<p>MiMo Code 是 <a href="https://github.com/XiaomiMiMo/MiMo-Code" style="color:var(--cyan)">OpenCode</a> 的官方分叉（Fork），由小米 MiMo 团队维护。分叉策略保留 OpenCode 全部能力（多 Provider、TUI、LSP、MCP、插件系统），在其上叠加了自研的记忆与 Agent 管理层。这种「继承 + 增量」模式让 MiMo Code 能持续享受 OpenCode 上游更新，同时独立演进差异化能力。</p>
+
+<div class="hl-box">
+<p>MiMoCode 的核心价值主张：让 AI 编程助手在<strong>多次会话间保持项目记忆的连续性</strong>，并在任务执行过程中能够<strong>动态调度子 Agent</strong> 完成并行工作，最终通过独立裁判模型判定任务是否真正达成。</p>
+</div>
+
+<div class="card-grid">
+<div class="card">
+<h4>继承自 OpenCode</h4>
+<p>多 LLM Provider 接入（OpenAI/Anthropic/OpenRouter/自定义）、终端 TUI 原生界面、LSP 智能补全、MCP 协议支持、插件生态</p>
+</div>
+<div class="card">
+<h4>MiMo 自研增量</h4>
+<p>SQLite FTS5 持久记忆层、三 Agent 体系（build/plan/compose）、子 Agent 生命周期管理、智能上下文预算重建、Goal/Stop 独立裁判、Compose Skills、Dream &amp; Distill 自改进</p>
+</div>
+</div>
+</section>
+
+<!-- ================================================================
+     S2: 技术栈总览
+     ================================================================ -->
+<section class="section" id="s2">
+<div class="section-label"><span class="num">02</span>技术栈总览</div>
+<h2>TS + Bun + Effect——类型安全的函数式 Agent 运行时</h2>
+<p>MiMo Code 的核心包是 <code>packages/opencode</code>，使用 TypeScript + <a href="https://bun.sh" style="color:var(--cyan)">Bun</a> 作为运行时，框架层引入 <a href="https://effect.website" style="color:var(--cyan)">Effect</a>（一个功能强大的 TypeScript 函数式编程库）管理副作用和依赖注入。</p>
+
+<div class="chips">
+<span class="chip">TypeScript</span>
+<span class="chip">Bun runtime</span>
+<span class="chip">Effect Context</span>
+<span class="chip">SQLite + FTS5</span>
+<span class="chip">Drizzle ORM</span>
+<span class="chip">AI SDK (Vercel)</span>
+<span class="chip">MCP Protocol</span>
+<span class="chip">Turbo monorepo</span>
+<span class="chip">TUI ( Ink.js)</span>
+</div>
+
+<pre><span class="cmt">// packages/opencode/src/ — 核心源码结构</span>
+opencode/src/
+├── <span class="fn">agent/</span>        <span class="cmt">// Agent 配置与 prompt 模板</span>
+├── <span class="fn">actor/</span>        <span class="cmt">// Actor 生命周期管理（含 spawn.ts）</span>
+├── <span class="fn">memory/</span>       <span class="cmt">// SQLite FTS5 持久记忆服务</span>
+├── <span class="fn">session/</span>       <span class="cmt">// 会话状态与消息序列化</span>
+├── <span class="fn">provider/</span>      <span class="cmt">// LLM Provider 抽象层</span>
+├── <span class="fn">mcp/</span>           <span class="cmt">// MCP 协议实现</span>
+├── <span class="fn">task/</span>          <span class="cmt">// 树形任务体系（T1/T1.1/T1.2…）</span>
+├── <span class="fn">bus/</span>           <span class="cmt">// Actor 间消息总线</span>
+├── <span class="fn">inbox/</span>         <span class="cmt">// 通知渲染</span>
+├── <span class="fn">storage/</span>       <span class="cmt">// Drizzle + SQLite 持久化</span>
+└── <span class="fn">config/</span>        <span class="cmt">// .mimocode/mimocode.json 配置</span></pre>
+</section>
+
+<!-- ================================================================
+     S3: 架构全景
+     ================================================================ -->
+<section class="section" id="s3">
+<div class="section-label"><span class="num">03</span>架构分层全景</div>
+<h2>六层架构——从模型到记忆的完整闭环</h2>
+
+<div class="mermaid-wrap">
+<div class="mermaid">
+graph TB
+subgraph UI["【表现层】 TUI / CLI"]
+    TUI[TUI 交互界面]
+end
+
+subgraph CORE["【核心层】 Agent 运行时"]
+    AGENTS[Build Agent<br/>Plan Agent<br/>Compose Agent]
+    ACTOR[Actor 生命周期<br/>spawn / turn / wait]
+    BUS[Actor Bus<br/>消息总线]
+end
+
+subgraph MEM["【记忆层】 持久化记忆"]
+    MEM_SVC[Memory Service<br/>SQLite FTS5]
+    CHECKPT[Checkpoint<br/>Session State]
+    PROJ_MEM[Project Memory<br/>MEMORY.md]
+    TASKS[Task Progress<br/>tasks/*/progress.md]
+end
+
+subgraph CTX["【上下文层】 智能上下文管理']
+    CTX_MGR[Context Manager<br/>预算分配]
+    CTX_RC[Context<br/>重建器]
+end
+
+subgraph TOOL["【工具层】"]
+    TOOL_MCP[MCP Tools]
+    TOOL_GIT[Git Tools]
+    TOOL_LSP[LSP Tools]
+    TOOL_FILE[File Tools]
+end
+
+subgraph LLM["【模型层】"]
+    PROVIDER[LLM Provider<br/>OpenAI / Anthropic / OpenRouter]
+end
+
+TUI --> AGENTS
+AGENTS --> ACTOR
+ACTOR --> BUS
+ACTOR --> MEM_SVC
+MEM_SVC --> CHECKPT
+MEM_SVC --> PROJ_MEM
+MEM_SVC --> TASKS
+AGENTS --> CTX_MGR
+CTX_MGR --> CTX_RC
+AGENTS --> TOOL_MCP
+AGENTS --> TOOL_GIT
+AGENTS --> TOOL_LSP
+AGENTS --> TOOL_FILE
+ACTOR --> PROVIDER
+</div>
+<span class="caption">图 1：MiMo Code 六层架构 — 三 Agent 体系通过 Actor 层接入 LLM，记忆层由 SQLite FTS5 驱动</span>
+</div>
+
+<p>整体呈经典的分层 + 模块化架构。最值得关注的是<strong>记忆层（Memory）</strong>与<strong>上下文层（Context）</strong>的协同方式：记忆不只存储，还在上下文紧张时触发<strong>基于预算的上下文重建（Context Reconstruction）</strong>，将记忆内容智能注入当前上下文。</p>
+</section>
+
+<!-- ================================================================
+     S4: 三 Agent 体系
+     ================================================================ -->
+<section class="section" id="s4">
+<div class="section-label"><span class="num">04</span>三 Agent 体系</div>
+<h2>build / plan / compose——按任务类型匹配合适的 Agent</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Agent</th><th>模式</th><th>权限</th><th>适用场景</th></tr></thead>
+<tbody>
+<tr>
+<td><strong style="color:var(--coral)">build</strong></td>
+<td>默认</td>
+<td>完整工具权限（Git/文件/终端/MCP）</td>
+<td>日常编码任务、快速实现</td>
+</tr>
+<tr>
+<td><strong style="color:var(--cyan)">plan</strong></td>
+<td>只读分析</td>
+<td>只读（不写文件不执行命令）</td>
+<td>代码探索、方案设计、代码审查</td>
+</tr>
+<tr>
+<td><strong style="color:var(--amber)">compose</strong></td>
+<td>编排模式</td>
+<td>完整 + Skills 工作流</td>
+<td>规格驱动开发（specs-driven）、技能化工作流编排</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<p>Tab 键切换主 Agent，系统按需动态创建<strong>子 Agent</strong>（Subagent）。子 Agent 共享当前会话上下文，可并行工作，系统跟踪其生命周期、支持取消与后台执行。</p>
+
+<div class="callout">
+<strong>设计意图：</strong>将「探索」与「执行」解耦——Plan Agent 专注分析不产生副作用，Build Agent 专注执行不深度思考，Compose Agent 则通过 Skills 封装最佳实践。三者互不侵入，各司其职。
+</div>
+</section>
+
+<!-- ================================================================
+     S5: 持久记忆系统
+     ================================================================ -->
+<section class="section" id="s5">
+<div class="section-label"><span class="num">05</span>持久记忆系统</div>
+<h2>SQLite FTS5 + 四层记忆文件——跨会话知识沉淀</h2>
+
+<div class="mermaid-wrap">
+<div class="mermaid">
+graph LR
+    subgraph Files["记忆文件层（.mimocode/）"]
+        MEM[MEMORY.md<br/>项目知识与架构决策]
+        CKPT[checkpoint.md<br/>结构化状态快照]
+        NOTES[notes.md<br/>临时便笺]
+        TASK_PROG[tasks/&lt;id&gt;/progress.md<br/>任务级日志]
+    end
+    subgraph SQLite["SQLite FTS5 索引层"]
+        FTS[Full-Text Search<br/>FTS5 BM25 ranking]
+        RECONCILE[reconcile.ts<br/>记忆调和（写入新记忆、剪枝旧记忆）]
+    end
+    Files --> RECONCILE
+    RECONCILE --> FTS
+</div>
+<span class="caption">图 2：MiMo Code 记忆层架构——四类文件记忆通过 reconcile.ts 同步到 SQLite FTS5</span>
+</div>
+
+<p>记忆服务由 <code>packages/opencode/src/memory/service.ts</code> 实现，核心接口：</p>
+
+<pre><span class="cmt">// packages/opencode/src/memory/service.ts — Memory Service 接口</span>
+<span class="kw">export</span> <span class="kw">interface</span> <span class="fn">Interface</span> {
+  <span class="kw">readonly</span> <span class="fn">root</span>:       () =&gt; <span class="fn">Effect</span>.Effect&lt;<span class="kwn">string</span>&gt;           <span class="cmt">// 记忆根目录</span>
+  <span class="kw">readonly</span> <span class="fn">reconcile</span>:  () =&gt; <span class="fn">Effect</span>.Effect&lt;{ indexed: <span class="kwn">number</span>; pruned: <span class="kwn">number</span> }&gt;  <span class="cmt">// 记忆调和</span>
+  <span class="kw">readonly</span> <span class="fn">search</span>:    (input: {
+    query: <span class="kwn">string</span>
+    scope?: <span class="kwn">string</span>
+    scope_id?: <span class="kwn">string</span>
+    type?: <span class="kwn">string</span>
+    limit?: <span class="kwn">number</span>
+  }) =&gt; <span class="fn">Effect</span>.Effect&lt;SearchRow[]&gt;
+}</pre>
+
+<p>关键设计点：</p>
+<ul>
+<li><strong>懒调和（Lazy Reconcile）</strong>：搜索前自动触发调和，将内存中的记忆变化写入 SQLite FTS5 索引</li>
+<li><strong>跨 Claude Code 索引</strong>：可选集成 <code>~/.claude/projects</code> 索引，打通 Claude Code 历史会话</li>
+<li><strong>预算注入</strong>：记忆内容通过 token 预算控制注入量，按重要性排序</li>
+<li><strong>FTS5 BM25 排名</strong>：全文搜索使用 BM25 算法，匹配质量优于简单 LIKE</li>
+</ul>
+</section>
+
+<!-- ================================================================
+     S6: 智能上下文管理
+     ================================================================ -->
+<section class="section" id="s6">
+<div class="section-label"><span class="num">06</span>智能上下文管理</div>
+<h2>预算驱动的上下文重建——让长程任务不中断</h2>
+
+<p>当模型上下文窗口接近上限时，Context Manager 执行「上下文重建」：</p>
+
+<ol>
+<li>从最新 <strong>checkpoint.md</strong> 重建结构化状态快照</li>
+<li>注入 <strong>MEMORY.md</strong> 中的项目记忆（按预算裁剪）</li>
+<li>补充 <strong>task progress</strong> 中的任务进度日志</li>
+<li>保留最近的<strong>会话消息</strong>（按时间序截断）</li>
+</ol>
+
+<div class="callout">
+<strong>核心价值：</strong>即使上下文窗口只有 200K tokens，Agent 也能通过「上下文重建」完成需要消耗大量 token 的长程任务（如重构大型模块、编写测试套件），无需人工干预续接。
+</div>
+
+<p>与记忆层的协同通过 <code>Memory.Service</code> 实现，搜索结果按 <code>scope</code>/<code>scope_id</code>/<code>type</code> 三元组过滤，保证只注入与当前任务相关的记忆片段。</p>
+</section>
+
+<!-- ================================================================
+     S7: 子 Agent 生命周期
+     ================================================================ -->
+<section class="section" id="s7">
+<div class="section-label"><span class="num">07</span>子 Agent 生命周期</div>
+<h2>Actor / Spawn / Turn——Effect 驱动的状态机</h2>
+
+<div class="mermaid-wrap">
+<div class="mermaid">
+stateDiagram-v2
+    [*] --> Spawning: spawn()
+    Spawning --> Running: preStop hooks
+    Running --> Running: tool calls
+    Running --> Waiting: yield / await
+    Waiting --> Running: resume
+    Running --> Stopping: return header
+    Stopping --> PostStop: postStop hooks
+    PostStop --> [*]: done
+    
+    note right of Running: MAX_PRE_REACT = 3
+    note right of PostStop: MAX_POST_REACT = 3
+</div>
+<span class="caption">图 3：Actor 生命周期状态机——preStop 和 postStop 各有 ReAct 重入上限，防止无限循环</span>
+</div>
+
+<p><code>actor/spawn.ts</code> 是核心实现：</p>
+
+<pre><span class="cmt">// packages/opencode/src/actor/spawn.ts — 子 Agent 启动</span>
+<span class="cmt">/** Cap on preStop ReAct re-entries per spawn — prevents infinite loops. */</span>
+<span class="kw">export const</span> <span class="fn">MAX_PRE_REACT</span> = <span class="num">3</span>
+<span class="cmt">/** Cap on postStop ReAct re-entries per spawn. */</span>
+<span class="kw">export const</span> <span class="fn">MAX_POST_REACT</span> = <span class="num">3</span>
+
+<span class="cmt">// 子 Agent 通过 renderActorNotification 通知父 Agent</span>
+<span class="kw">const</span> notification = <span class="fn">renderActorNotification</span>(actor, event)
+<span class="kw">await</span> <span class="fn">Inbox</span>.deliver(notification)
+
+<span class="cmt">// Return format 保证结果格式统一，供父 Agent 解析</span>
+<span class="cmt">// "**Status**: success | partial | failed | blocked"</span></pre>
+
+<p>子 Agent 的生命周期管理使用 Effect 的 <code>Fiber</code>（轻量协程）+ <code>Deferred</code>（异步信号），实现了<strong>生命周期跟踪、取消与后台执行</strong>三大能力。</p>
+</section>
+
+<!-- ================================================================
+     S8: Goal / Stop 裁判闭环
+     ================================================================ -->
+<section class="section" id="s8">
+<div class="section-label"><span class="num">08</span>Goal / Stop 裁判闭环</div>
+<h2>独立裁判模型——防止 Agent「乐观停工」</h2>
+
+<p>自主工作时，Agent 可能「乐观估计」任务已完成而提前停止（如「代码写完了，虽然还有 3 个测试失败」）。MiMo Code 通过 <code>/goal</code> 命令设置<strong>独立裁判模型（Judge Model）</strong>：</p>
+
+<ol>
+<li>用户通过 <code>/goal [条件]</code> 设置停止条件</li>
+<li>当 Agent 尝试停止时，触发器通知 Judge Model</li>
+<li>Judge Model 读取完整对话历史，独立评估条件是否满足</li>
+<li>返回 <code>success / partial / failed / blocked</code> 四级判定</li>
+</ol>
+
+<div class="hl-box">
+<p><strong>Status 语义：</strong><br>
+<code>success</code> — 条件完全满足<br>
+<code>partial</code> — 主体完成，有遗留项可接受<br>
+<code>failed</code> — 未达到可接受标准，需继续<br>
+<code>blocked</code> — 被外部条件阻塞（权限、网络、依赖缺失）</p>
+</div>
+
+<p>这一设计将「任务执行」与「结果判定」彻底解耦，是防止自主 Agent 偷懒逃逸的核心机制。</p>
+</section>
+
+<!-- ================================================================
+     S9: Compose Skills 工作流
+     ================================================================ -->
+<section class="section" id="s9">
+<div class="section-label"><span class="num">09</span>Compose Skills 工作流</div>
+<h2>规格驱动的 Skills 编排——不只是规则，是最佳实践封装</h2>
+
+<p>Compose Agent 内置 Skills，覆盖软件交付全生命周期：</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Skill</th><th>职责</th></tr></thead>
+<tbody>
+<tr><td><code>planning</code></td><td>任务拆解与优先级排序</td></tr>
+<tr><td><code>execution</code></td><td>任务执行与进度跟踪</td></tr>
+<tr><td><code>code-review</code></td><td>代码审查与质量把关</td></tr>
+<tr><td><code>tdd</code></td><td>测试驱动开发循环</td></tr>
+<tr><td><code>debugging</code></td><td>问题定位与修复验证</td></tr>
+<tr><td><code>verification</code></td><td>结果验证与集成测试</td></tr>
+<tr><td><code>merging</code></td><td>分支合并与冲突处理</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Skills 以<strong>规范化的 prompt 模板</strong>形式存储在 <code>packages/opencode/src/agent/prompt/</code> 目录，可被用户扩展或替换。这种「技能化」设计让 Compose Agent 能以「有经验的工程师」的方式推进工作流，而非机械地执行单步指令。</p>
+</section>
+
+<!-- ================================================================
+     S10: Dream & Distill 自改进
+     ================================================================ -->
+<section class="section" id="s10">
+<div class="section-label"><span class="num">10</span>Dream &amp; Distill 自改进</div>
+<h2>让 Agent 从自己的历史中学习</h2>
+
+<div class="card-grid">
+<div class="card">
+<h4>/dream</h4>
+<p>扫描近期会话轨迹，提取持久性知识写入 MEMORY.md，移除过时条目。Agent 主动反思「这次哪里做得好/不好」，形成结构化记忆。</p>
+</div>
+<div class="card">
+<h4>/distill</h4>
+<p>发现近期重复的人工工作流，将高置信度候选打包为可复用 Skills / 子 Agent / 命令。Agent 从历史中「蒸馏」最佳实践，自动积累生产力。</p>
+</div>
+</div>
+
+<p>这两个命令让 MiMo Code 具备<strong>元认知（metacognition）</strong>能力——不仅执行任务，还从任务执行历史中提取模式并内化到记忆，形成「越用越懂你」的个性化助手。</p>
+</section>
+
+<!-- ================================================================
+     S11: 核心代码解读
+     ================================================================ -->
+<section class="section" id="s11">
+<div class="section-label"><span class="num">11</span>核心代码解读</div>
+<h2>关键模块源码分析</h2>
+
+<h3>11.1 Memory Service（记忆服务）</h3>
+<pre><span class="cmt">// packages/opencode/src/memory/service.ts</span>
+<span class="kw">export const</span> <span class="fn">layer</span>: <span class="fn">Layer</span>.Layer&lt;<span class="fn">Service</span>, <span class="kw">never</span>, <span class="fn">Config</span>.Service&gt; = <span class="fn">Layer</span>.effect(
+  Service,
+  <span class="fn">Effect</span>.gen(<span class="kw">function</span>* () {
+    <span class="kw">const</span> config = <span class="kw">yield</span>* <span class="fn">Config</span>.Service
+    <span class="cmt">// 记忆根目录：~/.local/share/mimocode/memory 或项目 .mimocode/memory</span>
+    <span class="kw">const</span> root = <span class="fn">path</span>.join(<span class="fn">Global</span>.Path.data, <span class="str">"memory"</span>)
+    <span class="cmt">// 可选：打通 Claude Code 历史会话索引</span>
+    <span class="kw">const</span> ccBase = <span class="fn">path</span>.join(<span class="fn">os</span>.homedir(), <span class="str">".claude"</span>, <span class="str">"projects"</span>)
+
+    <span class="cmt">// 懒调和：搜索前自动同步文件系统变化到 FTS5</span>
+    <span class="kw">const</span> reconcile = <span class="fn">Effect</span>.fn(<span class="str">"Memory.reconcile"</span>)(<span class="kw">function</span>* () {
+      <span class="kw">const</span> cfg = <span class="kw">yield</span>* config.<span class="fn">get</span>()
+      <span class="kw">const</span> cc = cfg.memory?.cc_index ? ccBase : <span class="kw">undefined</span>
+      <span class="kw">return</span> <span class="kw">yield</span>* <span class="fn">Effect</span>.promise(<span class="kw">()</span> =&gt; <span class="fn">reconcileMemory</span>({ mimo: root, cc }))
+    })
+  })
+)</pre>
+
+<h3>11.2 Actor Spawn（子 Agent 启动）</h3>
+<pre><span class="cmt">// packages/opencode/src/actor/spawn.ts — 关键流程</span>
+<span class="cmt">// 1. 构建 Return format instruction，约束子 Agent 输出格式</span>
+<span class="kw">const</span> RETURN_FORMAT_INSTRUCTION = <span class="str">`
+---
+## Return format (required)
+**Status**: success | partial | failed | blocked
+**Summary**: &lt;one sentence&gt;
+**Files touched**: &lt;comma-separated paths or "(none)"&gt;
+---`</span>
+
+<span class="cmt">// 2. 父子通信通过 Inbox 异步通知（不阻塞主循环）</span>
+<span class="kw">await</span> <span class="fn">Inbox</span>.deliver(<span class="fn">renderActorNotification</span>(actor, event))
+
+<span class="cmt">// 3. ReAct 重入上限保护，防止子 Agent 进入无限循环</span>
+<span class="cmt">// MAX_PRE_REACT = 3, MAX_POST_REACT = 3</span></pre>
+
+<h3>11.3 Context Reconstruction（上下文重建）</h3>
+<pre><span class="cmt">// packages/opencode/src/memory/reconcile.ts — 记忆调和</span>
+<span class="cmt">// reconcileMemory 核心逻辑（伪代码）：</span>
+<span class="kw">function</span> <span class="fn">reconcileMemory</span>({ mimo, cc }) {
+  <span class="cmt">// 1. 扫描 .mimocode/memory 目录所有 Markdown 文件</span>
+  <span class="cmt">// 2. 解析 frontmatter 中的 scope / scope_id / type 元数据</span>
+  <span class="cmt">// 3. 对比 SQLite FTS5 已有索引，判定新增 / 更新 / 删除</span>
+  <span class="cmt">// 4. 写入 / 删除 FTS5 行，执行 vacuum 回收空间</span>
+  <span class="cmt">// 5. 返回 { indexed, pruned } 统计</span>
+}</pre>
+</section>
+
+<!-- ================================================================
+     S12: 技术亮点与取舍
+     ================================================================ -->
+<section class="section" id="s12">
+<div class="section-label"><span class="num">12</span>技术亮点与取舍</div>
+<h2>为什么 MiMo Code 值得关注</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>维度</th><th>亮点</th><th>潜在风险</th></tr></thead>
+<tbody>
+<tr>
+<td><strong>记忆系统</strong></td>
+<td>SQLite FTS5 实现轻量、高性能全文检索，跨会话零冷启动</td>
+<td>Markdown 文件格式对结构化知识的表达能力有限</td>
+</tr>
+<tr>
+<td><strong>子 Agent</strong></td>
+<td>Effect Fiber 实现轻量协程，生命周期管理干净</td>
+<td>MAX_PRE/POST_REACT 硬编码上限，缺乏动态调优机制</td>
+</tr>
+<tr>
+<td><strong>Goal 裁判</strong></td>
+<td>独立模型判定，防止自主 Agent 偷懒逃逸</td>
+<td>额外调用成本，每次停止判断多一次 LLM 调用</td>
+</tr>
+<tr>
+<td><strong>Dream/Distill</strong></td>
+<td>从历史中提取知识，形成个性化记忆，稀缺能力</td>
+<td>知识蒸馏质量依赖会话数据丰富度，冷启动无效</td>
+</tr>
+<tr>
+<td><strong>Compose Skills</strong></td>
+<td>最佳实践模板化，降低 Agent 执行的不确定性</td>
+<td>Skill 扩展依赖 prompt 工程，门槛不低</td>
+</tr>
+<tr>
+<td><strong>分叉策略</strong></td>
+<td>继承 OpenCode 上游，独立自研差异化功能</td>
+<td>长期需平衡上游合并与自研功能的兼容成本</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="callout">
+<strong>一句话总结：</strong>MiMo Code 代表了「让 coding agent 具备长期记忆与自我改进能力」这一方向上目前最完整的工程实现之一——从 SQLite FTS5 记忆层到 Effect 驱动的子 Agent 状态机，从 Goal 裁判闭环到 Dream/Distill 自改进，每一层都有明确的设计意图和工程约束。
+</div>
+</section>
+
+</div><!-- /content -->
+</div><!-- /flow-root -->
+
+</div><!-- /wrap -->
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>© 2026 Agent Infrastructure Teardown · 源码级深度解析</p>
+    <p><a href="index.html">← 返回索引</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var nav = document.getElementById('siteNav');
+  function onScroll() {
+    nav.classList.toggle('scrolled', (window.scrollY || document.documentElement.scrollTop) > 8);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>
