@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>COMPASS Skills · AI Agent 的本地 Skill 生态 · 源码级解析</title>
+<meta name="description" content="dongshuyan/compass-skills 源码解析——SKILL.md 技能描述格式、4 个本地技能（task-clarifier/task-forest/session-handoff/user-profile）、npx skills CLI 安装体系与 AI 审计工作流。" />
+<meta property="og:title" content="COMPASS Skills · AI Agent 的本地 Skill 生态" />
+<meta property="og:description" content="SKILL.md 技能描述格式 + 4 个本地技能 + npx 安装体系——让 coding agent 拥有任务澄清、记忆、交接与用户画像能力。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* ============================================================
+   Shared design system — COMPASS Skills (cs)
+   ============================================================ */
+:root {
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+  --gold:      #e0b07a;
+  --gold-2:    #d4a574;
+  --cyan:      #54d6e0;
+  --amber:     #e9b873;
+  --coral:     #e08a64;
+  --green:     #7fcf9e;
+  --violet:    #b3a4f0;
+  --shadow:    0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius:    16px;
+  --maxw:      1080px;
+  --mono:      "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans:      "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp:      "Space Grotesk", var(--sans);
+  --accent:    var(--violet);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+a{color:var(--gold);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{ max-width:var(--maxw); margin:0 auto; padding:0 24px; }
+.narrow{ max-width:780px; margin:0 auto; }
+
+/* progress bar */
+#progress{position:fixed;top:0;left:0;height:2px;background:var(--accent,var(--gold));z-index:100;width:0;transition:width .1s}
+
+/* reveal animation */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}}
+
+/* nav */
+header.nav{position:fixed;top:0;left:0;right:0;z-index:90;backdrop-filter:blur(14px);background:rgba(10,11,14,.72);border-bottom:1px solid transparent;transition:border-color .3s}
+header.nav.scrolled{border-bottom-color:var(--border);background:rgba(8,9,11,.9)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+.nav-links{display:flex;gap:6px;align-items:center}
+.nav-links a{padding:7px 14px;border-radius:8px;font-size:13.5px;color:var(--text-dim);font-weight:500;transition:color .2s,background .2s}
+.nav-links a:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.nav-brand{display:flex;align-items:center;gap:10px;font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:-.02em}
+.nav-brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--accent,var(--gold)),var(--gold));box-shadow:0 0 12px var(--gold)}
+
+/* hero */
+.hero{padding:140px 0 48px;text-align:center}
+.hero .eyebrow{display:inline-block;font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--accent,var(--gold));border:1px solid color-mix(in srgb,var(--accent,var(--gold)) 35%,transparent);background:color-mix(in srgb,var(--accent,var(--gold)) 8%,transparent);padding:5px 14px;border-radius:999px;margin-bottom:24px}
+.hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.025em;line-height:1.1;margin-bottom:16px}
+.hero h1 .ital{font-family:var(--serif,"Fraunces",serif);font-style:italic;font-weight:500;background:linear-gradient(110deg,var(--violet),var(--cyan) 50%,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lead{max-width:640px;margin:0 auto;color:var(--text-dim);font-size:1.05rem;line-height:1.65}
+.statstrip{display:flex;gap:1px;margin:36px auto 0;max-width:580px;background:var(--border);border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+.statstrip .cell{flex:1;padding:16px 12px;text-align:center;background:var(--bg-card)}
+.statstrip .n{font-family:var(--disp);font-weight:700;font-size:1.5rem;color:var(--accent,var(--gold));line-height:1}
+.statstrip .l{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+
+/* sections */
+section{padding:60px 0}
+section h2{font-family:var(--disp);font-weight:700;font-size:1.6rem;letter-spacing:-.02em;margin-bottom:8px}
+section h3{font-family:var(--disp);font-weight:600;font-size:1.15rem;letter-spacing:-.01em;margin:24px 0 8px}
+section p{color:var(--text-dim);margin:0 0 16px;font-size:15px;line-height:1.7}
+section ul,section ol{color:var(--text-dim);padding-left:20px;margin:0 0 16px}
+section li{margin-bottom:6px;line-height:1.6}
+section ul li::marker{color:var(--accent,var(--gold))}
+strong{color:var(--text)}
+code{font-family:var(--mono);font-size:.88em;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:5px;color:var(--gold-2)}
+
+/* stat chips */
+.statrow{display:flex;flex-wrap:wrap;gap:12px;margin:26px 0 38px}
+.chip{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;min-width:130px;flex:1}
+.chip .n{font-family:var(--disp);font-weight:700;font-size:1.5rem;color:var(--accent,var(--gold));line-height:1}
+.chip .l{font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+
+/* cards */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{background:linear-gradient(180deg,var(--bg-card),var(--bg-elev));border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .25s,transform .25s}
+.card:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+.card .ico{font-size:1.4rem;margin-bottom:12px;display:block}
+.card h5{font-family:var(--disp);font-size:1.02rem;margin-bottom:8px;letter-spacing:-.01em}
+.card p{font-size:14.5px;color:var(--text-dim);margin:0}
+.card .accent{color:var(--accent,var(--gold))}
+
+/* code block */
+.code{position:relative;background:#0b0d12;border:1px solid var(--border);border-radius:14px;margin:24px 0;overflow:hidden;box-shadow:var(--shadow)}
+.code .bar{display:flex;align-items:center;gap:7px;padding:11px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+.code .bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+.code .bar i:nth-child(1){background:#ff5f56}.code .bar i:nth-child(2){background:#ffbd2e}.code .bar i:nth-child(3){background:#27c93f}
+.code .bar .fname{margin-left:10px;font-family:var(--mono);font-size:12px;color:var(--text-faint)}
+.code pre{margin:0;padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65}
+.code pre code{background:none;padding:0;color:#cdd3e0;font-size:13px}
+.tok-c{color:#6b7280;font-style:italic}
+.tok-k{color:#c792ea}
+.tok-s{color:#c3e88d}
+.tok-f{color:#82aaff}
+.tok-t{color:#ffcb6b}
+.tok-n{color:#f78c6c}
+.tok-p{color:#89ddff}
+
+/* callout */
+.callout{border-left:3px solid var(--accent,var(--gold));background:rgba(255,255,255,.03);border-radius:0 12px 12px 0;padding:18px 22px;margin:26px 0;font-size:15px;color:var(--text-dim)}
+.callout b{color:var(--text)}
+
+/* skill file block */
+.skill-block{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;margin:20px 0;overflow:hidden}
+.skill-block .header{display:flex;align-items:center;gap:12px;padding:14px 18px;background:rgba(179,164,240,.08);border-bottom:1px solid var(--border)}
+.skill-block .header .icon{font-size:1.2rem}
+.skill-block .header .name{font-family:var(--mono);font-weight:600;font-size:14px;color:var(--violet)}
+.skill-block .header .tag{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-left:auto;background:rgba(255,255,255,.05);padding:3px 8px;border-radius:6px}
+.skill-block pre{font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:18px 20px;margin:0;overflow-x:auto;color:#cdd3e0}
+
+/* arch diagram */
+.arch{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:24px;margin:24px 0;text-align:center}
+.arch p{font-size:14px;color:var(--text-faint);margin-top:12px}
+.arch-grid{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin:16px 0}
+.arch-node{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:14px 20px;font-family:var(--mono);font-size:13px;color:var(--text-dim);min-width:140px;transition:border-color .2s}
+.arch-node:hover{border-color:var(--violet);color:var(--text)}
+.arch-node.highlight{border-color:var(--violet);background:rgba(179,164,240,.1);color:var(--violet)}
+.arch-arrow{color:var(--text-faint);font-size:18px;align-self:center}
+
+/* skill flow */
+.skill-flow{display:flex;flex-direction:column;gap:0;margin:24px 0}
+.sf-stage{display:flex;align-items:center;gap:16px;padding:16px 20px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px}
+.sf-arrow{align-self:center;color:var(--violet);font-size:18px;padding:4px 0}
+.sf-n{font-family:var(--mono);font-size:12px;color:var(--violet);flex:0 0 28px}
+.sf-stage b{font-family:var(--disp);font-size:1rem;color:var(--text)}
+.sf-stage small{display:block;font-size:13px;color:var(--text-faint)}
+
+/* comparison table */
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:14px;margin:8px 0}
+table.cmp{width:100%;border-collapse:collapse;min-width:540px;font-size:14.5px}
+table.cmp th,table.cmp td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--border);vertical-align:top}
+table.cmp thead th{font-family:var(--disp);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);background:rgba(255,255,255,.02)}
+table.cmp tbody tr:last-child td{border-bottom:none}
+table.cmp tbody tr:hover{background:rgba(255,255,255,.015)}
+
+/* footer */
+footer{padding:60px 0 80px;border-top:1px solid var(--border);text-align:center}
+footer .fbrand{font-family:var(--disp);font-weight:700;font-size:1.2rem;margin-bottom:10px}
+footer p{color:var(--text-faint);font-size:13.5px;margin:6px auto;max-width:560px}
+footer .links{display:flex;gap:18px;justify-content:center;margin:22px 0;flex-wrap:wrap}
+footer .links a{font-size:13.5px;color:var(--text-dim)}
+footer .links a:hover{color:var(--gold)}
+footer .meta{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);margin-top:16px}
+
+.totop{position:fixed;right:22px;bottom:22px;z-index:80;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--bg-card);border:1px solid var(--border-strong);color:var(--text-dim);cursor:pointer;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;font-size:18px}
+.totop.show{opacity:1;pointer-events:auto}
+.totop:hover{color:var(--accent,var(--gold));border-color:var(--accent,var(--gold));transform:translateY(-2px)}
+
+@media(max-width:768px){
+  .grid2{grid-template-columns:1fr}
+  .hero{padding:110px 0 40px}
+  section{padding:40px 0}
+  .nav-links{display:none}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="nav" id="coverNav">
+  <div class="wrap">
+    <a class="nav-brand" href="index.html"><span class="dot"></span>Agent Infrastructure Teardown</a>
+    <nav class="nav-links" aria-label="主导航">
+      <a href="index.html">← 索引</a>
+      <a href="https://github.com/dongshuyan/compass-skills" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero" style="padding:130px 0 30px">
+    <div class="wrap">
+      <span class="eyebrow reveal"><span class="pulse-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--violet);margin-right:8px;vertical-align:middle"></span>dongshuyan/compass-skills · v1.0 · MIT</span>
+      <h1 class="reveal" style="font-size:clamp(2rem,5vw,3.2rem);margin-bottom:16px"><span class="ital">COMPASS Skills</span> · AI Agent 本地技能生态</h1>
+      <p class="lead reveal" style="margin-bottom:0">用 <code>SKILL.md</code> 文件把 AI coding agent 的行为能力打包成分解可复用的技能单元——任务澄清、记忆管理、对话交接、用户画像，让 agent 在任意会话中快速获得团队级上下文感知。</p>
+      <div class="statstrip reveal" style="margin:36px auto 0">
+        <div class="cell"><div class="n">330</div><div class="l">Stars (6 天)</div></div>
+        <div class="cell"><div class="n">4</div><div class="l">内置技能</div></div>
+        <div class="cell"><div class="n">SKILL.md</div><div class="l">技能格式</div></div>
+        <div class="cell"><div class="n">npx</div><div class="l">安装方式</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:20px">
+    <div class="wrap narrow">
+      <div class="statrow reveal">
+        <div class="chip"><div class="n">task-clarifier</div><div class="l">目标澄清技能</div></div>
+        <div class="chip"><div class="n">task-forest</div><div class="l">任务 DAG 技能</div></div>
+        <div class="chip"><div class="n">session-handoff</div><div class="l">对话交接技能</div></div>
+        <div class="chip"><div class="n">user-profile</div><div class="l">用户画像技能</div></div>
+      </div>
+
+      <div class="prose">
+        <h2 id="overview" class="reveal">一句话定位</h2>
+        <p class="reveal"><strong>COMPASS Skills</strong> 是一个面向 AI coding agent 的本地技能（Skill）操作系统。它用 <code>SKILL.md</code> 文件格式定义技能元数据、使用触发词和执行逻辑，通过 <code>npx skills add</code> 安装到项目本地，让 Claude Code、Codex、OpenClaw 等 agent 运行时在任意对话中快速激活对应技能。</p>
+        <p class="reveal">项目受 Matt Pocock 的 <code>@skills</code> CLI 启发，但将技能作用域从"全局安装的 npm 包"下沉到"项目本地的 <code>.claude/skills/</code> 目录"，解决了跨项目上下文污染问题，并引入了 AI 辅助的技能审计工作流。</p>
+
+        <h2 id="architecture" class="reveal">架构总览</h2>
+        <p class="reveal">COMPASS Skills 由三层构成：技能格式规范 → CLI 安装工具 → AI 审计工作流：</p>
+      </div>
+
+      <div class="arch reveal">
+        <div class="arch-grid">
+          <div class="arch-node highlight">SKILL.md<br><small style="color:var(--text-faint)">技能描述格式</small></div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-node">skill-inspector<br><small style="color:var(--text-faint)">AI 审计脚本</small></div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-node">npx skills add<br><small style="color:var(--text-faint)">CLI 安装工具</small></div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-node">.claude/skills/<br><small style="color:var(--text-faint)">项目本地存储</small></div>
+        </div>
+        <p>技能文件是核心契约——Agent 通过识别触发词激活技能，技能描述了"何时用、怎么用、什么情况下不用"。</p>
+      </div>
+
+      <div class="prose">
+        <h2 id="skill-md" class="reveal">SKILL.md 格式解析</h2>
+        <p class="reveal">每个技能是一个独立目录，含 <code>SKILL.md</code> 主文件和可选的 <code>examples/</code> 目录。<code>SKILL.md</code> 的 frontmatter 遵循固定 schema：</p>
+      </div>
+
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">skills/task-clarifier/SKILL.md (frontmatter)</span></div>
+        <pre><code><span class="tok-c">---</span>
+<span class="tok-k">name:</span> <span class="tok-s">task-clarifier</span>                          <span class="tok-c">// 技能唯一标识符</span>
+<span class="tok-k">description:</span> <span class="tok-s">|-</span>                          <span class="tok-c">// 触发词 + 适用场景的完整描述</span>
+  <span class="tok-s">Convergent need-alignment system. Before executing</span>
+  <span class="tok-s">any non-trivial request, ask questions (1–3 per turn</span>
+  <span class="tok-s">...</span>
+<span class="tok-k">triggers:</span>                               <span class="tok-c">// 激活关键词（空格分隔，OR 语义）</span>
+  <span class="tok-s">ambiguous high-cost high-risk preference-sensitive</span>
+  <span class="tok-s">best better which-one recommend help-me-choose</span>
+<span class="tok-k">examples:</span>                               <span class="tok-c">// 可选：典型对话示例</span>
+  <span class="tok-s">- when: "用户说'帮我优化这个系统'"</span>
+    <span class="tok-s">response: "我需要先澄清几个问题：..."</span>
+<span class="tok-c">---</span></code></pre>
+      </div>
+
+      <div class="prose">
+        <p class="reveal">Body 部分是技能的执行逻辑说明，用 Markdown 编写但格式自由。task-clarifier 的 body 描述了一个多轮澄清协议：</p>
+        <ul class="reveal">
+          <li>每轮最多问 3 个问题，每个问题附带推荐答案选项</li>
+          <li>覆盖维度：目标（outcome）、约束（constraints）、验收标准（acceptance criteria）、风险边界（risk boundaries）</li>
+          <li>结束时必须确认共识（shared understanding），才进入执行阶段</li>
+        </ul>
+      </div>
+
+      <div class="callout reveal">
+        <b>设计亮点：触发词的多语言支持</b><br/>
+        task-clarifier 的触发词同时包含英文（<code>best better which-one recommend</code>）和中文（<code>最好 推荐 哪个 你来决定</code>），这意味着技能激活对使用中英混合对话的开发者同样有效。
+      </div>
+
+      <h2 id="four-skills" class="reveal">四个内置技能深度解析</h2>
+
+      <h3 id="task-clarifier" class="reveal" style="color:var(--violet)">① task-clarifier — 目标对齐协议</h3>
+      <p class="reveal">task-clarifier 解决的是 agent 执行中最常见的失效模式：用户给了一个模糊指令，agent 直接动手，返工率极高。它的核心创新是"收敛性澄清"——每轮只问 1-3 个最关键的元问题，不做无限追问。</p>
+      <p class="reveal">body 定义的执行流程：</p>
+      <div class="skill-flow reveal">
+        <div class="sf-stage"><span class="sf-n">01</span><div><b>检测激活词</b><small>识别触发词，判断是否进入澄清模式</small></div></div>
+        <div class="sf-arrow">↓</div>
+        <div class="sf-stage"><span class="sf-n">02</span><div><b>收集维度</b><small>从 outcome / constraints / acceptance criteria / risk 四维度构建问题列表</small></div></div>
+        <div class="sf-arrow">↓</div>
+        <div class="sf-stage"><span class="sf-n">03</span><div><b>分轮提问</b><small>每轮最多 3 问，附推荐答案，引导用户快速收敛</small></div></div>
+        <div class="sf-arrow">↓</div>
+        <div class="sf-stage"><span class="sf-n">04</span><div><b>确认共识</b><small>总结理解，请求确认后才进入执行</small></div></div>
+      </div>
+
+      <h3 id="task-forest" class="reveal" style="color:var(--violet)">② task-forest — 任务 DAG 管理</h3>
+      <p class="reveal">task-forest 是最复杂的技能。它在项目本地维护一个任务森林（Task Forest）——即一个以目标为根、子任务为枝的 DAG 结构。每个节点记录：</p>
+      <ul class="reveal">
+        <li><strong>goal</strong>：任务目标描述</li>
+        <li><strong>subtasks</strong>：子任务列表及依赖关系</li>
+        <li><strong>progress</strong>：进度（todo / in-progress / done / blocked / deferred）</li>
+        <li><strong>deviations</strong>：执行过程中的偏差记录</li>
+        <li><strong>decisions</strong>：做出的关键决策及其理由</li>
+        <li><strong>conversation history</strong>：对话历史摘要</li>
+      </ul>
+      <p class="reveal">它支持导出任务图 HTML——这意味着可以在 CI/CD 流程中嵌入任务状态报告，或在 Code Review 时作为上下文摘要。</p>
+
+      <h3 id="session-handoff" class="reveal" style="color:var(--violet)">③ session-handoff-prompt — 对话交接协议</h3>
+      <p class="reveal">这是解决"长程任务换 session"问题的关键技能。当用户要求"handoff / restart / continuation / fresh-session resume"时，session-handoff-prompt 生成一个粘贴即用的交接提示，包含：</p>
+      <div class="grid2 reveal">
+        <div class="card"><span class="ico">🎯</span><h5>Goal Summary</h5><p>当前会话的核心目标，精炼为 1-2 句话</p></div>
+        <div class="card"><span class="ico">📍</span><h5>Progress Report</h5><p>已完成的工作、当前状态、下一步计划</p></div>
+        <div class="card"><span class="ico">⚠️</span><h5>Constraints</h5><p>已知约束、风险边界、不应该做的事</p></div>
+        <div class="card"><span class="ico">📋</span><h5>Next Steps</h5><p>下一步具体动作，附执行顺序建议</p></div>
+      </div>
+
+      <h3 id="user-profile" class="reveal" style="color:var(--violet)">④ user-profile-keeper — 用户协作画像</h3>
+      <p class="reveal">user-profile-keeper 在 <code>.claude/user-profile.md</code> 维护一个本地持久化用户画像，包含：</p>
+      <ul class="reveal">
+        <li><strong>communication preferences</strong>：沟通风格（简洁 / 详细、中文 / 英文）</li>
+        <li><strong>risk style</strong>：风险偏好（保守 / 激进、重构 vs. 小步迭代）</li>
+        <li><strong>recurring working context</strong>：常驻工作上下文（使用的技术栈、常见项目结构）</li>
+        <li><strong>capability boundaries</strong>：已知的能力边界（不擅长什么）</li>
+        <li><strong>privacy boundaries</strong>：隐私边界（哪些信息不应进入记忆）</li>
+      </ul>
+      <p class="reveal">该画像在每次会话开始时由 agent 自动加载，而不是靠"人工在 system prompt 里写"。这解决了 system prompt 遗忘和跨会话偏好漂移问题。</p>
+
+      <h2 id="skill-inspector" class="reveal">skill-inspector：AI 辅助技能审计</h2>
+      <p class="reveal">COMPASS Skills 还包含一个 <code>skill-inspector</code> 工作流——用 AI 本身来审计技能文件的质量：</p>
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">skill-inspector audit workflow</span></div>
+        <pre><code><span class="tok-c">// 1. AI 阅读 SKILL.md 原文</span>
+<span class="tok-c">// 2. AI 模拟目标用户在多种场景下的激活效果</span>
+<span class="tok-c">// 3. AI 识别：</span>
+<span class="tok-c">//   - 遗漏的触发词（false negative）</span>
+<span class="tok-c">//   - 误激活的触发词（false positive）</span>
+<span class="tok-c">//   - 模糊的执行描述（执行不确定性）</span>
+<span class="tok-c">//   - 缺少示例的复杂决策点</span>
+<span class="tok-c">// 4. AI 生成改进建议并更新 SKILL.md</span></code></pre>
+      </div>
+
+      <h2 id="install" class="reveal">安装与使用</h2>
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">terminal</span></div>
+        <pre><code><span class="tok-c"># 列出所有可用技能</span>
+npx skills add dongshuyan/compass-skills --list
+
+<span class="tok-c"># 安装全部技能到 Claude Code</span>
+npx skills add dongshuyan/compass-skills --skill '<span class="tok-s">*</span>' -a claude-code
+
+<span class="tok-c"># 安装全部技能到 Claude Code + Codex</span>
+npx skills add dongshuyan/compass-skills --skill '<span class="tok-s">*</span>' -a codex -a claude-code
+
+<span class="tok-c"># 在 AI 对话中激活技能</span>
+<span class="tok-c"># AI 通过触发词自动识别，或用户手动调用：</span>
+$task-clarifier   <span class="tok-c">// 启动目标澄清</span>
+$task-forest      <span class="tok-c">// 打开任务 DAG</span>
+$session-handoff  <span class="tok-c">// 生成交接提示</span>
+$user-profile     <span class="tok-c">// 查询/更新用户画像</span></code></pre>
+      </div>
+
+      <h2 id="comparison" class="reveal">与现有方案对比</h2>
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead>
+            <tr><th>维度</th><th>COMPASS Skills</th><th>mattpocock/skills</th><th>OpenClaw Skills</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>技能存储位置</td><td>项目本地 <code>.claude/skills/</code></td><td>全局 npm 安装</td><td>Git 管理的 skills 目录</td></tr>
+            <tr><td>跨项目上下文污染</td><td style="color:var(--green)">无（项目隔离）</td><td style="color:var(--coral)">有（全局生效）</td><td style="color:var(--gold)">可选（可通过命名空间隔离）</td></tr>
+          <tr><td>技能激活方式</td><td>触发词自动 + 手动 $invoke</td><td>手动 <code>/skill</code> 命令</td><td>显式函数调用</td></tr>
+          <tr><td>多 Agent 支持</td><td style="color:var(--green)">Claude Code + Codex</td><td>主要 Claude</td><td>全渠道</td></tr>
+          <tr><td>AI 辅助审计</td><td style="color:var(--green)">内置 skill-inspector</td><td style="color:var(--coral)">无</td><td>无</td></tr>
+          <tr><td>任务 DAG</td><td style="color:var(--green)">task-forest（完整）</td><td style="color:var(--coral)">无</td><td>部分（memory-tree）</td></tr>
+          <tr><td>用户画像</td><td style="color:var(--green)">user-profile-keeper</td><td style="color:var(--coral)">无</td><td>memory-tree 部分覆盖</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="significance" class="reveal">生态意义</h2>
+      <p class="reveal">COMPASS Skills 的核心创新不是某个具体技能，而是<strong>技能格式契约</strong>（SKILL.md）和<strong>本地优先的作用域隔离</strong>。它把"技能"从运行时能力变成了一个可版本化、可分享、可 AI 审计的文本资产。</p>
+      <p class="reveal">这与 Matt Pocock 的 <code>@skills</code> CLI 一脉相承，但增加了：项目本地隔离、多 Agent 混用、AI 审计工作流。对于需要在多个项目中维护不同行为规范的团队，这套框架值得关注。</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">Agent Infrastructure Teardown</div>
+    <p>源码级深度解析 · github-trending 监控自动化</p>
+    <div class="links">
+      <a href="index.html">← 索引</a>
+      <a href="https://github.com/dongshuyan/compass-skills" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://classmatexiaoming96-ux.github.io/github-trending/compass-skills.html">在线阅读</a>
+    </div>
+    <div class="meta">COMPASS Skills · 2026-06-15 · MIT License</div>
+  </div>
+</footer>
+
+<button class="totop" id="totop" aria-label="返回顶部">↑</button>
+
+<script>
+(function(){
+  var prog=document.getElementById('progress');
+  var totop=document.getElementById('totop');
+  function onScroll(){
+    var y=window.scrollY||document.documentElement.scrollTop;
+    if(prog){
+      var h=document.documentElement.scrollHeight-window.innerHeight;
+      prog.style.width=(h>0?(y/h)*100:0)+'%';
+    }
+    if(totop) totop.classList.toggle('show',y>600);
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+  if(totop) totop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(!e.isIntersecting)return;
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+      });
+    },{rootMargin:'0px 0px -8% 0px',threshold:0.05});
+    document.querySelectorAll('.reveal').forEach(function(el){io.observe(el)});
+  }else{
+    document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('in')});
+  }
+})();
+</script>
+</body>
+</html>

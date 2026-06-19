@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Junction · VS Code 与本地 Coding Agent 的桥梁 · 源码级解析</title>
+<meta name="description" content="Plaer1/junction 源码解析——VS Code 聊天侧栏连接 7 种本地 agent 后端（OpenClaw/Hermes/MiMoCode/Goose/OpenCode/OpenHands）、统一上下文注入、多模型切换与 ChatGPT Web 集成。" />
+<meta property="og:title" content="Junction · VS Code 与本地 Coding Agent 的桥梁" />
+<meta property="og:description" content="一个 VS Code 扩展，把编辑器变成 7 种本地 coding agent 的统一控制台——OpenClaw、Hermes、MiMoCode、Goose、OpenCode、OpenHands、Souveraine。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+:root {
+  --bg:#0a0b0e;--bg-grad:#0c0e14;--bg-elev:#111319;--bg-card:#14161e;--bg-card-2:#181b24;
+  --border:rgba(255,255,255,.08);--border-strong:rgba(255,255,255,.14);
+  --text:#e7e9f0;--text-dim:#a3a9b8;--text-faint:#6f7585;
+  --gold:#e0b07a;--gold-2:#d4a574;--cyan:#54d6e0;--amber:#e9b873;--coral:#e08a64;--green:#7fcf9e;
+  --shadow:0 24px 60px -24px rgba(0,0,0,.8);--radius:16px;--maxw:1080px;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --disp:"Space Grotesk",var(--sans);
+  --accent:#54d6e0;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+a{color:var(--gold);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+.narrow{max-width:780px;margin:0 auto}
+#progress{position:fixed;top:0;left:0;height:2px;background:var(--accent,var(--gold));z-index:100;width:0;transition:width .1s}
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}}
+
+header.nav{position:fixed;top:0;left:0;right:0;z-index:90;backdrop-filter:blur(14px);background:rgba(10,11,14,.72);border-bottom:1px solid transparent;transition:border-color .3s}
+header.nav.scrolled{border-bottom-color:var(--border);background:rgba(8,9,11,.9)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+.nav-links{display:flex;gap:6px;align-items:center}
+.nav-links a{padding:7px 14px;border-radius:8px;font-size:13.5px;color:var(--text-dim);font-weight:500;transition:color .2s,background .2s}
+.nav-links a:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.nav-brand{display:flex;align-items:center;gap:10px;font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:-.02em}
+.nav-brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--gold));box-shadow:0 0 12px var(--gold)}
+
+.hero{padding:140px 0 48px;text-align:center}
+.hero .eyebrow{display:inline-block;font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);background:color-mix(in srgb,var(--accent) 8%,transparent);padding:5px 14px;border-radius:999px;margin-bottom:24px}
+.hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(1.8rem,5vw,3rem);letter-spacing:-.025em;line-height:1.1;margin-bottom:16px}
+.hero h1 .ital{font-family:"Fraunces",serif;font-style:italic;font-weight:500;background:linear-gradient(110deg,var(--cyan),var(--amber) 50%,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .lead{max-width:640px;margin:0 auto;color:var(--text-dim);font-size:1.05rem;line-height:1.65}
+.statstrip{display:flex;gap:1px;margin:36px auto 0;max-width:600px;background:var(--border);border-radius:14px;overflow:hidden;border:1px solid var(--border)}
+.statstrip .cell{flex:1;padding:16px 12px;text-align:center;background:var(--bg-card)}
+.statstrip .n{font-family:var(--disp);font-weight:700;font-size:1.5rem;color:var(--accent);line-height:1}
+.statstrip .l{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+
+section{padding:60px 0}
+section h2{font-family:var(--disp);font-weight:700;font-size:1.6rem;letter-spacing:-.02em;margin-bottom:8px}
+section h3{font-family:var(--disp);font-weight:600;font-size:1.15rem;letter-spacing:-.01em;margin:24px 0 8px}
+section p{color:var(--text-dim);margin:0 0 16px;font-size:15px;line-height:1.7}
+section ul,section ol{color:var(--text-dim);padding-left:20px;margin:0 0 16px}
+section li{margin-bottom:6px;line-height:1.6}
+section ul li::marker{color:var(--accent)}
+strong{color:var(--text)}
+code{font-family:var(--mono);font-size:.88em;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:5px;color:var(--gold-2)}
+
+.statrow{display:flex;flex-wrap:wrap;gap:12px;margin:26px 0 38px}
+.chip{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px 18px;min-width:130px;flex:1}
+.chip .n{font-family:var(--disp);font-weight:700;font-size:1.5rem;color:var(--accent);line-height:1}
+.chip .l{font-size:11.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;margin-top:6px}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{background:linear-gradient(180deg,var(--bg-card),var(--bg-elev));border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .25s,transform .25s}
+.card:hover{border-color:var(--border-strong);transform:translateY(-2px)}
+.card .ico{font-size:1.4rem;margin-bottom:12px;display:block}
+.card h5{font-family:var(--disp);font-size:1.02rem;margin-bottom:8px;letter-spacing:-.01em}
+.card p{font-size:14.5px;color:var(--text-dim);margin:0}
+.card .accent{color:var(--accent)}
+
+.code{position:relative;background:#0b0d12;border:1px solid var(--border);border-radius:14px;margin:24px 0;overflow:hidden;box-shadow:var(--shadow)}
+.code .bar{display:flex;align-items:center;gap:7px;padding:11px 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}
+.code .bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+.code .bar i:nth-child(1){background:#ff5f56}.code .bar i:nth-child(2){background:#ffbd2e}.code .bar i:nth-child(3){background:#27c93f}
+.code .bar .fname{margin-left:10px;font-family:var(--mono);font-size:12px;color:var(--text-faint)}
+.code pre{margin:0;padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65}
+.code pre code{background:none;padding:0;color:#cdd3e0;font-size:13px}
+.tok-c{color:#6b7280;font-style:italic}.tok-k{color:#c792ea}.tok-s{color:#c3e88d}.tok-f{color:#82aaff}.tok-t{color:#ffcb6b}.tok-n{color:#f78c6c}.tok-p{color:#89ddff}
+
+.callout{border-left:3px solid var(--accent);background:rgba(255,255,255,.03);border-radius:0 12px 12px 0;padding:18px 22px;margin:26px 0;font-size:15px;color:var(--text-dim)}
+.callout b{color:var(--text)}
+
+.arch{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:24px;margin:24px 0}
+.arch-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:16px 0}
+.arch-node{background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:12px 18px;font-family:var(--mono);font-size:12.5px;color:var(--text-dim);min-width:120px;text-align:center;transition:border-color .2s}
+.arch-node:hover{border-color:var(--cyan);color:var(--text)}
+.arch-node.highlight{border-color:var(--cyan);background:rgba(84,214,224,.1);color:var(--cyan)}
+
+.flow{display:flex;flex-direction:column;gap:0;margin:24px 0}
+.flow .stage{display:flex;align-items:center;gap:16px;padding:16px 20px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px}
+.flow .arrow{align-self:center;color:var(--cyan);font-size:18px;padding:4px 0}
+.flow .sn{font-family:var(--mono);font-size:12px;color:var(--cyan);flex:0 0 28px}
+.flow b{font-family:var(--disp);font-size:1rem;color:var(--text)}
+.flow small{display:block;font-size:13px;color:var(--text-faint)}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:14px;margin:8px 0}
+table.cmp{width:100%;border-collapse:collapse;min-width:500px;font-size:14.5px}
+table.cmp th,table.cmp td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--border);vertical-align:top}
+table.cmp thead th{font-family:var(--disp);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);background:rgba(255,255,255,.02)}
+table.cmp tbody tr:last-child td{border-bottom:none}
+table.cmp tbody tr:hover{background:rgba(255,255,255,.015)}
+table.cmp td:first-child{font-weight:500}
+
+footer{padding:60px 0 80px;border-top:1px solid var(--border);text-align:center}
+footer .fbrand{font-family:var(--disp);font-weight:700;font-size:1.2rem;margin-bottom:10px}
+footer p{color:var(--text-faint);font-size:13.5px;margin:6px auto;max-width:560px}
+footer .links{display:flex;gap:18px;justify-content:center;margin:22px 0;flex-wrap:wrap}
+footer .links a{font-size:13.5px;color:var(--text-dim)}
+footer .links a:hover{color:var(--gold)}
+footer .meta{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);margin-top:16px}
+
+.totop{position:fixed;right:22px;bottom:22px;z-index:80;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--bg-card);border:1px solid var(--border-strong);color:var(--text-dim);cursor:pointer;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;font-size:18px}
+.totop.show{opacity:1;pointer-events:auto}
+.totop:hover{color:var(--accent);border-color:var(--accent);transform:translateY(-2px)}
+
+@media(max-width:768px){.grid2,.grid3{grid-template-columns:1fr}.hero{padding:110px 0 40px}section{padding:40px 0}.nav-links{display:none}}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="nav" id="coverNav">
+  <div class="wrap">
+    <a class="nav-brand" href="index.html"><span class="dot"></span>Agent Infrastructure Teardown</a>
+    <nav class="nav-links">
+      <a href="index.html">← 索引</a>
+      <a href="https://github.com/Plaer1/junction" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero" style="padding:130px 0 30px">
+    <div class="wrap">
+      <span class="eyebrow reveal">Plaer1/junction · VS Code Extension · MIT</span>
+      <h1 class="reveal" style="font-size:clamp(2rem,5vw,3.2rem);margin-bottom:16px"><span class="ital">Junction</span> · VS Code 聊天侧栏 × 7 种 Agent 后端</h1>
+      <p class="lead reveal" style="margin-bottom:0">把 VS Code 的聊天侧栏变成 7 种本地 coding agent 的<strong>统一控制台</strong>——OpenClaw WebSocket、Hermes REST、MiMoCode、Goose、OpenCode、OpenHands、Souveraine，一个界面切换后端，不换工作流。</p>
+      <div class="statstrip reveal" style="margin:36px auto 0">
+        <div class="cell"><div class="n">512</div><div class="l">Stars (3 天)</div></div>
+        <div class="cell"><div class="n">7</div><div class="l">Agent 后端</div></div>
+        <div class="cell"><div class="n">TypeScript</div><div class="l">实现语言</div></div>
+        <div class="cell"><div class="n">MIT</div><div class="l">许可证</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:20px">
+    <div class="wrap narrow">
+      <div class="statrow reveal">
+        <div class="chip"><div class="n">OpenClaw</div><div class="l">WebSocket</div></div>
+        <div class="chip"><div class="n">Hermes</div><div class="l">REST+WS</div></div>
+        <div class="chip"><div class="n">MiMoCode</div><div class="l">Auto-spawn</div></div>
+        <div class="chip"><div class="n">Goose</div><div class="l">Data-dir</div></div>
+      </div>
+
+      <h2 id="overview" class="reveal">一句话定位</h2>
+      <p class="reveal"><strong>Junction</strong> 是一个 VS Code 扩展，为本地运行的 AI coding agent（OpenClaw、Hermes、MiMoCode、Goose、OpenCode、OpenHands、Souveraine）提供一个统一的聊天侧栏界面。它解决的核心问题是：不同的 agent 运行时有不同的 CLI 和配置方式，开发者需要在 IDE 和终端之间反复切换。</p>
+      <p class="reveal">Junction 的设计哲学是"零妥协的编辑器集成"——不改变 agent 行为，只提供更好的交互界面。模型选择、上下文注入、会话管理、输出渲染全在 VS Code 内完成。</p>
+
+      <h2 id="architecture" class="reveal">架构总览</h2>
+      <p class="reveal">Junction 采用"统一抽象层 + 后端适配器"架构：</p>
+      <div class="arch reveal">
+        <div style="font-family:var(--mono);font-size:13px;color:var(--text-faint);margin-bottom:12px">src/agent-adapters/*.ts — 每种后端一个适配器</div>
+        <div class="arch-grid">
+          <div class="arch-node highlight">Junction<br><small>VS Code 侧栏 UI</small></div>
+          <div class="arch-arrow" style="font-size:20px">→</div>
+          <div class="arch-node">AgentBridge<br><small>统一消息协议</small></div>
+          <div class="arch-arrow" style="font-size:20px">→</div>
+          <div class="arch-node">OpenClawAdapter<br><small>WebSocket</small></div>
+        </div>
+        <div class="arch-grid" style="margin-top:10px">
+          <div class="arch-node">HermesAdapter<br><small>REST+WS</small></div>
+          <div class="arch-node">MiMoCodeAdapter<br><small>Auto-spawn</small></div>
+          <div class="arch-node">GooseAdapter<br><small>Data-dir</small></div>
+          <div class="arch-node">OpenCodeAdapter<br><small>Binary+Config</small></div>
+          <div class="arch-node">OpenHandsAdapter<br><small>Launcher+Home</small></div>
+          <div class="arch-node">SouveraineAdapter<br><small>HTTP+Runtime</small></div>
+        </div>
+        <p style="margin-top:14px;font-size:13px;color:var(--text-faint)">每种后端的连接协议不同：WebSocket（OpenClaw/Hermes）、HTTP（Souveraine）、进程 Spawn（MiMoCode）、二进制路径+配置（OpenCode）、Launcher+Home（OpenHands）</p>
+      </div>
+
+      <h2 id="backend-protocols" class="reveal">后端连接协议对比</h2>
+      <div class="tablewrap reveal">
+        <table class="cmp">
+          <thead>
+            <tr><th>后端</th><th>协议</th><th>连接参数</th><th>会话管理</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>OpenClaw</td><td style="color:var(--green)">WebSocket</td><td>ws URL + session token</td><td>agent managed</td></tr>
+            <tr><td>Hermes</td><td style="color:var(--cyan)">REST + WS</td><td>Dashboard URL + API key</td><td>native session</td></tr>
+            <tr><td>Souveraine</td><td style="color:var(--amber)">HTTP</td><td>server URL + managed runtime spawning</td><td>runtime managed</td></tr>
+            <tr><td>MiMoCode</td><td style="color:var(--coral)">Auto-spawn</td><td>auto-spawn or pre-configured server</td><td>process managed</td></tr>
+            <tr><td>Goose</td><td style="color:var(--text-dim)">Data-dir</td><td>data directory + secret key</td><td>file based</td></tr>
+            <tr><td>OpenCode</td><td style="color:var(--text-dim)">Binary+Config</td><td>binary path + config home</td><td>config based</td></tr>
+            <tr><td>OpenHands</td><td style="color:var(--violet,#b3a4f0)">Launcher+Home</td><td>server launcher + home directory</td><td>home dir</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="core-features" class="reveal">核心功能解析</h2>
+
+      <h3 id="chat-sidebar" class="reveal" style="color:var(--cyan)">聊天侧栏 UI</h3>
+      <p class="reveal">VS Code Secondary Sidebar（活动栏右侧）作为 Junction 的主界面，提供：</p>
+      <ul class="reveal">
+        <li><strong>多会话标签页</strong>：每个 agent 后端一个 tab，tab 内维护独立消息历史</li>
+        <li><strong>消息渲染</strong>：Markdown 完整渲染（含代码高亮）、工具调用卡片、推理过程折叠</li>
+        <li><strong>上下文注入</strong>：拖拽文件到输入框，或右键文件/选区添加到当前 thread</li>
+        <li><strong>Follow-Up Modes</strong>：Queue（agent 完成后排队）、Steer（中间接管）、Interrupt（打断重定向）</li>
+      </ul>
+
+      <h3 id="model-picker" class="reveal" style="color:var(--cyan)">模型与推理强度选择</h3>
+      <p class="reveal">侧栏头部提供每个会话的模型选择器和"推理努力"滑块（reasoning effort），这解决了 agent 运行时通常需要 CLI 参数或配置文件来切换模型的问题——在编辑器内即时生效。</p>
+
+      <h3 id="chat-layouts" class="reveal" style="color:var(--cyan)">两种聊天布局</h3>
+      <div class="grid2 reveal">
+        <div class="card"><span class="ico">📦</span><h5>Compact Mode</h5><p>工具调用卡片折叠为 accordion，节省垂直空间，适合长对话</p></div>
+        <div class="card"><span class="ico">📜</span><h5>Timeline Mode</h5><p>时序视图，推理过程（Chain of Thought）完整展示，用户消息 sticky</p></div>
+      </div>
+
+      <h3 id="context-injection" class="reveal" style="color:var(--cyan)">上下文注入机制</h3>
+      <p class="reveal">Junction 的上下文注入有两种方式：</p>
+      <div class="flow reveal">
+        <div class="stage"><span class="sn">01</span><div><b>拖拽添加</b><small>拖拽文件/文件夹到聊天输入框，路径作为上下文引用注入</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">02</span><div><b>右键菜单</b><small>在文件树或编辑器中选择内容 → "Add to Junction Thread"，选区内容注入</small></div></div>
+        <div class="arrow">↓</div>
+        <div class="stage"><span class="sn">03</span><div><b>主动上下文</b><small>Agent 可通过工具调用卡片请求特定上下文（Git status、文件内容）</small></div></div>
+      </div>
+
+      <h2 id="tech-highlights" class="reveal">技术亮点</h2>
+
+      <div class="callout reveal">
+        <b>亮点 1：多后端协议统一抽象</b><br/>
+        7 种 agent 运行时有 5 种不同的连接协议（WebSocket、HTTP、进程 spawn、配置文件、环境变量），Junction 用适配器模式把它们抽象成统一的 <code>AgentAdapter</code> 接口，前端 UI 完全不需要知道后端类型。
+      </div>
+
+      <div class="callout reveal">
+        <b>亮点 2：零侵入性的 agent 集成</b><br/>
+        Junction 不修改任何 agent 的行为，只在协议层做桥接。agent 仍然用自己的 CLI 和配置，Junction 只负责把消息转发过去。这避免了 agent 版本升级带来的兼容性问题。
+      </div>
+
+      <div class="callout reveal">
+        <b>亮点 3：编辑器级上下文工程</b><br/>
+        拖拽/右键的上下文注入方式，把 VS Code 的编辑器能力（文件树、选择区、多选）直接接入 agent 对话，这是纯终端界面无法提供的能力。
+      </div>
+
+      <h2 id="openclaw-integration" class="reveal">OpenClaw WebSocket 集成详解</h2>
+      <p class="reveal">Junction 与 OpenClaw 的集成是所有后端中最深的。OpenClaw 提供 WebSocket gateway，包含 session 管理、模型管理和工具路由。Junction 的 OpenClawAdapter 负责：</p>
+      <div class="code reveal">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">src/agent-adapters/openclaw-adapter.ts (概念模型)</span></div>
+        <pre><code><span class="tok-c">// 1. 建立 WebSocket 连接</span>
+<span class="tok-k">const</span> <span class="tok-f">ws</span> = <span class="tok-k">new</span> <span class="tok-t">WebSocket</span>(<span class="tok-s">'ws://localhost:8080/gateway'</span>, {
+  headers: { <span class="tok-s">'x-session-token'</span>: sessionToken }
+});
+
+<span class="tok-c">// 2. 会话初始化 → 发送模型选择和系统提示</span>
+ws.on(<span class="tok-s">'open'</span>, () => {
+  adapter.<span class="tok-f">sendSessionInit</span>({
+    model: selectedModel,
+    reasoningEffort: reasoningLevel,
+    systemPrompt: userSystemPrompt
+  });
+});
+
+<span class="tok-c">// 3. 消息双向流：用户消息 → agent 流式响应</span>
+<span class="tok-k">function</span> <span class="tok-f">sendMessage</span>(content, contextFiles) {
+  ws.<span class="tok-f">send</span>(JSON.<span class="tok-f">stringify</span>({
+    type: <span class="tok-s">'user_message'</span>,
+    content,
+    context: contextFiles  <span class="tok-c">// Junction 特有的编辑器上下文注入</span>
+  }));
+}
+
+<span class="tok-c">// 4. 渲染 agent 的流式输出（Markdown + 工具调用卡片）</span>
+ws.on(<span class="tok-s">'message'</span>, (data) => {
+  <span class="tok-k">const</span> msg = JSON.<span class="tok-f">parse</span>(data);
+  <span class="tok-k">if</span> (msg.type === <span class="tok-s">'stream_token'</span>) render.<span class="tok-f">appendToken</span>(msg.token);
+  <span class="tok-k">if</span> (msg.type === <span class="tok-s">'tool_call'</span>) render.<span class="tok-f">showToolCard</span>(msg.tool, msg.args);
+  <span class="tok-k">if</span> (msg.type === <span class="tok-s">'reasoning'</span>) render.<span class="tok-f">showCOT</span>(msg.content);
+});</code></pre>
+      </div>
+
+      <h2 id="significance" class="reveal">生态意义</h2>
+      <p class="reveal">Junction 解决的是一个实际工作流摩擦：开发者使用多个 coding agent（各自擅长不同任务），但每个 agent 都有自己的 CLI 和界面，需要在 IDE 和终端之间反复横跳。Junction 把"多 agent 切换"收敛到 VS Code 侧栏一个界面。</p>
+      <p class="reveal">它的架构也值得借鉴——适配器模式使得新增后端的成本很低，只需要实现 <code>AgentAdapter</code> 接口即可。对于想统一管理多个 agent 运行时的人来说，Junction 的架构是一个可参考的"统一界面"方案。</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">Agent Infrastructure Teardown</div>
+    <p>源码级深度解析 · github-trending 监控自动化</p>
+    <div class="links">
+      <a href="index.html">← 索引</a>
+      <a href="https://github.com/Plaer1/junction" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://classmatexiaoming96-ux.github.io/github-trending/junction.html">在线阅读</a>
+    </div>
+    <div class="meta">Junction · 2026-06-17 · MIT License</div>
+  </div>
+</footer>
+
+<button class="totop" id="totop" aria-label="返回顶部">↑</button>
+
+<script>
+(function(){
+  var prog=document.getElementById('progress');
+  var totop=document.getElementById('totop');
+  function onScroll(){
+    var y=window.scrollY||document.documentElement.scrollTop;
+    if(prog){var h=document.documentElement.scrollHeight-window.innerHeight;prog.style.width=(h>0?(y/h)*100:0)+'%';}
+    if(totop)totop.classList.toggle('show',y>600);
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+  if(totop)totop.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'})});
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(entries){
+      entries.forEach(function(e){if(!e.isIntersecting)return;e.target.classList.add('in');io.unobserve(e.target);});
+    },{rootMargin:'0px 0px -8% 0px',threshold:0.05});
+    document.querySelectorAll('.reveal').forEach(function(el){io.observe(el)});
+  }else{
+    document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('in')});
+  }
+})();
+</script>
+</body>
+</html>
