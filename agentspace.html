@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentSpace 源码深度解析 · Agent Infrastructure Teardown</title>
+<meta name="description" content="HKUDS/AgentSpace 源码级深度解析——Agent 原生协作工作空间，AgentRouter 多运行时统一抽象、数字员工看板、多 Agent 编排与治理控制面。229 个 TypeScript 文件的完整架构拆解。" />
+<meta property="og:title" content="AgentSpace 源码深度解析 · Agent Infrastructure Teardown" />
+<meta property="og:description" content="Agent 原生协作工作空间——AgentRouter 多运行时统一抽象、数字员工看板、多 Agent 编排与治理控制面。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%23e9b873'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e08a64'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+:root {
+  --bg:        #0a0b0e;
+  --bg-grad:   #0c0e14;
+  --bg-elev:   #111319;
+  --bg-card:   #14161e;
+  --bg-card-2: #181b24;
+  --border:    rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text:      #e7e9f0;
+  --text-dim:  #a3a9b8;
+  --text-faint:#6f7585;
+  --gold:      #e0b07a;
+  --gold-2:    #d4a574;
+  --cyan:      #54d6e0;
+  --amber:     #e9b873;
+  --coral:     #e08a64;
+  --green:     #7fcf9e;
+  --purple:    #b3a4f0;
+  --shadow:    0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  --radius:    16px;
+  --maxw:      1080px;
+  --mono:      "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans:      "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --disp:      "Space Grotesk", var(--sans);
+  --serif:     "Fraunces", Georgia, serif;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;scroll-padding-top:80px;}
+body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);line-height:1.65;font-size:16px;-webkit-font-smoothing:antialiased;}
+::selection{background:rgba(84,214,224,0.25);}
+
+/* layout */
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;}
+.pb{padding-bottom:80px;}
+
+/* nav */
+header.nav{position:fixed;top:0;left:0;right:0;z-index:90;backdrop-filter:blur(14px);background:rgba(10,11,14,0.72);border-bottom:1px solid transparent;transition:border-color .3s,background .3s;}
+header.nav.scrolled{border-bottom-color:var(--border);background:rgba(8,9,11,.9);}
+header.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;}
+.nav-brand{display:flex;align-items:center;gap:10px;font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:-.02em;}
+.nav-brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--cyan),var(--gold));box-shadow:0 0 14px var(--gold);}
+.nav-links{display:flex;gap:6px;list-style:none;margin:0;padding:0;}
+.nav-links a{display:block;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;color:var(--text-dim);transition:color .2s,background .2s;text-decoration:none;}
+.nav-links a:hover{color:var(--text);background:var(--bg-card);}
+.nav-links a.active{color:var(--cyan);background:rgba(84,214,224,.08);}
+.nav-right{display:flex;align-items:center;gap:12px;}
+.nav-right a{font-size:13px;color:var(--text-dim);font-family:var(--mono);transition:color .2s;}
+.nav-right a:hover{color:var(--text);}
+
+/* progress bar */
+#progress{position:fixed;top:0;left:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--gold));z-index:100;width:0%;transition:width .1s;}
+
+/* hero */
+.hero{padding:140px 0 64px;text-align:center;}
+.hero .eyebrow{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;border-radius:999px;border:1px solid rgba(84,214,224,.3);background:rgba(84,214,224,.06);color:var(--cyan);font-family:var(--mono);font-size:12px;letter-spacing:.04em;margin-bottom:28px;}
+.hero h1{font-family:var(--disp);font-weight:700;letter-spacing:-.025em;font-size:clamp(2.2rem,5.5vw,3.8rem);line-height:1.06;margin:0 0 22px;}
+.hero h1 .ital{font-family:var(--serif);font-style:italic;font-weight:500;color:var(--gold);}
+.hero .lead{max-width:640px;margin:0 auto;color:var(--text-dim);font-size:clamp(.95rem,2.2vw,1.1rem);line-height:1.7;}
+.hero .meta{margin-top:28px;display:inline-flex;gap:8px;flex-wrap:wrap;justify-content:center;}
+.hero .meta span{font-family:var(--mono);font-size:11.5px;color:var(--text-faint);border:1px solid var(--border);border-radius:999px;padding:5px 12px;letter-spacing:.03em;}
+
+/* sections */
+section{padding:72px 0 0;}
+section h2{font-family:var(--disp);font-weight:600;font-size:1.45rem;letter-spacing:-.01em;margin:0 0 6px;}
+section h2 .num{font-family:var(--mono);font-size:11px;color:var(--text-faint);letter-spacing:.08em;margin-right:12px;}
+section .subtitle{color:var(--text-dim);font-size:.95rem;margin:0 0 40px;}
+
+/* cards */
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;transition:border-color .22s,transform .22s;}
+.card:hover{border-color:var(--border-strong);transform:translateY(-2px);}
+.card h3{font-family:var(--disp);font-weight:600;font-size:1.05rem;margin:0 0 8px;}
+.card p{color:var(--text-dim);font-size:.9rem;line-height:1.6;margin:0;}
+.card .tag{display:inline-block;margin-top:10px;font-family:var(--mono);font-size:10.5px;color:var(--text-faint);letter-spacing:.04em;border:1px solid var(--border);border-radius:4px;padding:2px 8px;}
+
+.grid-2{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));}
+.grid-3{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+
+/* code blocks */
+pre{background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:22px 24px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;color:var(--text-dim);margin:20px 0;}
+pre .kw{color:var(--cyan);}
+pre .str{color:var(--green);}
+pre .cm{color:var(--text-faint);}
+pre .fn{color:var(--amber);}
+pre .nb{color:var(--coral);}
+
+code{font-family:var(--mono);font-size:.875em;background:var(--bg-elev);border:1px solid var(--border);border-radius:5px;padding:2px 6px;color:var(--cyan);}
+pre code{background:none;border:none;padding:0;color:inherit;border-radius:0;}
+
+/* callout */
+.callout{border:1px solid rgba(84,214,224,.25);border-radius:12px;padding:18px 22px;background:rgba(84,214,224,.04);margin:28px 0;}
+.callout.b{background:rgba(224,138,100,.04);border-color:rgba(224,138,100,.25);}
+.callout.g{background:rgba(127,207,158,.04);border-color:rgba(127,207,158,.25);}
+.callout p{margin:0;font-size:.92rem;color:var(--text-dim);}
+.callout p strong{color:var(--text);}
+
+/* arch diagram */
+.arch{margin:32px 0;padding:28px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow-x:auto;}
+.arch pre{margin:0;background:transparent;border:none;padding:0;font-size:12.5px;color:var(--text-dim);}
+
+/* feature list */
+.features{display:grid;gap:14px;margin:24px 0;}
+.feature{display:flex;gap:16px;padding:18px 20px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;}
+.feature:hover{border-color:var(--border-strong);}
+.feature .icon{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:18px;flex:none;background:var(--bg-elev);border:1px solid var(--border);}
+.feature h4{font-family:var(--disp);font-weight:600;font-size:.95rem;margin:0 0 4px;}
+.feature p{color:var(--text-dim);font-size:.85rem;margin:0;line-height:1.55;}
+
+/* tab */
+.tab-nav{display:flex;gap:4px;margin-bottom:28px;flex-wrap:wrap;}
+.tab-nav button{font-family:var(--mono);font-size:12.5px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;transition:all .18s;}
+.tab-nav button:hover{border-color:var(--border-strong);color:var(--text);}
+.tab-nav button.active{background:rgba(84,214,224,.1);border-color:rgba(84,214,224,.4);color:var(--cyan);}
+.tab-content{display:none;}
+.tab-content.active{display:block;}
+
+/* divider */
+hr.sep{border:none;border-top:1px solid var(--border);margin:56px 0;}
+
+/* badge */
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.04em;}
+.badge.cy{background:rgba(84,214,224,.12);color:var(--cyan);border:1px solid rgba(84,214,224,.3);}
+.badge.am{background:rgba(233,184,115,.12);color:var(--amber);border:1px solid rgba(233,184,115,.3);}
+.badge.co{background:rgba(224,138,100,.12);color:var(--coral);border:1px solid rgba(224,138,100,.3);}
+.badge.gr{background:rgba(127,207,158,.12);color:var(--green);border:1px solid rgba(127,207,158,.3);}
+.badge.pu{background:rgba(179,164,240,.12);color:var(--purple);border:1px solid rgba(179,164,240,.3);}
+
+@media(max-width:600px){
+  .hero{padding:110px 0 48px;}
+  section{padding:48px 0 0;}
+  pre{font-size:11.5px;padding:16px;}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="nav" id="coverNav">
+  <div class="wrap">
+    <a class="nav-brand" href="index.html"><span class="dot"></span><span>Agent&nbsp;Infrastructure&nbsp;Teardown</span></a>
+    <ul class="nav-links">
+      <li><a href="index.html">首页</a></li>
+      <li><a href="index.html#oc">全部项目</a></li>
+    </ul>
+    <div class="nav-right">
+      <a href="https://github.com/HKUDS/AgentSpace" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <span class="eyebrow">🆕 2026-06-22 · Stars: 343</span>
+    <h1>AgentSpace · <span class="ital">Human + Agents.<br>One Team. One Workspace.</span></h1>
+    <p class="lead">AgentSpace 是一个 Agent 原生协作工作空间——把人类和 AI Agent 变成同一团队的正式成员，在同一个可治理的工作空间里分工、交接、审批与留存产出。核心创新是 AgentRouter：一条统一执行管线，抹平 Claude Code / Codex / OpenCode / OpenClaw / Hermes 五种运行时的差异。</p>
+    <div class="meta">
+      <span>⭐ 343★</span>
+      <span>📅 2026-06-22</span>
+      <span>📦 monorepo · TypeScript</span>
+      <span>🏗 AgentRouter · Agent 原生</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap pb">
+
+<!-- 01: What is it -->
+<section>
+  <h2><span class="num">01</span>问题域：为什么需要 Agent 工作空间</h2>
+  <p class="subtitle">大多数 Agent 框架面向单人 terminal，AgentSpace 要解决的是团队级协作与治理问题。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>现有框架的三大断层</h3>
+      <p>① Agent 能力私有化——Agent 藏在个人 terminal 里，团队不可见；② 上下文分散——消息、文档、审批、截图、runtime 文件散落在各处，没有共同 home；③ 治理缺失——凭证、文档权限、工具调用、对外操作几乎无法集中审计。</p>
+      <span class="tag">团队级缺失</span>
+    </div>
+    <div class="card">
+      <h3>AgentSpace 的回答</h3>
+      <p>把 Agent 从个人工具升格为数字员工（Digital Employee）：有角色定义、有 owner、有权限边界、可被借用/转让/审计。人类负责方向与授权，Agent 负责执行与协调——在同一套工作空间里。</p>
+      <span class="tag">组织级抽象</span>
+    </div>
+    <div class="card">
+      <h3>四大核心能力</h3>
+      <p>🗓 调度（Scheduling）——AgentRouter 统一路由；🧑‍💼 能力（Capability）——数字员工看板；🤝 协作（Collaboration）——多 Agent 协调 + 人工审批门；🔐 安全（Security）——完整治理控制面。</p>
+      <span class="tag">四层能力矩阵</span>
+    </div>
+    <div class="card">
+      <h3>技术选型</h3>
+      <p>Next.js 14 App Router（apps/web）+ Node.js CLI（apps/cli）+ TypeScript monorepo（npm workspaces）+ PostgreSQL + Docker Compose。远程 Daemon 独立部署，通过 HTTPS + token 与 Web 实例通信。</p>
+      <span class="tag">Next.js + PostgreSQL</span>
+    </div>
+  </div>
+</section>
+
+<hr class="sep" />
+
+<!-- 02: Architecture -->
+<section>
+  <h2><span class="num">02</span>全局架构</h2>
+  <p class="subtitle">AgentSpace 由 5 个 npm workspace 包组成，Web/CLI 共用同一服务层和数据层。</p>
+
+  <div class="arch">
+<pre>
+┌─────────────────────────────────────────────────────────────────┐
+│                        AgentSpace 架构                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────────┐        ┌──────────────────────────────────┐  │
+│   │  Human User  │◄──────►│     Next.js Web App (apps/web)    │  │
+│   └──────────────┘        │  React 18 + App Router            │  │
+│        │                  │  Channel docs / Knowledge base      │  │
+│        │                  │  Permission center / Audit logs     │  │
+│        │                  └──────────────┬─────────────────────┘  │
+│        │                                 │                        │
+│   ┌────┴────────────┐                    │                        │
+│   │  agent-space   │                    │                        │
+│   │  CLI (apps/cli) │◄───────────────────┤                        │
+│   │  Node.js TS CLI │                   │                        │
+│   └────┬───────────┘                   │                        │
+│        │                               │                        │
+│        └───────────┬───────────────────┤                        │
+│                    │                   │                        │
+│         ┌──────────┴───────────────────┴──────┐                  │
+│         │    @agent-space/services (101 files) │                  │
+│         │    Workspace / Agent / Channel /      │                  │
+│         │    Knowledge / Document / Cost /     │                  │
+│         │    Notification services             │                  │
+│         └──────────┬───────────────────┬───────┘                  │
+│                    │                   │                         │
+│         ┌──────────┴───────┐ ┌────────┴────────┐                │
+│         │ @agent-space/db   │ │ @agent-space/   │                │
+│         │ PostgreSQL 16+     │ │ domain (types)  │                │
+│         │ Schema: workspace,  │ │ Types: Agent,   │                │
+│         │ employee, channel,  │ │ Channel,        │                │
+│         │ document, knowledge │ │ Workspace,      │                │
+│         │                     │ │ DaemonProvider  │                │
+│         └─────────────────────┘ └────────────────┘                │
+│                                                                  │
+│   ┌───────────────────────────────────────────────────────────┐  │
+│   │           @agent-space/daemon (remote daemon)             │  │
+│   │  Stateful long-running process on remote host               │  │
+│   │  Heartbeat polling → Web server                            │  │
+│   │  ProviderRuntime: Claude Code / Codex / OpenCode /        │  │
+│   │                    OpenClaw / Hermes                       │  │
+│   └────────────────────────┬──────────────────────────────────┘  │
+│                            │                                     │
+│         ┌──────────────────┼──────────────────┐                 │
+│         │                  │                  │                 │
+│   ┌─────┴─────┐     ┌──────┴──────┐  ┌──────┴──────┐           │
+│   │AgentRouter │     │ Legacy      │  │ @agent-space│           │
+│   │(normalize  │     │ ProviderRT  │  │ /sandbox    │           │
+│   │ 5 runtimes)│     │(Gemini/Nano)│  │ (Cube/Local)│           │
+│   └────────────┘     └─────────────┘  └─────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+</pre>
+  </div>
+
+  <div class="grid-3">
+    <div class="card">
+      <h3>apps/web</h3>
+      <p>Next.js 14 App Router workspace UI。认证（Google OAuth）、频道文档、知识库、权限中心、审批流、任务面板、成本仪表盘。端口 1455。</p>
+      <span class="tag">Next.js 14</span>
+    </div>
+    <div class="card">
+      <h3>apps/cli</h3>
+      <p>Node.js CLI（node --experimental-strip-types），本地控制 AgentSpace 实例。doctor / workspace status / channel list / task list / daemon status 等命令。</p>
+      <span class="tag">Node.js TS CLI</span>
+    </div>
+    <div class="card">
+      <h3>packages/domain</h3>
+      <p>11 个共享类型文件。核心类型：Workspace / Channel / Message / AgentTemplate / DaemonProvider / RuntimeOutput。纯类型定义，无运行时依赖。</p>
+      <span class="tag">11 TS files</span>
+    </div>
+    <div class="card">
+      <h3>packages/services</h3>
+      <p>101 个 TypeScript 文件的业务服务层。AgentAccessRequests / Workspace / Knowledge / Documents / RuntimeAccess / Notifications / Costs / Audit。所有业务逻辑的核心。</p>
+      <span class="tag">101 TS files</span>
+    </div>
+    <div class="card">
+      <h3>packages/daemon</h3>
+      <p>48 个 TypeScript 文件。RemoteDaemon 主循环、AgentRouter（多运行时统一抽象）、ProviderRuntime、TaskContext、RuntimeOutput、CLI 入口。核心创新所在。</p>
+      <span class="tag">48 TS files</span>
+    </div>
+    <div class="card">
+      <h3>packages/sandbox</h3>
+      <p>12 个 TypeScript 文件。沙箱抽象层：LocalSandbox（本地）和 CubeSandbox（远程）两种 adapter。Factory 模式创建沙箱实例。</p>
+      <span class="tag">12 TS files</span>
+    </div>
+  </div>
+</section>
+
+<hr class="sep" />
+
+<!-- 03: AgentRouter -->
+<section>
+  <h2><span class="num">03</span>核心创新：AgentRouter</h2>
+  <p class="subtitle">AgentRouter 是 AgentSpace 最关键的技术设计——一条统一执行管线，把 Claude Code / Codex / OpenCode / OpenClaw / Hermes 五种异构运行时压成统一接口。</p>
+
+  <div class="callout">
+    <p><strong>设计动机：</strong>每种 Agent CLI 都有各自的 CLI 参数格式、会话模型、事件流结构和诊断输出。换 runtime 必须重建完整上下文。AgentRouter 把这些差异封装在 harness 层之后，对上层暴露完全一致的 JSON 事件流、会话 ID 和诊断结构。</p>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">支持的运行时</h3>
+
+  <div style="overflow-x:auto;margin:16px 0;">
+  <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border);">
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">Provider</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">Execution Path</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">Diagnostics</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">Session</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>Claude Code</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">AgentRouter</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">stream-json events, session fallback, tool approval bridge</td>
+        <td style="padding:8px 12px;color:var(--green);">✅</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>Codex CLI</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">AgentRouter</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">JSON events, session fallback, runtime tool capability diagnostics</td>
+        <td style="padding:8px 12px;color:var(--green);">✅</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>OpenCode</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">AgentRouter</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">JSON events, session propagation, timeout/nonzero/empty diagnostics</td>
+        <td style="padding:8px 12px;color:var(--green);">✅</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>OpenClaw</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">AgentRouter</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">health/preflight, auth/profile/model/tool/protocol diagnostics</td>
+        <td style="padding:8px 12px;color:var(--amber);">⚠️ fallback</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>Hermes Agent</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">AgentRouter</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">text output, executable compatibility checks, timeout/empty diagnostics</td>
+        <td style="padding:8px 12px;color:var(--green);">✅</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>Gemini CLI</code></td>
+        <td style="padding:8px 12px;color:var(--text-dim);">legacy provider-runtime</td>
+        <td style="padding:8px 12px;color:var(--text-faint);">one-shot CLI</td>
+        <td style="padding:8px 12px;color:var(--coral);">❌</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">核心类型定义</h3>
+
+<pre><span class="cm">// packages/domain/src/daemon-api.ts</span>
+<span class="kw">export type</span> <span class="fn">RuntimeOnlineStatus</span> = <span class="str">"online"</span> | <span class="str">"offline"</span>;
+<span class="kw">export type</span> <span class="fn">ProviderHealthStatus</span> = <span class="str">"unknown"</span> | <span class="str">"healthy"</span> | <span class="str">"degraded"</span> | <span class="str">"broken"</span>;
+<span class="kw">export type</span> <span class="fn">ProviderErrorCode</span> =
+  | <span class="str">"provider.cli_missing"</span>
+  | <span class="str">"provider.auth_invalid"</span>
+  | <span class="str">"provider.profile_missing"</span>
+  | <span class="str">"provider.rate_limited"</span>
+  | <span class="str">"provider.model_unavailable"</span>
+  | <span class="str">"provider.session_invalid"</span>
+  | <span class="str">"provider.tool_missing"</span>
+  | <span class="str">"provider.tool_unauthorized"</span>
+  | <span class="str">"provider.timeout"</span>
+  | <span class="str">"provider.runtime_generic_failure"</span>;
+
+<span class="kw">export interface</span> <span class="fn">ProviderStructuredError</span> {
+  code: ProviderErrorCode;
+  category?: ProviderErrorCategory;
+  provider?: DaemonProvider;
+  message?: string;
+  rawProviderMessage?: string;
+}
+
+<span class="kw">export interface</span> <span class="fn">ProviderHealthSnapshot</span> {
+  status: ProviderHealthStatus;
+  detected: DetectedProvider[];
+  harnesses: HarnessRecord[];
+}
+</pre>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">Harness 检测与 Smoke Test</h3>
+
+<pre><span class="cm">// packages/daemon/src/agent-router.test.ts</span>
+test(<span class="str">"listAgentRouterHarnesses exposes the MVP native harnesses"</span>, () => {
+  assert.deepEqual(listAgentRouterHarnesses(), [
+    { id: <span class="str">"claude"</span>,   label: <span class="str">"Claude Code"</span>    },
+    { id: <span class="str">"codex"</span>,    label: <span class="str">"Codex CLI"</span>     },
+    { id: <span class="str">"opencode"</span>, label: <span class="str">"OpenCode"</span>      },
+    { id: <span class="str">"openclaw"</span>, label: <span class="str">"OpenClaw"</span>      },
+    { id: <span class="str">"hermes"</span>,   label: <span class="str">"Hermes Agent"</span>  },
+  ]);
+});
+
+test(<span class="str">"detectAgentRouterHarnesses reports available and missing CLIs"</span>, async () => {
+  <span class="kw">const</span> detected = <span class="kw">await</span> detectAgentRouterHarnesses();
+  assert.deepEqual(
+    detected.harnesses.map(h => ({ id: h.id, status: h.status })),
+    [
+      { id: <span class="str">"claude"</span>,   status: <span class="str">"available"</span> },
+      { id: <span class="str">"codex"</span>,    status: <span class="str">"available"</span> },
+      { id: <span class="str">"opencode"</span>, status: <span class="str">"available"</span> },
+      { id: <span class="str">"openclaw"</span>, status: <span class="str">"missing"</span>   },
+      { id: <span class="str">"hermes"</span>,   status: <span class="str">"available"</span> },
+    ]
+  );
+});
+</pre>
+
+  <div class="callout g">
+    <p><strong>Smoke Test 命令：</strong>每种 harness 都可通过标准 CLI 直接测试：<br>
+    <code>agent-router run --harness claude --cwd /workspace/project "summarize this repo"</code><br>
+    <code>agent-router run --harness codex --cwd /workspace/project --model gpt-5.1 "fix tests"</code></p>
+  </div>
+</section>
+
+<hr class="sep" />
+
+<!-- 04: Digital Employee Board -->
+<section>
+  <h2><span class="num">04</span>数字员工看板</h2>
+  <p class="subtitle">数字员工看板（Digital Employee Board）是 AgentSpace 的资源管理层——把私有 Agent 变成全组织可见、可申请、可复用的共享资产。</p>
+
+  <div class="features">
+    <div class="feature">
+      <div class="icon">👤</div>
+      <div>
+        <h4>Agent 身份档案</h4>
+        <p>每个 Agent 有 role / summary / owner / readiness / status / 绑定的 runtime 和 harness / 已分配的 skills 和 knowledge / 常用频道和可用性状态。</p>
+      </div>
+    </div>
+    <div class="feature">
+      <div class="icon">🔄</div>
+      <div>
+        <h4>Agent Fork / Copy</h4>
+        <p>通过 <code>AgentAccessRequest</code> 申请借用或复制一个 Agent。Owner 审批通过后，Agent 的完整上下文（skills、knowledge、instructions）被 fork 到目标 workspace。</p>
+      </div>
+    </div>
+    <div class="feature">
+      <div class="icon">👥</div>
+      <div>
+        <h4>Channel 协作</h4>
+        <p>Agent 参与飞书风格的频道协作：@agentMention 触发执行，运行时输出文件、执行事件和任务历史附着在频道上下文中，不丢失在 terminal 里。</p>
+      </div>
+    </div>
+    <div class="feature">
+      <div class="icon">📋</div>
+      <div>
+        <h4>Agent 模板</h4>
+        <p>三种开箱即用模板：finance-analyst（财务分析）、product-manager（产品经理）、product-designer（产品设计）。每个模板定义了 role、instructions、skill recommendations 和适用场景。</p>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">AgentTemplate 核心字段</h3>
+
+<pre><span class="cm">// packages/domain/src/agent-templates.ts</span>
+<span class="kw">export type</span> <span class="fn">AgentTemplateId</span> = <span class="str">"finance-analyst"</span> | <span class="str">"product-manager"</span> | <span class="str">"product-designer"</span>;
+
+<span class="kw">export interface</span> <span class="fn">SystemAgentTemplatePreset</span> {
+  id: AgentTemplateId;
+  version: <span class="nb">number</span>;
+  category: <span class="str">"finance"</span> | <span class="str">"product"</span> | <span class="str">"design"</span>;
+  displayName: <span class="nb">string</span>;
+  shortDescription: <span class="nb">string</span>;
+  defaultAgentName: <span class="nb">string</span>;
+  traits: <span class="nb">string[]</span>;
+  instructions: <span class="nb">string</span>;
+  skillRecommendations: AgentTemplateSkillRecommendation[];
+}
+
+<span class="kw">export interface</span> <span class="fn">AgentTemplateSkillRecommendation</span> {
+  key: <span class="nb">string</span>;
+  label: <span class="nb">string</span>;
+  requirement: <span class="str">"required"</span> | <span class="str">"recommended"</span> | <span class="str">"optional"</span>;
+  sourceType: <span class="str">"skills.sh"</span> | <span class="str">"clawhub"</span> | <span class="str">"github"</span>;
+  sourceUrl: <span class="nb">string</span>;
+  description: <span class="nb">string</span>;
+}
+</pre>
+
+  <div class="callout">
+    <p><strong>AgentAccessRequest 流程：</strong>request_type 分为 <code>fork_copy</code>（复制完整上下文）和 <code>channel_use</code>（仅在频道中使用）。requester 发起请求 → Owner/Admin 审批 → 创建 AgentForkInvitation → 目标 workspace 获得 Agent 副本。</p>
+  </div>
+</section>
+
+<hr class="sep" />
+
+<!-- 05: Daemon Architecture -->
+<section>
+  <h2><span class="num">05</span>Remote Daemon 架构</h2>
+  <p class="subtitle">Remote Daemon 是 AgentSpace 的执行引擎，独立部署在远程机器上，通过 HTTPS 心跳轮询与 Web 实例通信。</p>
+
+  <div class="arch">
+<pre>
+<span class="cm">┌─────────────────────────────────────────────────────────────────┐</span>
+<span class="cm">│              RemoteDaemon 主循环 (packages/daemon)               │</span>
+<span class="cm">├─────────────────────────────────────────────────────────────────┤</span>
+<span class="cm">│                                                                  │</span>
+<span class="cm">│  1. registerDaemon() ──► POST /daemon/register ──► Web Server  │</span>
+<span class="cm">│     获取 daemonToken（后续认证用）                              │</span>
+<span class="cm">│                                                                  │</span>
+<span class="cm">│  2. 主循环: while(true) {                                        │</span>
+<span class="cm">│       heartbeat() ──► POST /daemon/heartbeat                    │</span>
+<span class="cm">│       claimTask()  ──► GET  /daemon/tasks/claim                │</span>
+<span class="cm">│                                                                  │</span>
+<span class="cm">│       if (task) {                                                │</span>
+<span class="cm">│         runProviderTask(task)  ──► AgentRouter / LegacyRT       │</span>
+<span class="cm">│         uploadOutput()   ──► POST /daemon/output               │</span>
+<span class="cm">│       }                                                          │</span>
+<span class="cm">│                                                                  │</span>
+<span class="cm">│       sleep(heartbeatIntervalMs)                                 │</span>
+<span class="cm">│  }                                                               │</span>
+<span class="cm">│                                                                  │</span>
+<span class="cm">│  心跳间隔: DEFAULT_HEARTBEAT_INTERVAL_MS = 10s                   │</span>
+<span class="cm">│  任务轮询: DEFAULT_TASK_POLL_INTERVAL_MS = 5s                    │</span>
+<span class="cm">│  任务超时: configurable via --task-timeout (default: 43.2s)     │</span>
+<span class="cm">└─────────────────────────────────────────────────────────────────┘</span>
+</pre>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">RemoteDaemonConfig 关键配置</h3>
+
+<pre><span class="cm">// packages/daemon/src/remote-daemon.ts</span>
+<span class="kw">export interface</span> <span class="fn">RemoteDaemonConfig</span> {
+  stateDir: <span class="nb">string</span>;           <span class="cm">// ~/.agent-space-daemon 状态目录</span>
+  daemonKey: <span class="nb">string</span>;          <span class="cm">// daemon 唯一标识</span>
+  deviceName: <span class="nb">string</span>;         <span class="cm">// 机器名</span>
+  runtimeName: <span class="nb">string</span>;        <span class="cm">// 显示名</span>
+  heartbeatIntervalMs: <span class="nb">number</span>;
+  taskPollIntervalMs: <span class="nb">number</span>;
+  taskTimeoutMs: <span class="nb">number</span>;      <span class="cm">// 单任务超时</span>
+  serverUrl?: <span class="nb">string</span>;          <span class="cm">// Web 实例地址</span>
+  daemonToken?: <span class="nb">string</span>;       <span class="cm">// 注册时获取的认证 token</span>
+}
+</pre>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">启动命令</h3>
+
+<pre>agent-space-daemon start \
+  --foreground \
+  --server-url <span class="str">"https://your-agentspace-domain"</span> \
+  --daemon-token <span class="str">"adt_xxx"</span> \
+  --daemon-id <span class="str">"daemon-prod-01"</span> \
+  --device-name <span class="str">"prod-daemon-host-01"</span> \
+  --runtime-name <span class="str">"Remote Agent"</span> \
+  --task-timeout <span class="str">"43200000"</span> \
+  --state-dir <span class="str">"$HOME/.agent-space-daemon"</span>
+</pre>
+</section>
+
+<hr class="sep" />
+
+<!-- 06: Governance -->
+<section>
+  <h2><span class="num">06</span>治理控制面</h2>
+  <p class="subtitle">AgentSpace 的权限模型围绕资源（Resource）× 参与者（Actor）× 能力（Capability）× 外部委托（Delegation）四个维度展开。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Workspace 成员</h3>
+      <p>owner / admin / member 三级角色。邀请链接、加入码、邀请历史追踪。</p>
+      <span class="tag">owner / admin / member</span>
+    </div>
+    <div class="card">
+      <h3>Channel Access</h3>
+      <p>加入权限、频道邀请、访问请求、读写断言。Agent 也需要 channel 成员资格才能参与协作。</p>
+      <span class="tag">channel ACL</span>
+    </div>
+    <div class="card">
+      <h3>Runtime Grants</h3>
+      <p>用户级运行时授权、运行时共享、绑定/解绑、runtime provider 健康状态追踪。</p>
+      <span class="tag">runtime 授权</span>
+    </div>
+    <div class="card">
+      <h3>Document Permissions</h3>
+      <p>owner / editor / viewer 三级角色。Agent 访问需要单独授权。文档版本回滚。</p>
+      <span class="tag">文档权限</span>
+    </div>
+    <div class="card">
+      <h3>Google Workspace</h3>
+      <p>OAuth 凭证 owner、Agent 粒度的 Google Workspace 委托（Scoped Delegation）、外部文档请求。</p>
+      <span class="tag">Google OAuth 2.0</span>
+    </div>
+    <div class="card">
+      <h3>Daemon Security</h3>
+      <p>API token 创建/撤销、远程 Daemon 注册、runtime 显示名管理。</p>
+      <span class="tag">daemon token</span>
+    </div>
+  </div>
+
+  <h3 style="font-family:var(--disp);font-size:1.05rem;margin:28px 0 14px;">Provider 错误分类</h3>
+
+<pre><span class="cm">// packages/domain/src/daemon-api.ts</span>
+<span class="kw">export type</span> <span class="fn">ProviderErrorCategory</span> =
+  | <span class="str">"provider"</span>      <span class="cm">// Agent CLI 本身问题</span>
+  | <span class="str">"runtime"</span>       <span class="cm">// 执行环境问题</span>
+  | <span class="str">"configuration"</span> <span class="cm">// 配置缺失</span>
+  | <span class="str">"auth"</span>          <span class="cm">// 认证失败</span>
+  | <span class="str">"profile"</span>       <span class="cm">// Profile 不存在/无效</span>
+  | <span class="str">"model"</span>         <span class="cm">// 模型不可用</span>
+  | <span class="str">"tool"</span>          <span class="cm">// 工具缺失/无权限</span>
+  | <span class="str">"protocol"</span>;      <span class="cm">// 协议解析失败</span>
+</pre>
+</section>
+
+<hr class="sep" />
+
+<!-- 07: Code Structure Summary -->
+<section>
+  <h2><span class="num">07</span>代码规模速览</h2>
+
+  <div style="overflow-x:auto;margin:16px 0;">
+  <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border);">
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">Package</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">TS Files</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">核心模块</th>
+        <th style="text-align:left;padding:8px 12px;color:var(--text-faint);font-weight:500;">职责</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>packages/domain</code></td>
+        <td style="padding:8px 12px;">11</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">workspace.ts, agent-templates.ts, daemon-api.ts, channel-document-collab.ts</td>
+        <td style="padding:8px 12px;">共享类型定义</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>packages/services</code></td>
+        <td style="padding:8px 12px;">101</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">agent-access-requests, workspace, knowledge, documents, runtime-access, notifications</td>
+        <td style="padding:8px 12px;">业务逻辑层</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>packages/daemon</code></td>
+        <td style="padding:8px 12px;">48</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">agent-router, remote-daemon, provider-runtime, task-context, runtime-output</td>
+        <td style="padding:8px 12px;">远程执行引擎</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>packages/sandbox</code></td>
+        <td style="padding:8px 12px;">12</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">factory, local-sandbox, cube-sandbox</td>
+        <td style="padding:8px 12px;">沙箱抽象</td>
+      </tr>
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:8px 12px;"><code>apps/cli</code></td>
+        <td style="padding:8px 12px;">32</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">daemon-client, channel-documents, daemon-task-context, skill-imports</td>
+        <td style="padding:8px 12px;">本地控制 CLI</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 12px;"><code>apps/web</code></td>
+        <td style="padding:8px 12px;">Next.js</td>
+        <td style="padding:8px 12px;color:var(--text-dim);">App Router + React 18 + 26 feature 模块</td>
+        <td style="padding:8px 12px;">Web UI</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout g">
+    <p><strong>技术栈总结：</strong>TypeScript monorepo（npm workspaces）+ Next.js 14 + PostgreSQL 16 + Docker Compose + Node.js 24 + <strong>AgentRouter</strong>（多运行时统一抽象层）。</p>
+  </div>
+</section>
+
+<hr class="sep" />
+
+<!-- 08: How to run -->
+<section>
+  <h2><span class="num">08</span>快速启动</h2>
+
+<pre>
+<span class="cm"># 1. 克隆安装</span>
+git clone https://github.com/HKUDS/AgentSpace.git
+<span class="kw">cd</span> AgentSpace
+
+<span class="cm"># 2. 安装依赖（Web + CLI + DB + Services + Daemon）</span>
+npm run setup
+
+<span class="cm"># 3. 配置环境变量</span>
+<span class="kw">cp</span> .env.example .env
+
+<span class="cm"># 4. 启动 PostgreSQL</span>
+docker compose -f deploy/postgres/docker-compose.yml up -d
+
+<span class="cm"># 5. 初始化数据库</span>
+npm run db:pg:init
+
+<span class="cm"># 6. 启动 Web</span>
+npm run dev:web
+<span class="cm"># → http://127.0.0.1:1455</span>
+
+<span class="cm"># CLI 用法</span>
+npm run cli -- doctor --json
+npm run cli -- workspace status --json
+npm run cli -- daemon status --json
+</pre>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var nav = document.getElementById('coverNav');
+  var prog = document.getElementById('progress');
+  function onScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop;
+    if (nav) nav.classList.toggle('scrolled', y > 8);
+    if (prog) {
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      prog.style.width = (h > 0 ? (y / h) * 100 : 0) + '%';
+    }
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>
