@@ -1,0 +1,279 @@
+import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { formatConfigError as formatDaemonConfigError, parseDaemonConfig, type OpenTagDaemonConfig } from "@opentag/local-runtime";
+import { z } from "zod";
+import type { ExecutorId } from "./catalogs/executors.js";
+import type { CliLanguage } from "./catalogs/languages.js";
+import type { PlatformId } from "./catalogs/platforms.js";
+
+const ExecutorSchema = z.enum(["echo", "codex", "claude-code"]);
+const KeepWorktreeSchema = z.enum(["always", "on_failure", "never"]);
+const PositiveIntegerSchema = z.number().int().positive();
+const CliLanguageSchema = z.enum(["en", "zh-CN"]);
+const PlatformSchema = z.enum(["lark", "slack", "github", "telegram"]);
+const LarkSetupMethodSchema = z.enum(["saved", "scan", "manual"]);
+const SlackModeSchema = z.enum(["socket_mode", "events_api"]);
+const BindingMethodSchema = z.enum(["default_project", "bind_later"]);
+const OptionalPortSchema = z.number().int().min(1).max(65535).optional();
+
+const RepositoryBindingSchema = z
+  .object({
+    provider: z.string().min(1),
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    checkoutPath: z.string().min(1),
+    defaultExecutor: ExecutorSchema,
+    baseBranch: z.string().min(1),
+    pushRemote: z.string().min(1),
+    worktreeRoot: z.string().min(1),
+    keepWorktree: KeepWorktreeSchema
+  })
+  .strict();
+
+const ChannelBindingSchema = z
+  .object({
+    provider: z.string().min(1),
+    accountId: z.string().min(1),
+    conversationId: z.string().min(1),
+    repoProvider: z.string().min(1),
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    metadata: z.record(z.string(), z.unknown()).optional()
+  })
+  .strict();
+
+const ClaudeCodeSchema = z
+  .object({
+    command: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    permissionMode: z.enum(["acceptEdits", "auto", "bypassPermissions", "default", "plan"]).optional(),
+    dangerouslySkipPermissions: z.boolean().optional()
+  })
+  .strict();
+
+const SecuritySchema = z
+  .object({
+    mode: z.enum(["enforce", "audit", "off"]).optional(),
+    allowedWorkspaceRoot: z.string().min(1).optional(),
+    allowUnsafePrompts: z.boolean().optional(),
+    extraSafeEnv: z.array(z.string().min(1)).optional()
+  })
+  .strict();
+
+const DaemonConfigSchema = z
+  .object({
+    runnerId: z.string().min(1),
+    dispatcherUrl: z.string().url(),
+    repositories: z.array(RepositoryBindingSchema).min(1),
+    channelBindings: z.array(ChannelBindingSchema).optional(),
+    claudeCode: ClaudeCodeSchema.optional(),
+    security: SecuritySchema.optional(),
+    githubToken: z.string().min(1).optional(),
+    preparePullRequestBranch: z.boolean().optional(),
+    allowAutoCreatePullRequest: z.boolean().optional(),
+    pairingToken: z.string().min(1),
+    pollIntervalMs: PositiveIntegerSchema,
+    heartbeatIntervalMs: PositiveIntegerSchema
+  })
+  .strict();
+
+const LarkPlatformSchema = z
+  .object({
+    appId: z.string().min(1),
+    appSecret: z.string().min(1),
+    domain: z.enum(["lark", "feishu"]),
+    botOpenId: z.string().min(1).optional(),
+    defaultProjectBinding: z.boolean().optional()
+  })
+  .strict();
+
+const SlackPlatformSchema = z
+  .object({
+    mode: SlackModeSchema.optional(),
+    appToken: z.string().min(1).optional(),
+    signingSecret: z.string().min(1).optional(),
+    botToken: z.string().min(1),
+    teamId: z.string().min(1),
+    channelId: z.string().min(1),
+    appId: z.string().min(1).optional(),
+    defaultProjectBinding: z.boolean().optional(),
+    port: OptionalPortSchema
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const mode = value.mode ?? "events_api";
+    if (mode === "socket_mode" && !value.appToken) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["appToken"],
+        message: "Slack Socket Mode requires appToken."
+      });
+    }
+    if (mode === "events_api" && !value.signingSecret) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["signingSecret"],
+        message: "Slack Events API requires signingSecret."
+      });
+    }
+  });
+
+const GitHubPlatformSchema = z
+  .object({
+    webhookSecret: z.string().min(1),
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    webhookPath: z.string().min(1).optional(),
+    port: OptionalPortSchema
+  })
+  .strict();
+
+const PreferencesSchema = z
+  .object({
+    language: CliLanguageSchema.optional(),
+    lastSetup: z
+      .object({
+        platforms: z.array(PlatformSchema).optional(),
+        executor: ExecutorSchema.optional(),
+        projectPath: z.string().min(1).optional(),
+        larkSetupMethod: LarkSetupMethodSchema.optional(),
+        larkDomain: z.enum(["lark", "feishu"]).optional(),
+        bindingMethod: BindingMethodSchema.optional(),
+        slackMode: SlackModeSchema.optional(),
+        slackTeamId: z.string().min(1).optional(),
+        slackChannelId: z.string().min(1).optional(),
+        slackPort: OptionalPortSchema,
+        githubOwner: z.string().min(1).optional(),
+        githubRepo: z.string().min(1).optional(),
+        githubPort: OptionalPortSchema,
+        githubAutoCreatePullRequest: z.boolean().optional()
+      })
+      .strict()
+      .optional()
+  })
+  .strict();
+
+export const OpenTagCliConfigSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    state: z
+      .object({
+        directory: z.string().min(1),
+        databasePath: z.string().min(1),
+        worktreeRoot: z.string().min(1)
+      })
+      .strict(),
+    preferences: PreferencesSchema.optional(),
+    daemon: DaemonConfigSchema,
+    platforms: z
+      .object({
+        lark: LarkPlatformSchema.optional(),
+        slack: SlackPlatformSchema.optional(),
+        github: GitHubPlatformSchema.optional()
+      })
+      .strict()
+  })
+  .strict();
+
+export type OpenTagCliConfig = Omit<z.infer<typeof OpenTagCliConfigSchema>, "daemon"> & {
+  daemon: OpenTagDaemonConfig;
+};
+
+export type OpenTagCliPreferences = NonNullable<OpenTagCliConfig["preferences"]>;
+export type OpenTagCliLastSetup = NonNullable<OpenTagCliPreferences["lastSetup"]>;
+export type OpenTagCliLanguage = CliLanguage;
+export type OpenTagCliPlatform = PlatformId;
+export type OpenTagCliExecutor = ExecutorId;
+
+export type PathEnvironment = Partial<
+  Record<"OPENTAG_CONFIG_PATH" | "OPENTAG_CONFIG_HOME" | "OPENTAG_STATE_DIR" | "XDG_CONFIG_HOME" | "XDG_STATE_HOME", string>
+>;
+
+function configHome(env: PathEnvironment, home = homedir()): string {
+  if (env.OPENTAG_CONFIG_HOME) return resolve(env.OPENTAG_CONFIG_HOME);
+  if (env.XDG_CONFIG_HOME) return resolve(env.XDG_CONFIG_HOME, "opentag");
+  return join(home, ".config", "opentag");
+}
+
+export function defaultConfigPath(env: PathEnvironment = process.env, home = homedir()): string {
+  if (env.OPENTAG_CONFIG_PATH) return resolve(env.OPENTAG_CONFIG_PATH);
+  return join(configHome(env, home), "config.json");
+}
+
+export function defaultStateDirectory(env: PathEnvironment = process.env, home = homedir()): string {
+  if (env.OPENTAG_STATE_DIR) return resolve(env.OPENTAG_STATE_DIR);
+  if (env.XDG_STATE_HOME) return resolve(env.XDG_STATE_HOME, "opentag");
+  return join(home, ".local", "state", "opentag");
+}
+
+function formatPath(path: Array<string | number>): string {
+  return path.length ? path.join(".") : "config";
+}
+
+export function formatCliConfigError(error: unknown): string {
+  if (error instanceof z.ZodError) {
+    return error.issues.map((issue) => `${formatPath(issue.path)}: ${issue.message}`).join("\n");
+  }
+  return formatDaemonConfigError(error);
+}
+
+export function parseCliConfig(value: unknown): OpenTagCliConfig {
+  const parsed = OpenTagCliConfigSchema.parse(value);
+  return {
+    ...parsed,
+    daemon: parseDaemonConfig(parsed.daemon)
+  };
+}
+
+export function readCliConfig(path = defaultConfigPath()): OpenTagCliConfig {
+  assertPrivateConfigFile(path);
+  return parseCliConfig(JSON.parse(readFileSync(path, "utf8")));
+}
+
+export function ensurePrivateDirectory(path: string): void {
+  const createdPath = mkdirSync(path, { recursive: true, mode: 0o700 });
+  if (createdPath) {
+    chmodSync(path, 0o700);
+  }
+}
+
+export function writeCliConfigAtomic(path: string, config: OpenTagCliConfig): void {
+  ensurePrivateDirectory(dirname(path));
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    chmodSync(tempPath, 0o600);
+    renameSync(tempPath, path);
+    chmodSync(path, 0o600);
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
+}
+
+export function assertPrivateConfigFile(path: string): void {
+  if (process.platform === "win32") return;
+  const mode = statSync(path).mode & 0o777;
+  if ((mode & 0o077) !== 0) {
+    throw new Error(`OpenTag config contains secrets and must not be readable by group or others: ${path}\nFix it with: chmod 600 ${path}`);
+  }
+}
+
+function redactValue(key: string, value: unknown): unknown {
+  if (["appSecret", "appToken", "botToken", "githubToken", "pairingToken", "signingSecret", "webhookSecret"].includes(key)) {
+    return "[REDACTED]";
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactValue("", entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [entryKey, redactValue(entryKey, entryValue)]));
+  }
+  return value;
+}
+
+export function redactedCliConfig(config: OpenTagCliConfig): unknown {
+  return redactValue("", config);
+}

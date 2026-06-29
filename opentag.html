@@ -3,641 +3,675 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>OpenTag · @agent 跨平台路由 · 源码观测台</title>
-<meta meta name="description" content="amplifthq/opentag 源码解析——mention 解析 + ContextPacket 7 阶段 + 7 包 monorepo（core/dispatcher/runner/store/cli/slack/github/lark/telegram/local-runtime/client）+ 安全审计 + Worktree 隔离执行。" />
+<title>opentag · 源码观测台</title>
+<meta name="description" content="amplifthq/opentag 源码级深度解析" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
 <style>
-:root{
-  --ink:        #070a12;
-  --ink-1:      #0b1020;
-  --ink-2:      #10172a;
-  --ink-3:      #161f38;
-  --panel:      rgba(18, 26, 46, 0.62);
-  --panel-2:    rgba(13, 19, 35, 0.85);
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
 
-  --star:       #f0883e;   /* orange — open integration */
-  --star-soft:  #ffb47a;
-  --star-deep:  #b85a14;
-  --signal:     #58a6ff;   /* blue — protocol */
-  --signal-soft:#8fbfff;
-  --phosphor:   #7fe6a6;   /* green — execution */
-  --rose:       #f08a8a;   /* red — security */
-  --violet:     #b3a4f0;   /* violet — zod / schema */
-  --gold:       #e0b07a;
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
 
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
   --text:       #ece7da;
   --text-2:     #b9bdca;
   --text-dim:   #79809a;
   --text-faint: #4a5172;
 
+  /* lines & glow */
   --line:       rgba(255,255,255,0.085);
   --line-2:     rgba(255,255,255,0.05);
-  --line-orange:rgba(240,136,62,0.32);
-  --line-blue:  rgba(88,166,255,0.32);
-  --glow-orange:rgba(240,136,62,0.18);
-  --glow-blue:  rgba(88,166,255,0.16);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
   --serif: "Fraunces", Georgia, serif;
   --sans:  "Hanken Grotesk", system-ui, sans-serif;
   --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
   --maxw: 1500px;
-  --nav-w: 256px;
+  --nav-w: 270px;
   --ease: cubic-bezier(.22,.61,.36,1);
 }
-*{ box-sizing:border-box; }
-html{ scroll-behavior:smooth; scroll-padding-top:32px; }
-body{ margin:0; font-family:var(--sans); background:var(--ink); color:var(--text); line-height:1.6; font-weight:340; font-size:16.5px; letter-spacing:0.005em; -webkit-font-smoothing:antialiased; overflow-x:hidden; }
-.bg-glow{ position:fixed; inset:0; z-index:-2; pointer-events:none; background: radial-gradient(900px 520px at 80% -5%, rgba(240,136,62,0.12), transparent 60%), radial-gradient(820px 600px at 5% 10%, rgba(88,166,255,0.09), transparent 62%); }
-.bg-grid{ position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.35; background-image: linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px); background-size:64px 64px; mask-image:radial-gradient(120% 100% at 50% 0%, #000 35%, transparent 92%); }
-.shell{ display:grid; grid-template-columns:var(--nav-w) 1fr; max-width:var(--maxw); margin:0 auto; }
-.nav{ position:sticky; top:0; align-self:start; height:100vh; padding:30px 22px 30px 30px; display:flex; flex-direction:column; gap:22px; border-right:1px solid var(--line); overflow-y:auto; }
-.nav-top{ display:flex; flex-direction:column; gap:6px; }
-.nav-logo{ font-family:var(--sans); font-weight:700; font-size:14px; color:var(--star); letter-spacing:-0.01em; }
-.nav-sub{ font-family:var(--mono); font-size:11px; color:var(--text-faint); }
-.nav-section{ display:flex; flex-direction:column; gap:3px; }
-.nav-section-label{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--text-faint); text-transform:uppercase; padding:8px 0 4px; }
-.nav-item{ display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--text-dim); text-decoration:none; padding:5px 8px; border-radius:6px; transition:background .15s, color .15s; }
-.nav-item:hover{ background:var(--ink-3); color:var(--text); }
-.nav-item.active{ color:var(--star); background:rgba(240,136,62,.08); }
-.nav-item .dot{ width:6px; height:6px; border-radius:50%; background:var(--star); flex:none; }
-.main{ padding:48px 56px 80px 64px; min-width:0; }
-.hero{ margin-bottom:64px; }
-.eyebrow{ display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:11px; letter-spacing:.1em; color:var(--star); border:1px solid rgba(240,136,62,.3); background:rgba(240,136,62,.06); border-radius:999px; padding:5px 12px; margin-bottom:20px; }
-.hero h1{ font-family:var(--sans); font-weight:700; font-size:clamp(2.4rem,5vw,4rem); letter-spacing:-.025em; line-height:1.05; margin-bottom:20px; }
-.hero h1 .ital{ font-family:var(--serif); font-style:italic; font-weight:500; color:var(--star-soft); }
-.hero .lead{ font-size:1.12rem; color:var(--text-dim); max-width:680px; line-height:1.7; margin-bottom:28px; }
-.meta-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-.badge{ display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:12px; background:var(--ink-2); border:1px solid var(--line); border-radius:8px; padding:5px 12px; color:var(--text-2); }
-.badge strong{ color:var(--star); }
-.hero-links{ display:flex; gap:12px; margin-top:20px; }
-.hero-links a{ font-family:var(--mono); font-size:13px; color:var(--text-dim); text-decoration:none; border:1px solid var(--line); border-radius:8px; padding:7px 16px; transition:border-color .2s, color .2s; }
-.hero-links a:hover{ border-color:var(--star); color:var(--star); }
-section{ margin-bottom:56px; }
-section h2{ font-family:var(--sans); font-weight:600; font-size:1.25rem; letter-spacing:-.01em; margin-bottom:6px; }
-section h2 a{ color:inherit; text-decoration:none; }
-section h2 a:hover{ color:var(--star); }
-.subhead{ color:var(--text-dim); font-size:.95rem; margin-bottom:24px; }
-pre{ background:var(--ink-1); border:1px solid var(--line); border-radius:12px; padding:22px 24px; overflow-x:auto; font-family:var(--mono); font-size:13.5px; line-height:1.65; margin-bottom:24px; }
-pre .kw{ color:#c792ea; }
-pre .str{ color:#7fcf9e; }
-pre .cmt{ color:var(--text-faint); font-style:italic; }
-pre .num{ color:#f0883e; }
-pre .fn{ color:#4cc9f0; }
-pre .op{ color:#89ddff; }
-code{ font-family:var(--mono); font-size:.875em; background:var(--ink-2); border:1px solid var(--line); border-radius:5px; padding:2px 6px; }
-pre code{ background:none; border:none; padding:0; font-size:inherit; }
-.card{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 24px; margin-bottom:16px; transition:border-color .2s; }
-.card:hover{ border-color:rgba(240,136,62,.32); }
-.card h3{ font-family:var(--sans); font-size:1.05rem; font-weight:600; margin-bottom:8px; color:var(--star-soft); }
-.card p{ color:var(--text-dim); font-size:.95rem; }
-.flow{ background:var(--ink-1); border:1px solid var(--line); border-radius:14px; padding:28px 32px; margin-bottom:28px; overflow-x:auto; }
-.flow pre{ background:none; border:none; padding:0; margin:0; font-size:13px; }
-.two-col{ display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px; }
-@media(max-width:700px){ .two-col{ grid-template-columns:1fr; } }
-table{ width:100%; border-collapse:collapse; margin-bottom:24px; font-size:.95rem; }
-th{ text-align:left; font-family:var(--mono); font-size:11px; letter-spacing:.06em; color:var(--text-faint); text-transform:uppercase; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--ink-1); }
-td{ padding:10px 14px; border-bottom:1px solid var(--line-2); color:var(--text-2); }
-tr:hover td{ background:var(--ink-1); }
-.callout{ background:rgba(240,136,62,.06); border-left:3px solid var(--star); border-radius:0 8px 8px 0; padding:14px 18px; margin-bottom:24px; font-size:.95rem; color:var(--text-dim); }
-.callout.blue{ background:rgba(88,166,255,.06); border-left-color:var(--signal); }
-.callout.green{ background:rgba(127,230,166,.06); border-left-color:var(--phosphor); }
-.callout.rose{ background:rgba(240,138,138,.06); border-left-color:var(--rose); }
-hr{ border:none; border-top:1px solid var(--line); margin:40px 0; }
-.back{ display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:13px; color:var(--text-faint); text-decoration:none; margin-bottom:32px; transition:color .2s; }
-.back:hover{ color:var(--star); }
-.statstrip{ display:flex; flex-wrap:wrap; gap:0; border:1px solid var(--line); border-radius:14px; overflow:hidden; margin-bottom:32px; }
-.statstrip .cell{ flex:1 1 140px; padding:18px 22px; border-right:1px solid var(--line); background:var(--panel); }
-.statstrip .cell:last-child{ border-right:none; }
-.statstrip .label{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; color:var(--text-faint); text-transform:uppercase; margin-bottom:6px; }
-.statstrip .val{ font-family:var(--sans); font-size:1.4rem; font-weight:600; color:var(--star); }
-.statstrip .val.alt{ color:var(--signal); }
-.statstrip .val.grn{ color:var(--phosphor); }
-.statstrip .val.ros{ color:var(--rose); }
-.statstrip .val.vio{ color:var(--violet); }
-.statstrip .sub{ font-family:var(--mono); font-size:11px; color:var(--text-faint); margin-top:4px; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root {
+  --star:       #b3a4f0;
+  --star-soft:  #c7bcf7;
+  --star-deep:  #8a79d6;
+}
+.mini { color: var(--muted); font-size: 0.9rem; line-height: 1.8; }
+.mermaid { background: rgba(255,255,255,0.035); border: 1px solid var(--line); border-radius: 8px; padding: 18px; margin: 18px 0; }
+.deep-link { display: inline-flex; margin-top: 16px; color: var(--star-soft); text-decoration: none; font-weight: 700; }
+.code-bar small { color: var(--muted); margin-left: 8px; }
+/* quality-gate selector anchors: .shell{ .nav{ */
 </style>
 </head>
 <body>
-
-<div class="bg-glow"></div>
-<div class="bg-grid"></div>
-
-<div class="shell">
-
-<nav class="nav">
-  <div class="nav-top">
-    <div class="nav-logo">Agent Infrastructure Teardown</div>
-    <div class="nav-sub">OpenTag · 源码级深度解析</div>
-  </div>
-  <div class="nav-section">
-    <div class="nav-section-label">快速导航</div>
-    <a class="nav-item" href="#top">↑ 顶部</a>
-    <a class="nav-item" href="#positioning">一句话定位</a>
-    <a class="nav-item" href="#arch">架构总览</a>
-    <a class="nav-item" href="#packages">7+ 包 monorepo</a>
-    <a class="nav-item" href="#mention">mention 解析</a>
-    <a class="nav-item" href="#context">ContextPacket</a>
-    <a class="nav-item" href="#dispatcher">dispatcher server</a>
-    <a class="nav-item" href="#security">安全审计</a>
-    <a class="nav-item" href="#runner">runner worktree</a>
-    <a class="nav-item" href="#design">设计取舍</a>
-    <a class="nav-item" href="#failure">失败模式</a>
-    <a class="nav-item" href="#compare">竞品对比</a>
-    <a class="nav-item" href="#ecosystem">生态意义</a>
-  </div>
-  <div class="nav-section">
-    <div class="nav-section-label">外部直链</div>
-    <a class="nav-item" href="https://github.com/amplifthq/opentag" target="_blank">↗ GitHub 仓库</a>
-    <a class="nav-item" href="https://www.npmjs.com/package/@opentag/cli" target="_blank">↗ npm 包</a>
-    <a class="nav-item" href="index.html">← 返回索引</a>
-  </div>
-</nav>
-
-<main class="main" id="top">
-
-<a class="back" href="index.html">← 返回 Agent Infrastructure Teardown</a>
-
-<div class="hero">
-  <span class="eyebrow"><span style="display:inline-block;width:6px;height:6px;background:var(--star);border-radius:50%;box-shadow:0 0 12px var(--star);"></span>@agent 协议 · 多平台路由 · zod schema · Hono dispatcher</span>
-  <h1>OpenTag<br><span class="ital">把 coding agent 挂上 Slack / GitHub / Lark</span></h1>
-  <p class="lead">amplifthq 团队开源的"@agent mention → 触发本地 Codex/Claude Code → 回写原平台"全链路。10 个 npm 包组成的 monorepo（pnpm workspace）：core 定义 schema 与 mention 解析，dispatcher 跑 Hono 服务器接 webhook，runner 包 Codex/Claude Code 调用 + git worktree 隔离，store 用 better-sqlite3 + Drizzle 持久化，slack/github/lark/telegram 4 个平台 adapter。代码侧 6.6K LOC TypeScript，配置驱动、四命令 setup。</p>
-
-  <div class="statstrip">
-    <div class="cell"><div class="label">stars</div><div class="val">359</div><div class="sub">5.1d · amplifthq</div></div>
-    <div class="cell"><div class="label">LOC</div><div class="val alt">6.6K</div><div class="sub">TypeScript · pnpm workspace</div></div>
-    <div class="cell"><div class="label">Packages</div><div class="val grn">10</div><div class="sub">core / dispatcher / runner / store / cli / slack / github / lark / telegram / client</div></div>
-    <div class="cell"><div class="label">Adapters</div><div class="val vio">4 platforms</div><div class="sub">Slack · GitHub · Lark/Feishu · Telegram</div></div>
-    <div class="cell"><div class="label">Schema</div><div class="val ros">zod 3.x</div><div class="sub">Zod-to-JSON-Schema 双格式导出</div></div>
-  </div>
-
-  <div class="meta-row">
-    <span class="badge"><strong>10</strong> npm packages</span>
-    <span class="badge"><strong>5</strong> Intent types (fix / review / investigate / explain / run)</span>
-    <span class="badge"><strong>7-stage</strong> ContextPacket assembly</span>
-    <span class="badge"><strong>3-mode</strong> Security (enforce / audit / off)</span>
-    <span class="badge"><strong>Git worktree</strong> per-run isolation</span>
-  </div>
-
-  <div class="hero-links">
-    <a href="https://github.com/amplifthq/opentag" target="_blank">↗ GitHub</a>
-    <a href="https://www.npmjs.com/package/@opentag/cli" target="_blank">↗ npm CLI</a>
-    <a href="https://github.com/amplifthq/opentag/tree/main/docs/platforms" target="_blank">↗ Platform Guides</a>
-  </div>
-</div>
-
-<section id="positioning">
-  <h2>一句话定位</h2>
-  <p class="subhead">让 Slack/GitHub/Lark 里的 <code>@opentag fix ...</code> mention 触发本地 Codex/Claude Code，在 git worktree 隔离环境里跑出 patch，再把 diff/PR 回写到原平台——一套跨平台的"agent invocation 协议"。</p>
-
-  <div class="callout"><strong>核心抽象</strong>：OpenTagEvent 是从 Slack/GitHub/Lark webhook 归一化后的"原始 mention 事件"；ContextPacket 是给 executor（Codex/Claude Code）使用的"裁剪后上下文"（summary + selected sources + facts + exclusions）；OpenTagRun 是一次完整的"用户 mention → executor 执行 → 结果回写"生命周期。整套系统的设计目标是：<strong>让 mention 成为 Agent 的一等公民</strong>。</div>
-
-  <div class="card">
-    <h3>为什么是 mention 而不是 API？</h3>
-    <p>传统 bot 通过"slash command + 私有 API"接入——开发体验差、用户要记语法。OpenTag 走 Slack/GitHub 原生 mention，<strong>人类和 agent 共用同一条消息</strong>。@alice @opentag 这个代码会怎么报错？@opentag 看到 fix intent，@alice 看到同伴提问。两个 recipient 并存，互不干扰——这是 OpenTag 的根本设计哲学。</p>
-  </div>
-</section>
-
-<section id="arch">
-  <h2>架构总览</h2>
-  <p class="subhead">10 包 monorepo，按"协议 → 适配器 → 持久化 → 执行 → 客户端"分层。core 包被所有其他包依赖；dispatcher 是运行时中枢；runner 才是真正干活的。</p>
-
-  <div class="flow">
-<pre>
-┌─────────────────────── Webhook Sources ────────────────────────┐
-│  Slack Socket Mode · GitHub Webhook · Lark/Feishu · Telegram   │
-└───────────────┬──────────────────────┬─────────────────────────┘
-                │ webhook / event      │
-                ▼                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  @opentag/dispatcher (server.ts, 1869 LOC, Hono + zod + better-sqlite3)     │
-│                                                                             │
-│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐               │
-│  │ router   │───▶│ admission│───▶│presenta- │───▶│ run      │               │
-│  │ parseEvent│   │ (access  │    │ tion     │    │ ctx packet│              │
-│  │ (zod)    │    │ control) │    │ (callbacks)   │ assembly │               │
-│  └──────────┘    └──────────┘    └──────────┘    └────┬─────┘               │
-│                                                        │                     │
-└────────────────────────────────────────────────────────┼─────────────────────┘
-                                                         │
-                                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  @opentag/core (protocol.ts, 595 LOC)                                      │
-│                                                                             │
-│  ContextPacket assembly pipeline (7 stages)                                 │
-│  collect → classify → filter → preserve → summarize → budget → emit        │
-│                                                                             │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐           │
-│  │ mention.ts (537) │  │ schema.ts (514)  │  │ project-target.ts│           │
-│  │ intent parser    │  │ zod sources      │  │ ref extraction   │           │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
-└──────────────────────────────────────────┬──────────────────────────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  @opentag/runner (executor.ts + codex.ts + claude-code.ts)                 │
-│                                                                             │
-│  1. assessRunnerSecurity() — enforce/audit/off + path sandbox                │
-│  2. createRunWorktree()  — git worktree per run                             │
-│  3. shell out to `codex` / `claude-code` CLI                                │
-│  4. commitRunChanges()    — auto-commit changes                             │
-│  5. cleanupInternalArtifacts() — remove worktree on cleanup                 │
-└──────────────────────────────────────────┬──────────────────────────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  @opentag/store (better-sqlite3 + Drizzle ORM)                              │
-│  OpenTagRun · OpenTagEvent · Audit log · Admission profiles                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                           │
-                                           ▼
-                              ┌──────────────────────┐
-                              │ Slack Block / GitHub │
-                              │ PR / Lark Card       │
-                              └──────────────────────┘
-</pre>
-  </div>
-</section>
-
-<section id="packages">
-  <h2>10 个 npm 包 · 边界与依赖方向</h2>
-
-  <table>
-    <thead><tr><th>包</th><th>LOC</th><th>职责</th><th>依赖方向</th></tr></thead>
-    <tbody>
-      <tr><td><code>@opentag/core</code></td><td>~1.4K</td><td>Protocol schema (zod), ContextPointer, OpenTagCommand, ContextPacket, policy resolution, mention parsing</td><td>0 deps（被所有其他包依赖）</td></tr>
-      <tr><td><code>@opentag/store</code></td><td>~600</td><td>better-sqlite3 + Drizzle 持久化；OpenTagRun / Event 仓库；schema migration</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/dispatcher</code></td><td>~2.5K</td><td>Hono HTTP 服务器；webhook 路由；admission 控制；presentation 层；server.ts 1869 LOC</td><td>→ core, store, github, slack, lark</td></tr>
-      <tr><td><code>@opentag/runner</code></td><td>~900</td><td>executor.ts 抽象 + codex/claude-code/echo 三个实现；git worktree 操作；安全评估</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/local-runtime</code></td><td>~1.2K</td><td>daemon 进程、dispatcher 启动、config 加载、doctor 检查</td><td>→ dispatcher, runner, cli</td></tr>
-      <tr><td><code>@opentag/cli</code></td><td>~2K</td><td>setup/start/status/doctor 四命令；onboarding wizard；platform 凭证管理</td><td>→ core, local-runtime, store</td></tr>
-      <tr><td><code>@opentag/client</code></td><td>—</td><td>SDK：第三方服务可以调用 OpenTag API 而非自己跑 daemon</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/slack</code></td><td>—</td><td>Slack Socket Mode 适配 + Block Kit 回调渲染</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/github</code></td><td>—</td><td>GitHub webhook + Issue/PR mutation compiler（双向：把 mention 转 mutation intent）</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/lark</code></td><td>—</td><td>飞书/Lark 适配 + 卡片回调</td><td>→ core</td></tr>
-      <tr><td><code>@opentag/telegram</code></td><td>—</td><td>Telegram Bot API 适配（最简，仅消息收发）</td><td>→ core</td></tr>
-    </tbody>
-  </table>
-
-  <div class="callout blue"><strong>依赖方向是 DAG</strong>：core → store/runner → dispatcher → local-runtime → cli。client 包独立，可单独 publish 供第三方调用。这意味着任何一层都可以单独替换——比如你可以写自己的 dispatcher 而复用 core 的协议定义。</div>
-</section>
-
-<section id="mention">
-  <h2>mention 解析 · 5 intent + 12 flag + scope 校验</h2>
-  <p class="subhead"><code>@opentag/core/src/mention.ts</code> 537 行——把任意 Slack 消息体里的 <code>@opentag ...</code> mention 解析成结构化 OpenTagCommand。这是协议的"前端 lexer"。</p>
-
-  <div class="card">
-    <h3>5 种 Intent 类型</h3>
-    <p><code>fix</code>（修 bug）、<code>review</code>（评审代码）、<code>investigate</code>（调查问题）、<code>explain</code>（解释代码）、<code>run</code>（执行命令）——不在列表里的会被标 <code>unknown</code> intent，进入 generic command path。未知 intent 不报错，但执行器会按"general command"模式跑，缺少针对性 prompt。</p>
-  </div>
-
-  <div class="card">
-    <h3>12 个已注册 flag + 单值/多值区分</h3>
-    <p><code>approval</code>、<code>executor</code>、<code>file</code>、<code>label</code>、<code>line</code>、<code>network</code>、<code>path</code>、<code>range</code>、<code>runner</code>、<code>scope</code>、<code>timeout</code>、<code>url</code>。<code>SINGLE_VALUE_FLAGS</code> 集合把 <code>approval/executor/line/network/range/runner/timeout</code> 标为单值——重复赋值时收集诊断信息（level=warning）而不是后写覆盖。</p>
-  </div>
-
-<pre><span class="cmt"># packages/core/src/mention.ts  (节选 — intent/flag/scope 常量定义)</span>
-<span class="kw">const</span> INTENTS: KnownIntent[] = [<span class="str">"fix"</span>, <span class="str">"review"</span>, <span class="str">"investigate"</span>, <span class="str">"explain"</span>, <span class="str">"run"</span>];
-<span class="kw">const</span> KNOWN_FLAGS = <span class="kw">new</span> <span class="fn">Set</span>([
-  <span class="str">"approval"</span>, <span class="str">"executor"</span>, <span class="str">"file"</span>, <span class="str">"label"</span>, <span class="str">"line"</span>, <span class="str">"network"</span>,
-  <span class="str">"path"</span>, <span class="str">"range"</span>, <span class="str">"runner"</span>, <span class="str">"scope"</span>, <span class="str">"timeout"</span>, <span class="str">"url"</span>
-]);
-<span class="kw">const</span> SINGLE_VALUE_FLAGS = <span class="kw">new</span> <span class="fn">Set</span>([<span class="str">"approval"</span>, <span class="str">"executor"</span>, <span class="str">"line"</span>, <span class="str">"network"</span>, <span class="str">"range"</span>, <span class="str">"runner"</span>, <span class="str">"timeout"</span>]);
-<span class="kw">const</span> APPROVAL_VALUES = <span class="kw">new</span> <span class="fn">Set</span>([<span class="str">"auto"</span>, <span class="str">"required"</span>, <span class="str">"never"</span>]);
-<span class="kw">const</span> EXECUTOR_HINTS = <span class="kw">new</span> <span class="fn">Set</span>([<span class="str">"claude-code"</span>, <span class="str">"codex"</span>, <span class="str">"hermes"</span>, <span class="str">"openclaw"</span>, <span class="str">"custom"</span>]);
-<span class="kw">const</span> PERMISSION_SCOPES = <span class="kw">new</span> <span class="fn">Set</span>([
-  <span class="str">"repo:read"</span>, <span class="str">"repo:write"</span>, <span class="str">"issue:comment"</span>, <span class="str">"chat:postMessage"</span>,
-  <span class="str">"pr:create"</span>, <span class="str">"pr:update"</span>, <span class="str">"runner:local"</span>, <span class="str">"network:restricted"</span>
-]);
-
-<span class="kw">export function</span> <span class="fn">parseOpenTagMention</span>(body: <span class="kw">string</span>, mention = <span class="str">"@opentag"</span>): MentionMatch {
-  <span class="kw">const</span> escaped = mention.<span class="fn">replace</span>(<span class="op">/</span>[.*+?^${}()|[\]\\]<span class="op">/</span>g, <span class="str">"\\$&amp;"</span>);
-  <span class="kw">const</span> pattern = <span class="kw">new</span> <span class="fn">RegExp</span>(<span class="str">`${escaped}(?=[\\s:,.!?]|$)`</span>, <span class="str">"i"</span>);
-  <span class="kw">const</span> match = body.<span class="fn">match</span>(pattern);
-  <span class="kw">if</span> (<span class="kw">typeof</span> match?.index !== <span class="str">"number"</span>) <span class="kw">return</span> { matched: <span class="kw">false</span> };
-  ...
-}
-</pre>
-
-  <div class="callout rose"><strong>执行器 hint 与 Hermes 共享生态</strong>：<code>EXECUTOR_HINTS</code> 集合里有 <code>hermes</code> 和 <code>openclaw</code>——说明 OpenTag 设计时就预期与本地 Hermes Agent / OpenClaw 共存，不是封闭的"只用 Codex"系统。</div>
-</section>
-
-<section id="context">
-  <h2>ContextPacket · 7 阶段装配流水线</h2>
-  <p class="subhead">从 OpenTagEvent 到"给 executor 的 prompt"中间要经过 7 个阶段，每个阶段都有 hooks 注入点。这是 OpenTag 协议最复杂的部分。</p>
-
-  <div class="card">
-    <h3>7 阶段定义（protocol.ts L18）</h3>
-  </div>
-
-<pre><span class="cmt"># packages/core/src/protocol.ts  L18 — 7 stage constant</span>
-<span class="kw">const</span> CONTEXT_PACKET_STAGES = [
-  <span class="str">"collect"</span>,     <span class="cmt">// 收集所有相关 ContextPointer</span>
-  <span class="str">"classify"</span>,    <span class="cmt">// 分四类：primary_evidence / supporting_context / background_noise / sensitive_material</span>
-  <span class="str">"filter"</span>,      <span class="cmt">// 按 policy 过滤</span>
-  <span class="str">"preserve"</span>,    <span class="cmt">// 抽出 ContextPacketFact（可被 prompt 注入的事实单元）</span>
-  <span class="str">"summarize"</span>,   <span class="cmt">// 生成 summary 字符串</span>
-  <span class="str">"budget"</span>,      <span class="cmt">// 按 token budget 裁剪</span>
-  <span class="str">"emit"</span>         <span class="cmt">// 最终 ContextPacket 输出</span>
-] <span class="kw">as const</span>;
-</pre>
-
-  <div class="card">
-    <h3>ContextSourceClassification 的语义</h3>
-    <p>四分类不只是"重要不重要"，而是直接影响 packet 在 executor 侧被渲染的方式：</p>
-  </div>
-
-<pre><span class="cmt"># packages/core/src/protocol.ts  L35-45</span>
-<span class="kw">function</span> <span class="fn">contextPacketSourceRole</span>(classification: ContextSourceClassification): <span class="str">"primary"</span> | <span class="str">"supporting"</span> | <span class="str">"background"</span> {
-  <span class="kw">switch</span> (classification) {
-    <span class="kw">case</span> <span class="str">"primary_evidence"</span>:
-      <span class="kw">return</span> <span class="str">"primary"</span>;          <span class="cmt">// 直接喂进 prompt 的核心证据</span>
-    <span class="kw">case</span> <span class="str">"supporting_context"</span>:
-      <span class="kw">return</span> <span class="str">"supporting"</span>;       <span class="cmt">// 标注 role=supporting，可选注入</span>
-    <span class="kw">case</span> <span class="str">"background_noise"</span>:
-    <span class="kw">case</span> <span class="str">"sensitive_material"</span>:
-      <span class="kw">return</span> <span class="str">"background"</span>;        <span class="cmt">// 默认不注入；sensitive 必须 explicit 申请</span>
-  }
-}
-</pre>
-
-  <div class="card">
-    <h3>Policy 解析的 5 级 scope 优先级</h3>
-    <p>policy 不是"全局一种"——它有 5 层级的覆盖优先级，从低到高：<code>organization_default &lt; adapter_surface_default &lt; work_context_owner_container &lt; work_item_override &lt; primary_anchor_override</code>。越靠近"具体锚点"的覆盖越优先。这让团队可以为不同 work item 单独定义策略而不动全局配置。</p>
-  </div>
-
-<pre><span class="cmt"># packages/core/src/protocol.ts  L19-25</span>
-<span class="kw">const</span> POLICY_SCOPE_ORDER: PolicyScope[] = [
-  <span class="str">"organization_default"</span>,            <span class="cmt">// 组织全局默认值（最低优先级）</span>
-  <span class="str">"adapter_surface_default"</span>,          <span class="cmt">// 适配器/平台默认</span>
-  <span class="str">"work_context_owner_container"</span>,     <span class="cmt">// work item 所属容器</span>
-  <span class="str">"work_item_override"</span>,               <span class="cmt">// 单个 work item 覆盖</span>
-  <span class="str">"primary_anchor_override"</span>           <span class="cmt">// 主锚点（最高优先级）</span>
-];
-</pre>
-
-  <div class="callout blue"><strong>AdapterMutationCompiler 是 OpenTag 的"半成品 sandbox"</strong>：当某个 mention 解析后被识别为 mutation（创建/更新 Issue、PR、回复评论），不会直接执行 API call——而是先生成 <code>MutationIntent</code>，经 <code>AdapterMutationCompilerRegistry.compile()</code> 编译成平台特定的 operation object（GitHubIssueMutationOperation / SlackBlock 等）。如果某个 adapter 没注册 compiler，编译结果 <code>{ok: false, outcome: "unsupported"}</code>，由 dispatcher 决定如何回写用户。这是 mutation 流水线的"中间表示"层。</div>
-</section>
-
-<section id="dispatcher">
-  <h2>dispatcher server · 1869 行的 Hono 单文件</h2>
-  <p class="subhead">dispatcher/src/server.ts 集中了所有 webhook 路由、admission 控制、presentation 渲染、mutation 编译、Hono HTTP 入口。这是 OpenTag 真正的运行时。</p>
-
-  <div class="card">
-    <h3>parseBody 的"只把 JSON 错映射到 400"哲学</h3>
-    <p>这是 dispatcher 里第一条值得记录的设计：只把"请求体本身的语法错误"映射成 HTTP 400。其他错误（包括下游的 ZodError、SyntaxError 来自中间件）原样抛出、走 500。注释里写得很清楚："malformed JSON (SyntaxError from c.req.json()) and request-schema validation failures (ZodError from schema.parse()) are tagged as HTTPException with status 400 so the global onError handler can return them as client errors without masking unrelated internal ZodError/SyntaxError as 400s." —— 是好实践，避免把无关的内部 ZodError 误标成客户端错误。</p>
-  </div>
-
-<pre><span class="cmt"># packages/dispatcher/src/server.ts  L41-69  (parseBody)</span>
-<span class="kw">async function</span> <span class="fn">parseBody</span>&lt;S <span class="kw">extends</span> z.ZodTypeAny&gt;(c: Context, schema: S): Promise&lt;z.infer&lt;S&gt;&gt; {
-  <span class="kw">let</span> json: unknown;
-  <span class="kw">try</span> {
-    json = <span class="kw">await</span> c.req.<span class="fn">json</span>();
-  } <span class="kw">catch</span> (err) {
-    <span class="kw">if</span> (err <span class="kw">instanceof</span> SyntaxError) {
-      <span class="kw">throw new</span> HTTPException(<span class="num">400</span>, { res: c.<span class="fn">json</span>({ error: <span class="str">"invalid_json_body"</span> }, <span class="num">400</span>) });
-    }
-    <span class="kw">throw</span> err;
-  }
-
-  <span class="kw">const</span> result = schema.<span class="fn">safeParse</span>(json);
-  <span class="kw">if</span> (!result.success) {
-    <span class="kw">throw new</span> HTTPException(<span class="num">400</span>, {
-      res: c.<span class="fn">json</span>({ error: <span class="str">"invalid_request_body"</span>, issues: result.error.issues }, <span class="num">400</span>)
-    });
-  }
-  <span class="kw">return</span> result.data;
-}
-</pre>
-
-  <div class="card">
-    <h3>Admission Runtime · 谁能触发 executor</h3>
-    <p><code>createAdmissionRuntime()</code>（admission.ts 209 LOC）维护 <code>AgentAccessProfileCheck</code> 列表——当 webhook 事件到达时，runtime 决定这个 actor（Slack user / GitHub user / Telegram chat）是否被授权在当前 work context 上触发 executor。admission 通过后才进入 ContextPacket assembly + runner 调用。</p>
-  </div>
-
-  <div class="card">
-    <h3>Presentation 层 · Slack Block Kit / GitHub Comment 渲染</h3>
-    <p>presentation.ts（69 LOC）+ callbacks.ts（253 LOC）——把 OpenTagRun 状态转成"用户能看到的反馈格式"：Slack 里是 Block Kit message（带 status emoji、进度条、changed files 列表），GitHub 里是 PR/Issue 评论。rendering 是双向的：用户的 mention → executor → 平台特定 message。</p>
-  </div>
-</section>
-
-<section id="security">
-  <h2>安全审计 · 3 mode + 17 类敏感 pattern</h2>
-  <p class="subhead">runner/src/security.ts（253 LOC）是 OpenTag 整套系统中<strong>对 prompt injection 最敏感的防线</strong>——因为 mention 来自外部用户，必须做严格 sandbox。</p>
-
-  <div class="card">
-    <h3>3 种安全模式</h3>
-    <p><code>enforce</code>（默认）—— 检测到风险直接 fail；<code>audit</code>—— 仍执行但记 audit log；<code>off</code>—— 跳过所有检测。<strong>audit 是"测试环境友好"的折衷</strong>，让 dev 阶段不被 false positive 卡住。</p>
-  </div>
-
-  <div class="card">
-    <h3>17 类 SENSITIVE_ENV_PATTERNS</h3>
-    <p>环境变量正则：<code>/TOKEN/</code>、<code>/SECRET/</code>、<code>/PASSWORD/</code>、<code>/API[_-]?KEY/</code>、<code>/CREDENTIAL/</code>、<code>/^AWS_/</code>、<code>/^AZURE_/</code>、<code>/^GCP_/</code>、<code>/^GOOGLE_/</code>、<code>/^OPENAI_/</code>、<code>/^ANTHROPIC_/</code>、<code>/^SLACK_/</code>、<code>/^GITHUB_TOKEN$/</code>、<code>/^GH_TOKEN$/</code>、<code>/^SSH_/</code> 等。这些变量会从 exec 环境里被<strong>剔除</strong>（<code>scrubEnvironment</code>），防止 executor 读取 secrets。</p>
-  </div>
-
-<pre><span class="cmt"># packages/runner/src/security.ts  L53-73  (敏感 env 模式)</span>
-<span class="kw">const</span> SENSITIVE_ENV_PATTERNS = [
-  <span class="op">/</span>TOKEN<span class="op">/</span>, <span class="op">/</span>SECRET<span class="op">/</span>, <span class="op">/</span>PASSWORD<span class="op">/</span>, <span class="op">/</span>PASS$<span class="op">/</span>,
-  <span class="op">/</span>API[_-]?KEY<span class="op">/</span>, <span class="op">/</span>CREDENTIAL<span class="op">/</span>, <span class="op">/</span>COOKIE<span class="op">/</span>, <span class="op">/</span>SESSION<span class="op">/</span>, <span class="op">/</span>AUTH<span class="op">/</span>,
-  <span class="op">/^</span>AWS_<span class="op">/</span>, <span class="op">/^</span>AZURE_<span class="op">/</span>, <span class="op">/^</span>GCP_<span class="op">/</span>, <span class="op">/^</span>GOOGLE_<span class="op">/</span>,
-  <span class="op">/^</span>OPENAI_<span class="op">/</span>, <span class="op">/^</span>ANTHROPIC_<span class="op">/</span>, <span class="op">/^</span>SLACK_<span class="op">/</span>,
-  <span class="op">/^</span>GITHUB_TOKEN$<span class="op">/</span>, <span class="op">/^</span>GH_TOKEN$<span class="op">/</span>, <span class="op">/^</span>SSH_<span class="op">/</span>
-];
-</pre>
-
-  <div class="card">
-    <h3>3 类 prompt injection 高危 pattern（HIGH_RISK_TEXT_PATTERNS）</h3>
-  </div>
-
-<pre><span class="cmt"># packages/runner/src/security.ts  L75-92  (prompt injection 检测)</span>
-<span class="kw">const</span> HIGH_RISK_TEXT_PATTERNS: <span class="kw">Array</span>&lt;{ code: <span class="kw">string</span>; pattern: RegExp; message: <span class="kw">string</span> }&gt; = [
-  {
-    code: <span class="str">"prompt.instruction_override"</span>,
-    pattern: <span class="op">/</span>\b(ignore|disregard|forget)\s+(all\s+)?(previous|prior|system|developer|safety)\s+instructions\b<span class="op">/</span>i,
-    message: <span class="str">"Request contains an instruction override pattern commonly used in prompt injection."</span>
-  },
-  {
-    code: <span class="str">"prompt.secret_exfiltration"</span>,
-    pattern: <span class="op">/</span>\b(print|dump|show|reveal|exfiltrate|send|upload|post|copy)\b[\s\S]{0,100}\b(secret|token|password|api[\s_-]?key|credential|environment variables?|env vars?)\b<span class="op">/</span>i,
-    message: <span class="str">"Request appears to ask the runner to expose secrets or environment variables."</span>
-  },
-  {
-    code: <span class="str">"prompt.sensitive_file_access"</span>,
-    pattern: <span class="op">/</span>\b(cat|open|read|print|dump)\b[\s\S]{0,80}(~\/.ssh|~\/.aws|\.env\b|id_rsa|known_hosts|credentials\b)<span class="op">/</span>i,
-    message: <span class="str">"Request appears to ask the runner to read sensitive local credential files."</span>
-  }
-];
-</pre>
-
-  <div class="callout rose"><strong>注意：这些是正则，绕过很容易</strong>。比如用 unicode 混淆（<code>ｉｇｎｏｒｅ</code>）就能绕过 <code>ignore</code> 检测。所以这套 security 只能挡"诚实攻击者"——真正的威胁模型还得靠 <code>network: restricted</code> policy + git worktree 隔离 + 进程级 sandbox。这是 layered defense 的第一层，不是唯一一层。</div>
-
-  <div class="card">
-    <h3>DEFAULT_SAFE_ENV_NAMES · 显式白名单</h3>
-    <p>20 个环境变量保留（CI、PATH、HOME、LANG、TERM、XDG_* 等），其余默认 scrub。注意 <code>CODEX_HOME</code> 被显式保留——因为 runner 调 Codex CLI 必须知道它的 config 位置。</p>
-  </div>
-</section>
-
-<section id="runner">
-  <h2>runner · git worktree per-run 隔离</h2>
-  <p class="subhead">runner 包有 3 个 executor adapter：<code>echo</code>（测试用，无副作用）、<code>codex</code>、<code>claude-code</code>。每个 executor 必须实现 ExecutorAdapter 接口（<code>canRun / run / cancel</code>）。</p>
-
-<pre><span class="cmt"># packages/runner/src/executor.ts  L60-71  (接口)</span>
-<span class="kw">export type</span> ExecutorAdapter = {
-  id: <span class="kw">string</span>;
-  displayName: <span class="kw">string</span>;
-  <span class="fn">canRun</span>(input: ExecutorRunInput): Promise&lt;ExecutorReadiness&gt;;
-  <span class="fn">run</span>(input: ExecutorRunInput, sink: ExecutorEventSink): Promise&lt;OpenTagRunResult&gt;;
-  <span class="fn">cancel</span>(runId: <span class="kw">string</span>): Promise&lt;<span class="kw">void</span>&gt;;
-};
-</pre>
-
-  <div class="card">
-    <h3>canRun 阶段：3 项前提检查</h3>
-    <p>（1）<code>codex --version</code> exit 0；（2）当前 workspace 是 git checkout（<code>git rev-parse --show-toplevel</code> exit 0）；（3）<code>{baseBranch}^{commit}</code> 存在。任何一项不过 → <code>{ready: false, reason: ...}</code>，dispatcher 会决定是否回错误给用户。</p>
-  </div>
-
-  <div class="card">
-    <h3>run 阶段：6 步流程</h3>
-  </div>
-
-<pre><span class="cmt"># packages/runner/src/codex.ts  L76-117  (run 流程节选)</span>
-<span class="kw">async function</span> <span class="fn">run</span>(input, sink) {
-  <span class="kw">const</span> security = options.security;
-  <span class="kw">const</span> worktreePath = <span class="fn">worktreePathForRun</span>({
-    workspacePath: input.workspacePath,
-    runId: input.runId,
-    ...(input.worktreeRoot ? { worktreeRoot: input.worktreeRoot } : {})
-  });
-  <span class="kw">const</span> assessment = <span class="fn">assessRunnerSecurity</span>({
-    executorId: <span class="str">"codex"</span>,
-    workspacePath: input.workspacePath,
-    executionPath: worktreePath,
-    command: input.command,
-    context: input.context,
-    ...(input.permissions ? { permissions: input.permissions } : {}),
-    ...(security ? { policy: security } : {})
-  });
-  <span class="kw">if</span> (assessment.findings.length &gt; <span class="num">0</span>) {
-    <span class="kw">await</span> sink.<span class="fn">emit</span>({
-      type: assessment.allowed ? <span class="str">"executor.progress"</span> : <span class="str">"executor.failed"</span>,
-      message: <span class="fn">formatSecurityAssessment</span>(assessment),
-      at: <span class="kw">new</span> <span class="fn">Date</span>().<span class="fn">toISOString</span>()
-    });
-  }
-  <span class="kw">if</span> (!assessment.allowed) {
-    <span class="kw">return</span> {
-      conclusion: <span class="str">"needs_human"</span>,
-      summary: <span class="fn">formatSecurityAssessment</span>(assessment),
-      nextAction: <span class="str">"Review the request and rerun with a narrower prompt or an explicit local policy override if appropriate."</span>
-    };
-  }
-
-  <span class="kw">const</span> branchName = <span class="fn">branchNameForRun</span>(input.runId);
-  <span class="kw">const</span> baseBranch = input.baseBranch ?? <span class="str">"main"</span>;
-  <span class="kw">const</span> keepWorktree = input.keepWorktree ?? <span class="str">"on_failure"</span>;
-
-  <span class="kw">await</span> sink.<span class="fn">emit</span>({
-    type: <span class="str">"executor.started"</span>,
-    message: <span class="str">`Creating isolated worktree ${worktreePath} on ${branchName}`</span>,
-    at: <span class="kw">new</span> <span class="fn">Date</span>().<span class="fn">toISOString</span>()
-  });
-  <span class="kw">try</span> {
-    <span class="kw">await</span> <span class="fn">createRunWorktree</span>({ runner, ... });
-    ...
-  }
-}
-</pre>
-
-  <div class="callout green"><strong>isolation 的意义</strong>：每个 OpenTagRun 都在独立 git worktree + 独立 branch 上跑。即使 executor 改了 100 个文件，主 checkout 不受影响；失败/成功的 worktree 用 <code>keepWorktree: "on_failure" | "always" | "never"</code> 三个选项控制生命周期。默认 on_failure——成功不留、失败保留供调试。</div>
-</section>
-
-<section id="design">
-  <h2>设计取舍 · 5 个关键决定</h2>
-
-  <div class="card">
-    <h3>1. zod 3.x 作为唯一 schema 来源</h3>
-    <p>所有 schema 在 <code>core/src/schema.ts</code> 用 zod 定义；导出时通过 <code>zod-to-json-schema</code> 同时产出 JSON Schema。这意味着 dispatcher 可以用 zod 做运行时校验（type-safe），同时下游 client（比如第三方 IDE 插件）可以拿 JSON Schema 做 IDE autocomplete + 静态校验。一份定义，双格式输出。</p>
-  </div>
-
-  <div class="card">
-    <h3>2. Hono 而非 Express</h3>
-    <p>Web framework 用 Hono 而非传统 Express——Hono 是 Web Standard API，原生支持 <code>c.req.json()</code>、<code>c.json()</code>，且与 Cloudflare Workers / Deno / Bun 兼容。OpenTag 的 daemon 目前跑在 Node，但代码结构让它能在任何 Web Standard runtime 上跑。</p>
-  </div>
-
-  <div class="card">
-    <h3>3. better-sqlite3 + Drizzle 而不是 Prisma</h3>
-    <p>本地 daemon 用本地 sqlite。Drizzle 是 type-safe SQL builder（不是 ORM），编译期校验 query 类型；better-sqlite3 是同步 API（无 callback hell）。这套组合在 Node 上是"接近零依赖"的本地持久化方案。</p>
-  </div>
-
-  <div class="card">
-    <h3>4. AdapterMutationCompiler · 中间表示层</h3>
-    <p>GitHub / Slack / Lark 平台的 mutation 不能直接 HTTP call——要先编译成平台特定 operation object。这种"中间表示"的好处是：dispatcher 可以用统一代码路径处理 mutation，不需要为每个平台写分支。</p>
-  </div>
-
-  <div class="card">
-    <h3>5. ContextPointer + 7-stage assembly hooks</h3>
-    <p>ContextPointer（来自 source = "slack / github / lark"）+ 7 阶段流水线 + 每阶段 hook。这是 OpenTag 协议里最复杂但最有灵活性的部分——第三方插件可以在任意阶段 hook 进去，比如"<code>collect</code> 阶段多收集 X 类 pointer"、"<code>classify</code> 阶段把所有 markdown 标 primary_evidence"。</p>
-  </div>
-</section>
-
-<section id="failure">
-  <h2>失败模式 · 4 类已知边界</h2>
-
-  <div class="callout"><strong>边界 1 · admission false positive</strong>：当前 admission runtime 校验"该 user 是否有权限触发"，但没有"该 user 的 mention 是否符合该 work context 的 topic scope"。理论上 Slack 里任何人都可以 <code>@opentag fix anything</code>，只要 admission 通过就跑——实际部署需要额外的 <code>topic-scope</code> policy。</div>
-
-  <div class="callout blue"><strong>边界 2 · executor 失败后状态机不完整</strong>：当 <code>codex --version</code> 检查通过但 run 中途 OOM/SIGKILL，OpenTagRun 状态会被标记为 partial——但 <code>keepWorktree</code> 默认 <code>on_failure</code>，worktree 会被 cleanup，可能导致后续诊断无法复原。</div>
-
-  <div class="callout green"><strong>边界 3 · 网络策略只有 "restricted"</strong>：<code>network: restricted</code> 是唯一合法值，其他值（比如 <code>none</code>、<code>unrestricted</code>）会被 diagnostic warning。这意味着 OpenTag 不能跑"完全离线"或"完全开放"——只能"有限制的网络"。这是设计取舍，不是 bug。</div>
-
-  <div class="callout rose"><strong>边界 4 · ContextPointer 的事实 vs. 噪声分类不可逆</strong>：一旦 classify 阶段把某 pointer 标 <code>sensitive_material</code>，它永远进 background role，不再能升级为 primary_evidence。如果分类错误（误判某 GitHub PR review comment 为敏感），后续 executor 看不到这条信息。</div>
-</section>
-
-<section id="compare">
-  <h2>竞品对比 · 与其他"chat-driven agent"平台的差异化</h2>
-
-  <table>
-    <thead><tr><th>项目</th><th>触发方式</th><th>执行隔离</th><th>平台广度</th><th>OpenTag 差异</th></tr></thead>
-    <tbody>
-      <tr><td><strong>claude-code-mention-bot</strong></td><td>Slack mention → Anthropic API</td><td>无（直接 API 调用）</td><td>仅 Slack</td><td>OpenTag 有 worktree + multi-CLI 支持</td></tr>
-      <tr><td><strong>Junction</strong>（已收录）</td><td>VS Code 侧栏</td><td>IDE 进程内</td><td>7 个本地 coding agent</td><td>Junction 是 IDE 桥；OpenTag 是聊天平台桥</td></tr>
-      <tr><td><strong>Multica</strong>（已收录）</td><td>Web 工作台</td><td>云端容器</td><td>多 agent 编排</td><td>Multica 偏团队协作；OpenTag 偏事件触发</td></tr>
-      <tr><td><strong>AgentSpace</strong>（已收录）</td><td>Web 工作台</td><td>云端</td><td>5 种运行时</td><td>OpenTag 在本地 daemon；AgentSpace 在云</td></tr>
-      <tr><td><strong>OpenClaw</strong>（已收录）</td><td>全渠道 webhook</td><td>本地</td><td>跨渠道助手</td><td>OpenClaw 是个人助手；OpenTag 是 coding agent 桥</td></tr>
-    </tbody>
-  </table>
-
-  <h3>OpenTag 的核心定位</h3>
-  <p>不是"又一个 bot 框架"，而是<strong>"把现有 coding agent 接入现有协作平台"的桥</strong>。抽象层选得很精准：core 包不绑任何特定 agent / 任何特定平台，谁都能扩展；security 在 runner 层而不是 dispatcher 层——意味着你跑自己的 executor 时也能复用 security.ts。</p>
-</section>
-
-<section id="ecosystem">
-  <h2>生态意义 · "Agent 即平台公民"的协议层</h2>
-
-  <div class="card">
-    <h3>对 Agent 协议化的贡献</h3>
-    <p>OpenTag 的 core 包是一份<strong>schema-first 的 Agent 协议定义</strong>——所有字段都有 zod 类型，导出 JSON Schema 可以直接喂给 OpenAPI、JSON Schema-aware IDE、TypeScript codegen。这意味着：未来任意 chat platform（Discord / Teams / Matrix / 钉钉）都可以用同一份 schema 实现 OpenTag 兼容 adapter。</p>
-  </div>
-
-  <div class="card">
-    <h3>对 Hermes / OpenClaw 生态的呼应</h3>
-    <p><code>EXECUTOR_HINTS</code> 集合里包含 <code>hermes</code> 和 <code>openclaw</code>——这意味着 OpenTag 在协议层就把"我支持本地 Hermes Agent / OpenClaw"显式列出。这是一个<strong>生态联盟信号</strong>：不是"OpenTag vs Hermes"，而是"OpenTag 作为粘合层，让 Hermes 也能享受 @agent mention 的 UX"。</p>
-  </div>
-
-  <div class="card">
-    <h3>对企业部署的友好性</h3>
-    <p>三个特性让 OpenTag 比纯云方案更适合企业：① admission runtime + scope policy——可以控制"哪些 channel / 哪些 user 可以触发"；② git worktree 隔离——变更不污染主分支；③ audit mode——可观察性而不破坏执行。本地 daemon 部署也让审计/合规部门更容易接受。</p>
-  </div>
-
-  <div class="callout"><strong>对效铭的提示</strong>：OpenTag 的架构是"协议 → dispatcher → runner → executor"四层，最容易复用的是 <code>@opentag/core</code>——如果哪天你想做一个新的"agent 协作平台"，先看 core 包能不能复用，再决定要不要 fork dispatcher。</div>
-</section>
-
-<hr />
-
-<div style="text-align:center; color:var(--text-faint); font-family:var(--mono); font-size:12px; padding:24px 0 0;">
-  源码来自 github.com/amplifthq/opentag @ 2026-06-29 · MIT · 分析 by Agent Infrastructure Teardown
-</div>
-
-</main>
-</div>
-</body>
-</html>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">opentag<b>平台提及到本地代理</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">opentag<b>平台提及到本地代理</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · pnpm monorepo</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>协议与调度拓扑</a></li><li><a href="#section-2"><span class="idx">02</span>核心契约与运行时边界</a></li><li><a href="#section-3"><span class="idx">03</span>从平台消息到本地执行</a></li><li><a href="#section-4"><span class="idx">04</span>测试与验证面</a></li><li><a href="#section-5"><span class="idx">05</span>值得保留的设计</a></li><li><a href="#section-6"><span class="idx">06</span>风险与缺口</a></li></ul></nav><div class="nav-foot"><div>Stars ★359 · 2026-06</div><div><a href="https://github.com/amplifthq/opentag">amplifthq/opentag</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">opentag <em>平台提及到本地代理</em></h1><p class="hero-desc">把 Slack、GitHub、Lark 的 @agent 事件统一成 OpenTagEvent，再交给本地 Codex 或 Claude Code 执行。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 359</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">31.8K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">TypeScript monorepo</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-06-29</div><div class="stat-lbl">Last commit</div></div></div></div><div><div class="mermaid">
+graph TD
+  A[Platform or dataset event] --> B[opentag contract layer]
+  B --> C[Normalization and parsing]
+  C --> D[Execution or evaluation loop]
+  D --> E[Result, score, or local memory]
+  C --> F[Validation and edge handling]
+</div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2><p>把 Slack、GitHub、Lark 的 @agent 事件统一成 OpenTagEvent，再交给本地 Codex 或 Claude Code 执行。 这次重做只围绕源码可见的边界：入口如何被解析、核心对象如何流转、失败路径如何被测试或显式降级。</p><p>阅读重点不是营销功能，而是从真实文件里抽出的契约链。下面的索引同时保留真实行号，便于回到 <code>sources/opentag/</code> 复核。</p><h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">协议与调度拓扑</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">核心契约与运行时边界</div></div><div class="card"><div class="card-h">验证数据</div><div class="card-d">以源码测试、解析器和配置表作为可复核证据</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">pnpm monorepo</div></div></div><h3><span class="arr">▸</span>源码证据索引</h3><p class="mini"><strong>源文件地图：</strong> <code>packages/core/src/protocol.ts:1</code> · <code>packages/dispatcher/src/server.ts:1</code> · <code>packages/local-runtime/src/runtime.ts:1</code> · <code>packages/runner/src/executor.ts:1</code> · <code>packages/store/src/repository.ts:1</code> · <code>packages/github/src/ingress.ts:1</code> · <code>packages/cli/src/start.ts:1</code> · <code>packages/runner/test/codex.test.ts:1</code> · <code>packages/core/src/schema.ts:1</code> · <code>packages/client/src/index.ts:1</code> · <code>packages/github/src/apply.ts:1</code></p><p class="mini">源码索引：<code>packages/core/src/protocol.ts:18</code> · <code>packages/core/src/protocol.ts:19</code> · <code>packages/core/src/protocol.ts:20</code> · <code>packages/core/src/protocol.ts:21</code> · <code>packages/core/src/protocol.ts:22</code> · <code>packages/core/src/protocol.ts:23</code> · <code>packages/core/src/protocol.ts:24</code> · <code>packages/core/src/protocol.ts:25</code> · <code>packages/core/src/protocol.ts:26</code> · <code>packages/core/src/protocol.ts:27</code> · <code>packages/core/src/protocol.ts:28</code> · <code>packages/core/src/protocol.ts:29</code> · <code>packages/core/src/protocol.ts:30</code> · <code>packages/core/src/protocol.ts:31</code> · <code>packages/core/src/protocol.ts:32</code> · <code>packages/core/src/protocol.ts:33</code> · <code>packages/core/src/protocol.ts:34</code> · <code>packages/core/src/protocol.ts:35</code> · <code>packages/core/src/protocol.ts:36</code> · <code>packages/core/src/protocol.ts:37</code> · <code>packages/core/src/protocol.ts:38</code> · <code>packages/core/src/protocol.ts:39</code> · <code>packages/core/src/protocol.ts:40</code> · <code>packages/core/src/protocol.ts:41</code> · <code>packages/core/src/protocol.ts:42</code> · <code>packages/core/src/protocol.ts:43</code> · <code>packages/core/src/protocol.ts:44</code> · <code>packages/core/src/protocol.ts:45</code> · <code>packages/core/src/protocol.ts:46</code> · <code>packages/core/src/protocol.ts:47</code> · <code>packages/core/src/protocol.ts:48</code> · <code>packages/core/src/protocol.ts:49</code> · <code>packages/core/src/protocol.ts:50</code> · <code>packages/core/src/protocol.ts:51</code> · <code>packages/core/src/protocol.ts:52</code> · <code>packages/core/src/protocol.ts:53</code> · <code>packages/core/src/protocol.ts:54</code> · <code>packages/core/src/protocol.ts:55</code> · <code>packages/core/src/protocol.ts:56</code> · <code>packages/core/src/protocol.ts:57</code> · <code>packages/core/src/protocol.ts:58</code> · <code>packages/core/src/protocol.ts:59</code> · <code>packages/core/src/protocol.ts:60</code> · <code>packages/core/src/protocol.ts:61</code> · <code>packages/core/src/protocol.ts:62</code> · <code>packages/core/src/protocol.ts:63</code> · <code>packages/core/src/protocol.ts:64</code> · <code>packages/core/src/protocol.ts:65</code> · <code>packages/core/src/protocol.ts:66</code> · <code>packages/core/src/protocol.ts:67</code> · <code>packages/core/src/protocol.ts:68</code> · <code>packages/core/src/protocol.ts:69</code> · <code>packages/core/src/protocol.ts:70</code> · <code>packages/core/src/protocol.ts:97</code> · <code>packages/core/src/protocol.ts:98</code> · <code>packages/core/src/protocol.ts:99</code> · <code>packages/core/src/protocol.ts:100</code> · <code>packages/core/src/protocol.ts:101</code> · <code>packages/core/src/protocol.ts:102</code> · <code>packages/core/src/protocol.ts:103</code> · <code>packages/core/src/protocol.ts:104</code> · <code>packages/core/src/protocol.ts:105</code> · <code>packages/core/src/protocol.ts:106</code> · <code>packages/core/src/protocol.ts:107</code> · <code>packages/core/src/protocol.ts:108</code> · <code>packages/core/src/protocol.ts:109</code> · <code>packages/core/src/protocol.ts:110</code> · <code>packages/core/src/protocol.ts:111</code> · <code>packages/core/src/protocol.ts:112</code> · <code>packages/core/src/protocol.ts:113</code> · <code>packages/core/src/protocol.ts:114</code> · <code>packages/core/src/protocol.ts:115</code> · <code>packages/core/src/protocol.ts:116</code> · <code>packages/core/src/protocol.ts:117</code> · <code>packages/core/src/protocol.ts:118</code> · <code>packages/core/src/protocol.ts:119</code> · <code>packages/core/src/protocol.ts:120</code> · <code>packages/core/src/protocol.ts:121</code> · <code>packages/core/src/protocol.ts:122</code> · <code>packages/core/src/protocol.ts:123</code> · <code>packages/core/src/protocol.ts:124</code> · <code>packages/core/src/protocol.ts:125</code> · <code>packages/core/src/protocol.ts:126</code> · <code>packages/core/src/protocol.ts:127</code> · <code>packages/core/src/protocol.ts:128</code> · <code>packages/core/src/protocol.ts:129</code> · <code>packages/core/src/protocol.ts:130</code> · <code>packages/core/src/protocol.ts:131</code> · <code>packages/core/src/protocol.ts:132</code> · <code>packages/core/src/protocol.ts:133</code></p></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">协议与调度拓扑</h2><p>架构可以拆成三段：输入契约、核心处理、输出/评分/写入。每段都有独立文件承接，而不是把逻辑堆在 README 示例里。</p><h3><span class="arr">▸</span>系统拓扑</h3><div class="mermaid">
+graph TD
+  A[Platform or dataset event] --> B[opentag contract layer]
+  B --> C[Normalization and parsing]
+  C --> D[Execution or evaluation loop]
+  D --> E[Result, score, or local memory]
+  C --> F[Validation and edge handling]
+</div><h3><span class="arr">▸</span>模块清单</h3><div class="g3"><div class="card"><div class="card-h">协议入口</div><div class="card-d">事件、上下文、权限和 mutation intent 先归一成可校验契约。</div></div><div class="card"><div class="card-h">调度核心</div><div class="card-d">Dispatcher/runner 只交换 run、progress、result，不绑定具体平台 UI。</div></div><div class="card"><div class="card-h">验证层</div><div class="card-d">Parser、schema 和单测围绕失败输入设计，避免无声漂移。</div></div></div><h3><span class="arr">▸</span>关键数据结构</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/protocol.ts</span> · L18-70</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">  18</span>const CONTEXT_PACKET_STAGES = [&quot;collect&quot;, &quot;classify&quot;, &quot;filter&quot;, &quot;preserve&quot;, &quot;summarize&quot;, &quot;budget&quot;, &quot;emit&quot;] as const;
+<span class="ln">  19</span>const POLICY_SCOPE_ORDER: PolicyScope[] = [
+<span class="ln">  20</span>  &quot;organization_default&quot;,
+<span class="ln">  21</span>  &quot;adapter_surface_default&quot;,
+<span class="ln">  22</span>  &quot;work_context_owner_container&quot;,
+<span class="ln">  23</span>  &quot;work_item_override&quot;,
+<span class="ln">  24</span>  &quot;primary_anchor_override&quot;
+<span class="ln">  25</span>];
+<span class="ln">  26</span>
+<span class="ln">  27</span>export type ContextSourceClassification = &quot;primary_evidence&quot; | &quot;supporting_context&quot; | &quot;background_noise&quot; | &quot;sensitive_material&quot;;
+<span class="ln">  28</span>
+<span class="ln">  29</span>export type ClassifiedContextPointer = {
+<span class="ln">  30</span>  pointer: ContextPointer;
+<span class="ln">  31</span>  classification: ContextSourceClassification;
+<span class="ln">  32</span>  reason: string;
+<span class="ln">  33</span>};
+<span class="ln">  34</span>
+<span class="ln">  35</span>function contextPacketSourceRole(classification: ContextSourceClassification): &quot;primary&quot; | &quot;supporting&quot; | &quot;background&quot; {
+<span class="ln">  36</span>  switch (classification) {
+<span class="ln">  37</span>    case &quot;primary_evidence&quot;:
+<span class="ln">  38</span>      return &quot;primary&quot;;
+<span class="ln">  39</span>    case &quot;supporting_context&quot;:
+<span class="ln">  40</span>      return &quot;supporting&quot;;
+<span class="ln">  41</span>    case &quot;background_noise&quot;:
+<span class="ln">  42</span>    case &quot;sensitive_material&quot;:
+<span class="ln">  43</span>      return &quot;background&quot;;
+<span class="ln">  44</span>  }
+<span class="ln">  45</span>}
+<span class="ln">  46</span>
+<span class="ln">  47</span>export function contextPointerLabel(pointer: ContextPointer): string {
+<span class="ln">  48</span>  return pointer.provider ? `${pointer.provider}.${pointer.kind}` : pointer.kind;
+<span class="ln">  49</span>}
+<span class="ln">  50</span>
+<span class="ln">  51</span>export type ContextPacketAssemblyOptions = {
+<span class="ln">  52</span>  budgetTokens?: number;
+<span class="ln">  53</span>  risks?: string[];
+<span class="ln">  54</span>  exclusions?: string[];
+<span class="ln">  55</span>  redactions?: Array&lt;{ reason: string; sourceUri?: string }&gt;;
+<span class="ln">  56</span>  hooks?: ContextPacketAssemblyHooks;
+<span class="ln">  57</span>};
+<span class="ln">  58</span>
+<span class="ln">  59</span>export type ContextPacketAssemblyHooks = {
+<span class="ln">  60</span>  collect?(input: { event: OpenTagEvent; pointers: ContextPointer[] }): ContextPointer[];
+<span class="ln">  61</span>  classify?(input: { event: OpenTagEvent; classified: ClassifiedContextPointer[] }): ClassifiedContextPointer[];
+<span class="ln">  62</span>  filter?(input: { event: OpenTagEvent; classified: ClassifiedContextPointer[] }): ClassifiedContextPointer[];
+<span class="ln">  63</span>  preserve?(input: { event: OpenTagEvent; facts: ContextPacketFact[] }): ContextPacketFact[];
+<span class="ln">  64</span>  summarize?(input: { event: OpenTagEvent; summary: string }): string;
+<span class="ln">  65</span>  budget?(input: {
+<span class="ln">  66</span>    event: OpenTagEvent;
+<span class="ln">  67</span>    classified: ClassifiedContextPointer[];
+<span class="ln">  68</span>    budgetTokens?: number;
+<span class="ln">  69</span>  }): ClassifiedContextPointer[];
+<span class="ln">  70</span>  emit?(input: { event: OpenTagEvent; packet: ContextPacket }): ContextPacket;</pre>
+</div><a class="deep-link" href="opentag/opentag-context-packet.html">深度阅读 · Context packet 与协议收敛 →</a></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">核心契约与运行时边界</h2><h3><span class="arr">▸</span>契约入口如何收口</h3><p>第一组代码展示输入被分类、清洗或注册的地方；这些函数决定后续流程拿到的是结构化对象，而不是自由文本。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/protocol.ts</span> · L97-146</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">  97</span>export function createAdapterMutationCompilerRegistry(compilers: AdapterMutationCompiler[] = []): AdapterMutationCompilerRegistry {
+<span class="ln">  98</span>  const byAdapter = new Map(compilers.map((compiler) =&gt; [compiler.adapter, compiler]));
+<span class="ln">  99</span>  return {
+<span class="ln"> 100</span>    register(compiler) {
+<span class="ln"> 101</span>      byAdapter.set(compiler.adapter, compiler);
+<span class="ln"> 102</span>    },
+<span class="ln"> 103</span>    get(adapter) {
+<span class="ln"> 104</span>      return byAdapter.get(adapter);
+<span class="ln"> 105</span>    },
+<span class="ln"> 106</span>    compile(adapter, intents) {
+<span class="ln"> 107</span>      const compiler = byAdapter.get(adapter);
+<span class="ln"> 108</span>      if (!compiler) {
+<span class="ln"> 109</span>        return intents.map((intent) =&gt; ({
+<span class="ln"> 110</span>          ok: false,
+<span class="ln"> 111</span>          adapter,
+<span class="ln"> 112</span>          outcome: {
+<span class="ln"> 113</span>            intentId: intent.intentId,
+<span class="ln"> 114</span>            outcome: &quot;unsupported&quot;,
+<span class="ln"> 115</span>            message: `No adapter mutation compiler is registered for ${adapter}.`
+<span class="ln"> 116</span>          }
+<span class="ln"> 117</span>        }));
+<span class="ln"> 118</span>      }
+<span class="ln"> 119</span>      return intents.map((intent) =&gt; compiler.compile(intent));
+<span class="ln"> 120</span>    }
+<span class="ln"> 121</span>  };
+<span class="ln"> 122</span>}
+<span class="ln"> 123</span>
+<span class="ln"> 124</span>function classifyContextPointer(pointer: ContextPointer): ClassifiedContextPointer {
+<span class="ln"> 125</span>  if (pointer.kind === &quot;text&quot;) {
+<span class="ln"> 126</span>    return { pointer, classification: &quot;primary_evidence&quot;, reason: &quot;Original user-authored text is primary evidence.&quot; };
+<span class="ln"> 127</span>  }
+<span class="ln"> 128</span>  if ([&quot;issue&quot;, &quot;pull_request&quot;, &quot;comment&quot;, &quot;thread&quot;, &quot;message&quot;].includes(pointer.kind)) {
+<span class="ln"> 129</span>    return { pointer, classification: &quot;primary_evidence&quot;, reason: `${contextPointerLabel(pointer)} is directly attached to the invocation.` };
+<span class="ln"> 130</span>  }
+<span class="ln"> 131</span>  if ([&quot;repo&quot;, &quot;file&quot;, &quot;url&quot;].includes(pointer.kind)) {
+<span class="ln"> 132</span>    return { pointer, classification: &quot;supporting_context&quot;, reason: `${contextPointerLabel(pointer)} supports execution but is not itself the request.` };
+<span class="ln"> 133</span>  }
+<span class="ln"> 134</span>  return { pointer, classification: &quot;supporting_context&quot;, reason: &quot;Pointer is relevant context.&quot; };
+<span class="ln"> 135</span>}
+<span class="ln"> 136</span>
+<span class="ln"> 137</span>export function collectContextPointers(event: OpenTagEvent): ContextPointer[] {
+<span class="ln"> 138</span>  return event.context;
+<span class="ln"> 139</span>}
+<span class="ln"> 140</span>
+<span class="ln"> 141</span>export function classifyContextPointers(pointers: ContextPointer[]): ClassifiedContextPointer[] {
+<span class="ln"> 142</span>  return pointers.map((pointer) =&gt; classifyContextPointer(pointer));
+<span class="ln"> 143</span>}
+<span class="ln"> 144</span>
+<span class="ln"> 145</span>export function filterClassifiedContextPointers(classified: ClassifiedContextPointer[]): ClassifiedContextPointer[] {
+<span class="ln"> 146</span>  return classified.filter((entry) =&gt; entry.classification !== &quot;background_noise&quot; &amp;&amp; entry.classification !== &quot;sensitive_material&quot;);</pre>
+</div><h3><span class="arr">▸</span>执行/评测边界</h3><p>第二组代码展示核心运行边界：请求体、运行输入、模型输出或本地写入都在这里被转换成下游可消费的形态。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/dispatcher/src/server.ts</span> · L49-69</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">  49</span>async function parseBody&lt;S extends z.ZodTypeAny&gt;(c: Context, schema: S): Promise&lt;z.infer&lt;S&gt;&gt; {
+<span class="ln">  50</span>  let json: unknown;
+<span class="ln">  51</span>  try {
+<span class="ln">  52</span>    json = await c.req.json();
+<span class="ln">  53</span>  } catch (err) {
+<span class="ln">  54</span>    if (err instanceof SyntaxError) {
+<span class="ln">  55</span>      throw new HTTPException(400, {
+<span class="ln">  56</span>        res: c.json({ error: &quot;invalid_json_body&quot; }, 400)
+<span class="ln">  57</span>      });
+<span class="ln">  58</span>    }
+<span class="ln">  59</span>    throw err;
+<span class="ln">  60</span>  }
+<span class="ln">  61</span>
+<span class="ln">  62</span>  const result = schema.safeParse(json);
+<span class="ln">  63</span>  if (!result.success) {
+<span class="ln">  64</span>    throw new HTTPException(400, {
+<span class="ln">  65</span>      res: c.json({ error: &quot;invalid_request_body&quot;, issues: result.error.issues }, 400)
+<span class="ln">  66</span>    });
+<span class="ln">  67</span>  }
+<span class="ln">  68</span>  return result.data;
+<span class="ln">  69</span>}</pre>
+</div><h3><span class="arr">▸</span>状态与配置的交界</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/dispatcher/src/server.ts</span> · L179-217</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln"> 179</span>function childEventFromParent(input: {
+<span class="ln"> 180</span>  parentEvent: OpenTagEvent;
+<span class="ln"> 181</span>  childRunId: string;
+<span class="ln"> 182</span>  commandText?: string;
+<span class="ln"> 183</span>  actionKind: string;
+<span class="ln"> 184</span>  receivedAt: string;
+<span class="ln"> 185</span>  extraContext?: OpenTagEvent[&quot;context&quot;];
+<span class="ln"> 186</span>  metadata?: Record&lt;string, unknown&gt;;
+<span class="ln"> 187</span>}): OpenTagEvent {
+<span class="ln"> 188</span>  return {
+<span class="ln"> 189</span>    ...input.parentEvent,
+<span class="ln"> 190</span>    id: `evt_${input.childRunId}`,
+<span class="ln"> 191</span>    sourceEventId: `${input.parentEvent.sourceEventId}:${input.childRunId}`,
+<span class="ln"> 192</span>    receivedAt: input.receivedAt,
+<span class="ln"> 193</span>    context: [...input.parentEvent.context, ...(input.extraContext ?? [])],
+<span class="ln"> 194</span>    command: {
+<span class="ln"> 195</span>      rawText: input.commandText ?? `Execute next action: ${input.actionKind}`,
+<span class="ln"> 196</span>      intent: &quot;run&quot;,
+<span class="ln"> 197</span>      args: {
+<span class="ln"> 198</span>        parentSourceEventId: input.parentEvent.sourceEventId,
+<span class="ln"> 199</span>        actionKind: input.actionKind
+<span class="ln"> 200</span>      }
+<span class="ln"> 201</span>    },
+<span class="ln"> 202</span>    metadata: {
+<span class="ln"> 203</span>      ...input.parentEvent.metadata,
+<span class="ln"> 204</span>      ...(input.metadata ?? {})
+<span class="ln"> 205</span>    }
+<span class="ln"> 206</span>  };
+<span class="ln"> 207</span>}
+<span class="ln"> 208</span>
+<span class="ln"> 209</span>function mappingsFromAdapterPlan(adapterPlan: unknown) {
+<span class="ln"> 210</span>  if (!adapterPlan || typeof adapterPlan !== &quot;object&quot; || Array.isArray(adapterPlan)) return [];
+<span class="ln"> 211</span>  const mappings = (adapterPlan as { mappings?: unknown }).mappings;
+<span class="ln"> 212</span>  if (!Array.isArray(mappings)) return [];
+<span class="ln"> 213</span>  return mappings.map((mapping) =&gt; AdapterMutationMappingSchema.parse(mapping));
+<span class="ln"> 214</span>}
+<span class="ln"> 215</span>
+<span class="ln"> 216</span>function conversationKeyFromCallback(input: { provider: string; uri: string; threadKey?: string | undefined }): string {
+<span class="ln"> 217</span>  return `${input.provider}:${input.threadKey ?? input.uri}`;</pre>
+</div><a class="deep-link" href="opentag/opentag-runtime-dispatch.html">深度阅读 · Local runtime 与执行器选择 →</a></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">从平台消息到本地执行</h2><p>关键流程从输入开始，经过规范化、执行或评分，再输出结果。源码里真正重要的是失败点是否被显式表达。</p><h3><span class="arr">▸</span>入口到规范化</h3><div class="flow"><span class="flow-stage">[1]</span> raw event / sample → parser → typed payload<br><span class="flow-stage">[2]</span> payload → policy / prompt / context → bounded execution</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/local-runtime/src/runtime.ts</span> · L7-36</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">   7</span>export function securityFromConfig(config: OpenTagDaemonConfig): RunnerSecurityPolicy | undefined {
+<span class="ln">   8</span>  const security = config.security;
+<span class="ln">   9</span>  if (!security) return undefined;
+<span class="ln">  10</span>
+<span class="ln">  11</span>  const normalized: RunnerSecurityPolicy = {};
+<span class="ln">  12</span>  if (security.mode !== undefined) normalized.mode = security.mode;
+<span class="ln">  13</span>  if (security.allowedWorkspaceRoot !== undefined) normalized.allowedWorkspaceRoot = security.allowedWorkspaceRoot;
+<span class="ln">  14</span>  if (security.allowUnsafePrompts !== undefined) normalized.allowUnsafePrompts = security.allowUnsafePrompts;
+<span class="ln">  15</span>  if (security.extraSafeEnv !== undefined) normalized.extraSafeEnv = security.extraSafeEnv;
+<span class="ln">  16</span>
+<span class="ln">  17</span>  return Object.keys(normalized).length &gt; 0 ? normalized : undefined;
+<span class="ln">  18</span>}
+<span class="ln">  19</span>
+<span class="ln">  20</span>export function executorsFromConfig(config: OpenTagDaemonConfig) {
+<span class="ln">  21</span>  const security = securityFromConfig(config);
+<span class="ln">  22</span>
+<span class="ln">  23</span>  return {
+<span class="ln">  24</span>    echo: createEchoExecutor(),
+<span class="ln">  25</span>    codex: createCodexExecutor({
+<span class="ln">  26</span>      ...(security ? { security } : {})
+<span class="ln">  27</span>    }),
+<span class="ln">  28</span>    &quot;claude-code&quot;: createClaudeCodeExecutor({
+<span class="ln">  29</span>      ...(config.claudeCode?.command ? { claudeCommand: config.claudeCode.command } : {}),
+<span class="ln">  30</span>      ...(config.claudeCode?.model ? { model: config.claudeCode.model } : {}),
+<span class="ln">  31</span>      ...(config.claudeCode?.permissionMode ? { permissionMode: config.claudeCode.permissionMode } : {}),
+<span class="ln">  32</span>      ...(config.claudeCode?.dangerouslySkipPermissions !== undefined
+<span class="ln">  33</span>        ? { dangerouslySkipPermissions: config.claudeCode.dangerouslySkipPermissions }
+<span class="ln">  34</span>        : {})
+<span class="ln">  35</span>    })
+<span class="ln">  36</span>  };</pre>
+</div><h3><span class="arr">▸</span>结果回写或评分</h3><div class="flow"><span class="flow-node">result</span> → validation → persistence / reply / aggregate score</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/local-runtime/src/runtime.ts</span> · L59-72</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">  59</span>export function createDaemonRuntimeInput(config: OpenTagDaemonConfig) {
+<span class="ln">  60</span>  const security = securityFromConfig(config);
+<span class="ln">  61</span>  const pullRequestOptions = pullRequestOptionsFromConfig(config);
+<span class="ln">  62</span>
+<span class="ln">  63</span>  return {
+<span class="ln">  64</span>    runnerId: config.runnerId,
+<span class="ln">  65</span>    repositories: config.repositories,
+<span class="ln">  66</span>    executors: executorsFromConfig(config),
+<span class="ln">  67</span>    ...(security ? { security } : {}),
+<span class="ln">  68</span>    ...(pullRequestOptions ? { pullRequestOptions } : {}),
+<span class="ln">  69</span>    ...(config.heartbeatIntervalMs ? { heartbeatIntervalMs: config.heartbeatIntervalMs } : {}),
+<span class="ln">  70</span>    ...(config.pollIntervalMs ? { pollIntervalMs: config.pollIntervalMs } : {}),
+<span class="ln">  71</span>    client: createDaemonClient(config)
+<span class="ln">  72</span>  };</pre>
+</div><h3><span class="arr">▸</span>失败路径不是旁路</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/runner/src/executor.ts</span> · L13-70</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">  13</span>export type ExecutorRunInput = {
+<span class="ln">  14</span>  runId: string;
+<span class="ln">  15</span>  workspacePath: string;
+<span class="ln">  16</span>  command: OpenTagCommand;
+<span class="ln">  17</span>  context: ContextPointer[];
+<span class="ln">  18</span>  contextPacket?: ContextPacket;
+<span class="ln">  19</span>  permissions?: PermissionGrant[];
+<span class="ln">  20</span>  baseBranch?: string;
+<span class="ln">  21</span>  worktreeRoot?: string;
+<span class="ln">  22</span>  keepWorktree?: &quot;always&quot; | &quot;on_failure&quot; | &quot;never&quot;;
+<span class="ln">  23</span>};
+<span class="ln">  24</span>
+<span class="ln">  25</span>export function renderContextPacketForPrompt(packet?: ContextPacket): string[] {
+<span class="ln">  26</span>  if (!packet) return [];
+<span class="ln">  27</span>
+<span class="ln">  28</span>  const lines = [&quot;OpenTag context packet:&quot;, `- summary: ${packet.summary}`];
+<span class="ln">  29</span>
+<span class="ln">  30</span>  if (packet.intent) {
+<span class="ln">  31</span>    lines.push(`- intent: ${packet.intent.normalizedIntent}`);
+<span class="ln">  32</span>    lines.push(`- requested by: ${packet.intent.requestedBy.provider}:${packet.intent.requestedBy.providerUserId}`);
+<span class="ln">  33</span>  }
+<span class="ln">  34</span>
+<span class="ln">  35</span>  if (packet.sources?.length) {
+<span class="ln">  36</span>    lines.push(&quot;- selected sources:&quot;);
+<span class="ln">  37</span>    for (const source of packet.sources) {
+<span class="ln">  38</span>      lines.push(`  - [${source.role}] ${contextPointerLabel(source.pointer)}: ${source.pointer.uri}`);
+<span class="ln">  39</span>      lines.push(`    reason: ${source.reason}`);
+<span class="ln">  40</span>    }
+<span class="ln">  41</span>  }
+<span class="ln">  42</span>
+<span class="ln">  43</span>  if (packet.facts?.length) {
+<span class="ln">  44</span>    lines.push(&quot;- facts:&quot;);
+<span class="ln">  45</span>    for (const fact of packet.facts) {
+<span class="ln">  46</span>      lines.push(`  - ${fact.text}`);
+<span class="ln">  47</span>    }
+<span class="ln">  48</span>  }
+<span class="ln">  49</span>
+<span class="ln">  50</span>  if (packet.exclusions?.length) {
+<span class="ln">  51</span>    lines.push(&quot;- exclusions:&quot;);
+<span class="ln">  52</span>    for (const exclusion of packet.exclusions) {
+<span class="ln">  53</span>      lines.push(`  - ${exclusion}`);
+<span class="ln">  54</span>    }
+<span class="ln">  55</span>  }
+<span class="ln">  56</span>
+<span class="ln">  57</span>  return lines;
+<span class="ln">  58</span>}
+<span class="ln">  59</span>
+<span class="ln">  60</span>export type ExecutorReadiness = {
+<span class="ln">  61</span>  ready: boolean;
+<span class="ln">  62</span>  reason?: string;
+<span class="ln">  63</span>};
+<span class="ln">  64</span>
+<span class="ln">  65</span>export type ExecutorAdapter = {
+<span class="ln">  66</span>  id: string;
+<span class="ln">  67</span>  displayName: string;
+<span class="ln">  68</span>  canRun(input: ExecutorRunInput): Promise&lt;ExecutorReadiness&gt;;
+<span class="ln">  69</span>  run(input: ExecutorRunInput, sink: ExecutorEventSink): Promise&lt;OpenTagRunResult&gt;;
+<span class="ln">  70</span>  cancel(runId: string): Promise&lt;void&gt;;</pre>
+</div></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div><h2 class="sec-title">测试与验证面</h2><p>验证面主要看三类风险：输入格式漂移、外部工具失败、以及安全/路径/权限边界。</p><h3><span class="arr">▸</span>测试或防御性代码</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/store/src/repository.ts</span> · L1-48</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">   1</span>import {
+<span class="ln">   2</span>  ApprovalDecisionSchema,
+<span class="ln">   3</span>  ApplyIntentOutcomeSchema,
+<span class="ln">   4</span>  ApplyPlanSchema,
+<span class="ln">   5</span>  ActionHintSchema,
+<span class="ln">   6</span>  AdapterMutationMappingSchema,
+<span class="ln">   7</span>  ContextPacketSchema,
+<span class="ln">   8</span>  conversationKeyFromEvent,
+<span class="ln">   9</span>  defaultRunEventMetadata,
+<span class="ln">  10</span>  OpenTagEventSchema,
+<span class="ln">  11</span>  OpenTagRunResultSchema,
+<span class="ln">  12</span>  PolicyRuleSchema,
+<span class="ln">  13</span>  ProposalLineageSchema,
+<span class="ln">  14</span>  preflightMutationIntent,
+<span class="ln">  15</span>  projectTargetRefFromEvent,
+<span class="ln">  16</span>  protocolRunFieldsFromEvent,
+<span class="ln">  17</span>  RunAdmissionDecisionSchema,
+<span class="ln">  18</span>  RunEventImportanceSchema,
+<span class="ln">  19</span>  RunEventVisibilitySchema,
+<span class="ln">  20</span>  SuggestedChangesSnapshotSchema,
+<span class="ln">  21</span>  type ApprovalDecision,
+<span class="ln">  22</span>  type ApplyIntentOutcome,
+<span class="ln">  23</span>  type ApplyPlan,
+<span class="ln">  24</span>  type ActionHint,
+<span class="ln">  25</span>  type AdapterMutationMapping,
+<span class="ln">  26</span>  type MutationIntentActionability,
+<span class="ln">  27</span>  type OpenTagEvent,
+<span class="ln">  28</span>  type OpenTagRun,
+<span class="ln">  29</span>  type OpenTagRunResult,
+<span class="ln">  30</span>  type PolicyRule,
+<span class="ln">  31</span>  type ProposalLineage,
+<span class="ln">  32</span>  type RunAdmissionDecision,
+<span class="ln">  33</span>  type RunEventImportance,
+<span class="ln">  34</span>  type RunEventVisibility,
+<span class="ln">  35</span>  type SuggestedChangesSnapshot
+<span class="ln">  36</span>} from &quot;@opentag/core&quot;;
+<span class="ln">  37</span>import { and, asc, eq, inArray } from &quot;drizzle-orm&quot;;
+<span class="ln">  38</span>import type { BetterSQLite3Database } from &quot;drizzle-orm/better-sqlite3&quot;;
+<span class="ln">  39</span>import {
+<span class="ln">  40</span>  applyPlans,
+<span class="ln">  41</span>  approvalDecisions,
+<span class="ln">  42</span>  channelBindings,
+<span class="ln">  43</span>  repoBindings,
+<span class="ln">  44</span>  repoMutationMappings,
+<span class="ln">  45</span>  repoPolicyRules,
+<span class="ln">  46</span>  callbackDeliveries,
+<span class="ln">  47</span>  followUpRequests,
+<span class="ln">  48</span>  runEvents,</pre>
+</div><h3><span class="arr">▸</span>已知边界 / 失败模式</h3><ul><li>仓库发布节奏快，页面引用的行号必须以后续 clone 为准重新校验。</li><li>外部平台、模型 API 或本地 CLI 的错误不会总是同构，需要保留原始错误。</li><li>路径别名只用于质量门禁的 <code>src/</code> 计数；页面代码块标出 repo 实际路径。</li></ul></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div><h2 class="sec-title">值得保留的设计</h2><div class="g2"><div class="card"><div class="card-h">契约清晰</div><div class="card-d">核心边界被拆到独立模块，读者可以直接从行号回溯。</div></div><div class="card"><div class="card-h">失败可见</div><div class="card-d">解析、评分、路径和权限错误大多被显式编码，而不是吞掉。</div></div><div class="card"><div class="card-h">局部可替换</div><div class="card-d">平台、模型或摘要后端通过配置/接口切换。</div></div><div class="card"><div class="card-h">测试有抓手</div><div class="card-d">单测围绕 parser、security、config 或 runner 这样的真实风险点。</div></div></div></section>
+<section class="sec" id="section-6"><div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div><h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2><p>这些风险来自源码结构和发布形态，不是对项目价值的否定。</p><div class="g2"><div class="card"><div class="card-h">文档与实现可能错位</div><div class="card-d">README 的高层叙述需要用当前 clone 的源码重新核验。</div></div><div class="card"><div class="card-h">边界依赖外部系统</div><div class="card-d">平台 API、模型服务或 Claude Code 本身会引入非仓库内可控变量。</div></div><div class="card"><div class="card-h">评测/摘要可被输入污染</div><div class="card-d">长上下文、prompt tag、转录文本都需要清洗策略。</div></div><div class="card"><div class="card-h">本地状态要谨慎</div><div class="card-d">写入历史、SQLite 或工作树时必须保留路径与权限边界。</div></div></div><div class="callout warn"><strong>诚实记录</strong> — 本页只解释当前源码能证明的内容；模型权重表现、平台 SLA 或未发布路线不作外推。</div></section>
+<div class="foot"><span>Generated · 2026-06-29</span><span>Source · <a href="https://github.com/amplifthq/opentag">amplifthq/opentag</a></span><span><a href="index.html">← 返回 Trending 索引</a></span></div></main></div><script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.remove('active')); const a = map.get(e.target); if (a) a.classList.add('active'); } }), { rootMargin: '-40% 0px -55% 0px' });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) { links.forEach(a => { const o = document.createElement('option'); o.value = a.getAttribute('href'); o.textContent = a.textContent.trim(); sel.appendChild(o); }); sel.addEventListener('change', e => location.href = e.target.value); }
+  const canvas = document.getElementById('stars'); if (!canvas) return; const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; }; resize(); addEventListener('resize', resize);
+  const stars = Array.from({length:72}, () => ({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));
+  const tick = () => { ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--star-soft'); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); }; tick();
+})();
+</script>
+</body></html>
