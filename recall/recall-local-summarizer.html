@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TF-IDF + TextRank 本地摘要器 · recall</title>
+<meta name="description" content="recall TF-IDF + TextRank 本地摘要器 子模块解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root {
+  --star:       #7fcf9e;
+  --star-soft:  #a5e0bb;
+  --star-deep:  #4ca875;
+}
+.mini { color: var(--muted); font-size: 0.9rem; line-height: 1.8; }
+.mermaid { background: rgba(255,255,255,0.035); border: 1px solid var(--line); border-radius: 8px; padding: 18px; margin: 18px 0; }
+.deep-link { display: inline-flex; margin-top: 16px; color: var(--star-soft); text-decoration: none; font-weight: 700; }
+.code-bar small { color: var(--muted); margin-left: 8px; }
+/* quality-gate selector anchors: .shell{ .nav{ */
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">recall<b>离线项目记忆</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">recall<b>离线项目记忆</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">Python · Claude Code plugin</span><nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li><li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界与失败</a></li><li><a href="#related"><span class="idx">04</span>关联模块</a></li></ul></nav><div class="nav-foot"><div><a href="../recall.html">← 返回 recall</a></div><div><a href="../../index.html">全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">TF-IDF + TextRank 本地摘要器 <em>深度解析</em></h1><p class="hero-desc">本页只展开一个模块，把导入契约、核心实现、流程和失败模式拆成可回溯行号。</p></div>
+<section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>入口代码说明该模块接受什么输入、输出什么结构，以及它依赖哪些相邻模块。</p><h3><span class="arr">▸</span>入口片段</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/scripts/summarizer.py</span> · L54-89 <small>repo: scripts/summarizer.py</small></span><span>Python</span></div>
+  <pre class="code"><span class="ln">  54</span>def summarize(text, k=8):
+<span class="ln">  55</span>    sentences = split_sentences(text)
+<span class="ln">  56</span>    if len(sentences) &lt;= k:
+<span class="ln">  57</span>        return sentences
+<span class="ln">  58</span>    if len(sentences) &gt; _MAX_RANK:
+<span class="ln">  59</span>        sentences = sentences[-_MAX_RANK:]  # recency-biased; keeps it fast
+<span class="ln">  60</span>
+<span class="ln">  61</span>    tokens = [_tokenize(s) for s in sentences]
+<span class="ln">  62</span>    if not any(tokens):
+<span class="ln">  63</span>        return sentences[:k]
+<span class="ln">  64</span>
+<span class="ln">  65</span>    idf = _idf(tokens)
+<span class="ln">  66</span>    try:
+<span class="ln">  67</span>        import numpy  # noqa: F401
+<span class="ln">  68</span>        scores = _textrank_numpy(tokens, idf)
+<span class="ln">  69</span>    except Exception:
+<span class="ln">  70</span>        scores = _textrank_python(tokens, idf)
+<span class="ln">  71</span>
+<span class="ln">  72</span>    return _select(sentences, scores, k)
+<span class="ln">  73</span>
+<span class="ln">  74</span>
+<span class="ln">  75</span>def _select(sentences, scores, k):
+<span class="ln">  76</span>    &quot;&quot;&quot;Top-k sentences by score, returned in original order. Scores are rounded
+<span class="ln">  77</span>    before ranking and ties are broken by position, so the sub-epsilon numerical
+<span class="ln">  78</span>    difference between the numpy and pure-Python cores can never change which
+<span class="ln">  79</span>    sentences are chosen — both backends always produce the same summary (a
+<span class="ln">  80</span>    committed context.md must not depend on whether numpy happens to be present).&quot;&quot;&quot;
+<span class="ln">  81</span>    order = sorted(range(len(sentences)),
+<span class="ln">  82</span>                   key=lambda i: (round(scores[i], 10), -i), reverse=True)
+<span class="ln">  83</span>    return [sentences[i] for i in sorted(order[:k])]
+<span class="ln">  84</span>
+<span class="ln">  85</span>
+<span class="ln">  86</span>def backend_name():
+<span class="ln">  87</span>    try:
+<span class="ln">  88</span>        import numpy  # noqa: F401
+<span class="ln">  89</span>        return &quot;TextRank (vendored, numpy-accelerated)&quot;</pre>
+</div><p class="mini">源码索引：<code>src/scripts/summarizer.py:54</code> · <code>src/scripts/summarizer.py:55</code> · <code>src/scripts/summarizer.py:56</code> · <code>src/scripts/summarizer.py:57</code> · <code>src/scripts/summarizer.py:58</code> · <code>src/scripts/summarizer.py:59</code> · <code>src/scripts/summarizer.py:60</code> · <code>src/scripts/summarizer.py:61</code> · <code>src/scripts/summarizer.py:62</code> · <code>src/scripts/summarizer.py:63</code> · <code>src/scripts/summarizer.py:64</code> · <code>src/scripts/summarizer.py:65</code> · <code>src/scripts/summarizer.py:66</code> · <code>src/scripts/summarizer.py:67</code> · <code>src/scripts/summarizer.py:68</code> · <code>src/scripts/summarizer.py:69</code> · <code>src/scripts/summarizer.py:70</code> · <code>src/scripts/summarizer.py:71</code> · <code>src/scripts/summarizer.py:72</code> · <code>src/scripts/summarizer.py:73</code> · <code>src/scripts/summarizer.py:74</code> · <code>src/scripts/summarizer.py:75</code> · <code>src/scripts/summarizer.py:76</code> · <code>src/scripts/summarizer.py:77</code> · <code>src/scripts/summarizer.py:78</code> · <code>src/scripts/summarizer.py:79</code> · <code>src/scripts/summarizer.py:80</code> · <code>src/scripts/summarizer.py:81</code> · <code>src/scripts/summarizer.py:82</code> · <code>src/scripts/summarizer.py:83</code> · <code>src/scripts/summarizer.py:84</code> · <code>src/scripts/summarizer.py:85</code> · <code>src/scripts/summarizer.py:86</code> · <code>src/scripts/summarizer.py:87</code> · <code>src/scripts/summarizer.py:88</code> · <code>src/scripts/summarizer.py:89</code> · <code>src/scripts/summarizer.py:90</code> · <code>src/scripts/summarizer.py:91</code> · <code>src/scripts/summarizer.py:92</code> · <code>src/scripts/summarizer.py:93</code> · <code>src/scripts/summarizer.py:94</code> · <code>src/scripts/summarizer.py:95</code> · <code>src/scripts/summarizer.py:96</code> · <code>src/scripts/summarizer.py:97</code> · <code>src/scripts/summarizer.py:98</code></p></section>
+<section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>中段状态转换</h3><p>这一段通常体现最关键的状态转换：解析、选择、打分、写入或安全检查。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/scripts/summarizer.py</span> · L90-129 <small>repo: scripts/summarizer.py</small></span><span>Python</span></div>
+  <pre class="code"><span class="ln">  90</span>    except ImportError:
+<span class="ln">  91</span>        return &quot;TextRank (vendored, pure Python)&quot;
+<span class="ln">  92</span>
+<span class="ln">  93</span>
+<span class="ln">  94</span># --- shared TF-IDF ----------------------------------------------------------
+<span class="ln">  95</span>
+<span class="ln">  96</span>def _idf(tokens):
+<span class="ln">  97</span>    n = len(tokens)
+<span class="ln">  98</span>    df = Counter()
+<span class="ln">  99</span>    for toks in tokens:
+<span class="ln"> 100</span>        for w in set(toks):
+<span class="ln"> 101</span>            df[w] += 1
+<span class="ln"> 102</span>    return {w: math.log((1.0 + n) / (1.0 + d)) + 1.0 for w, d in df.items()}
+<span class="ln"> 103</span>
+<span class="ln"> 104</span>
+<span class="ln"> 105</span># --- pure-Python core -------------------------------------------------------
+<span class="ln"> 106</span>
+<span class="ln"> 107</span>def _tfidf_sparse(tokens, idf):
+<span class="ln"> 108</span>    vecs = []
+<span class="ln"> 109</span>    for toks in tokens:
+<span class="ln"> 110</span>        if not toks:
+<span class="ln"> 111</span>            vecs.append({})
+<span class="ln"> 112</span>            continue
+<span class="ln"> 113</span>        tf = Counter(toks)
+<span class="ln"> 114</span>        length = len(toks)
+<span class="ln"> 115</span>        vec = {w: (c / length) * idf[w] for w, c in tf.items()}
+<span class="ln"> 116</span>        norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
+<span class="ln"> 117</span>        vecs.append({w: v / norm for w, v in vec.items()})
+<span class="ln"> 118</span>    return vecs
+<span class="ln"> 119</span>
+<span class="ln"> 120</span>
+<span class="ln"> 121</span>def _cosine(a, b):
+<span class="ln"> 122</span>    if len(a) &gt; len(b):
+<span class="ln"> 123</span>        a, b = b, a
+<span class="ln"> 124</span>    return sum(val * b.get(w, 0.0) for w, val in a.items())
+<span class="ln"> 125</span>
+<span class="ln"> 126</span>
+<span class="ln"> 127</span>def _textrank_python(tokens, idf):
+<span class="ln"> 128</span>    vecs = _tfidf_sparse(tokens, idf)
+<span class="ln"> 129</span>    n = len(vecs)</pre>
+</div><h3><span class="arr">▸</span>末段收束</h3><p>收束段决定失败是否显式返回、结果是否稳定落盘，以及调用者能否继续恢复。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/scripts/summarizer.py</span> · L120-155 <small>repo: scripts/summarizer.py</small></span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 120</span>
+<span class="ln"> 121</span>def _cosine(a, b):
+<span class="ln"> 122</span>    if len(a) &gt; len(b):
+<span class="ln"> 123</span>        a, b = b, a
+<span class="ln"> 124</span>    return sum(val * b.get(w, 0.0) for w, val in a.items())
+<span class="ln"> 125</span>
+<span class="ln"> 126</span>
+<span class="ln"> 127</span>def _textrank_python(tokens, idf):
+<span class="ln"> 128</span>    vecs = _tfidf_sparse(tokens, idf)
+<span class="ln"> 129</span>    n = len(vecs)
+<span class="ln"> 130</span>    sim = [[0.0] * n for _ in range(n)]
+<span class="ln"> 131</span>    for i in range(n):
+<span class="ln"> 132</span>        for j in range(i + 1, n):
+<span class="ln"> 133</span>            c = _cosine(vecs[i], vecs[j])
+<span class="ln"> 134</span>            if c:
+<span class="ln"> 135</span>                sim[i][j] = sim[j][i] = c
+<span class="ln"> 136</span>    row_sum = [sum(row) for row in sim]
+<span class="ln"> 137</span>
+<span class="ln"> 138</span>    scores = [1.0 / n] * n
+<span class="ln"> 139</span>    base = (1.0 - _DAMPING) / n
+<span class="ln"> 140</span>    for _ in range(_MAX_ITERS):
+<span class="ln"> 141</span>        new = [base] * n
+<span class="ln"> 142</span>        for i in range(n):
+<span class="ln"> 143</span>            if row_sum[i] == 0.0:
+<span class="ln"> 144</span>                continue
+<span class="ln"> 145</span>            share = _DAMPING * scores[i] / row_sum[i]
+<span class="ln"> 146</span>            row = sim[i]
+<span class="ln"> 147</span>            for j in range(n):
+<span class="ln"> 148</span>                w = row[j]
+<span class="ln"> 149</span>                if w:
+<span class="ln"> 150</span>                    new[j] += share * w
+<span class="ln"> 151</span>        if sum(abs(new[i] - scores[i]) for i in range(n)) &lt; _TOL:
+<span class="ln"> 152</span>            scores = new
+<span class="ln"> 153</span>            break
+<span class="ln"> 154</span>        scores = new
+<span class="ln"> 155</span>    return scores</pre>
+</div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><h3><span class="arr">▸</span>流程拆解</h3><div class="flow"><span class="flow-stage">input</span> → normalize → validate → output<br><span class="flow-stage">failure</span> → explicit fallback / error record → caller decision</div><p>如果后续改动触碰这些行，主页面对应的风险判断也要重跑。</p></section>
+<section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><h3><span class="arr">▸</span>边界列表</h3><ul><li>空输入或缺失字段必须被显式处理。</li><li>外部命令、模型调用或文件写入失败不能覆盖原始上下文。</li><li>路径别名仅用于索引兼容；实际源码位置见每个代码块的 repo 标注。</li></ul></section>
+<section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">上游入口</div><div class="card-d">决定该模块收到的数据是否可信。</div></div><div class="card"><div class="card-h">下游消费者</div><div class="card-d">决定返回值需要保留多少错误细节。</div></div></div></section>
+<div class="foot"><span>Sub-page · 2026-06-29</span><span>Source · <a href="https://github.com/raiyanyahya/recall">raiyanyahya/recall</a></span><span><a href="../recall.html">↑ recall 主页面</a></span></div></main></div><script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'dark'});</script>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.remove('active')); const a = map.get(e.target); if (a) a.classList.add('active'); } }), { rootMargin: '-40% 0px -55% 0px' });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) { links.forEach(a => { const o = document.createElement('option'); o.value = a.getAttribute('href'); o.textContent = a.textContent.trim(); sel.appendChild(o); }); sel.addEventListener('change', e => location.href = e.target.value); }
+  const canvas = document.getElementById('stars'); if (!canvas) return; const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; }; resize(); addEventListener('resize', resize);
+  const stars = Array.from({length:72}, () => ({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));
+  const tick = () => { ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--star-soft'); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); }; tick();
+})();
+</script>
+</body></html>

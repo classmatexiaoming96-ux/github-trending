@@ -1,0 +1,119 @@
+import os
+
+import common
+import make_context
+from _util import assistant, make_jsonl, user
+from config import load_config
+
+
+def test_context_has_facts_and_clean_summary(tmp_path):
+    cwd = str(tmp_path)
+    t = os.path.join(cwd, "sessCCCC3333.jsonl")
+    make_jsonl(t, [
+        user("Refactor the database layer to Postgres and add tests"),
+        assistant(
+            "Migrated the connection layer to Postgres and added integration "
+            "tests. Token sk-ant-ABCDEFGHIJKLMNOP123 should be redacted.",
+            [("Write", {"file_path": "db.py"}), ("Bash", {"command": "pytest -q"})],
+        ),
+    ])
+
+    assert make_context.run(cwd, transcript_path=t, quiet=True) == 0
+    ctx = common.read_text(common.context_path(cwd, load_config(cwd)))
+
+    # Deterministic facts.
+    assert "Refactor the database layer to Postgres" in ctx  # goal
+    assert "db.py" in ctx                                    # files touched
+    assert "pytest -q" in ctx                                # commands run
+    # Redaction applied to the written file.
+    assert "sk-ant-ABCDEFGHIJKLMNOP123" not in ctx
+
+    # The summary section must not contain history.md markdown chrome.
+    summary = ctx.split("## 🧭 Summary")[1].split("## ⏭️")[0]
+    assert "#" not in summary
+    assert "`" not in summary
+    assert "**You:**" not in summary and "**Claude:**" not in summary
+
+
+def test_ignores_slash_command_meta_and_own_save(tmp_path):
+    cwd = str(tmp_path)
+    t = os.path.join(cwd, "sessDDDD4444.jsonl")
+    make_jsonl(t, [
+        user("Implement the parser module with full coverage"),
+        assistant("Done.", [("Write", {"file_path": "parser.py"})]),
+        # a /recall:save invocation: a command-meta user turn + the save command
+        user("<command-name>/recall:save</command-name>"),
+        assistant("Saving the context now.",
+                  [("Bash", {"command": 'python3 "/x/scripts/make_context.py" --cwd .'})]),
+    ])
+    assert make_context.run(cwd, transcript_path=t, quiet=True) == 0
+    ctx = common.read_text(common.context_path(cwd, load_config(cwd)))
+    assert "Implement the parser module" in ctx     # real goal, not the slash command
+    assert "command-name" not in ctx                # meta turn filtered out
+    assert "make_context.py" not in ctx             # own save command not listed
+
+
+def test_next_steps_section_extracts_cues(tmp_path):
+    cwd = str(tmp_path)
+    t = os.path.join(cwd, "sessEEEE5555.jsonl")
+    make_jsonl(t, [
+        user("Set up the auth module"),
+        assistant("Added login. Next I still need to add token refresh and write "
+                  "tests for the logout path. Should we support OAuth too?"),
+    ])
+    assert make_context.run(cwd, transcript_path=t, quiet=True) == 0
+    ctx = common.read_text(common.context_path(cwd, load_config(cwd)))
+    nxt = ctx.split("## ⏭️ Next steps / open threads")[1].split("## 📂")[0]
+    assert "_(none detected)_" not in nxt
+    assert "token refresh" in nxt or "OAuth" in nxt
+
+
+def test_next_steps_filters_meta_and_trivial_questions(tmp_path):
+    cwd = str(tmp_path)
+    t = os.path.join(cwd, "sessHHHH8888.jsonl")
+    make_jsonl(t, [
+        user("In 3-4 sentences confirm the plan and list the next steps you'd take."),
+        assistant("Concrete next steps:\n"
+                  "Plan confirmed. Looks good, anything left? "
+                  "Note this is from saved Recall context and not yet verified. "
+                  "Next I still need to add the Redis backend so limits are shared."),
+    ])
+    assert make_context.run(cwd, transcript_path=t, quiet=True) == 0
+    ctx = common.read_text(common.context_path(cwd, load_config(cwd)))
+    nxt = ctx.split("## ⏭️ Next steps / open threads")[1].split("## 📂")[0]
+
+    assert "Redis backend" in nxt                       # the genuine step is kept
+    assert "confirm the plan" not in nxt.lower()        # echoed prompt/instruction dropped
+    assert "anything left" not in nxt.lower()           # trivial question dropped
+    assert "concrete next steps" not in nxt.lower()     # header/label line dropped
+    assert "recall context" not in nxt.lower()          # Recall's own boilerplate dropped
+
+
+def test_standalone_save_falls_back_to_substantive_session(tmp_path, monkeypatch):
+    cwd = str(tmp_path)
+    # The "current" transcript is just a /recall:save invocation — no real prompt.
+    current = os.path.join(cwd, "save_only.jsonl")
+    make_jsonl(current, [
+        user("<command-name>/recall:save</command-name>"),
+        assistant("Saving.", [("Bash", {"command": "python3 x/make_context.py"})]),
+    ])
+    # An earlier session that actually did work.
+    work = os.path.join(cwd, "work.jsonl")
+    make_jsonl(work, [
+        user("Add a rate limiter to the API gateway"),
+        assistant("Implemented it.", [("Write", {"file_path": "limiter.py"})]),
+    ])
+    monkeypatch.setattr(make_context, "project_transcripts",
+                        lambda _cwd: [current, work])
+
+    assert make_context.run(cwd, transcript_path=current, quiet=True) == 0
+    ctx = common.read_text(common.context_path(cwd, load_config(cwd)))
+    assert "Add a rate limiter" in ctx     # goal pulled from the work session
+    assert "limiter.py" in ctx
+    assert "command-name" not in ctx
+
+
+def test_missing_transcript_returns_nonzero(tmp_path):
+    cwd = str(tmp_path)
+    assert make_context.run(cwd, transcript_path=os.path.join(cwd, "nope.jsonl"),
+                            quiet=True) == 1
