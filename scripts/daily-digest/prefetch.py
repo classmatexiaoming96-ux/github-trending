@@ -38,26 +38,44 @@ def log(msg):
         print(f"[prefetch] {msg}", file=sys.stderr)
 
 def fetch_url(url, timeout=15):
-    """获取 URL 内容，返回 (content, error)"""
+    """获取 URL 内容，返回 (content, error)
+    优先使用 urllib，失败后回退到 curl (绕过 Cloudflare)"""
     try:
         req = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Mozilla/5.0 (compatible; DailyDigestBot/1.0; +https://github.com/classmatexiaoming96-ux/github-trending)",
-                "Accept": "application/rss+xml, application/xml, text/xml, application/json, text/html, */*",
-                "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
             }
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            # 跳过图片等非文本内容
-            if "text" not in content_type and "json" not in content_type:
-                log(f"Skipping non-text content type: {content_type}")
-                return None, "Non-text content"
-            return resp.read().decode("utf-8", errors="replace"), None
+            content = resp.read().decode("utf-8", errors="replace")
+            # 检查是否被 Cloudflare 拦截
+            if "not a bot" in content.lower() or "captcha" in content.lower():
+                log("urllib blocked by Cloudflare, falling back to curl")
+                return _fetch_with_curl(url, timeout)
+            return content, None
     except Exception as e:
-        log(f"Failed to fetch {url}: {e}")
-        return None, str(e)
+        log(f"urllib failed: {e}, falling back to curl")
+        return _fetch_with_curl(url, timeout)
+
+
+def _fetch_with_curl(url, timeout=15):
+    """使用 curl 获取 URL (绕过 Cloudflare 验证)"""
+    import subprocess
+    try:
+        cmd = ["curl", "-sL", "--max-time", str(timeout), url]
+        # 如果设置了代理环境变量
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        if proxy:
+            cmd.extend(["--proxy", proxy])
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        if result.returncode == 0 and result.stdout:
+            return result.stdout, None
+        return None, f"curl failed (exit {result.returncode}): {result.stderr[:200]}"
+    except Exception as e:
+        return None, f"curl error: {e}"
 
 def parse_rss(xml_content, max_items=10):
     """解析 RSS XML，返回条目列表"""
@@ -104,14 +122,79 @@ def fetch_google_news(url, label, icon, max_items=10):
         item["source_icon"] = icon
     return items
 
+def parse_nitter_html(html_content, max_items=10):
+    """从 Nitter HTML 页面解析推文（RSS 端点不可用时使用）"""
+    items = []
+    try:
+        # 提取推文块：找 tweet-content + username + tweet-link
+        # Nitter 搜索页面每条推文的结构：
+        # <div class="timeline-item"> 内包含 tweet-content, username, tweet-link
+        tweet_pattern = re.compile(
+            r'<div\s+class="timeline-item[^"]*".*?'
+            r'class="tweet-content[^"]*"[^>]*>(.*?)</(?:div|span)>',
+            re.DOTALL
+        )
+        contents = tweet_pattern.findall(html_content)
+
+        usernames = re.findall(
+            r'class="username[^"]*"[^>]*>@*([^<]+)',
+            html_content
+        )
+        links = re.findall(
+            r'class="tweet-link[^"]*"\s+href="([^"]+)"',
+            html_content
+        )
+
+        # 按 max_items 限制
+        count = min(len(contents), max_items)
+        for i in range(count):
+            content = re.sub(r'<[^>]+>', '', contents[i]).strip()
+            if not content:
+                continue
+            username = usernames[i].strip() if i < len(usernames) else ""
+            link = links[i] if i < len(links) else ""
+            # 补全相对链接
+            if link and link.startswith("/"):
+                link = "https://nitter.tiekoetter.com" + link
+
+            items.append({
+                "title": content[:120],
+                "link": link,
+                "pubDate": "",
+                "description": content[:200] + "..." if len(content) > 200 else content,
+                "source": f"@{username}",
+            })
+
+        if items:
+            log(f"Nitter HTML parse: {len(items)} tweets")
+        else:
+            log("Nitter HTML parse: no tweets found, trying RSS fallback")
+    except Exception as e:
+        log(f"Nitter HTML parse error: {e}")
+
+    return items
+
+
 def fetch_nitter(url, label, icon, max_items=10):
-    """抓取 Nitter (X/Twitter) 搜索结果 RSS"""
+    """抓取 Nitter (X/Twitter) 搜索结果
+    优先尝试 RSS，失败后回退到 HTML 页面解析"""
     log(f"Fetching Nitter: {label}")
     content, err = fetch_url(url)
     if err or not content:
         log(f"Nitter fetch failed: {err}")
         return []
+
+    # 1) 尝试 RSS 解析
     items = parse_rss(content, max_items)
+    if items:
+        for item in items:
+            item["source_label"] = label
+            item["source_icon"] = icon
+        return items
+
+    # 2) RSS 不行 → HTML 回退
+    log("RSS empty, falling back to HTML parsing")
+    items = parse_nitter_html(content, max_items)
     for item in items:
         item["source_label"] = label
         item["source_icon"] = icon

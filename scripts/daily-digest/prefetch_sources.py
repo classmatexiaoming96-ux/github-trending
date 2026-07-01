@@ -14,16 +14,20 @@ GOOGLE_NEWS_EN_ICON = "🌐"
 
 # X (Twitter) AI Trending via Nitter (免费开源替代)
 # 注意: Nitter 实例可能不稳定，请确认可用实例
-X_TRENDING_URL = "https://nitter.net/search?q=%23AI+OR+%23ArtificialIntelligence+OR+%23MachineLearning&f=tweets"
+# 当前可用实例 (2026-07-01 实测):
+#   ✅ nitter.tiekoetter.com — 20 条 AI 推文 (走代理)
+#   ❌ nitter.net — Caddy 200 但内容 0
+#   ❌ nitter.privacyredirect.com — Cloudflare 验证拦截
+#   ❌ nitter.privacydev.net — 超时
+X_TRENDING_URL = "https://nitter.tiekoetter.com/search?q=%23AI+OR+%23ArtificialIntelligence+OR+%23MachineLearning&f=tweets"
 X_TRENDING_LABEL = "X (Twitter) AI Trending"
 X_TRENDING_ICON = "𝕏"
 
 # Nitter 实例列表 (按优先级尝试)
 NITTER_INSTANCES = [
+    "https://nitter.tiekoetter.com",
+    "https://nitter.privacyredirect.com",
     "https://nitter.net",
-    "https://nitter.privacydev.net",
-    "https://nitter.poast.org",
-    "https://nitter.unixfox.eu",
 ]
 
 # GitHub Trending AI (备选降级数据源)
