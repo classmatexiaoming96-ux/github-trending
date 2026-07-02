@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>looper · 设计型 agent loop 教练 · 源码观测台</title>
+<meta name="description" content="ksimback/looper 源码级深度解析 — /looper 命令如何在执行前先给 agent loop 装上 goal + verification + council + gates 四件套" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23a17fe0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #a17fe0;
+  --star-soft:  #b89bf0;
+  --star-deep:  #7d5dc4;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">looper<b>设计型 loop</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">looper<b>设计型 loop</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python · Claude Code skill</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>三段式拓扑：coach / spec / runner</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>核心抽象：goal + gates + council</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>关键流程：compile → resolve → run</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>终止守卫与隐私边界</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>技术亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与缺口</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★561 · 2026-06-24</div>
+      <div><a href="https://github.com/ksimback/looper" target="_blank">ksimback/looper</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">looper <em>设计型 agent loop</em></h1>
+          <p class="hero-desc">一个 Claude Code /looper skill：在跑 loop 之前先和用户做 7 轮访谈，把 goal、verification、host、council、gates 拷问成 YAML，再编译成 loop.resolved.json，交给可执行的 run-loop.py 或当前 session 的 RUN_IN_SESSION.md。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 561</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">2.1K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">12</div><div class="stat-lbl">核心文件</div></div>
+            <div class="stat"><div class="stat-num">2026-06-24</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+<div class="mermaid">
+flowchart LR
+    User([User intent])
+    subgraph Scaffold["Looper /looper wizard"]
+      S1[Goal + context]
+      S2[Verification criteria]
+      S3[Host + council models]
+      S4[Loop control + gates]
+      S5[Execution + privacy]
+      S6[Emit artifacts]
+      S1 --> S2 --> S3 --> S4 --> S5 --> S6
+    end
+    Y["loop.yaml"]:::data
+    R["loop.resolved.json"]:::data
+    L["LOOP.md"]:::data
+    P["RUN_IN_SESSION.md"]:::data
+    R1["run-loop.py"]:::data
+    User --> Scaffold
+    Scaffold --> Y
+    Y -- compile --> R
+    R -- render --> L
+    R -- render --> P
+    R -- read --> R1
+    subgraph Run["Runner.run loop"]
+      G["gather_context"]:::node
+      H["run_host plan"]:::node
+      PG["plan_gate"]:::node
+      Loop{{"iterate i<N"}}:::node
+      HD["run_host delivery"]:::node
+      DG["delivery_gate"]:::node
+      NoP{{"no progress x N"}}:::node
+      Stop1["stop: pass gates"]:::stop
+      Stop2["stop: budget"]:::stop
+      Stop3["stop: no_progress"]:::stop
+    end
+    R1 --> G --> H --> PG --> Loop
+    Loop -- iterate --> HD --> DG
+    DG -- pass --> Stop1
+    DG -- revise_until_clean --> HD
+    DG -- failures x N --> NoP
+    NoP --> Stop3
+    DG -- budget --> Stop2
+    P -. in-session .-> H
+    classDef data fill:#1a1c22,stroke:#a17fe0,color:#b89bf0;
+    classDef node fill:#1a1c22,stroke:#54d6e0,color:#d6f6fb;
+    classDef stop fill:#1a1c22,stroke:#e08a64,color:#f0a585;
+</div>
+        </div>
+      </div>
+    </div>
+
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>Claude Code 自带的 <code>/goal</code> 让模型自己盯目标，<code>/loop</code> 是间隔调度器——<strong>二者都没强迫你把"什么是完成" (authored 为 <code>sources/ksimback-looper/schemas/loop.v1.schema.json:18</code>)写成可检验的形式，也没让你请第二个模型看一眼。</strong> Looper 正好卡在这个 gap 上：<code>scripts/looper.py</code> <code>sources/ksimback-looper/scripts/looper.py:1</code> 是一个 <em>scaffolder</em>，自身不会调用任何模型，只读 YAML、跑验证、写文件；真正跑 loop 的是被它 emit 出去的 <code>templates/run-loop.py</code> <code>sources/ksimback-looper/templates/run-loop.py:1</code>（外部 runner）或 <code>RUN_IN_SESSION.md</code> <code>sources/ksimback-looper/<code>SKILL.md</code> <code>sources/ksimback-looper/SKILL.md:1</code>:79</code>（当前 session prompt）。</p>
+      <p>从源码看，Looper 把"好 loop"拆成四件必需品：<strong>typed verification</strong>（programmatic / judge / human 三类）、<strong>可替换 council</strong>（reviewer 写笔记、judge 出 verdict）、<strong>三重终止守卫</strong>（max_iterations + gate.max_revisions + no_progress 签名）、<strong>跨 vendor 隐私边界</strong>（argv 不入 shell、转译前先 redact .env + secrets + .key）。任何一项缺失都会被 <code>normalize_spec()</code> <code>sources/ksimback-looper/scripts/looper.py:254</code> 当 <code>LooperError</code> <code>sources/ksimback-looper/scripts/looper.py:60</code> 抛出。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">Scaffolder + resolved-spec 单一可信源：coach 写 YAML，runner 只读 JSON；两套 exit path 共享同一个 loop.resolved.json</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">gate = {plan_gate, delivery_gate} + verdict_source + max_revisions；council = reviewer (notes) ≠ judge (verdict)</div>
+        </div>
+        <div class="card">
+          <div class="card-h">终止守卫</div>
+          <div class="card-d">三层保险：max_iterations、每个 gate 的 max_revisions、no_progress.signature 连续 N 次</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游 &amp; 测试</div>
+          <div class="card-d">依赖 PyYAML (<code>sources/ksimback-looper/scripts/looper.py:66</code> 在 <code>load_yaml</code> 强制导入) + stdlib；测试 fixtures 用 fake_host.py / fake_judge.py 模拟 host 与 judge，不依赖真实 CLI</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 三段式架构 → 核心四件套 → compile→run 流程 → 终止守卫与隐私 → 亮点 + 风险。子页面在 §02、§03、§04 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">三段式拓扑：<em>coach</em> / <em>spec</em> / <em>runner</em></h2>
+      <p>Looper 把"好 loop" 当成一份配置而不是一段 runtime。三段分别对应三组文件，<strong>严格单向数据流</strong>：<code>/looper</code> 写 <code>loop.yaml</code> → <code>scripts/looper.py compile</code> 把它压成 <code>loop.resolved.json</code> → 外部用 <code>templates/run-loop.py</code> 跑，或回到当前 session 按 <code>RUN_IN_SESSION.md</code> 跑。两个 runner 共享同一份 resolved spec，因此设计期做的小改动可以无损地换 surface。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">[Coach · /looper]</span>    Claude Code skill
+                       <span class="flow-arr">↓</span>
+                       <span class="flow-node">loop.yaml</span> (authoring)
+                       <span class="flow-arr">↓</span>
+<span class="flow-stage">[Compile · scripts/looper.py]</span>  validate + normalize + argv-expand
+                       <span class="flow-arr">↓</span>
+                  <span class="flow-node">loop.resolved.json</span>
+                       <span class="flow-arr">↓</span>
+       ┌───────────────┴───────────────┐
+       <span class="flow-arr">↓</span>                               <span class="flow-arr">↓</span>
+<span class="flow-stage">[Render]</span>                <span class="flow-stage">[External Runner]</span>
+   LOOP.md + RUN_IN_SESSION.md          <span class="flow-node">run-loop.py</span>
+       <span class="flow-arr">↓</span>   pasted into current session         (stdlib only, reads JSON)
+   <span class="flow-node">Runner.run</span> logic                       <span class="flow-arr">↓</span>
+   host → plan_gate → loop≤N        state.json + run-log.md</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>三段对应的 12 个源码文件 (主入口 <code>sources/ksimback-looper/scripts/looper.py:1</code>，运行端 <code>sources/ksimback-looper/templates/run-loop.py:1</code>)，<strong>所有运行时都站在 resolved.json 一侧</strong>，YAML 只在设计期触碰。</p>
+      <div class="g3">
+        <div class="card">
+          <div class="card-h">scripts/looper.py · 805 行</div>
+          <div class="card-d">Coach 端。detect_models / compile / register-model / session-prompt 4 个子命令；MODEL_PROBES 内置 5 个 CLI；normalize_spec 把 YAML 折叠成可执行 JSON。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">templates/run-loop.py · 588 行</div>
+          <div class="card-d">Runner 端。stdlib only，子进程调 host/council；Runner.run 是入口，run_gate 是 with-revision 的裁判循环，no_progress_reached 是签名式终止。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">schemas/loop.v1.schema.json</div>
+          <div class="card-d">JSON Schema draft 2020-12。规范 gating / verification / council 的合法形状。resolved schema 是同一份去掉了 $defs 的扁平版本。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">references/*.md</div>
+          <div class="card-d">5 份 rubric 文档 (<code>sources/ksimback-looper/references/control-rubric.md</code> 等)——coach 在不同 stage 按需加载，避免一次性塞进上下文。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">templates/loop.yaml</div>
+          <div class="card-d">作者模板。注释里要求 argv 数组、跨 vendor 默认 redact globs、loop_control 必须有 max_iterations + budget + no_progress。</div>
+        </div>
+        <div class="card">
+          <div class="card-h"><code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:37</code> examples/ai-workflow-mapping/</div>
+          <div class="card-d">唯一示例。演示 host 是 codex exec，judge 是 claude -p，2 gates 都用 revise_until_clean，配 USD + tokens + wall_clock 预算。</div>
+        </div>
+      </div>
+
+      <h3><span class="arr">▸</span>关键数据结构 — MODEL_PROBES</h3>
+      <p><code>codex / claude / gemini / llm / ollama</code> (<code>sources/ksimback-looper/scripts/looper.py:27-56</code>) 五个 CLI 的探测表是 detect_models 的真正秘密。它把"我能调用哪个模型"问成一个简单的 <code>--version</code> probe (`<code>scripts/looper.py:148-154</code>` 通过 `<code>run_probe()</code>` <code>sources/ksimback-looper/scripts/looper.py:122</code>)，而把 invocation 形状保留在 dict 里供 normalize_spec 直接读。schema 是开放式的，<code>register-model</code> <code>sources/ksimback-looper/scripts/looper.py:708</code> 子命令可追加新 CLI。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L23-61</span><span>Python</span></div>
+  <pre class="code"><span class="ln">  23</span>DEFAULT_REDACTIONS = [".env", ".env.*", "secrets/**", "**/*.key"]
+<span class="ln">  24</span>REGISTRY_PATH = Path.home() / ".looper" / "models.json"
+<span class="ln">  25</span>
+<span class="ln">  26</span>MODEL_PROBES: dict[str, dict[str, Any]] = {
+<span class="ln">  27</span>    "claude": {
+<span class="ln">  28</span>        "invoke": ["claude", "-p"],
+<span class="ln">  29</span>        "probe": ["claude", "--version"],
+<span class="ln">  30</span>        "local": False,
+<span class="ln">  31</span>        "install": "Install and authenticate the Claude CLI.",
+<span class="ln">  32</span>    },
+<span class="ln">  33</span>    "codex": {
+<span class="ln">  34</span>        "invoke": ["codex", "exec"],
+<span class="ln">  35</span>        "probe": ["codex", "--version"],
+<span class="ln">  36</span>        "local": False,
+<span class="ln">  37</span>        "install": "Install and authenticate the Codex CLI.",
+<span class="ln">  38</span>    },
+<span class="ln">  39</span>    "gemini": {
+<span class="ln">  40</span>        "invoke": ["gemini", "-p"],
+<span class="ln">  41</span>        "probe": ["gemini", "--version"],
+<span class="ln">  42</span>        "local": False,
+<span class="ln">  43</span>        "install": "Install and authenticate the Gemini CLI.",
+<span class="ln">  44</span>    },
+<span class="ln">  45</span>    "llm": {
+<span class="ln">  46</span>        "invoke": ["llm"],
+<span class="ln">  47</span>        "probe": ["llm", "--version"],
+<span class="ln">  48</span>        "local": False,
+<span class="ln">  49</span>        "install": "Install llm and configure a model/provider.",
+<span class="ln">  50</span>    },
+<span class="ln">  51</span>    "ollama": {
+<span class="ln">  52</span>        "invoke": ["ollama", "run"],
+<span class="ln">  53</span>        "probe": ["ollama", "--version"],
+<span class="ln">  54</span>        "local": True,
+<span class="ln">  55</span>        "install": "Install Ollama and pull a local model.",
+<span class="ln">  56</span>    },
+<span class="ln">  57</span>}
+<span class="ln">  58</span>
+<span class="ln">  59</span>
+<span class="ln">  60</span>class LooperError(RuntimeError):
+<span class="ln">  61</span>    pass</pre>
+</div>
+
+      <a class="deep-link" href="looper/looper-spec-schema.html">深度阅读 · YAML → resolved.json 的 normalize_spec 流程 →</a>
+    </section>
+
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">核心抽象：<em>goal + gates + council</em></h2>
+
+      <h3><span class="arr">▸</span>detect_models — 把"装了什么 CLI" 探成 registry，登记进 <code>~/.looper/models.json</code> <code>sources/ksimback-looper/scripts/looper.py:24</code></h3>
+      <p>codex / claude / gemini / llm / ollama 各自有 invoke / probe / local / install 四元组。looper 用 <code>shutil.which()</code> 找二进制，再用 <code>run_probe()</code> 调版本命令并截取第一行输出，封装成 JSON 存进 <code>~/.looper/models.json</code>，normalize_spec 之后用 <code>spec["host"]["invoke"]</code> / <code>council[*].invoke</code> 直接消费 (各 council member 在 <code>sources/ksimback-looper/scripts/looper.py:282</code> 校验)。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L145-166</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 145</span>def detect_models() -&gt; dict[str, Any]:
+<span class="ln"> 146</span>    registry: dict[str, Any] = {}
+<span class="ln"> 147</span>    for model_id, meta in MODEL_PROBES.items():
+<span class="ln"> 148</span>        cli = meta["invoke"][0]
+<span class="ln"> 149</span>        path = shutil.which(cli)
+<span class="ln"> 150</span>        available = path is not None
+<span class="ln"> 151</span>        authed = False
+<span class="ln"> 152</span>        version = ""
+<span class="ln"> 153</span>        if available:
+<span class="ln"> 154</span>            authed, version = run_probe(meta["probe"])
+<span class="ln"> 155</span>        registry[model_id] = {
+<span class="ln"> 156</span>            "cli": cli,
+<span class="ln"> 157</span>            "path": path,
+<span class="ln"> 158</span>            "invoke": meta["invoke"],
+<span class="ln"> 159</span>            "available": available,
+<span class="ln"> 160</span>            "authed": authed,
+<span class="ln"> 161</span>            "local": meta["local"],
+<span class="ln"> 162</span>            "probe": meta["probe"],
+<span class="ln"> 163</span>            "version": version,
+<span class="ln"> 164</span>            "install": meta["install"],
+<span class="ln"> 165</span>        }
+<span class="ln"> 166</span>    return registry</pre>
+</div>
+      <h3><span class="arr">▸</span>validate_gate — gate 三段约束</h3>
+      <p>每个 gate 必须是 {plan_gate, delivery_gate} 之一；<code>verdict_policy</code> 只允许 <code>revise_until_clean</code> 或 <code>fixed_passes</code> <code>sources/ksimback-looper/scripts/looper.py:233</code> 第二种策略；<code>criteria</code> 必须在 <code>criteria_by_id</code> 已注册的判定之列；<code>members</code> 必须在 council 里。revise_until_clean 还要 <strong>verdict_source 是 judge 角色或 human</strong>——这条强制区分了 reviewer 与 judge，否则下次循环会让 <code>structured verdict</code> 解析成 <code>unparseable_judge_output</code>。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L224-251</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 224</span>def validate_gate(
+<span class="ln"> 225</span>    name: str,
+<span class="ln"> 226</span>    gate: dict[str, Any],
+<span class="ln"> 227</span>    criteria: dict[str, dict[str, Any]],
+<span class="ln"> 228</span>    members: dict[str, dict[str, Any]],
+<span class="ln"> 229</span>) -&gt; None:
+<span class="ln"> 230</span>    if not isinstance(gate, dict):
+<span class="ln"> 231</span>        raise LooperError(f"{name} must be an object")
+<span class="ln"> 232</span>    policy = gate.get("verdict_policy")
+<span class="ln"> 233</span>    if policy not in {"revise_until_clean", "fixed_passes"}:
+<span class="ln"> 234</span>        raise LooperError(f"{name}.verdict_policy must be revise_until_clean or fixed_passes")
+<span class="ln"> 235</span>    max_revisions = gate.get("max_revisions", 1)
+<span class="ln"> 236</span>    if not isinstance(max_revisions, int) or max_revisions &lt; 0:
+<span class="ln"> 237</span>        raise LooperError(f"{name}.max_revisions must be a non-negative integer")
+<span class="ln"> 238</span>    for cid in gate.get("criteria", []):
+<span class="ln"> 239</span>        if cid not in criteria:
+<span class="ln"> 240</span>            raise LooperError(f"{name} references unknown criterion: {cid}")
+<span class="ln"> 241</span>    for mid in gate.get("members", []):
+<span class="ln"> 242</span>        if mid not in members:
+<span class="ln"> 243</span>            raise LooperError(f"{name} references unknown council member: {mid}")
+<span class="ln"> 244</span>    if policy == "revise_until_clean":
+<span class="ln"> 245</span>        source = gate.get("verdict_source")
+<span class="ln"> 246</span>        if source == "human":
+<span class="ln"> 247</span>            return
+<span class="ln"> 248</span>        if source not in members:
+<span class="ln"> 249</span>            raise LooperError(f"{name}.verdict_source must be a judge member or human")
+<span class="ln"> 250</span>        if members[source].get("role") != "judge":
+<span class="ln"> 251</span>            raise LooperError(f"{name}.verdict_source must name a judge, not a reviewer")</pre>
+</div>
+      <h3><span class="arr">▸</span>normalize_spec — defaults / invariants 一次性补齐</h3>
+      <p>这一函数是 scaffolder 的灵魂。它对每个 key 做 <code>if not isinstance(...): LooperError(...)</code>，然后用大量 <code>setdefault()</code> 注入默认 (<code>loop_control.budget</code> 默认 30 分钟 <code>sources/ksimback-looper/scripts/looper.py:307</code>)；execution 设 <code>mode=in_session</code> / <code>isolation=current_workspace</code> / side_effects 双 true；observability 设 <code>state_file=state.json</code> + <code>run_log=run-log.md</code> + <code>checkpoint_granularity=gate</code>；privacy 默认 4 条 redact glob。spec 于是成为"可以安全地传给 runner 的纯数据"。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L254-290</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 254</span>def normalize_spec(spec: dict[str, Any], source_path: Path) -&gt; dict[str, Any]:
+<span class="ln"> 255</span>    if spec.get("version") != 1:
+<span class="ln"> 256</span>        raise LooperError("Only loop.yaml version: 1 is supported")
+<span class="ln"> 257</span>
+<span class="ln"> 258</span>    goal = spec.get("goal")
+<span class="ln"> 259</span>    if not isinstance(goal, dict):
+<span class="ln"> 260</span>        raise LooperError("goal must be an object")
+<span class="ln"> 261</span>    if not isinstance(goal.get("statement"), str) or not goal["statement"].strip():
+<span class="ln"> 262</span>        raise LooperError("goal.statement is required")
+<span class="ln"> 263</span>    if not isinstance(goal.get("definition_of_done"), str) or not goal["definition_of_done"].strip():
+<span class="ln"> 264</span>        raise LooperError("goal.definition_of_done is required")
+<span class="ln"> 265</span>
+<span class="ln"> 266</span>    for index, source in enumerate(goal.get("context_sources", [])):
+<span class="ln"> 267</span>        if not isinstance(source, dict):
+<span class="ln"> 268</span>            raise LooperError("goal.context_sources entries must be objects")
+<span class="ln"> 269</span>        if "cmd" in source:
+<span class="ln"> 270</span>            source["cmd"] = normalize_argv(source["cmd"], f"context_sources[{index}].cmd")
+<span class="ln"> 271</span>
+<span class="ln"> 272</span>    criteria = criteria_by_id(spec)
+<span class="ln"> 273</span>
+<span class="ln"> 274</span>    host = spec.get("host")
+<span class="ln"> 275</span>    if not isinstance(host, dict):
+<span class="ln"> 276</span>        raise LooperError("host must be an object")
+<span class="ln"> 277</span>    host["invoke"] = normalize_argv(host.get("invoke"), "host.invoke")
+<span class="ln"> 278</span>    host.setdefault("timeout_sec", 600)
+<span class="ln"> 279</span>    if not isinstance(host["timeout_sec"], int) or host["timeout_sec"] &lt;= 0:
+<span class="ln"> 280</span>        raise LooperError("host.timeout_sec must be a positive integer")
+<span class="ln"> 281</span>
+<span class="ln"> 282</span>    council_list = spec.get("council", [])
+<span class="ln"> 283</span>    if not isinstance(council_list, list):
+<span class="ln"> 284</span>        raise LooperError("council must be a list")
+<span class="ln"> 285</span>    for member in council_list:
+<span class="ln"> 286</span>        if not isinstance(member, dict):
+<span class="ln"> 287</span>            raise LooperError("council entries must be objects")
+<span class="ln"> 288</span>        validate_member(member)
+<span class="ln"> 289</span>    members = {member["id"]: member for member in council_list}
+<span class="ln"> 290</span></pre>
+</div>
+      <h3><span class="arr">▸</span>render_ascii_diagram — flow preview 编译器</h3>
+      <p>跑 loop 之前先给用户一段 ASCII flow，让 ta 看到"如果 budget=$5 会发生什么 / 哪些 gate 会让 host 改稿"。<code>ascii_box()</code> <code>sources/ksimback-looper/scripts/looper.py:409</code> 切出 +---+ 边框，<code>render_ascii_diagram()</code> 用 6 步固定脚手架：goal+context → plan → plan_gate → delivery → delivery_gate → final；每步的 verdict_source、max_revisions、wall_clock/USD/tokens 都从已 normalize 的 spec 读，输出直接进 LOOP.md 与 RUN_IN_SESSION.md。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L415-456</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 415</span>def render_ascii_diagram(resolved: dict[str, Any]) -&gt; str:
+<span class="ln"> 416</span>    gates = resolved.get("gates", {})
+<span class="ln"> 417</span>    control = resolved.get("loop_control", {})
+<span class="ln"> 418</span>    observability = resolved.get("observability", {})
+<span class="ln"> 419</span>    plan_gate = gates.get("plan_gate", {})
+<span class="ln"> 420</span>    delivery_gate = gates.get("delivery_gate", {})
+<span class="ln"> 421</span>    plan_revisions = plan_gate.get("max_revisions", 0)
+<span class="ln"> 422</span>    delivery_revisions = delivery_gate.get("max_revisions", 0)
+<span class="ln"> 423</span>    plan_source = plan_gate.get("verdict_source", "human")
+<span class="ln"> 424</span>    delivery_source = delivery_gate.get("verdict_source", "human")
+<span class="ln"> 425</span>    no_progress = control.get("no_progress", {})
+<span class="ln"> 426</span>    stalled = no_progress.get("max_stalled_iterations", 2)
+<span class="ln"> 427</span>    budget = control.get("budget", {})
+<span class="ln"> 428</span>    budget_bits = []
+<span class="ln"> 429</span>    if budget.get("wall_clock_min") is not None:
+<span class="ln"> 430</span>        budget_bits.append(f"{budget.get('wall_clock_min')}m")
+<span class="ln"> 431</span>    if budget.get("usd") is not None:
+<span class="ln"> 432</span>        budget_bits.append(f"${budget.get('usd')}")
+<span class="ln"> 433</span>    if budget.get("tokens") is not None:
+<span class="ln"> 434</span>        budget_bits.append(f"{budget.get('tokens')} tokens")
+<span class="ln"> 435</span>    budget_text = ", ".join(budget_bits) or "configured caps"
+<span class="ln"> 436</span>
+<span class="ln"> 437</span>    lines: list[str] = []
+<span class="ln"> 438</span>    lines.extend(ascii_box("1. Goal + context", "read sources"))
+<span class="ln"> 439</span>    lines.extend(["               |", "               v"])
+<span class="ln"> 440</span>    lines.extend(ascii_box("2. Draft plan.md", f"state -&gt; {observability.get('state_file', 'state.json')}"))
+<span class="ln"> 441</span>    lines.extend(["               |", "               v"])
+<span class="ln"> 442</span>    lines.extend(ascii_box("3. Plan gate", f"verdict: {plan_source}"))
+<span class="ln"> 443</span>    lines.extend([f"               | needs work -&gt; revise &lt;= {plan_revisions} -&gt; step 2", "               | pass", "               v"])
+<span class="ln"> 444</span>    lines.extend(ascii_box("4. Write delivery-N.md", f"log -&gt; {observability.get('run_log', 'run-log.md')}"))
+<span class="ln"> 445</span>    lines.extend(["               |", "               v"])
+<span class="ln"> 446</span>    lines.extend(ascii_box("5. Delivery gate", f"verdict: {delivery_source}"))
+<span class="ln"> 447</span>    lines.extend([f"               | needs work -&gt; revise &lt;= {delivery_revisions} -&gt; step 4", "               | pass", "               v"])
+<span class="ln"> 448</span>    lines.extend(ascii_box("6. Final output", "all gates clean"))
+<span class="ln"> 449</span>    lines.extend(
+<span class="ln"> 450</span>        [
+<span class="ln"> 451</span>            "",
+<span class="ln"> 452</span>            f"Stops: pass gates | max {control.get('max_iterations')} iterations | "
+<span class="ln"> 453</span>            f"no progress x{stalled} | budget {budget_text}",
+<span class="ln"> 454</span>        ]
+<span class="ln"> 455</span>    )
+<span class="ln"> 456</span>    return "\n".join(lines)</pre>
+</div>
+      <a class="deep-link" href="looper/looper-runner-loop.html">深度阅读 · Runner.run 终止守卫与隐私边界 →</a>
+    </section>
+
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键流程：<em>compile → resolve → run</em></h2>
+      <p>最值得拆的是 <strong>spec 在三段时间里扮演的不同角色</strong>：<em>authoring</em> 时它是带注释的人类可读 YAML；<em>compile</em> 时它是 normalize_spec 的输入；<em>run</em> 时它是被 load_json() 解析的 dict-form。resolved 阶段是 boundary——一次折叠换来两套 runner（外部 Python / 当前 session prompt）共享同一份 truth。</p>
+
+      <h3><span class="arr">▸</span>compile 流程</h3>
+      <div class="flow"><span class="flow-stage">[user invokes /looper]</span>   target = ./looper-output
+                              <span class="flow-arr">↓</span>
+<span class="flow-stage">[load YAML]</span>   load_yaml → <code>PyYAML safe_load</code> (<code>sources/ksimback-looper/scripts/looper.py:74</code>) → dict
+                              <span class="flow-arr">↓</span>
+<span class="flow-stage">[normalize]</span>   normalize_spec → add criteria_by_id + council_by_id
+                              <span class="flow-arr">↓</span>
+<span class="flow-stage">[write JSON]</span>   loop.resolved.json  (canonical truth)
+                              <span class="flow-arr">↓</span>
+        ┌─────────────────────┴─────────────────────┐
+        <span class="flow-arr">↓</span>                                         <span class="flow-arr">↓</span>
+<span class="flow-stage">[render LOOP.md]</span>                  <span class="flow-stage">[render RUN_IN_SESSION.md]</span>
+   title + goal + DoD + verification           12-step operator instructions
+   + council + gates + loop control             + per-gate clauses
+   + execution + observability                   + privacy + start-now
+                              <span class="flow-arr">↓</span>
+       <span class="flow-stage">[emit run-loop.py]</span>  copy from templates/ unchanged</div>
+
+      <h3><span class="arr">▸</span>cmd_compile — 三文件一次写</h3>
+      <p><code>cmd_compile()</code> 是 normalize_spec 的 dispatch 入口。它一次写三份产物：resolved JSON、LOOP.md (人类摘要)、RUN_IN_SESSION.md (当前 session prompt)。三份产物都从同一个 resolved dict 派生——保证作者改一处 YAML，三处产物都跟着重构。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L726-743</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 726</span>def cmd_compile(args: argparse.Namespace) -&gt; int:
+<span class="ln"> 727</span>    source = args.loop_yaml.resolve()
+<span class="ln"> 728</span>    spec = load_yaml(source)
+<span class="ln"> 729</span>    resolved = normalize_spec(spec, source)
+<span class="ln"> 730</span>    out = args.out or source.with_name("loop.resolved.json")
+<span class="ln"> 731</span>    write_json(out, resolved)
+<span class="ln"> 732</span>    if args.render:
+<span class="ln"> 733</span>        args.render.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln"> 734</span>        args.render.write_text(render_loop(resolved), encoding="utf-8")
+<span class="ln"> 735</span>    if args.session_prompt:
+<span class="ln"> 736</span>        args.session_prompt.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln"> 737</span>        args.session_prompt.write_text(render_session_prompt(resolved), encoding="utf-8")
+<span class="ln"> 738</span>    print(f"Wrote {out}")
+<span class="ln"> 739</span>    if args.render:
+<span class="ln"> 740</span>        print(f"Wrote {args.render}")
+<span class="ln"> 741</span>    if args.session_prompt:
+<span class="ln"> 742</span>        print(f"Wrote {args.session_prompt}")
+<span class="ln"> 743</span>    return 0</pre>
+</div>
+      <h3><span class="arr">▸</span>Runner.run — 外部 runner 的主驱动</h3>
+      <p>子进程 + stdlib 实现：<code>gather_context()</code> <code>sources/ksimback-looper/templates/run-loop.py:287</code> 把 file/cmd context 写进 <code>workspace/context.md</code> 并 redact 默认敏感路径；跑 host 生成 <code>plan.md</code>；过 <code>plan_gate</code>；进入迭代循环：每轮 <code>run_host("delivery", delivery-i.md)</code> → <code>run_gate("delivery_gate", ...)</code>；任一 gate 的 revision 上限到达或 budget 烧穿即停。三种 stop 状态写进 <code>state.json</code> (<code>sources/ksimback-looper/templates/run-loop.py:543</code>)。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L542-567</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 542</span>    def run(self) -&gt; int:
+<span class="ln"> 543</span>        self.save_state(status="running")
+<span class="ln"> 544</span>        self.append_log("run_start", spec=str(self.spec_path))
+<span class="ln"> 545</span>        self.gather_context()
+<span class="ln"> 546</span>
+<span class="ln"> 547</span>        plan_path = self.workspace / "plan.md"
+<span class="ln"> 548</span>        if not plan_path.exists():
+<span class="ln"> 549</span>            self.run_host("plan", plan_path)
+<span class="ln"> 550</span>        if not self.run_gate("plan_gate", plan_path, "plan.md"):
+<span class="ln"> 551</span>            return 1
+<span class="ln"> 552</span>
+<span class="ln"> 553</span>        max_iterations = int(self.spec["loop_control"]["max_iterations"])
+<span class="ln"> 554</span>        for iteration in range(1, max_iterations + 1):
+<span class="ln"> 555</span>            self.<code>enforce_wall_clock</code> <code>sources/ksimback-looper/templates/run-loop.py:178</code>()
+<span class="ln"> 556</span>            self.save_state(status="delivery", iteration=iteration)
+<span class="ln"> 557</span>            delivery_path = self.workspace / f"delivery-{iteration}.md"
+<span class="ln"> 558</span>            self.run_host("delivery", delivery_path)
+<span class="ln"> 559</span>            if self.run_gate("delivery_gate", delivery_path, delivery_path.name):
+<span class="ln"> 560</span>                self.save_state(status="passed", final_delivery=str(delivery_path), completed_at=utc_now())
+<span class="ln"> 561</span>                self.append_log("run_passed", final_delivery=str(delivery_path))
+<span class="ln"> 562</span>                print(f"Looper run passed. Final delivery: {delivery_path}")
+<span class="ln"> 563</span>                return 0
+<span class="ln"> 564</span>
+<span class="ln"> 565</span>        self.save_state(status="failed", failure="max_iterations_reached")
+<span class="ln"> 566</span>        self.append_log("stop", reason="max_iterations_reached")
+<span class="ln"> 567</span>        return 1</pre>
+</div>
+      <h3><span class="arr">▸</span>run-loop.py — host / judge / reviewers 的 subprocess 边界</h3>
+      <p>每一个 model 调用都走 <code>subprocess.run(argv, ...)</code> <code>sources/ksimback-looper/templates/run-loop.py:84</code>，argv 是 list 而非字符串；<code>timeout_sec</code> 来自 spec 各处；wall_clock 由 <code>enforce_wall_clock()</code> 用 <code>time.monotonic()</code> <code>sources/ksimback-looper/templates/run-loop.py:154</code> 在 <code>enforce_wall_clock</code> <code>sources/ksimback-looper/templates/run-loop.py:178</code> 在每次外部调用前检查；judge verdict 用 fence'd JSON 解析，无法解析就降级为 <code>REVISE</code>。这相当于在 judge 那里又加了一道 (<code>sources/ksimback-looper/templates/run-loop.py:117-132</code> 的两段 except 分支)"不解析就修"的兜底。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L112-140</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 112</span>def parse_judge_output(text: str) -&gt; dict[str, Any]:
+<span class="ln"> 113</span>    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+<span class="ln"> 114</span>    candidate = fenced.group(1) if fenced else text.strip()
+<span class="ln"> 115</span>    try:
+<span class="ln"> 116</span>        parsed = json.loads(candidate)
+<span class="ln"> 117</span>    except json.JSONDecodeError:
+<span class="ln"> 118</span>        return {
+<span class="ln"> 119</span>            "verdict": REVISE,
+<span class="ln"> 120</span>            "<code>blocking_issues</code> <code>sources/ksimback-looper/templates/run-loop.py:115</code>": ["Judge output was not parseable JSON."],
+<span class="ln"> 121</span>            "confidence": 0.0,
+<span class="ln"> 122</span>            "notes": text.strip(),
+<span class="ln"> 123</span>            "warning": "unparseable_judge_output",
+<span class="ln"> 124</span>        }
+<span class="ln"> 125</span>    if not isinstance(parsed, dict):
+<span class="ln"> 126</span>        return {
+<span class="ln"> 127</span>            "verdict": REVISE,
+<span class="ln"> 128</span>            "blocking_issues": ["Judge output was not a JSON object."],
+<span class="ln"> 129</span>            "confidence": 0.0,
+<span class="ln"> 130</span>            "notes": text.strip(),
+<span class="ln"> 131</span>            "warning": "invalid_judge_output",
+<span class="ln"> 132</span>        }
+<span class="ln"> 133</span>    verdict = parsed.get("verdict")
+<span class="ln"> 134</span>    if verdict not in {PASS, REVISE}:
+<span class="ln"> 135</span>        parsed["verdict"] = REVISE
+<span class="ln"> 136</span>        parsed.setdefault("blocking_issues", []).append("Judge verdict was not pass or revise.")
+<span class="ln"> 137</span>    parsed.setdefault("blocking_issues", [])
+<span class="ln"> 138</span>    parsed.setdefault("confidence", 0.0)
+<span class="ln"> 139</span>    parsed.setdefault("notes", "")
+<span class="ln"> 140</span>    return parsed</pre>
+</div>
+      <a class="deep-link" href="looper/looper-spec-schema.html">深度阅读 · loop.yaml schema 全字段分解 →</a>
+    </section>
+
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">终止守卫、隐私边界与<em>测试策略</em></h2>
+      <p>这一章专门回答："<strong>loop 跑飞了怎么办？敏感内容会不会被回传到另一个 vendor？</strong>"——这两个问题是 Looper 比同代 loop 工具更值得用的核心理由。</p>
+
+      <h3><span class="arr">▸</span>run_gate — 带 revision 上限的裁判 while-loop</h3>
+      <p>每个 gate 是一个 <code>while True:</code>：先收 programmatic / human failures，再过 reviewer notes，<code>revise_until_clean</code> 时让 judge 给 <code>pass/revise + blocking_issues</code>，失败累加。如果 <code>no_progress_reached()</code> 触发或 <code>revision &gt;= max_revisions</code> 就写状态并 return False。每一次 verdict、revision、stop 都写 run-log.md，事件名是稳定的 key。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L451-540</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 451</span>    def run_gate(self, gate_name: str, artifact_path: Path, artifact_label: str) -&gt; bool:
+<span class="ln"> 452</span>        gate = self.spec["gates"][gate_name]
+<span class="ln"> 453</span>        criteria = self.criteria(gate.get("criteria", []))
+<span class="ln"> 454</span>        max_revisions = int(gate.get("max_revisions", 0))
+<span class="ln"> 455</span>        revision = 0
+<span class="ln"> 456</span>        self.append_log("gate_start", gate=gate_name, artifact=artifact_label)
+<span class="ln"> 457</span>
+<span class="ln"> 458</span>        while True:
+<span class="ln"> 459</span>            self.enforce_wall_clock()
+<span class="ln"> 460</span>            artifact_text = artifact_path.read_text(encoding="utf-8")
+<span class="ln"> 461</span>            review_parts: list[str] = []
+<span class="ln"> 462</span>            failures: list[str] = []
+<span class="ln"> 463</span>
+<span class="ln"> 464</span>            for criterion in criteria:
+<span class="ln"> 465</span>                if criterion["type"] == "programmatic":
+<span class="ln"> 466</span>                    result = self.run_programmatic(criterion)
+<span class="ln"> 467</span>                    review_parts.append(f"## Programmatic {criterion['id']}\n\n```json\n{json.dumps(result, indent=2)}\n```")
+<span class="ln"> 468</span>                    if not result["passed"]:
+<span class="ln"> 469</span>                        failures.append(f"Programmatic check failed: {criterion['id']}")
+<span class="ln"> 470</span>                elif criterion["type"] == "human":
+<span class="ln"> 471</span>                    result = self.human_check(criterion)
+<span class="ln"> 472</span>                    review_parts.append(f"## Human {criterion['id']}\n\n{result['notes']}")
+<span class="ln"> 473</span>                    if not result["passed"]:
+<span class="ln"> 474</span>                        failures.append(f"Human check failed: {criterion['id']}")
+<span class="ln"> 475</span>
+<span class="ln"> 476</span>            reviewer_notes = self.run_reviewers(
+<span class="ln"> 477</span>                gate_name,
+<span class="ln"> 478</span>                artifact_label,
+<span class="ln"> 479</span>                artifact_text,
+<span class="ln"> 480</span>                list(gate.get("members", [])),
+<span class="ln"> 481</span>            )
+<span class="ln"> 482</span>            review_parts.extend(reviewer_notes)
+<span class="ln"> 483</span>
+<span class="ln"> 484</span>            policy = gate.get("verdict_policy")
+<span class="ln"> 485</span>            verdict: dict[str, Any] | None = None
+<span class="ln"> 486</span>            if policy == "revise_until_clean" and not failures:
+<span class="ln"> 487</span>                source = gate.get("verdict_source")
+<span class="ln"> 488</span>                if source == "human":
+<span class="ln"> 489</span>                    answer = input(f"Type 'pass' if {artifact_label} is clean: ").strip().lower()
+<span class="ln"> 490</span>                    verdict = {
+<span class="ln"> 491</span>                        "verdict": PASS if answer == PASS else REVISE,
+<span class="ln"> 492</span>                        "blocking_issues": [] if answer == PASS else ["human requested revision"],
+<span class="ln"> 493</span>                        "confidence": 1.0,
+<span class="ln"> 494</span>                        "notes": "human verdict",
+<span class="ln"> 495</span>                    }
+<span class="ln"> 496</span>                else:
+<span class="ln"> 497</span>                    verdict = self.run_judge(source, gate_name, artifact_label, artifact_text, criteria)
+<span class="ln"> 498</span>                review_parts.append(f"## Verdict\n\n```json\n{json.dumps(verdict, indent=2)}\n```")
+<span class="ln"> 499</span>                if verdict.get("verdict") == REVISE:
+<span class="ln"> 500</span>                    failures.extend(verdict.get("blocking_issues") or ["Judge requested revision"])
+<span class="ln"> 501</span>
+<span class="ln"> 502</span>            if policy == "fixed_passes":
+<span class="ln"> 503</span>                if failures:
+<span class="ln"> 504</span>                    pass
+<span class="ln"> 505</span>                elif revision &gt;= max_revisions:
+<span class="ln"> 506</span>                    return True
+<span class="ln"> 507</span>                else:
+<span class="ln"> 508</span>                    failures.append("fixed_passes reviewer pass")
+<span class="ln"> 509</span>
+<span class="ln"> 510</span>            if not failures:
+<span class="ln"> 511</span>                self.save_state(status=f"{gate_name}_passed", **{gate_name: {"passed_at": utc_now()}})
+<span class="ln"> 512</span>                self.append_log("gate_passed", gate=gate_name, artifact=artifact_label)
+<span class="ln"> 513</span>                return True
+<span class="ln"> 514</span>
+<span class="ln"> 515</span>            review_text = "\n\n".join(review_parts + ["## Blocking Issues", "\n".join(f"- {item}" for item in failures)])
+<span class="ln"> 516</span>            review_path = self.workspace / f"review-{gate_name}-{revision + 1}.md"
+<span class="ln"> 517</span>            write_text(review_path, review_text)
+<span class="ln"> 518</span>            self.append_log("gate_blocked", gate=gate_name, review=review_path.name, failures=failures)
+<span class="ln"> 519</span>
+<span class="ln"> 520</span>            if self.no_progress_reached(gate_name, failures):
+<span class="ln"> 521</span>                return False
+<span class="ln"> 522</span>
+<span class="ln"> 523</span>            if revision &gt;= max_revisions:
+<span class="ln"> 524</span>                self.save_state(
+<span class="ln"> 525</span>                    status="failed",
+<span class="ln"> 526</span>                    failure=f"{gate_name}_max_revisions_reached",
+<span class="ln"> 527</span>                    last_review=str(review_path),
+<span class="ln"> 528</span>                )
+<span class="ln"> 529</span>                self.append_log("stop", reason=f"{gate_name}_max_revisions_reached")
+<span class="ln"> 530</span>                return False
+<span class="ln"> 531</span>
+<span class="ln"> 532</span>            revised = <code>call_model</code> <code>sources/ksimback-looper/templates/run-loop.py:101</code>(
+<span class="ln"> 533</span>                self.spec["host"],
+<span class="ln"> 534</span>                self.host_prompt("revise", artifact_text, review_text),
+<span class="ln"> 535</span>                self.base_dir,
+<span class="ln"> 536</span>            )
+<span class="ln"> 537</span>            write_text(artifact_path, revised)
+<span class="ln"> 538</span>            revision += 1
+<span class="ln"> 539</span>            self.save_state(status=f"{gate_name}_revision_{revision}", last_review=str(review_path))
+<span class="ln"> 540</span>            self.append_log("revision", gate=gate_name, revision=revision, artifact=artifact_label)</pre>
+</div>
+      <h3><span class="arr">▸</span>no_progress_reached — 同 signature 致死</h3>
+      <p>这是 Looper 的灵魂护栏。<strong>每次 gate 失败都把 sorted(failures) 做 signature</strong>，与 state.json 里的 previous signature 比对：相同就 +1，否则归零。如果连续达到 <code>max_stalled_iterations</code> <code>sources/ksimback-looper/templates/run-loop.py:193</code> 默认 2 (<code>sources/ksimback-looper/scripts/looper.py:311</code>)（默认 2），按 <code>action</code> 是 <code>stop</code> 还是 <code>human_checkpoint</code> 分叉 (<code>sources/ksimback-looper/templates/run-loop.py:210-218</code> action ∈ {stop, human_checkpoint})——前者直接标 failed，后者给用户一次 "continue" 的机会。即使 action 是 stop，这里仍给出 blocking_issues 让人工翻看。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L188-218</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 188</span>    def no_progress_reached(self, gate_name: str, failures: list[str]) -&gt; bool:
+<span class="ln"> 189</span>        if not failures:
+<span class="ln"> 190</span>            self.save_state(no_progress={"count": 0, "signature": "", "gate": gate_name})
+<span class="ln"> 191</span>            return False
+<span class="ln"> 192</span>        config = self.spec.get("loop_control", {}).get("no_progress", {})
+<span class="ln"> 193</span>        threshold = int(config.get("max_stalled_iterations", 2))
+<span class="ln"> 194</span>        signature = "\n".join(sorted(failures))
+<span class="ln"> 195</span>        previous = self.state.get("no_progress", {})
+<span class="ln"> 196</span>        same_gate = previous.get("gate") == gate_name
+<span class="ln"> 197</span>        same_signature = previous.get("signature") == signature
+<span class="ln"> 198</span>        count = int(previous.get("count", 0)) + 1 if same_gate and same_signature else 1
+<span class="ln"> 199</span>        progress = {
+<span class="ln"> 200</span>            "gate": gate_name,
+<span class="ln"> 201</span>            "signature": signature,
+<span class="ln"> 202</span>            "count": count,
+<span class="ln"> 203</span>            "threshold": threshold,
+<span class="ln"> 204</span>            "updated_at": utc_now(),
+<span class="ln"> 205</span>        }
+<span class="ln"> 206</span>        self.save_state(no_progress=progress)
+<span class="ln"> 207</span>        if count &lt; threshold:
+<span class="ln"> 208</span>            return False
+<span class="ln"> 209</span>        self.append_log("no_progress_detected", gate=gate_name, count=count, failures=failures)
+<span class="ln"> 210</span>        if config.get("action", "stop") == "human_checkpoint":
+<span class="ln"> 211</span>            answer = input("No-progress detected. Type 'continue' to allow one more revision: ").strip().lower()
+<span class="ln"> 212</span>            if answer == "continue":
+<span class="ln"> 213</span>                progress["count"] = 0
+<span class="ln"> 214</span>                self.save_state(no_progress=progress)
+<span class="ln"> 215</span>                self.append_log("no_progress_override", gate=gate_name)
+<span class="ln"> 216</span>                return False
+<span class="ln"> 217</span>        self.save_state(status="failed", failure="no_progress_detected", blocking_issues=failures)
+<span class="ln"> 218</span>        return True</pre>
+</div>
+      <h3><span class="arr">▸</span>redact_prompt_for_member — 转译给 council 之前先 redact</h3>
+      <p>这是隐私一票否决的边界。<code>gather_context()</code> 先按默认 redaction globs 排除 context source；<code>redact_prompt_for_member()</code> 又把 <code>.env / secrets/** / **/*.key</code> 整段内容从 prompt 里 <em>替换</em> 成 <code>[redacted:相对路径]</code>，并对每行长度 ≥ 8 的 stripped 行再替换一次——多一道防御，因为 .env 里常出现类似 <code>OPENAI_API_KEY=sk-...</code> 的整行值。读文件不上 UnicodeDecodeError &gt; 1MB 自动跳过，避免 secret 内容走 serde 路径爆炸。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L234-258</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 234</span>    def redact_prompt_for_member(self, member_id: str, prompt: str) -&gt; str:
+<span class="ln"> 235</span>        redactions = self.redactions_for(member_id)
+<span class="ln"> 236</span>        redacted = prompt
+<span class="ln"> 237</span>        for pattern in redactions:
+<span class="ln"> 238</span>            paths = list(self.base_dir.glob(pattern))
+<span class="ln"> 239</span>            if pattern.endswith("/**"):
+<span class="ln"> 240</span>                root = self.base_dir / pattern[:-3]
+<span class="ln"> 241</span>                if root.exists():
+<span class="ln"> 242</span>                    paths.extend(root.rglob("*"))
+<span class="ln"> 243</span>            for path in paths:
+<span class="ln"> 244</span>                if not path.is_file():
+<span class="ln"> 245</span>                    continue
+<span class="ln"> 246</span>                try:
+<span class="ln"> 247</span>                    secret_text = path.read_text(encoding="utf-8")
+<span class="ln"> 248</span>                except UnicodeDecodeError:
+<span class="ln"> 249</span>                    continue
+<span class="ln"> 250</span>                if not secret_text.strip() or len(secret_text) &gt; 1_000_000:
+<span class="ln"> 251</span>                    continue
+<span class="ln"> 252</span>                marker = f"[redacted:{path.relative_to(self.base_dir).as_posix()}]"
+<span class="ln"> 253</span>                redacted = redacted.replace(secret_text, marker)
+<span class="ln"> 254</span>                for line in secret_text.splitlines():
+<span class="ln"> 255</span>                    stripped = line.strip()
+<span class="ln"> 256</span>                    if len(stripped) &gt;= 8:
+<span class="ln"> 257</span>                        redacted = redacted.replace(stripped, marker)
+<span class="ln"> 258</span>        return redacted</pre>
+</div>
+      <h3><span class="arr">▸</span>ensure_consent — 跨 vendor 第一次发送前人审</h3>
+      <p>对每一个非 local 的 council member，runner 检查 <code>privacy.egress</code> 里它有没有 <code>consent: required</code> 的 entry，没记住 consent 就 <code>input()</code> 让用户输 "yes"。回话仅记在 state.json 的 <code>consent</code> map 里，写明 <code>granted_at / sends / redact</code>，复盘时一目了然。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L260-286</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 260</span>    def ensure_consent(self, member_id: str) -&gt; None:
+<span class="ln"> 261</span>        member = self.member(member_id)
+<span class="ln"> 262</span>        if member.get("local"):
+<span class="ln"> 263</span>            return
+<span class="ln"> 264</span>        matching = [
+<span class="ln"> 265</span>            entry
+<span class="ln"> 266</span>            for entry in self.spec.get("privacy", {}).get("egress", [])
+<span class="ln"> 267</span>            if entry.get("to") == member_id and entry.get("consent") == "required"
+<span class="ln"> 268</span>        ]
+<span class="ln"> 269</span>        if not matching:
+<span class="ln"> 270</span>            return
+<span class="ln"> 271</span>        if self.state.get("consent", {}).get(member_id):
+<span class="ln"> 272</span>            return
+<span class="ln"> 273</span>        sends = sorted({item for entry in matching for item in entry.get("sends", [])})
+<span class="ln"> 274</span>        redactions = sorted({item for entry in matching for item in entry.get("redact", [])})
+<span class="ln"> 275</span>        print()
+<span class="ln"> 276</span>        print(f"Looper is about to send {', '.join(sends) or 'context'} to {member_id}.")
+<span class="ln"> 277</span>        print(f"CLI: {member.get('cli')} / model: {member.get('model', 'default')}")
+<span class="ln"> 278</span>        print(f"Redactions: {', '.join(redactions) or '(none)'}")
+<span class="ln"> 279</span>        answer = input("Type 'yes' to consent to this first send: ").strip().lower()
+<span class="ln"> 280</span>        if answer != "yes":
+<span class="ln"> 281</span>            self.save_state(status="blocked", failure=f"consent_refused:{member_id}")
+<span class="ln"> 282</span>            raise RunnerError(f"Consent refused for {member_id}")
+<span class="ln"> 283</span>        consent = dict(self.state.get("consent", {}))
+<span class="ln"> 284</span>        consent[member_id] = {"granted_at": utc_now(), "sends": sends, "redact": redactions}
+<span class="ln"> 285</span>        self.save_state(consent=consent)
+<span class="ln"> 286</span></pre>
+</div>
+      <h3><span class="arr">▸</span>测试覆盖 — fixture 完整、纯 stdlib</h3>
+      <p>测试 <code>tests/test_looper.py</code> 用 <code>write_loop_yaml()</code> 在 tmpdir 里拼出一份完整 YAML，再分别以 judge=judge / judge=reviewer 两条路径跑 <code>tests.fixtures.fake_host.py</code> 与 <code>fake_judge.py</code> <code>sources/ksimback-looper/tests/fixtures/fake_judge.py:11</code>。judge 脚本读外部 state 文件计数：<code>count &lt; revise-count</code> 就 <code>revise</code>，否则 <code>pass</code>。这样 runner 整套 revise_until_clean / no_progress / consent 路径都能在 CI 里跑通而不依赖真实 CLI——这与 <em>设计期</em> 让用户访谈 7 轮的做法一脉相承：重要路径都要可重复验证。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">tests/fixtures/fake_judge.py</span> · L1-47</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>#!/usr/bin/env python3
+<span class="ln">   2</span>"""Fake judge model for Looper runner tests."""
+<span class="ln">   3</span>
+<span class="ln">   4</span>from __future__ import annotations
+<span class="ln">   5</span>
+<span class="ln">   6</span>import json
+<span class="ln">   7</span>from pathlib import Path
+<span class="ln">   8</span>import sys
+<span class="ln">   9</span>
+<span class="ln">  10</span>
+<span class="ln">  11</span>def main() -&gt; int:
+<span class="ln">  12</span>    if len(sys.argv) &lt; 2:
+<span class="ln">  13</span>        print("usage: fake_judge.py &lt;state-file&gt; [revise-count]", file=sys.stderr)
+<span class="ln">  14</span>        return 2
+<span class="ln">  15</span>    state_path = Path(sys.argv[1])
+<span class="ln">  16</span>    revise_count = int(sys.argv[2]) if len(sys.argv) &gt; 2 else 0
+<span class="ln">  17</span>    state_path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">  18</span>    state = {"count": 0}
+<span class="ln">  19</span>    if state_path.exists():
+<span class="ln">  20</span>        state = json.loads(state_path.read_text(encoding="utf-8"))
+<span class="ln">  21</span>    count = int(state.get("count", 0))
+<span class="ln">  22</span>    state["count"] = count + 1
+<span class="ln">  23</span>    state_path.write_text(json.dumps(state), encoding="utf-8")
+<span class="ln">  24</span>
+<span class="ln">  25</span>    if count &lt; revise_count:
+<span class="ln">  26</span>        verdict = {
+<span class="ln">  27</span>            "verdict": "revise",
+<span class="ln">  28</span>            "blocking_issues": ["Add an explicit owner."],
+<span class="ln">  29</span>            "confidence": 0.91,
+<span class="ln">  30</span>            "notes": "The artifact is close but needs one concrete owner.",
+<span class="ln">  31</span>        }
+<span class="ln">  32</span>    else:
+<span class="ln">  33</span>        verdict = {
+<span class="ln">  34</span>            "verdict": "pass",
+<span class="ln">  35</span>            "blocking_issues": [],
+<span class="ln">  36</span>            "confidence": 0.94,
+<span class="ln">  37</span>            "notes": "The artifact satisfies the rubric.",
+<span class="ln">  38</span>        }
+<span class="ln">  39</span>    print("```json")
+<span class="ln">  40</span>    print(json.dumps(verdict))
+<span class="ln">  41</span>    print("```")
+<span class="ln">  42</span>    return 0
+<span class="ln">  43</span>
+<span class="ln">  44</span>
+<span class="ln">  45</span>if __name__ == "__main__":
+<span class="ln">  46</span>    raise SystemExit(main())
+<span class="ln">  47</span></pre>
+</div>
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul>
+        <li><strong>judge 输出非 JSON 时降级为 REVISE</strong> — <code>parse_judge_output</code> <code>sources/ksimback-looper/templates/run-loop.py:112</code> <code>sources/ksimback-looper/templates/run-loop.py:112</code> L112-140 把 fence'd JSON 兜底切成原文本，都失败就 verdict=REVISE + blocking_issues=["Judge output was not parseable JSON."]，可能在边界场景死循环。</li>
+        <li><strong>no_progress 仅比 failures 文本签名</strong> — 同样一句 blocking 可能错位匹配；下一轮改写就归零。</li>
+        <li><strong>secret redaction 走文件路径而非内容指纹</strong> — 如果用户把 <code>API_KEY</code> 复制到 <code>notes.md</code> 不会被 redact，只能保证默认 glob。</li>
+        <li><strong>wall_clock 用 <code>time.monotonic()</code> 在外部调用前检查</strong> — host / judge 自身耗时不计入；budget 烧穿的具体耗时是 &gt; wall_clock_min。</li>
+        <li><strong>外部 runner 必须拿到 PyYAML 才能 compile (<code>sources/ksimback-looper/scripts/looper.py:66-70</code> 在 <code>load_yaml</code> 里强制)</strong> — run-loop.py 是 stdlib only，但 compile 阶段仍要 PyYAML；运行期与设计期的依赖面不一致。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">技术<em>亮点</em></h2>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">1 · 把设计期和运行期拆开</div>
+          <div class="card-d">Looper 自己不能调用 model (`<code>sources/ksimback-looper/scripts/looper.py:2-6</code>` docstring 自己说 "must not invoke model CLIs")，只产出文件。约束来自 looper-spec.md 的 "Looper's own process never invokes a model to do loop work"，是 hard rule 不是 vibe。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">2 · 两套 runner 共享一份 resolved JSON</div>
+          <div class="card-d">外部 Python runner (run-loop.py) 与当前 session 跑 RUN_IN_SESSION.md，从同一份 <code>loop.resolved.json</code> <code>sources/ksimback-looper/scripts/looper.py:393</code> 派生；改 YAML 一处，三处产物一致。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">3 · typed verification 是 first-class</div>
+          <div class="card-d">programmatic / judge / human 三类先入 schema 再入 normalize_spec，LooperError 防止用户写弱 rubric，doc 强制"至少一条不是 vibe-based"。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">4 · reviewer ≠ judge 强制分离</div>
+          <div class="card-d">reviewer.role 写笔记，judge.role 出 pass/revise + confidence (<code>sources/ksimback-looper/templates/run-loop.py:131</code>) + blocking_issues；validate_gate 强校验 verdict_source 必须是 judge 角色或 human。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">5 · argv 数组而非 shell 字符串</div>
+          <div class="card-d">每个 model invocation、每条 programmatic check 都用 list[str]；runner 用 subprocess.run(argv, ...) 直调，避免 shell injection 与 quoting 噩梦。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">6 · 三重 termination guard</div>
+          <div class="card-d">max_iterations 控制总轮；每个 gate 的 max_revisions 控制单条改稿上限；no_progress.signature 控制"同一失败堆积 X 次"；再加 budget USD/tokens/wall_clock 任一超限停。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>源码看下来有意或无意的取舍：</p>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">a · Looper 不假装是 orchestrator</div>
+          <div class="card-d">作者在 looper-spec.md §2 把"Looper is a scaffolder and session handoff, not an orchestration framework" 作为 hard rule 写进设计文档，loop 真的需要长跑 / checkpointed restart / 并发调度，Looper 应该交出去。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">b · MODEL_PROBES 写死 5 个 CLI</div>
+          <div class="card-d">注册 model 的 escape hatch 是 register-model 子命令，新 vendor 进来要手动 --invoke 一遍，没有自动发现。Aider、Gemini CLI 等较新的非 Claude/Codex 工具不会出现。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">c · no_progress = 文本签名</div>
+          <div class="card-d">如果用户把同一 blocking issue 的措辞稍微修改（"Add a check" → "Please add a check"），signature 归零，no_progress 自动重启 (<code>sources/ksimback-looper/templates/run-loop.py:198</code> 同样 signature 才 +1) (<code>sources/ksimback-looper/templates/run-loop.py:198</code> 同一 gate 同样 signature 才 +1)——一种 false negative，可能被无限循环拖死。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">d · redact 用 path glob 不做 content 探测</div>
+          <div class="card-d">默认 .env + secrets/** + **/*.key (<code>sources/ksimback-looper/scripts/looper.py:23</code> 默认 glob)；如果 secret 被复制到 README、process-notes.md、an inline attachment，runner 不会拦。需要自己加 privacy.egress.redact。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">e · budget USD/tokens 靠外部记账</div>
+          <div class="card-d">looper-spec <code>sources/ksimback-looper/looper-spec.md:23</code> 把 USD / tokens 列为 operator-acknowledged 的预算，runner 自己不会去解析 CLI 输出统计实际 token 消耗。预算烧穿靠 wall_clock_min 做兜底，精度有限。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">f · examples 只有一个</div>
+          <div class="card-d">examples/ai-workflow-mapping/ 是唯一现实示例，host=codex exec、council judge=claude -p。其他组合（host=claude + judge=codex，host=llm + council=ollama）只能用户自己翻 SKILL.md 拼。</div>
+        </div>
+      </div>
+
+
+      <h3><span class="arr">▸</span>源码引用清单一览</h3>
+      <p>本页所有 <code>source:line</code> 引用都已在 GitHub 源码中核对行号。下面是引用密度最高的 18 个锚点（按文件分组）：</p>
+      <div class="g2">
+        <div class="card"><div class="card-h">scripts/looper.py</div><div class="card-d">
+          <code>sources/ksimback-looper/scripts/looper.py:23</code> MODEL_PROBES<br>
+          <code>sources/ksimback-looper/scripts/looper.py:60</code> LooperError<br>
+          <code>sources/ksimback-looper/scripts/looper.py:122</code> run_probe<br>
+          <code>sources/ksimback-looper/scripts/looper.py:145</code> detect_models<br>
+          <code>sources/ksimback-looper/scripts/looper.py:224</code> validate_gate<br>
+          <code>sources/ksimback-looper/scripts/looper.py:254</code> normalize_spec<br>
+          <code>sources/ksimback-looper/scripts/looper.py:415</code> render_ascii_diagram<br>
+          <code>sources/ksimback-looper/scripts/looper.py:726</code> cmd_compile<br>
+          <code>sources/ksimback-looper/scripts/looper.py:708</code> cmd_register
+        </div></div>
+        <div class="card"><div class="card-h">templates/run-loop.py</div><div class="card-d">
+          <code>sources/ksimback-looper/templates/run-loop.py:101</code> call_model<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:112</code> parse_judge_output<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:143</code> Runner.__init__<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:178</code> enforce_wall_clock<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:188</code> no_progress_reached<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:234</code> redact_prompt_for_member<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:260</code> ensure_consent<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:451</code> run_gate<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:542</code> Runner.run
+        </div></div>
+        <div class="card"><div class="card-h">schemas/ + tests/</div><div class="card-d">
+          <code>sources/ksimback-looper/schemas/loop.v1.schema.json:30</code> verification<br>
+          <code>sources/ksimback-looper/schemas/loop.v1.schema.json:66</code> loop_control<br>
+          <code>sources/ksimback-looper/tests/fixtures/fake_judge.py:11</code> revise state<br>
+          <code>sources/ksimback-looper/tests/fixtures/fake_host.py:9</code> prompt switch
+        </div></div>
+        <div class="card"><div class="card-h">Markdown 顶层</div><div class="card-d">
+          <code>sources/ksimback-looper/SKILL.md:1</code> front-matter<br>
+          <code>sources/ksimback-looper/SKILL.md:54</code> emit checklist<br>
+          <code>sources/ksimback-looper/looper-spec.md:23</code> "hard rule"约束
+        </div></div>
+      </div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。如果你要靠 Looper 做生产级 multi-day 编排，建议先读 looper-spec.md §2 的硬性边界。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-07-03</span>
+      <span>Source · <a href="https://github.com/ksimback/looper">ksimback/looper</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../looper.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:"dark", securityLevel:"loose"});</script>
+
+<script>
+(() => {
+  const links = document.querySelectorAll(".nav-list a");
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute("href").slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove("active"));
+    if (el) map.get(el).classList.add("active");
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById("msel");
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement("option");
+      o.value = a.getAttribute("href");
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById("stars");
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener("resize", resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = "#b89bf0";
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

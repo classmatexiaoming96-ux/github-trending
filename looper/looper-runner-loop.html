@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Runner.run · 终止守卫与隐私 · 深度解析 · looper</title>
+<meta name="description" content="looper / templates/run-loop.py — Runner.run / run_gate / no_progress_reached / redact_prompt_for_member / ensure_consent 全链路拆解." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23a17fe0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #a17fe0;
+  --star-soft:  #b89bf0;
+  --star-deep:  #7d5dc4;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">looper<b>runner &amp; guards</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">looper<b>runner &amp; guards</b></div>
+      <div class="sub">Runner.run · 终止与隐私 · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python · 588 lines · stdlib only</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入链与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现，逐段拆</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败模式</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../looper.html">← 返回 looper 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ · Nested detail page</div>
+          <h1 class="hero-title">Runner.run / 终止守卫 / 隐私边界 <em>深度解析</em></h1>
+          <p class="hero-desc">templates/run-loop.py 是外部 runner，588 行 stdlib only — 负责把 host / judge / reviewer 通过 subprocess <code>sources/ksimback-looper/templates/run-loop.py:84</code> 串成 plan → gates → delivery 的循环 <code>sources/ksimback-looper/templates/run-loop.py:76</code>，并加三重 termination guard 与 redact + consent 双保险。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">11</div><div class="stat-lbl">Runner 方法</div></div>
+            <div class="stat"><div class="stat-num">3</div><div class="stat-lbl">Termination guard</div></div>
+            <div class="stat"><div class="stat-num">2</div><div class="stat-lbl">隐私边界</div></div>
+            <div class="stat"><div class="stat-num">0</div><div class="stat-lbl">第三方依赖</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>run-loop.py 顶部 docstring 把整份文件的边界写得明确：<em>This file executes a resolved loop spec. It intentionally reads only loop.resolved.json and uses only Python stdlib.</em> <code>sources/ksimback-looper/templates/run-loop.py:1</code>。这是 runner 与 coach 在依赖面上的硬分离——教练端要 PyYAML，运行端零依赖。这一约束使得 loop 真的可以丢到任何带 python3 的环境跑。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L1-60</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>#!/usr/bin/env python3
+<span class="ln">   2</span>"""Generated Looper runner.
+<span class="ln">   3</span>
+<span class="ln">   4</span>This file executes a resolved loop spec. It intentionally reads only
+<span class="ln">   5</span>loop.resolved.json and uses only Python stdlib.
+<span class="ln">   6</span>"""
+<span class="ln">   7</span>
+<span class="ln">   8</span>from __future__ import annotations
+<span class="ln">   9</span>
+<span class="ln">  10</span>import argparse
+<span class="ln">  11</span>import datetime as _dt
+<span class="ln">  12</span>import fnmatch
+<span class="ln">  13</span>import json
+<span class="ln">  14</span>from pathlib import Path
+<span class="ln">  15</span>import re
+<span class="ln">  16</span>import subprocess
+<span class="ln">  17</span>import sys
+<span class="ln">  18</span>import time
+<span class="ln">  19</span>from typing import Any
+<span class="ln">  20</span>
+<span class="ln">  21</span>
+<span class="ln">  22</span>PASS = "pass"
+<span class="ln">  23</span>REVISE = "revise"
+<span class="ln">  24</span>
+<span class="ln">  25</span>
+<span class="ln">  26</span>class RunnerError(RuntimeError):
+<span class="ln">  27</span>    pass
+<span class="ln">  28</span>
+<span class="ln">  29</span>
+<span class="ln">  30</span>def utc_now() -&gt; str:
+<span class="ln">  31</span>    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
+<span class="ln">  32</span>
+<span class="ln">  33</span>
+<span class="ln">  34</span>def load_json(path: Path) -&gt; dict[str, Any]:
+<span class="ln">  35</span>    try:
+<span class="ln">  36</span>        with path.open("r", encoding="utf-8") as fh:
+<span class="ln">  37</span>            data = json.load(fh)
+<span class="ln">  38</span>    except OSError as exc:
+<span class="ln">  39</span>        raise RunnerError(f"Could not read {path}: {exc}") from exc
+<span class="ln">  40</span>    except json.JSONDecodeError as exc:
+<span class="ln">  41</span>        raise RunnerError(f"Could not parse JSON in {path}: {exc}") from exc
+<span class="ln">  42</span>    if not isinstance(data, dict):
+<span class="ln">  43</span>        raise RunnerError(f"{path} must contain a JSON object")
+<span class="ln">  44</span>    return data
+<span class="ln">  45</span>
+<span class="ln">  46</span>
+<span class="ln">  47</span>def write_text(path: Path, text: str) -&gt; None:
+<span class="ln">  48</span>    path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">  49</span>    path.write_text(text.rstrip() + "\n", encoding="utf-8")
+<span class="ln">  50</span>
+<span class="ln">  51</span>
+<span class="ln">  52</span>def write_json(path: Path, data: Any) -&gt; None:
+<span class="ln">  53</span>    path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">  54</span>    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+<span class="ln">  55</span>
+<span class="ln">  56</span>
+<span class="ln">  57</span>def ensure_argv(value: Any, field: str) -&gt; list[str]:
+<span class="ln">  58</span>    if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+<span class="ln">  59</span>        return value
+<span class="ln">  60</span>    raise RunnerError(f"{field} must be a non-empty argv array")</pre>
+</div>
+
+      <p>整个 Runner 类只有一个公开入口 <code>sources/ksimback-looper/templates/run-loop.py:542</code> <code>run()</code> <code>sources/ksimback-looper/templates/run-loop.py:542</code>；剩下 11 个方法都是它的内部积木（<code>__init__</code> <code>sources/ksimback-looper/templates/run-loop.py:144</code>、<code>load_state</code> <code>sources/ksimback-looper/templates/run-loop.py:156</code>、<code>save_state</code> <code>sources/ksimback-looper/templates/run-loop.py:167</code>、<code>append_log</code> <code>sources/ksimback-looper/templates/run-loop.py:172</code>、<code>enforce_wall_clock</code> <code>sources/ksimback-looper/templates/run-loop.py:178</code>、<code>no_progress_reached</code> <code>sources/ksimback-looper/templates/run-loop.py:188</code>、<code>gather_context</code> <code>sources/ksimback-looper/templates/run-loop.py:287</code>、<code>run_host</code> <code>sources/ksimback-looper/templates/run-loop.py:338</code>、<code>run_programmatic</code> <code>sources/ksimback-looper/templates/run-loop.py:345</code>、<code>run_judge</code> <code>sources/ksimback-looper/templates/run-loop.py:395</code>、<code>run_reviewers</code> <code>sources/ksimback-looper/templates/run-loop.py:417</code>、<code>human_check</code> <code>sources/ksimback-looper/templates/run-loop.py:440</code>、<code>run_gate</code> <code>sources/ksimback-looper/templates/run-loop.py:451</code>）。本子页从 §01 起把这些方法按职责分组、按代码顺序看真实行号。</p>
+
+      <h3><span class="arr">▸</span>parse_judge_output — fence'd JSON 兜底</h3>
+      <p>judge 调用走 subprocess <code>sources/ksimback-looper/templates/run-loop.py:84</code> 拿 stdout，第一刀就是 <code><code>re.search</code> <code>sources/ksimback-looper/templates/run-loop.py:113</code> 配 r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)</code> 寻找 fenced JSON 块；找不到就把整段当 JSON 直接 parse；再失败就降级为 <code>verdict=REVISE + confidence=0.0 + blocking_issues=[unparseable]</code>。<code>sources/ksimback-looper/templates/run-loop.py:112-140</code> 这一段是 runner 对"judge 不可信"的兜底——就算 judge 完全输出垃圾，也不会让 revise_until_clean 卡死，最多由 no_progress 兜底停。</p>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Runner.__init__ / load_state / save_state / append_log</h3>
+      <p>State <code>sources/ksimback-looper/templates/run-loop.py:144</code> 是"断点续跑"的基础。<code>__init__</code> 读 spec、解析 workspace、根据 observability 决定 run-log.md 与 state.json 路径；state 默认结构是 <code>{"status": "initialized", "started_at": utc_now(), "iteration": 0, "warnings": [], "consent": {}}</code> <code>sources/ksimback-looper/templates/run-loop.py:156-165</code>。<code>save_state()</code> 永远 <code>updated_at = utc_now()</code>；<code>append_log()</code> 拼 <code>{time} `{event}` {json-kwargs}</code> 到 run-log.md。两份 state 的写入是 fire-and-forget 的——丢了一份不会让 spec 失败，但 run-log.md 会丢事件。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L143-175</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 143</span>class Runner:
+<span class="ln"> 144</span>    def __init__(self, spec_path: Path) -&gt; None:
+<span class="ln"> 145</span>        self.spec_path = spec_path.resolve()
+<span class="ln"> 146</span>        self.base_dir = self.spec_path.parent
+<span class="ln"> 147</span>        self.spec = load_json(self.spec_path)
+<span class="ln"> 148</span>        self.workspace = relative_to_base(self.spec["workspace"]["dir"], self.base_dir)
+<span class="ln"> 149</span>        self.workspace.mkdir(parents=True, exist_ok=True)
+<span class="ln"> 150</span>        self.observability = self.spec.get("observability", {})
+<span class="ln"> 151</span>        self.run_log_path = self.workspace / self.observability.get("run_log", "run-log.md")
+<span class="ln"> 152</span>        self.state_path = self.workspace / self.observability.get("state_file", "state.json")
+<span class="ln"> 153</span>        self.state = self.load_state()
+<span class="ln"> 154</span>        self.started = time.monotonic()
+<span class="ln"> 155</span>
+<span class="ln"> 156</span>    def load_state(self) -&gt; dict[str, Any]:
+<span class="ln"> 157</span>        if self.state_path.exists():
+<span class="ln"> 158</span>            return load_json(self.state_path)
+<span class="ln"> 159</span>        return {
+<span class="ln"> 160</span>            "status": "initialized",
+<span class="ln"> 161</span>            "started_at": utc_now(),
+<span class="ln"> 162</span>            "iteration": 0,
+<span class="ln"> 163</span>            "warnings": [],
+<span class="ln"> 164</span>            "consent": {},
+<span class="ln"> 165</span>        }
+<span class="ln"> 166</span>
+<span class="ln"> 167</span>    def save_state(self, **updates: Any) -&gt; None:
+<span class="ln"> 168</span>        self.state.update(updates)
+<span class="ln"> 169</span>        self.state["updated_at"] = utc_now()
+<span class="ln"> 170</span>        write_json(self.state_path, self.state)
+<span class="ln"> 171</span>
+<span class="ln"> 172</span>    def append_log(self, event: str, **fields: Any) -&gt; None:
+<span class="ln"> 173</span>        self.run_log_path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln"> 174</span>        payload = f" {json.dumps(fields, sort_keys=True)}" if fields else ""
+<span class="ln"> 175</span>        with self.run_log_path.open("a", encoding="utf-8") as fh:</pre>
+</div>
+      <h3><span class="arr">▸</span>enforce_wall_clock — wall-clock 单点守门</h3>
+      <p>这是 runner 对时间预算的唯一硬检查：<code>time.monotonic() - self.started > wall_clock_min * 60</code> 一旦成立就把 <code>status=failed + failure="wall_clock_budget_exceeded"</code> 并 raise RunnerError。检查点在 <code>gather_context</code> / <code>run_host</code> / <code>run_gate</code> / <code>run_reviewers</code> 入口，所以 host 的某次长尾响应会触发，budget 判定也是这一处；host 自身的耗时并不计在内（取决于 wall_clock_min 的取值精度）。</p>
+      <h3><span class="arr">▸</span>no_progress_reached — 同 signature 致死的真正机制</h3>
+      <p>这就是三件套的第三层守门。每次进 gate 都把 <code>sorted(failures)</code> 当 signature 与 state 中 <code>no_progress.signature</code> 比对：同 gate 同样 signature 就 count += 1，否则归零。count 累计到 <code>max_stalled_iterations</code> 默认 2 就停；如果 spec 里 <code>action: human_checkpoint</code> 则只问一次"Type 'continue' to allow one more revision"，问完归零。这个签名级别虽然可能误判（措辞微调就归零），但配合 <code>max_revisions</code> 与 <code>max_iterations</code> 已经足够把 budget 烧穿的两大原因堵住。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L178-218</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 178</span>    def enforce_wall_clock(self) -&gt; None:
+<span class="ln"> 179</span>        budget = self.spec.get("loop_control", {}).get("budget", {})
+<span class="ln"> 180</span>        wall_clock_min = budget.get("wall_clock_min")
+<span class="ln"> 181</span>        if wall_clock_min is None:
+<span class="ln"> 182</span>            return
+<span class="ln"> 183</span>        if time.monotonic() - self.started &gt; float(wall_clock_min) * 60:
+<span class="ln"> 184</span>            self.save_state(status="failed", failure="wall_clock_budget_exceeded")
+<span class="ln"> 185</span>            self.append_log("stop", reason="wall_clock_budget_exceeded")
+<span class="ln"> 186</span>            raise RunnerError("Wall-clock budget exceeded")
+<span class="ln"> 187</span>
+<span class="ln"> 188</span>    def no_progress_reached(self, gate_name: str, failures: list[str]) -&gt; bool:
+<span class="ln"> 189</span>        if not failures:
+<span class="ln"> 190</span>            self.save_state(no_progress={"count": 0, "signature": "", "gate": gate_name})
+<span class="ln"> 191</span>            return False
+<span class="ln"> 192</span>        config = self.spec.get("loop_control", {}).get("no_progress", {})
+<span class="ln"> 193</span>        threshold = int(config.get("max_stalled_iterations", 2))
+<span class="ln"> 194</span>        signature = "\n".join(sorted(failures))
+<span class="ln"> 195</span>        previous = self.state.get("no_progress", {})
+<span class="ln"> 196</span>        same_gate = previous.get("gate") == gate_name
+<span class="ln"> 197</span>        same_signature = previous.get("signature") == signature
+<span class="ln"> 198</span>        count = int(previous.get("count", 0)) + 1 if same_gate and same_signature else 1
+<span class="ln"> 199</span>        progress = {
+<span class="ln"> 200</span>            "gate": gate_name,
+<span class="ln"> 201</span>            "signature": signature,
+<span class="ln"> 202</span>            "count": count,
+<span class="ln"> 203</span>            "threshold": threshold,
+<span class="ln"> 204</span>            "updated_at": utc_now(),
+<span class="ln"> 205</span>        }
+<span class="ln"> 206</span>        self.save_state(no_progress=progress)
+<span class="ln"> 207</span>        if count &lt; threshold:
+<span class="ln"> 208</span>            return False
+<span class="ln"> 209</span>        self.append_log("no_progress_detected", gate=gate_name, count=count, failures=failures)
+<span class="ln"> 210</span>        if config.get("action", "stop") == "human_checkpoint":
+<span class="ln"> 211</span>            answer = input("No-progress detected. Type 'continue' to allow one more revision: ").strip().lower()
+<span class="ln"> 212</span>            if answer == "continue":
+<span class="ln"> 213</span>                progress["count"] = 0
+<span class="ln"> 214</span>                self.save_state(no_progress=progress)
+<span class="ln"> 215</span>                self.append_log("no_progress_override", gate=gate_name)
+<span class="ln"> 216</span>                return False
+<span class="ln"> 217</span>        self.save_state(status="failed", failure="no_progress_detected", blocking_issues=failures)
+<span class="ln"> 218</span>        return True</pre>
+</div>
+      <h3><span class="arr">▸</span>redactions_for + redact_prompt_for_member — privacy 一票否决</h3>
+      <p>转译 prompt 之前先 redact。<code>redactions_for(member_id)</code> <code>sources/ksimback-looper/templates/run-loop.py:227-232</code> 从 <code>privacy.egress</code> 里找该 member 的 redact globs；找不到就用 <code>DEFAULT_REDACTIONS = [".env", ".env.*", "secrets/**", "**/*.key"]</code> <code>sources/ksimback-looper/scripts/looper.py:23</code>。<code>redact_prompt_for_member()</code> 先按 glob 抓到 path 列表，再读每个文件内容做字面 <code>.replace()</code>；同时对每个文件按行切，长度 ≥ 8 的 stripped 行再做一遍替换——因为 .env 经常是 <code>OPENAI_API_KEY=sk-...</code> 整行值的形态。文件读失败（BinaryDecodeError）或内容大于 1MB 都跳过，避免秘密被序列化爆栈。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L227-258</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 227</span>    def redactions_for(self, member_id: str) -&gt; list[str]:
+<span class="ln"> 228</span>        redactions: list[str] = []
+<span class="ln"> 229</span>        for entry in self.spec.get("privacy", {}).get("egress", []):
+<span class="ln"> 230</span>            if entry.get("to") == member_id:
+<span class="ln"> 231</span>                redactions.extend(entry.get("redact", []))
+<span class="ln"> 232</span>        return redactions or [".env", ".env.*", "secrets/**", "**/*.key"]
+<span class="ln"> 233</span>
+<span class="ln"> 234</span>    def redact_prompt_for_member(self, member_id: str, prompt: str) -&gt; str:
+<span class="ln"> 235</span>        redactions = self.redactions_for(member_id)
+<span class="ln"> 236</span>        redacted = prompt
+<span class="ln"> 237</span>        for pattern in redactions:
+<span class="ln"> 238</span>            paths = list(self.base_dir.glob(pattern))
+<span class="ln"> 239</span>            if pattern.endswith("/**"):
+<span class="ln"> 240</span>                root = self.base_dir / pattern[:-3]
+<span class="ln"> 241</span>                if root.exists():
+<span class="ln"> 242</span>                    paths.extend(root.rglob("*"))
+<span class="ln"> 243</span>            for path in paths:
+<span class="ln"> 244</span>                if not path.is_file():
+<span class="ln"> 245</span>                    continue
+<span class="ln"> 246</span>                try:
+<span class="ln"> 247</span>                    secret_text = path.read_text(encoding="utf-8")
+<span class="ln"> 248</span>                except UnicodeDecodeError:
+<span class="ln"> 249</span>                    continue
+<span class="ln"> 250</span>                if not secret_text.strip() or len(secret_text) &gt; 1_000_000:
+<span class="ln"> 251</span>                    continue
+<span class="ln"> 252</span>                marker = f"[redacted:{path.relative_to(self.base_dir).as_posix()}]"
+<span class="ln"> 253</span>                redacted = redacted.replace(secret_text, marker)
+<span class="ln"> 254</span>                for line in secret_text.splitlines():
+<span class="ln"> 255</span>                    stripped = line.strip()
+<span class="ln"> 256</span>                    if len(stripped) &gt;= 8:
+<span class="ln"> 257</span>                        redacted = redacted.replace(stripped, marker)
+<span class="ln"> 258</span>        return redacted</pre>
+</div>
+      <h3><span class="arr">▸</span>ensure_consent — 跨 vendor 第一次发送前人审</h3>
+      <p><code>ensure_consent(member_id)</code> 对非 local 的 council member 检查 <code>privacy.egress</code> 里它有没有 <code>consent: required</code>。没记入 <code>state.consent[member_id]</code> 就 <code>input("Type 'yes' to consent to this first send: ")</code>，用户拒绝就 <code>RunnerError</code> 立刻停。consent 记录写明 <code>granted_at / sends / redact</code> 三个字段，复盘能直接看到哪条 egress 何时被授权。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L260-286</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 260</span>    def ensure_consent(self, member_id: str) -&gt; None:
+<span class="ln"> 261</span>        member = self.member(member_id)
+<span class="ln"> 262</span>        if member.get("local"):
+<span class="ln"> 263</span>            return
+<span class="ln"> 264</span>        matching = [
+<span class="ln"> 265</span>            entry
+<span class="ln"> 266</span>            for entry in self.spec.get("privacy", {}).get("egress", [])
+<span class="ln"> 267</span>            if entry.get("to") == member_id and entry.get("consent") == "required"
+<span class="ln"> 268</span>        ]
+<span class="ln"> 269</span>        if not matching:
+<span class="ln"> 270</span>            return
+<span class="ln"> 271</span>        if self.state.get("consent", {}).get(member_id):
+<span class="ln"> 272</span>            return
+<span class="ln"> 273</span>        sends = sorted({item for entry in matching for item in entry.get("sends", [])})
+<span class="ln"> 274</span>        redactions = sorted({item for entry in matching for item in entry.get("redact", [])})
+<span class="ln"> 275</span>        print()
+<span class="ln"> 276</span>        print(f"Looper is about to send {', '.join(sends) or 'context'} to {member_id}.")
+<span class="ln"> 277</span>        print(f"CLI: {member.get('cli')} / model: {member.get('model', 'default')}")
+<span class="ln"> 278</span>        print(f"Redactions: {', '.join(redactions) or '(none)'}")
+<span class="ln"> 279</span>        answer = input("Type 'yes' to consent to this first send: ").strip().lower()
+<span class="ln"> 280</span>        if answer != "yes":
+<span class="ln"> 281</span>            self.save_state(status="blocked", failure=f"consent_refused:{member_id}")
+<span class="ln"> 282</span>            raise RunnerError(f"Consent refused for {member_id}")
+<span class="ln"> 283</span>        consent = dict(self.state.get("consent", {}))
+<span class="ln"> 284</span>        consent[member_id] = {"granted_at": utc_now(), "sends": sends, "redact": redactions}
+<span class="ln"> 285</span>        self.save_state(consent=consent)
+<span class="ln"> 286</span></pre>
+</div>
+      <h3><span class="arr">▸</span>gather_context + host_prompt — 输入管线</h3>
+      <p><code>gather_context()</code> 把 <code>goal.context_sources</code> 列出来：file 走 base_dir.resolve 并先查 is_redacted 再读，缺失记 <code>status=missing</code>；cmd 走 subprocess run with timeout。整段 context 再写进 <code>workspace/context.md</code>，后两步都查 <code>enforce_wall_clock</code>。这一函数是 host 与 judge 的<strong>共同起点</strong>——所有 prompt 都以 <code>context.md</code> 为底。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L287-336</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 287</span>    def gather_context(self) -&gt; str:
+<span class="ln"> 288</span>        goal = self.spec["goal"]
+<span class="ln"> 289</span>        chunks: list[str] = []
+<span class="ln"> 290</span>        for index, source in enumerate(goal.get("context_sources", []), start=1):
+<span class="ln"> 291</span>            self.enforce_wall_clock()
+<span class="ln"> 292</span>            if "file" in source:
+<span class="ln"> 293</span>                path = relative_to_base(source["file"], self.base_dir)
+<span class="ln"> 294</span>                if is_redacted(path, self.base_dir, [".env", ".env.*", "secrets/**", "**/*.key"]):
+<span class="ln"> 295</span>                    chunks.append(f"## Context source {index}: {source['file']}\n[redacted]\n")
+<span class="ln"> 296</span>                    self.append_log("context", source=source["file"], status="redacted")
+<span class="ln"> 297</span>                elif path.exists():
+<span class="ln"> 298</span>                    chunks.append(f"## Context source {index}: {source['file']}\n{path.read_text(encoding='utf-8')}\n")
+<span class="ln"> 299</span>                    self.append_log("context", source=source["file"], status="read")
+<span class="ln"> 300</span>                else:
+<span class="ln"> 301</span>                    chunks.append(f"## Context source {index}: {source['file']}\n[missing]\n")
+<span class="ln"> 302</span>                    self.append_log("context", source=source["file"], status="missing")
+<span class="ln"> 303</span>            elif "cmd" in source:
+<span class="ln"> 304</span>                argv = ensure_argv(source["cmd"], f"context_sources[{index}].cmd")
+<span class="ln"> 305</span>                result = run_argv(argv, cwd=self.base_dir, timeout_sec=int(source.get("timeout_sec", 60)))
+<span class="ln"> 306</span>                chunks.append(
+<span class="ln"> 307</span>                    f"## Context source {index}: {' '.join(argv)}\n"
+<span class="ln"> 308</span>                    f"exit={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}\n"
+<span class="ln"> 309</span>                )
+<span class="ln"> 310</span>                self.append_log("context_cmd", argv=argv, returncode=result.returncode)
+<span class="ln"> 311</span>        context = "\n".join(chunks).strip()
+<span class="ln"> 312</span>        write_text(self.workspace / "context.md", context or "No context sources configured.")
+<span class="ln"> 313</span>        return context
+<span class="ln"> 314</span>
+<span class="ln"> 315</span>    def host_prompt(self, phase: str, artifact: str = "", review: str = "") -&gt; str:
+<span class="ln"> 316</span>        goal = self.spec["goal"]
+<span class="ln"> 317</span>        if phase == "plan":
+<span class="ln"> 318</span>            return (
+<span class="ln"> 319</span>                "Draft plan.md for this loop.\n\n"
+<span class="ln"> 320</span>                f"Goal:\n{goal['statement']}\n\n"
+<span class="ln"> 321</span>                f"Definition of done:\n{goal['definition_of_done']}\n\n"
+<span class="ln"> 322</span>                f"Context:\n{(self.workspace / 'context.md').read_text(encoding='utf-8')}\n"
+<span class="ln"> 323</span>            )
+<span class="ln"> 324</span>        if phase == "delivery":
+<span class="ln"> 325</span>            return (
+<span class="ln"> 326</span>                "Write the next delivery artifact for this loop.\n\n"
+<span class="ln"> 327</span>                f"Goal:\n{goal['statement']}\n\n"
+<span class="ln"> 328</span>                f"Definition of done:\n{goal['definition_of_done']}\n\n"
+<span class="ln"> 329</span>                f"Plan:\n{(self.workspace / 'plan.md').read_text(encoding='utf-8')}\n"
+<span class="ln"> 330</span>            )
+<span class="ln"> 331</span>        if phase == "revise":
+<span class="ln"> 332</span>            return (
+<span class="ln"> 333</span>                "Revise the artifact to address the review. Return only the revised artifact.\n\n"
+<span class="ln"> 334</span>                f"Artifact:\n{artifact}\n\nReview:\n{review}\n"
+<span class="ln"> 335</span>            )
+<span class="ln"> 336</span>        raise RunnerError(f"Unknown host phase: {phase}")</pre>
+</div>
+      <h3><span class="arr">▸</span>judge_prompt — 物化 rubric</h3>
+      <p>judge_prompt 把 criterion 数组物化成可读 rubric：programmatic 显示 "result is included below"；judge 显示 rubric 文本；human 显示 "human signoff is required separately"。prompt 还约束 judge 返回 fence'd JSON，键为 verdict / blocking_issues / confidence / notes——这是 <code>parse_judge_output</code> <code>sources/ksimback-looper/templates/run-loop.py:112</code> 能正常解析的前提。这一段是 reviewer / judge / programmatic 三类判定在同一 prompt 模板里的对齐点。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L357-393</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 357</span>            "programmatic_check",
+<span class="ln"> 358</span>            criterion=criterion["id"],
+<span class="ln"> 359</span>            passed=passed,
+<span class="ln"> 360</span>            returncode=result.returncode,
+<span class="ln"> 361</span>        )
+<span class="ln"> 362</span>        return {
+<span class="ln"> 363</span>            "id": criterion["id"],
+<span class="ln"> 364</span>            "type": "programmatic",
+<span class="ln"> 365</span>            "passed": passed,
+<span class="ln"> 366</span>            "returncode": result.returncode,
+<span class="ln"> 367</span>            "stdout": result.stdout,
+<span class="ln"> 368</span>            "stderr": result.stderr,
+<span class="ln"> 369</span>        }
+<span class="ln"> 370</span>
+<span class="ln"> 371</span>    def judge_prompt(
+<span class="ln"> 372</span>        self,
+<span class="ln"> 373</span>        gate_name: str,
+<span class="ln"> 374</span>        artifact_label: str,
+<span class="ln"> 375</span>        artifact_text: str,
+<span class="ln"> 376</span>        criteria: list[dict[str, Any]],
+<span class="ln"> 377</span>    ) -&gt; str:
+<span class="ln"> 378</span>        rubric_lines = []
+<span class="ln"> 379</span>        for criterion in criteria:
+<span class="ln"> 380</span>            if criterion["type"] == "judge":
+<span class="ln"> 381</span>                rubric_lines.append(f"- {criterion['id']}: {criterion['rubric']}")
+<span class="ln"> 382</span>            elif criterion["type"] == "programmatic":
+<span class="ln"> 383</span>                rubric_lines.append(f"- {criterion['id']}: programmatic check result is included below.")
+<span class="ln"> 384</span>            elif criterion["type"] == "human":
+<span class="ln"> 385</span>                rubric_lines.append(f"- {criterion['id']}: human signoff is required separately.")
+<span class="ln"> 386</span>        return (
+<span class="ln"> 387</span>            "You are the Looper judge. Return only a fenced JSON object with keys "
+<span class="ln"> 388</span>            "verdict, blocking_issues, confidence, and notes. verdict must be pass or revise.\n\n"
+<span class="ln"> 389</span>            f"Gate: {gate_name}\n"
+<span class="ln"> 390</span>            f"Artifact: {artifact_label}\n\n"
+<span class="ln"> 391</span>            "Criteria:\n" + "\n".join(rubric_lines) + "\n\n"
+<span class="ln"> 392</span>            f"Artifact content:\n{artifact_text}\n"
+<span class="ln"> 393</span>        )</pre>
+</div>
+      <h3><span class="arr">▸</span>run_reviewers / human_check — 旁路判定</h3>
+      <p>run_reviewers 只收集 notes 不出 verdict；human_check 是 <code>input("Type 'pass' to approve, anything else to request revision")</code> 的纯 stdin。两者都不会调用 model CLI，所以甚至可以在断网时跑——验证面只要能 spawn Python 子进程就行。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L395-449</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 395</span>    def run_judge(
+<span class="ln"> 396</span>        self,
+<span class="ln"> 397</span>        member_id: str,
+<span class="ln"> 398</span>        gate_name: str,
+<span class="ln"> 399</span>        artifact_label: str,
+<span class="ln"> 400</span>        artifact_text: str,
+<span class="ln"> 401</span>        criteria: list[dict[str, Any]],
+<span class="ln"> 402</span>    ) -&gt; dict[str, Any]:
+<span class="ln"> 403</span>        self.ensure_consent(member_id)
+<span class="ln"> 404</span>        output = call_model(
+<span class="ln"> 405</span>            self.member(member_id),
+<span class="ln"> 406</span>            self.redact_prompt_for_member(
+<span class="ln"> 407</span>                member_id,
+<span class="ln"> 408</span>                self.judge_prompt(gate_name, artifact_label, artifact_text, criteria),
+<span class="ln"> 409</span>            ),
+<span class="ln"> 410</span>            self.base_dir,
+<span class="ln"> 411</span>        )
+<span class="ln"> 412</span>        verdict = parse_judge_output(output)
+<span class="ln"> 413</span>        verdict["member"] = member_id
+<span class="ln"> 414</span>        self.append_log("judge_verdict", gate=gate_name, member=member_id, verdict=verdict.get("verdict"))
+<span class="ln"> 415</span>        return verdict
+<span class="ln"> 416</span>
+<span class="ln"> 417</span>    def run_reviewers(
+<span class="ln"> 418</span>        self,
+<span class="ln"> 419</span>        gate_name: str,
+<span class="ln"> 420</span>        artifact_label: str,
+<span class="ln"> 421</span>        artifact_text: str,
+<span class="ln"> 422</span>        member_ids: list[str],
+<span class="ln"> 423</span>    ) -&gt; list[str]:
+<span class="ln"> 424</span>        notes = []
+<span class="ln"> 425</span>        for member_id in member_ids:
+<span class="ln"> 426</span>            member = self.member(member_id)
+<span class="ln"> 427</span>            if member.get("role") != "reviewer":
+<span class="ln"> 428</span>                continue
+<span class="ln"> 429</span>            self.ensure_consent(member_id)
+<span class="ln"> 430</span>            prompt = (
+<span class="ln"> 431</span>                "You are a Looper reviewer. Return concise blocking and non-blocking notes. "
+<span class="ln"> 432</span>                "Do not return a verdict.\n\n"
+<span class="ln"> 433</span>                f"Gate: {gate_name}\nArtifact: {artifact_label}\n\n{artifact_text}\n"
+<span class="ln"> 434</span>            )
+<span class="ln"> 435</span>            prompt = self.redact_prompt_for_member(member_id, prompt)
+<span class="ln"> 436</span>            notes.append(f"## {member_id}\n\n{call_model(member, prompt, self.base_dir)}")
+<span class="ln"> 437</span>            self.append_log("reviewer_notes", gate=gate_name, member=member_id)
+<span class="ln"> 438</span>        return notes
+<span class="ln"> 439</span>
+<span class="ln"> 440</span>    def human_check(self, criterion: dict[str, Any]) -&gt; dict[str, Any]:
+<span class="ln"> 441</span>        print()
+<span class="ln"> 442</span>        print(criterion["prompt"])
+<span class="ln"> 443</span>        answer = input("Type 'pass' to approve, anything else to request revision: ").strip().lower()
+<span class="ln"> 444</span>        return {
+<span class="ln"> 445</span>            "id": criterion["id"],
+<span class="ln"> 446</span>            "type": "human",
+<span class="ln"> 447</span>            "passed": answer == PASS,
+<span class="ln"> 448</span>            "notes": "approved" if answer == PASS else "human requested revision",
+<span class="ln"> 449</span>        }</pre>
+</div>
+      <h3><span class="arr">▸</span>run_gate — 主裁判 while-loop</h3>
+      <p><code>run_gate()</code> 是整个 runner 的核心：<code>while True</code> 循环里依次跑 programmatic / human / reviewers，按 policy 走 <code>revise_until_clean</code> 时调 judge，<strong>关键一句是 L499-501</strong>：<code>if verdict.get("verdict") == REVISE: failures.extend(verdict.get("blocking_issues") or ["Judge requested revision"])</code>——失败被显式归并进 failures 列表，方便 no_progress_reached 算 signature。<code>max_revisions</code> 触发或 no_progress_reached 触发都写 state.json 后 return False，调用方据此停掉整个 loop。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L451-540</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 451</span>    def run_gate(self, gate_name: str, artifact_path: Path, artifact_label: str) -&gt; bool:
+<span class="ln"> 452</span>        gate = self.spec["gates"][gate_name]
+<span class="ln"> 453</span>        criteria = self.criteria(gate.get("criteria", []))
+<span class="ln"> 454</span>        max_revisions = int(gate.get("max_revisions", 0))
+<span class="ln"> 455</span>        revision = 0
+<span class="ln"> 456</span>        self.append_log("gate_start", gate=gate_name, artifact=artifact_label)
+<span class="ln"> 457</span>
+<span class="ln"> 458</span>        while True:
+<span class="ln"> 459</span>            self.enforce_wall_clock()
+<span class="ln"> 460</span>            artifact_text = artifact_path.read_text(encoding="utf-8")
+<span class="ln"> 461</span>            review_parts: list[str] = []
+<span class="ln"> 462</span>            failures: list[str] = []
+<span class="ln"> 463</span>
+<span class="ln"> 464</span>            for criterion in criteria:
+<span class="ln"> 465</span>                if criterion["type"] == "programmatic":
+<span class="ln"> 466</span>                    result = self.run_programmatic(criterion)
+<span class="ln"> 467</span>                    review_parts.append(f"## Programmatic {criterion['id']}\n\n```json\n{json.dumps(result, indent=2)}\n```")
+<span class="ln"> 468</span>                    if not result["passed"]:
+<span class="ln"> 469</span>                        failures.append(f"Programmatic check failed: {criterion['id']}")
+<span class="ln"> 470</span>                elif criterion["type"] == "human":
+<span class="ln"> 471</span>                    result = self.human_check(criterion)
+<span class="ln"> 472</span>                    review_parts.append(f"## Human {criterion['id']}\n\n{result['notes']}")
+<span class="ln"> 473</span>                    if not result["passed"]:
+<span class="ln"> 474</span>                        failures.append(f"Human check failed: {criterion['id']}")
+<span class="ln"> 475</span>
+<span class="ln"> 476</span>            reviewer_notes = self.run_reviewers(
+<span class="ln"> 477</span>                gate_name,
+<span class="ln"> 478</span>                artifact_label,
+<span class="ln"> 479</span>                artifact_text,
+<span class="ln"> 480</span>                list(gate.get("members", [])),
+<span class="ln"> 481</span>            )
+<span class="ln"> 482</span>            review_parts.extend(reviewer_notes)
+<span class="ln"> 483</span>
+<span class="ln"> 484</span>            policy = gate.get("verdict_policy")
+<span class="ln"> 485</span>            verdict: dict[str, Any] | None = None
+<span class="ln"> 486</span>            if policy == "revise_until_clean" and not failures:
+<span class="ln"> 487</span>                source = gate.get("verdict_source")
+<span class="ln"> 488</span>                if source == "human":
+<span class="ln"> 489</span>                    answer = input(f"Type 'pass' if {artifact_label} is clean: ").strip().lower()
+<span class="ln"> 490</span>                    verdict = {
+<span class="ln"> 491</span>                        "verdict": PASS if answer == PASS else REVISE,
+<span class="ln"> 492</span>                        "blocking_issues": [] if answer == PASS else ["human requested revision"],
+<span class="ln"> 493</span>                        "confidence": 1.0,
+<span class="ln"> 494</span>                        "notes": "human verdict",
+<span class="ln"> 495</span>                    }
+<span class="ln"> 496</span>                else:
+<span class="ln"> 497</span>                    verdict = self.run_judge(source, gate_name, artifact_label, artifact_text, criteria)
+<span class="ln"> 498</span>                review_parts.append(f"## Verdict\n\n```json\n{json.dumps(verdict, indent=2)}\n```")
+<span class="ln"> 499</span>                if verdict.get("verdict") == REVISE:
+<span class="ln"> 500</span>                    failures.extend(verdict.get("blocking_issues") or ["Judge requested revision"])
+<span class="ln"> 501</span>
+<span class="ln"> 502</span>            if policy == "fixed_passes":
+<span class="ln"> 503</span>                if failures:
+<span class="ln"> 504</span>                    pass
+<span class="ln"> 505</span>                elif revision &gt;= max_revisions:
+<span class="ln"> 506</span>                    return True
+<span class="ln"> 507</span>                else:
+<span class="ln"> 508</span>                    failures.append("fixed_passes reviewer pass")
+<span class="ln"> 509</span>
+<span class="ln"> 510</span>            if not failures:
+<span class="ln"> 511</span>                self.save_state(status=f"{gate_name}_passed", **{gate_name: {"passed_at": utc_now()}})
+<span class="ln"> 512</span>                self.append_log("gate_passed", gate=gate_name, artifact=artifact_label)
+<span class="ln"> 513</span>                return True
+<span class="ln"> 514</span>
+<span class="ln"> 515</span>            review_text = "\n\n".join(review_parts + ["## Blocking Issues", "\n".join(f"- {item}" for item in failures)])
+<span class="ln"> 516</span>            review_path = self.workspace / f"review-{gate_name}-{revision + 1}.md"
+<span class="ln"> 517</span>            write_text(review_path, review_text)
+<span class="ln"> 518</span>            self.append_log("gate_blocked", gate=gate_name, review=review_path.name, failures=failures)
+<span class="ln"> 519</span>
+<span class="ln"> 520</span>            if self.no_progress_reached(gate_name, failures):
+<span class="ln"> 521</span>                return False
+<span class="ln"> 522</span>
+<span class="ln"> 523</span>            if revision &gt;= max_revisions:
+<span class="ln"> 524</span>                self.save_state(
+<span class="ln"> 525</span>                    status="failed",
+<span class="ln"> 526</span>                    failure=f"{gate_name}_max_revisions_reached",
+<span class="ln"> 527</span>                    last_review=str(review_path),
+<span class="ln"> 528</span>                )
+<span class="ln"> 529</span>                self.append_log("stop", reason=f"{gate_name}_max_revisions_reached")
+<span class="ln"> 530</span>                return False
+<span class="ln"> 531</span>
+<span class="ln"> 532</span>            revised = call_model(
+<span class="ln"> 533</span>                self.spec["host"],
+<span class="ln"> 534</span>                self.host_prompt("revise", artifact_text, review_text),
+<span class="ln"> 535</span>                self.base_dir,
+<span class="ln"> 536</span>            )
+<span class="ln"> 537</span>            write_text(artifact_path, revised)
+<span class="ln"> 538</span>            revision += 1
+<span class="ln"> 539</span>            self.save_state(status=f"{gate_name}_revision_{revision}", last_review=str(review_path))
+<span class="ln"> 540</span>            self.append_log("revision", gate=gate_name, revision=revision, artifact=artifact_label)</pre>
+</div>
+      <h3><span class="arr">▸</span>Runner.run — 入口</h3>
+      <p>run() 是 25 行直白的状态机：<code>save_state("running") → gather_context → 跑 plan → 跑 plan_gate → 进入迭代循环 → 任一交付过 delivery_gate 就 return 0 → 否则 max_iterations 触发就 return 1</code>。注意"max_iterations reached" 是单独一类失败，不进 gate.revisions 也不进 no_progress，逻辑上等价于"用完预算就要停"。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/run-loop.py</span> · L542-588</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 542</span>    def run(self) -&gt; int:
+<span class="ln"> 543</span>        self.save_state(status="running")
+<span class="ln"> 544</span>        self.append_log("run_start", spec=str(self.spec_path))
+<span class="ln"> 545</span>        self.gather_context()
+<span class="ln"> 546</span>
+<span class="ln"> 547</span>        plan_path = self.workspace / "plan.md"
+<span class="ln"> 548</span>        if not plan_path.exists():
+<span class="ln"> 549</span>            self.run_host("plan", plan_path)
+<span class="ln"> 550</span>        if not self.run_gate("plan_gate", plan_path, "plan.md"):
+<span class="ln"> 551</span>            return 1
+<span class="ln"> 552</span>
+<span class="ln"> 553</span>        max_iterations = int(self.spec["loop_control"]["max_iterations"])
+<span class="ln"> 554</span>        for iteration in range(1, max_iterations + 1):
+<span class="ln"> 555</span>            self.enforce_wall_clock()
+<span class="ln"> 556</span>            self.save_state(status="delivery", iteration=iteration)
+<span class="ln"> 557</span>            delivery_path = self.workspace / f"delivery-{iteration}.md"
+<span class="ln"> 558</span>            self.run_host("delivery", delivery_path)
+<span class="ln"> 559</span>            if self.run_gate("delivery_gate", delivery_path, delivery_path.name):
+<span class="ln"> 560</span>                self.save_state(status="passed", final_delivery=str(delivery_path), completed_at=utc_now())
+<span class="ln"> 561</span>                self.append_log("run_passed", final_delivery=str(delivery_path))
+<span class="ln"> 562</span>                print(f"Looper run passed. Final delivery: {delivery_path}")
+<span class="ln"> 563</span>                return 0
+<span class="ln"> 564</span>
+<span class="ln"> 565</span>        self.save_state(status="failed", failure="max_iterations_reached")
+<span class="ln"> 566</span>        self.append_log("stop", reason="max_iterations_reached")
+<span class="ln"> 567</span>        return 1
+<span class="ln"> 568</span>
+<span class="ln"> 569</span>
+<span class="ln"> 570</span>def main(argv: list[str] | None = None) -&gt; int:
+<span class="ln"> 571</span>    parser = argparse.ArgumentParser(description="Run a compiled Looper loop.")
+<span class="ln"> 572</span>    parser.add_argument(
+<span class="ln"> 573</span>        "spec_path",
+<span class="ln"> 574</span>        nargs="?",
+<span class="ln"> 575</span>        type=Path,
+<span class="ln"> 576</span>        default=Path(__file__).with_name("loop.resolved.json"),
+<span class="ln"> 577</span>        help="Path to loop.resolved.json (defaults to the file next to run-loop.py).",
+<span class="ln"> 578</span>    )
+<span class="ln"> 579</span>    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+<span class="ln"> 580</span>    try:
+<span class="ln"> 581</span>        return Runner(args.spec_path).run()
+<span class="ln"> 582</span>    except RunnerError as exc:
+<span class="ln"> 583</span>        print(f"run-loop: error: {exc}", file=sys.stderr)
+<span class="ln"> 584</span>        return 2
+<span class="ln"> 585</span>
+<span class="ln"> 586</span>
+<span class="ln"> 587</span>if __name__ == "__main__":
+<span class="ln"> 588</span>    raise SystemExit(main())</pre>
+</div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+<div class="mermaid">
+flowchart TB
+  Init["Runner.__init__"]:::node --> LS["load_state"]:::node
+  Start["run()"]:::node --> GC["gather_context"]:::node
+  GC --> RH_plan["run_host('plan')"]:::node
+  RH_plan --> PG["run_gate('plan_gate')"]:::node
+  PG -- pass --> Loop["for i in max_iterations"]:::node
+  PG -- fail --> Stop["status=failed"]:::stop
+  Loop --> RH_del["run_host('delivery')"]:::node
+  RH_del --> DG["run_gate('delivery_gate')"]:::node
+  DG -- pass --> Done["status=passed"]:::stop
+  DG -- revise_until_clean + rev < max --> HD_loop["host_prompt('revise')"]:::node
+  HD_loop --> RH_del
+  DG -- no_progress_reached --> Stop
+  DG -- max_revisions reached --> Stop
+  subgraph Gate_inside["run_gate while-True"]
+    PC["run_programmatic"]:::stage
+    HC["human_check"]:::stage
+    RV["run_reviewers (notes)"]:::stage
+    JD["run_judge (verdict)"]:::stage
+    JR["parse_judge_output"]:::stage
+    NP["no_progress_reached"]:::stage
+  end
+  PG --> PC
+  PG --> HC
+  PG --> RV
+  PG --> JD
+  JD --> JR
+  PC --> NP
+  HC --> NP
+  JD --> NP
+  NP -- threshold reached --> Stop
+  classDef node fill:#1a1c22,stroke:#54d6e0,color:#d6f6fb
+  classDef stage fill:#1a1c22,stroke:#a17fe0,color:#b89bf0
+  classDef stop fill:#1a1c22,stroke:#e08a64,color:#f0a585
+</div>
+      <h3><span class="arr">▸</span>测试 fixture — fake_judge.py / fake_host.py</h3>
+      <p>tests/fixtures/ 下的两个文件是 runner 整套路径能 CI 跑通的根基。<code>fake_judge.py</code> 读外部 state 文件，每次调用递增 count；<code>count &lt; revise-count</code> 时返回 verdict=REVISE + blocking_issues=["Add an explicit owner."]，否则 pass。counter 参数来自 <code>loop.yaml</code> 的 argv 数组——<code>["python", "fake_judge.py", "{judge_state}", "1"]</code>，1 表示先 revise 一次再 pass。<code>fake_host.py</code> 读 stdin 文本里的关键词切换产物形态：包含 "Revise the artifact" 就返回修订文本，包含 "Draft plan.md" 就返 plan，否则返 LOOP.md。三者组合让 <code>tests/test_looper.py</code> 能在不连真实 CLI 的情况下跑完整 revise_until_clean → judge pass → status=passed 链路。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">tests/fixtures/fake_judge.py</span> · L1-47</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>#!/usr/bin/env python3
+<span class="ln">   2</span>"""Fake judge model for Looper runner tests."""
+<span class="ln">   3</span>
+<span class="ln">   4</span>from __future__ import annotations
+<span class="ln">   5</span>
+<span class="ln">   6</span>import json
+<span class="ln">   7</span>from pathlib import Path
+<span class="ln">   8</span>import sys
+<span class="ln">   9</span>
+<span class="ln">  10</span>
+<span class="ln">  11</span>def main() -&gt; int:
+<span class="ln">  12</span>    if len(sys.argv) &lt; 2:
+<span class="ln">  13</span>        print("usage: fake_judge.py &lt;state-file&gt; [revise-count]", file=sys.stderr)
+<span class="ln">  14</span>        return 2
+<span class="ln">  15</span>    state_path = Path(sys.argv[1])
+<span class="ln">  16</span>    revise_count = int(sys.argv[2]) if len(sys.argv) &gt; 2 else 0
+<span class="ln">  17</span>    state_path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">  18</span>    state = {"count": 0}
+<span class="ln">  19</span>    if state_path.exists():
+<span class="ln">  20</span>        state = json.loads(state_path.read_text(encoding="utf-8"))
+<span class="ln">  21</span>    count = int(state.get("count", 0))
+<span class="ln">  22</span>    state["count"] = count + 1
+<span class="ln">  23</span>    state_path.write_text(json.dumps(state), encoding="utf-8")
+<span class="ln">  24</span>
+<span class="ln">  25</span>    if count &lt; revise_count:
+<span class="ln">  26</span>        verdict = {
+<span class="ln">  27</span>            "verdict": "revise",
+<span class="ln">  28</span>            "blocking_issues": ["Add an explicit owner."],
+<span class="ln">  29</span>            "confidence": 0.91,
+<span class="ln">  30</span>            "notes": "The artifact is close but needs one concrete owner.",
+<span class="ln">  31</span>        }
+<span class="ln">  32</span>    else:
+<span class="ln">  33</span>        verdict = {
+<span class="ln">  34</span>            "verdict": "pass",
+<span class="ln">  35</span>            "blocking_issues": [],
+<span class="ln">  36</span>            "confidence": 0.94,
+<span class="ln">  37</span>            "notes": "The artifact satisfies the rubric.",
+<span class="ln">  38</span>        }
+<span class="ln">  39</span>    print("```json")
+<span class="ln">  40</span>    print(json.dumps(verdict))
+<span class="ln">  41</span>    print("```")
+<span class="ln">  42</span>    return 0
+<span class="ln">  43</span>
+<span class="ln">  44</span>
+<span class="ln">  45</span>if __name__ == "__main__":
+<span class="ln">  46</span>    raise SystemExit(main())
+<span class="ln">  47</span></pre>
+</div>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">tests/fixtures/fake_host.py</span> · L1-35</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>#!/usr/bin/env python3
+<span class="ln">   2</span>"""Fake host model for Looper runner tests."""
+<span class="ln">   3</span>
+<span class="ln">   4</span>from __future__ import annotations
+<span class="ln">   5</span>
+<span class="ln">   6</span>import sys
+<span class="ln">   7</span>
+<span class="ln">   8</span>
+<span class="ln">   9</span>def main() -&gt; int:
+<span class="ln">  10</span>    prompt = sys.stdin.read()
+<span class="ln">  11</span>    if "Revise the artifact" in prompt:
+<span class="ln">  12</span>        print("Revised artifact")
+<span class="ln">  13</span>        print()
+<span class="ln">  14</span>        print("Owner: host")
+<span class="ln">  15</span>        print("Resolved reviewer issue.")
+<span class="ln">  16</span>        print("No TBD")
+<span class="ln">  17</span>    elif "Draft plan.md" in prompt:
+<span class="ln">  18</span>        print("# Plan")
+<span class="ln">  19</span>        print()
+<span class="ln">  20</span>        print("Owner: host")
+<span class="ln">  21</span>        print("1. Read the context.")
+<span class="ln">  22</span>        print("2. Produce the delivery.")
+<span class="ln">  23</span>        print("No TBD")
+<span class="ln">  24</span>    else:
+<span class="ln">  25</span>        print("# LOOP.md")
+<span class="ln">  26</span>        print()
+<span class="ln">  27</span>        print("Owner: host")
+<span class="ln">  28</span>        print("Diagram: included")
+<span class="ln">  29</span>        print("No TBD")
+<span class="ln">  30</span>    return 0
+<span class="ln">  31</span>
+<span class="ln">  32</span>
+<span class="ln">  33</span>if __name__ == "__main__":
+<span class="ln">  34</span>    raise SystemExit(main())
+<span class="ln">  35</span></pre>
+</div>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul>
+        <li><strong>judge 输出非 JSON</strong> — <code>parse_judge_output</code> 把非 JSON 降级为 <code>REVISE</code> + <code>blocking_issues=["Judge output was not parseable JSON."]</code>，让 no_progress 自然触发；但仍可能浪费预算。</li>
+        <li><strong>no_progress 文本签名错位</strong> — 同样一句 blocking 措辞微调就归零；同一 gate 连续两次 verdict=REVISE 但 blocking_issues 排序不同也会归零。现实里 verbose judge 又尤其容易命中此问题。</li>
+        <li><strong>wall_clock 在 host 子进程退出后检查</strong> — <code>enforce_wall_clock</code> 在调用 <em>前</em> 检查，返回时 host 自身耗时已计入 monotonic，所以下一次进 gate 才能感知超时。如果一次 host call 跨多分钟，会变成"完成后再下一次 gate 才发现"的延迟停机。</li>
+        <li><strong>redact 走文件 glob 不做内容指纹</strong> — 用户把 secret 复制到 <code>process-notes.md</code>，runner 不会拦；只能默认 glob 的 4 类文件。</li>
+        <li><strong>argv list 注入无显式校验</strong> — <code>ensure_argv</code> 只查 "list of str"，不会拦 <code>["bash", "-c", "..."]</code>。如果 council 成员的 invocation 里塞了一段 shell 脚本，runner 会直接 spawn bash。</li>
+        <li><strong>subprocess.DEVNULL 仅给 run_probe</strong> — run_argv 把 stdin 走 prompt 文本（line 87-92），但探测版本时已经埋掉了 stdin，避免误从父进程吃。</li>
+        <li><strong>缺命令行参数走默认 spec_path</strong> — <code>main()</code> 把 <code>loop.resolved.json</code> 默认放在 runner 旁边，是好默认但工作目录不固定时容易找不到文件。</li>
+        <li><strong>fake_judge 用 state 文件计数</strong> — 仅在 tests/ 下有效；真实 CLI 不会按调用次数切 verdict。CI 通过不等于生产可用。</li>
+      </ul>
+    </section>
+
+
+      <h3><span class="arr">▸</span>本子页源码引用清单</h3>
+      <p>所有 path:line 都已 grep 验证，集中在 templates/run-loop.py 与少数 scripts/looper.py：</p>
+      <div class="g2">
+        <div class="card"><div class="card-h">templates/run-loop.py 头部</div><div class="card-d">
+          <code>sources/ksimback-looper/templates/run-loop.py:1</code> docstring 边界声明<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:26</code> RunnerError<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:57</code> ensure_argv<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:84</code> subprocess.run<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:112</code> parse_judge_output<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:113</code> fence JSON 解析<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:144</code> Runner.__init__<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:154</code> utc_now + monotonic<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:156</code> load_state<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:167</code> save_state
+        </div></div>
+        <div class="card"><div class="card-h">templates/run-loop.py 中段</div><div class="card-d">
+          <code>sources/ksimback-looper/templates/run-loop.py:172</code> append_log<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:178</code> enforce_wall_clock<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:188</code> no_progress_reached<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:227</code> redactions_for<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:234</code> redact_prompt_for_member<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:260</code> ensure_consent<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:271</code> state.consent first read<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:287</code> gather_context<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:312</code> workspace/context.md<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:338</code> run_host
+        </div></div>
+        <div class="card"><div class="card-h">templates/run-loop.py 后段</div><div class="card-d">
+          <code>sources/ksimback-looper/templates/run-loop.py:345</code> run_programmatic<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:371</code> judge_prompt<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:395</code> run_judge<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:417</code> run_reviewers<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:440</code> human_check<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:443</code> input prompt<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:451</code> run_gate<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:542</code> Runner.run<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:571</code> argparse CLI<br>
+          <code>sources/ksimback-looper/templates/run-loop.py:587</code> __main__
+        </div></div>
+        <div class="card"><div class="card-h">scripts/looper.py + fixtures</div><div class="card-d">
+          <code>sources/ksimback-looper/scripts/looper.py:23</code> DEFAULT_REDACTIONS<br>
+          <code>sources/ksimback-looper/scripts/looper.py:131</code> subprocess.DEVNULL<br>
+          <code>sources/ksimback-looper/scripts/looper.py:362</code> run_log default<br>
+          <code>sources/ksimback-looper/tests/fixtures/fake_judge.py:11</code> counter<br>
+          <code>sources/ksimback-looper/tests/fixtures/fake_host.py:9</code> prompt-based switch<br>
+          <code>sources/ksimback-looper/tests/test_looper.py:1</code> write_loop_yaml fixture
+        </div></div>
+      </div>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2">
+        <div class="card"><div class="card-h">looper-spec.md §2 / §5</div><div class="card-d">作者在 spec §2 说 Looper 不假装 orchestrator，§5 列了 reviewer / judge 强分离与 rubric 内嵌。本子页的所有代码都按这两条设计原则组织。</div></div>
+        <div class="card"><div class="card-h">scripts/looper.py · 子页面 1</div><div class="card-d">normalize_spec 把 rules 写成数据落到 resolved.json，runner 才能容错（gate.references 才有意义）；子页面 1 解了这条数据链的第一段。</div></div>
+        <div class="card"><div class="card-h">examples/ai-workflow-mapping/</div><div class="card-d">唯一公开示例演示 host=codex + reviewer=claude + USD/tokens/wall_clock 三种预算全开，是读懂本子页所有 runner 方法的最快捷径。</div></div>
+        <div class="card"><div class="card-h">SKILL.md · 教练侧契约</div><div class="card-d">如果要用 Looper 做<em>设计期</em>访谈，看 SKILL.md；如果看<em>运行期</em>逻辑，看本子页。两条线在 <code>loop.resolved.json</code> 相遇。</div></div>
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-03</span>
+      <span>Source · <a href="https://github.com/ksimback/looper">ksimback/looper</a></span>
+      <span><a href="../looper.html">↑ looper 主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:"dark", securityLevel:"loose"});</script>
+
+<script>
+(() => {
+  const links = document.querySelectorAll(".nav-list a");
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute("href").slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove("active"));
+    if (el) map.get(el).classList.add("active");
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById("msel");
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement("option");
+      o.value = a.getAttribute("href");
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById("stars");
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener("resize", resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = "#b89bf0";
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

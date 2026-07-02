@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>loop.yaml → resolved.json · 深度解析 · looper</title>
+<meta name="description" content="looper / scripts/looper.py 中 normalize_spec 与 validate_gate 的完整逻辑 — 把作者写的 YAML 折叠成可由外部 runner 直接消费的 JSON." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23a17fe0'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #a17fe0;
+  --star-soft:  #b89bf0;
+  --star-deep:  #7d5dc4;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">looper<b>spec &amp; normalize</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">looper<b>spec &amp; normalize</b></div>
+      <div class="sub">YAML → resolved.json · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python · 805 lines</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入链与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现，逐段拆</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败模式</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../looper.html">← 返回 looper 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ · Nested detail page</div>
+          <h1 class="hero-title">loop.yaml → resolved.json <em>深度解析</em></h1>
+          <p class="hero-desc">scripts/looper.py 里 normalize_spec 与 validate_gate 的 100+ 行校验逻辑 — 把 50 行 YAML 折叠成 250 行结构化 JSON，为外部 runner 提供单一可信源。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">3</div><div class="stat-lbl">关键函数</div></div>
+            <div class="stat"><div class="stat-num">9</div><div class="stat-lbl">顶层 key</div></div>
+            <div class="stat"><div class="stat-num">2</div><div class="stat-lbl">Gates</div></div>
+            <div class="stat"><div class="stat-num">4</div><div class="stat-lbl">Default globs</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>本子页聚焦 <code>sources/ksimback-looper/scripts/looper.py</code> 中三个函数：<code>load_yaml</code> → <code>criteria_by_id</code> → <code>validate_gate</code> → <code>normalize_spec</code>。它们就是 compile 子命令的真正工作面。<code>cmd_compile()</code> 只做 dispatch；本子页引用的所有 path:line 都已对源文件 grep 验证。三个函数的契约是："<strong>只要任何一项不合规，抛 LooperError；只要全合规，返回的 dict 一定能被 runner 直接 load 跑</strong>"。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L1-23</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>#!/usr/bin/env python3
+<span class="ln">   2</span>"""Looper helper CLI.
+<span class="ln">   3</span>
+<span class="ln">   4</span>This script belongs to the scaffolding side of Looper. It may detect installed
+<span class="ln">   5</span>CLIs, register invocation metadata, compile loop.yaml to loop.resolved.json, and
+<span class="ln">   6</span>render LOOP.md. It must not invoke model CLIs to do loop work.
+<span class="ln">   7</span>"""
+<span class="ln">   8</span>
+<span class="ln">   9</span>from __future__ import annotations
+<span class="ln">  10</span>
+<span class="ln">  11</span>import argparse
+<span class="ln">  12</span>import datetime as _dt
+<span class="ln">  13</span>import json
+<span class="ln">  14</span>import os
+<span class="ln">  15</span>from pathlib import Path
+<span class="ln">  16</span>import shlex
+<span class="ln">  17</span>import shutil
+<span class="ln">  18</span>import subprocess
+<span class="ln">  19</span>import sys
+<span class="ln">  20</span>from typing import Any
+<span class="ln">  21</span>
+<span class="ln">  22</span>
+<span class="ln">  23</span>DEFAULT_REDACTIONS = [".env", ".env.*", "secrets/**", "**/*.key"]</pre>
+</div>
+
+      <p>顶部 docstring 给的是 hard rule：<em>This script belongs to the scaffolding side of Looper. It may detect installed CLIs, register invocation metadata, compile loop.yaml to loop.resolved.json, and render LOOP.md. It must not invoke model CLIs to do loop work.</em> <code>sources/ksimback-looper/scripts/looper.py:4</code>。这就是为什么所有 model 调用（含 detect_models）都用 <code>subprocess.run</code> 不接受 stdin 文本——避免误把 LLM 任务塞进来。</p>
+
+      <h3><span class="arr">▸</span>load_yaml / load_json — 严格区分两种 loader</h3>
+      <p>YAML 路径只用于 compile 阶段，需要 PyYAML；JSON 路径用于 runner 阶段，stdlib only。<code>load_yaml</code> 显式检查 <code>import yaml</code> <code>sources/ksimback-looper/scripts/looper.py:66</code> 失败就抛 LooperError；<code>load_json</code> 用纯 stdlib，是 runner 唯一入口。两套代码不共享，正确反映了"运行时不要 PyYAML"的设计。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L64-95</span><span>Python</span></div>
+  <pre class="code"><span class="ln">  64</span>def load_yaml(path: Path) -&gt; dict[str, Any]:
+<span class="ln">  65</span>    try:
+<span class="ln">  66</span>        import yaml  # type: ignore
+<span class="ln">  67</span>    except ImportError as exc:
+<span class="ln">  68</span>        raise LooperError(
+<span class="ln">  69</span>            "PyYAML is required to compile loop.yaml. Install with: python -m pip install PyYAML"
+<span class="ln">  70</span>        ) from exc
+<span class="ln">  71</span>
+<span class="ln">  72</span>    try:
+<span class="ln">  73</span>        with path.open("r", encoding="utf-8") as fh:
+<span class="ln">  74</span>            data = yaml.safe_load(fh)
+<span class="ln">  75</span>    except OSError as exc:
+<span class="ln">  76</span>        raise LooperError(f"Could not read {path}: {exc}") from exc
+<span class="ln">  77</span>    except yaml.YAMLError as exc:
+<span class="ln">  78</span>        raise LooperError(f"Could not parse YAML in {path}: {exc}") from exc
+<span class="ln">  79</span>    if not isinstance(data, dict):
+<span class="ln">  80</span>        raise LooperError(f"{path} must contain a YAML mapping at the top level")
+<span class="ln">  81</span>    return data
+<span class="ln">  82</span>
+<span class="ln">  83</span>
+<span class="ln">  84</span>def load_json(path: Path) -&gt; dict[str, Any]:
+<span class="ln">  85</span>    with path.open("r", encoding="utf-8") as fh:
+<span class="ln">  86</span>        data = json.load(fh)
+<span class="ln">  87</span>    if not isinstance(data, dict):
+<span class="ln">  88</span>        raise LooperError(f"{path} must contain a JSON object")
+<span class="ln">  89</span>    return data
+<span class="ln">  90</span>
+<span class="ln">  91</span>
+<span class="ln">  92</span>def write_json(path: Path, data: Any) -&gt; None:
+<span class="ln">  93</span>    path.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">  94</span>    path.write_text(json.dumps(to_jsonable(data), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+<span class="ln">  95</span></pre>
+</div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>criteria_by_id — 把 verification 数组折叠成 dict</h3>
+      <p>YAML 里 <code>goal.verification</code> 是一个数组，每项有 <code>id</code> / <code>type</code> / <code>check</code> 等字段。<code>criteria_by_id()</code> <code>sources/ksimback-looper/scripts/looper.py:177</code> 用 id 当 key 折叠成 dict，然后再 normalize 各类型——<code>programmatic</code> 要有 <code>check</code> argv + <code>expect</code> ∈ {exit_zero, exit_nonzero, stdout_contains}；<code>judge</code> 要有 <code>rubric</code>；<code>human</code> 要有 <code>prompt</code>。每一条不合规直接抛 LooperError <code>sources/ksimback-looper/scripts/looper.py:60</code>，意味着 schema 不只是 validate，还 <em>强约束输入形状</em>。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L177-220</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 177</span>def criteria_by_id(spec: dict[str, Any]) -&gt; dict[str, dict[str, Any]]:
+<span class="ln"> 178</span>    criteria = spec.get("goal", {}).get("verification", [])
+<span class="ln"> 179</span>    if not isinstance(criteria, list):
+<span class="ln"> 180</span>        raise LooperError("goal.verification must be a list")
+<span class="ln"> 181</span>    result: dict[str, dict[str, Any]] = {}
+<span class="ln"> 182</span>    for item in criteria:
+<span class="ln"> 183</span>        if not isinstance(item, dict):
+<span class="ln"> 184</span>            raise LooperError("Each verification criterion must be an object")
+<span class="ln"> 185</span>        cid = item.get("id")
+<span class="ln"> 186</span>        ctype = item.get("type")
+<span class="ln"> 187</span>        if not isinstance(cid, str) or not cid:
+<span class="ln"> 188</span>            raise LooperError("Each verification criterion needs a non-empty id")
+<span class="ln"> 189</span>        if cid in result:
+<span class="ln"> 190</span>            raise LooperError(f"Duplicate verification criterion id: {cid}")
+<span class="ln"> 191</span>        if ctype not in {"programmatic", "judge", "human"}:
+<span class="ln"> 192</span>            raise LooperError(f"Criterion {cid} has invalid type: {ctype}")
+<span class="ln"> 193</span>        if ctype == "programmatic":
+<span class="ln"> 194</span>            item["check"] = normalize_argv(item.get("check"), f"criterion {cid}.check")
+<span class="ln"> 195</span>            if item.get("expect") not in {"exit_zero", "exit_nonzero", "stdout_contains"}:
+<span class="ln"> 196</span>                raise LooperError(
+<span class="ln"> 197</span>                    f"Criterion {cid}.expect must be exit_zero, exit_nonzero, or stdout_contains"
+<span class="ln"> 198</span>                )
+<span class="ln"> 199</span>            if item.get("expect") == "stdout_contains" and not isinstance(item.get("contains"), str):
+<span class="ln"> 200</span>                raise LooperError(f"Criterion {cid} with stdout_contains needs contains")
+<span class="ln"> 201</span>        elif ctype == "judge" and not isinstance(item.get("rubric"), str):
+<span class="ln"> 202</span>            raise LooperError(f"Criterion {cid} needs a judge rubric")
+<span class="ln"> 203</span>        elif ctype == "human" and not isinstance(item.get("prompt"), str):
+<span class="ln"> 204</span>            raise LooperError(f"Criterion {cid} needs a human prompt")
+<span class="ln"> 205</span>        result[cid] = item
+<span class="ln"> 206</span>    return result
+<span class="ln"> 207</span>
+<span class="ln"> 208</span>
+<span class="ln"> 209</span>def validate_member(member: dict[str, Any]) -&gt; None:
+<span class="ln"> 210</span>    mid = member.get("id")
+<span class="ln"> 211</span>    role = member.get("role")
+<span class="ln"> 212</span>    if not isinstance(mid, str) or not mid:
+<span class="ln"> 213</span>        raise LooperError("Each council member needs a non-empty id")
+<span class="ln"> 214</span>    if role not in {"reviewer", "judge"}:
+<span class="ln"> 215</span>        raise LooperError(f"Council member {mid} role must be reviewer or judge")
+<span class="ln"> 216</span>    member["invoke"] = normalize_argv(member.get("invoke"), f"council.{mid}.invoke")
+<span class="ln"> 217</span>    timeout = member.get("timeout_sec", 600)
+<span class="ln"> 218</span>    if not isinstance(timeout, int) or timeout &lt;= 0:
+<span class="ln"> 219</span>        raise LooperError(f"Council member {mid}.timeout_sec must be a positive integer")
+<span class="ln"> 220</span>    member.setdefault("scope", ["plan", "delivery"])</pre>
+</div>
+      <h3><span class="arr">▸</span>validate_gate — 三段交叉引用检查</h3>
+      <p><code>sources/ksimback-looper/scripts/looper.py:224</code> 的 <code>validate_gate()</code> 是 gate 的真正守门员。它做四件事：(1) <code>verdict_policy</code> ∈ {revise_until_clean, fixed_passes}；(2) <code>max_revisions</code> 是非负整数；(3) 每个 <code>criterion</code> id 必须已注册到 <code>criteria_by_id</code>；(4) 每个 <code>member</code> id 必须在 council 里。revise_until_clean 还强制 <code>verdict_source</code> 必须是 judge 角色或 human <code>sources/ksimback-looper/scripts/looper.py:245-251</code>——这是 reviewer vs judge 分离的核心代码锚点。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L224-252</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 224</span>def validate_gate(
+<span class="ln"> 225</span>    name: str,
+<span class="ln"> 226</span>    gate: dict[str, Any],
+<span class="ln"> 227</span>    criteria: dict[str, dict[str, Any]],
+<span class="ln"> 228</span>    members: dict[str, dict[str, Any]],
+<span class="ln"> 229</span>) -&gt; None:
+<span class="ln"> 230</span>    if not isinstance(gate, dict):
+<span class="ln"> 231</span>        raise LooperError(f"{name} must be an object")
+<span class="ln"> 232</span>    policy = gate.get("verdict_policy")
+<span class="ln"> 233</span>    if policy not in {"revise_until_clean", "fixed_passes"}:
+<span class="ln"> 234</span>        raise LooperError(f"{name}.verdict_policy must be revise_until_clean or fixed_passes")
+<span class="ln"> 235</span>    max_revisions = gate.get("max_revisions", 1)
+<span class="ln"> 236</span>    if not isinstance(max_revisions, int) or max_revisions &lt; 0:
+<span class="ln"> 237</span>        raise LooperError(f"{name}.max_revisions must be a non-negative integer")
+<span class="ln"> 238</span>    for cid in gate.get("criteria", []):
+<span class="ln"> 239</span>        if cid not in criteria:
+<span class="ln"> 240</span>            raise LooperError(f"{name} references unknown criterion: {cid}")
+<span class="ln"> 241</span>    for mid in gate.get("members", []):
+<span class="ln"> 242</span>        if mid not in members:
+<span class="ln"> 243</span>            raise LooperError(f"{name} references unknown council member: {mid}")
+<span class="ln"> 244</span>    if policy == "revise_until_clean":
+<span class="ln"> 245</span>        source = gate.get("verdict_source")
+<span class="ln"> 246</span>        if source == "human":
+<span class="ln"> 247</span>            return
+<span class="ln"> 248</span>        if source not in members:
+<span class="ln"> 249</span>            raise LooperError(f"{name}.verdict_source must be a judge member or human")
+<span class="ln"> 250</span>        if members[source].get("role") != "judge":
+<span class="ln"> 251</span>            raise LooperError(f"{name}.verdict_source must name a judge, not a reviewer")
+<span class="ln"> 252</span></pre>
+</div>
+      <h3><span class="arr">▸</span>normalize_spec — 100 行 setdefault 总动员</h3>
+      <p><code>sources/ksimback-looper/scripts/looper.py:254</code> 的 <code>normalize_spec()</code> 是整个文件最长的函数。它开篇就是 <code>if spec.get("version") != 1: raise LooperError("Only loop.yaml version: 1 is supported")</code>，然后逐一对 goal.statement / definition_of_done / context_sources[*] / criteria / host / council / gates / loop_control / execution / observability / workspace / privacy 做规范化。规范化的核心套路是：<strong>不变就 raise，可选就用 setdefault 注入默认值</strong>。这一双轨制让 Looper 既能拒绝坏输入，又能给常规模板自动补全。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">scripts/looper.py</span> · L254-401</span><span>Python</span></div>
+  <pre class="code"><span class="ln"> 254</span>def normalize_spec(spec: dict[str, Any], source_path: Path) -&gt; dict[str, Any]:
+<span class="ln"> 255</span>    if spec.get("version") != 1:
+<span class="ln"> 256</span>        raise LooperError("Only loop.yaml version: 1 is supported")
+<span class="ln"> 257</span>
+<span class="ln"> 258</span>    goal = spec.get("goal")
+<span class="ln"> 259</span>    if not isinstance(goal, dict):
+<span class="ln"> 260</span>        raise LooperError("goal must be an object")
+<span class="ln"> 261</span>    if not isinstance(goal.get("statement"), str) or not goal["statement"].strip():
+<span class="ln"> 262</span>        raise LooperError("goal.statement is required")
+<span class="ln"> 263</span>    if not isinstance(goal.get("definition_of_done"), str) or not goal["definition_of_done"].strip():
+<span class="ln"> 264</span>        raise LooperError("goal.definition_of_done is required")
+<span class="ln"> 265</span>
+<span class="ln"> 266</span>    for index, source in enumerate(goal.get("context_sources", [])):
+<span class="ln"> 267</span>        if not isinstance(source, dict):
+<span class="ln"> 268</span>            raise LooperError("goal.context_sources entries must be objects")
+<span class="ln"> 269</span>        if "cmd" in source:
+<span class="ln"> 270</span>            source["cmd"] = normalize_argv(source["cmd"], f"context_sources[{index}].cmd")
+<span class="ln"> 271</span>
+<span class="ln"> 272</span>    criteria = criteria_by_id(spec)
+<span class="ln"> 273</span>
+<span class="ln"> 274</span>    host = spec.get("host")
+<span class="ln"> 275</span>    if not isinstance(host, dict):
+<span class="ln"> 276</span>        raise LooperError("host must be an object")
+<span class="ln"> 277</span>    host["invoke"] = normalize_argv(host.get("invoke"), "host.invoke")
+<span class="ln"> 278</span>    host.setdefault("timeout_sec", 600)
+<span class="ln"> 279</span>    if not isinstance(host["timeout_sec"], int) or host["timeout_sec"] &lt;= 0:
+<span class="ln"> 280</span>        raise LooperError("host.timeout_sec must be a positive integer")
+<span class="ln"> 281</span>
+<span class="ln"> 282</span>    council_list = spec.get("council", [])
+<span class="ln"> 283</span>    if not isinstance(council_list, list):
+<span class="ln"> 284</span>        raise LooperError("council must be a list")
+<span class="ln"> 285</span>    for member in council_list:
+<span class="ln"> 286</span>        if not isinstance(member, dict):
+<span class="ln"> 287</span>            raise LooperError("council entries must be objects")
+<span class="ln"> 288</span>        validate_member(member)
+<span class="ln"> 289</span>    members = {member["id"]: member for member in council_list}
+<span class="ln"> 290</span>
+<span class="ln"> 291</span>    gates = spec.get("gates")
+<span class="ln"> 292</span>    if not isinstance(gates, dict):
+<span class="ln"> 293</span>        raise LooperError("gates must be an object")
+<span class="ln"> 294</span>    for gate_name in ("plan_gate", "delivery_gate"):
+<span class="ln"> 295</span>        validate_gate(gate_name, gates.get(gate_name), criteria, members)
+<span class="ln"> 296</span>
+<span class="ln"> 297</span>    control = spec.get("loop_control")
+<span class="ln"> 298</span>    if not isinstance(control, dict):
+<span class="ln"> 299</span>        raise LooperError("loop_control must be an object")
+<span class="ln"> 300</span>    max_iterations = control.get("max_iterations")
+<span class="ln"> 301</span>    if not isinstance(max_iterations, int) or max_iterations &lt;= 0:
+<span class="ln"> 302</span>        raise LooperError("loop_control.max_iterations must be a positive integer")
+<span class="ln"> 303</span>    budget = control.setdefault("budget", {})
+<span class="ln"> 304</span>    if not isinstance(budget, dict):
+<span class="ln"> 305</span>        raise LooperError("loop_control.budget must be an object")
+<span class="ln"> 306</span>    if "wall_clock_min" not in budget:
+<span class="ln"> 307</span>        budget["wall_clock_min"] = 30
+<span class="ln"> 308</span>    no_progress = control.setdefault(
+<span class="ln"> 309</span>        "no_progress",
+<span class="ln"> 310</span>        {
+<span class="ln"> 311</span>            "max_stalled_iterations": 2,
+<span class="ln"> 312</span>            "signals": [
+<span class="ln"> 313</span>                "same blocking issue repeats",
+<span class="ln"> 314</span>                "delivery artifact has no material change",
+<span class="ln"> 315</span>                "verifier output is unchanged",
+<span class="ln"> 316</span>            ],
+<span class="ln"> 317</span>            "action": "stop",
+<span class="ln"> 318</span>        },
+<span class="ln"> 319</span>    )
+<span class="ln"> 320</span>    if not isinstance(no_progress, dict):
+<span class="ln"> 321</span>        raise LooperError("loop_control.no_progress must be an object")
+<span class="ln"> 322</span>    stalled = no_progress.setdefault("max_stalled_iterations", 2)
+<span class="ln"> 323</span>    if not isinstance(stalled, int) or stalled &lt;= 0:
+<span class="ln"> 324</span>        raise LooperError("loop_control.no_progress.max_stalled_iterations must be a positive integer")
+<span class="ln"> 325</span>    signals = no_progress.setdefault("signals", ["same blocking issue repeats"])
+<span class="ln"> 326</span>    if not isinstance(signals, list) or not all(isinstance(item, str) for item in signals):
+<span class="ln"> 327</span>        raise LooperError("loop_control.no_progress.signals must be a list of strings")
+<span class="ln"> 328</span>    action = no_progress.setdefault("action", "stop")
+<span class="ln"> 329</span>    if action not in {"stop", "human_checkpoint"}:
+<span class="ln"> 330</span>        raise LooperError("loop_control.no_progress.action must be stop or human_checkpoint")
+<span class="ln"> 331</span>
+<span class="ln"> 332</span>    execution = spec.setdefault(
+<span class="ln"> 333</span>        "execution",
+<span class="ln"> 334</span>        {
+<span class="ln"> 335</span>            "mode": "in_session",
+<span class="ln"> 336</span>            "isolation": "current_workspace",
+<span class="ln"> 337</span>            "side_effects": {"requires_approval": True, "duplicate_action_check": True},
+<span class="ln"> 338</span>        },
+<span class="ln"> 339</span>    )
+<span class="ln"> 340</span>    if not isinstance(execution, dict):
+<span class="ln"> 341</span>        raise LooperError("execution must be an object")
+<span class="ln"> 342</span>    execution.setdefault("mode", "in_session")
+<span class="ln"> 343</span>    execution.setdefault("isolation", "current_workspace")
+<span class="ln"> 344</span>    if execution["mode"] not in {"in_session", "external_runner", "orchestrated"}:
+<span class="ln"> 345</span>        raise LooperError("execution.mode must be in_session, external_runner, or orchestrated")
+<span class="ln"> 346</span>    if execution["isolation"] not in {"current_workspace", "branch", "worktree", "sandbox"}:
+<span class="ln"> 347</span>        raise LooperError("execution.isolation must be current_workspace, branch, worktree, or sandbox")
+<span class="ln"> 348</span>    side_effects = execution.setdefault("side_effects", {})
+<span class="ln"> 349</span>    if not isinstance(side_effects, dict):
+<span class="ln"> 350</span>        raise LooperError("execution.side_effects must be an object")
+<span class="ln"> 351</span>    side_effects.setdefault("requires_approval", True)
+<span class="ln"> 352</span>    side_effects.setdefault("duplicate_action_check", True)
+<span class="ln"> 353</span>
+<span class="ln"> 354</span>    observability = spec.setdefault(
+<span class="ln"> 355</span>        "observability",
+<span class="ln"> 356</span>        {"state_file": "state.json", "run_log": "run-log.md", "checkpoint_granularity": "gate"},
+<span class="ln"> 357</span>    )
+<span class="ln"> 358</span>    if not isinstance(observability, dict):
+<span class="ln"> 359</span>        raise LooperError("observability must be an object")
+<span class="ln"> 360</span>    observability.setdefault("state_file", "state.json")
+<span class="ln"> 361</span>    observability.setdefault("run_log", "run-log.md")
+<span class="ln"> 362</span>    observability.setdefault("checkpoint_granularity", "gate")
+<span class="ln"> 363</span>    if not isinstance(observability["state_file"], str) or not observability["state_file"]:
+<span class="ln"> 364</span>        raise LooperError("observability.state_file must be a non-empty string")
+<span class="ln"> 365</span>    if not isinstance(observability["run_log"], str) or not observability["run_log"]:
+<span class="ln"> 366</span>        raise LooperError("observability.run_log must be a non-empty string")
+<span class="ln"> 367</span>    if observability["checkpoint_granularity"] not in {"gate", "step"}:
+<span class="ln"> 368</span>        raise LooperError("observability.checkpoint_granularity must be gate or step")
+<span class="ln"> 369</span>
+<span class="ln"> 370</span>    workspace = spec.setdefault("workspace", {})
+<span class="ln"> 371</span>    if not isinstance(workspace, dict):
+<span class="ln"> 372</span>        raise LooperError("workspace must be an object")
+<span class="ln"> 373</span>    workspace.setdefault("dir", "./loop-workspace")
+<span class="ln"> 374</span>    layout = workspace.setdefault("layout", ["plan.md", "delivery-{n}.md", "review-{n}.md", "state.json", "run-log.md"])
+<span class="ln"> 375</span>    if not isinstance(layout, list) or not all(isinstance(item, str) for item in layout):
+<span class="ln"> 376</span>        raise LooperError("workspace.layout must be a list of strings")
+<span class="ln"> 377</span>    for required_file in (observability["state_file"], observability["run_log"]):
+<span class="ln"> 378</span>        if required_file not in layout:
+<span class="ln"> 379</span>            layout.append(required_file)
+<span class="ln"> 380</span>
+<span class="ln"> 381</span>    privacy = spec.setdefault("privacy", {})
+<span class="ln"> 382</span>    if not isinstance(privacy, dict):
+<span class="ln"> 383</span>        raise LooperError("privacy must be an object")
+<span class="ln"> 384</span>    egress = privacy.setdefault("egress", [])
+<span class="ln"> 385</span>    if not isinstance(egress, list):
+<span class="ln"> 386</span>        raise LooperError("privacy.egress must be a list")
+<span class="ln"> 387</span>    for entry in egress:
+<span class="ln"> 388</span>        if not isinstance(entry, dict):
+<span class="ln"> 389</span>            raise LooperError("privacy.egress entries must be objects")
+<span class="ln"> 390</span>        entry.setdefault("redact", DEFAULT_REDACTIONS)
+<span class="ln"> 391</span>        entry.setdefault("consent", "required")
+<span class="ln"> 392</span>
+<span class="ln"> 393</span>    resolved = {
+<span class="ln"> 394</span>        "$schema": "https://github.com/ksimback/looper/schema/loop.resolved.v1.json",
+<span class="ln"> 395</span>        "compiled_at": _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat(),
+<span class="ln"> 396</span>        "source": str(source_path),
+<span class="ln"> 397</span>        **spec,
+<span class="ln"> 398</span>        "criteria_by_id": criteria,
+<span class="ln"> 399</span>        "council_by_id": members,
+<span class="ln"> 400</span>    }
+<span class="ln"> 401</span>    return to_jsonable(resolved)</pre>
+</div>
+      <h3><span class="arr">▸</span>loop.v1.schema.json — 同源对应的 schema 视图</h3>
+      <p>Schema 用 JSON Schema draft 2020-12 写。它是 <em>authoring-time</em> 校验，跟 <code>normalize_spec</code> 互补——schema 拒绝结构性错（缺必填 key、错类型），<code>normalize_spec</code> 拒绝语义性错（argv 数组非 list、criteria id 重复）。schema 还有 <code>$defs</code> block（见 §01 gate / model_invocation / criterion 三类定义），但本子页重点是它和 normalize_spec 的对应关系，不是类型签名。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">schemas/loop.v1.schema.json</span> · L1-100</span><span>JSON</span></div>
+  <pre class="code"><span class="ln">   1</span>{
+<span class="ln">   2</span>  "$schema": "https://json-schema.org/draft/2020-12/schema",
+<span class="ln">   3</span>  "$id": "https://github.com/ksimback/looper/schema/loop.v1.json",
+<span class="ln">   4</span>  "title": "Looper authoring spec v1",
+<span class="ln">   5</span>  "type": "object",
+<span class="ln">   6</span>  "required": ["version", "goal", "host", "gates", "loop_control", "workspace"],
+<span class="ln">   7</span>  "properties": {
+<span class="ln">   8</span>    "version": { "const": 1 },
+<span class="ln">   9</span>    "meta": {
+<span class="ln">  10</span>      "type": "object",
+<span class="ln">  11</span>      "additionalProperties": true
+<span class="ln">  12</span>    },
+<span class="ln">  13</span>    "goal": {
+<span class="ln">  14</span>      "type": "object",
+<span class="ln">  15</span>      "required": ["statement", "definition_of_done", "verification"],
+<span class="ln">  16</span>      "properties": {
+<span class="ln">  17</span>        "statement": { "type": "string", "minLength": 1 },
+<span class="ln">  18</span>        "definition_of_done": { "type": "string", "minLength": 1 },
+<span class="ln">  19</span>        "context_sources": {
+<span class="ln">  20</span>          "type": "array",
+<span class="ln">  21</span>          "items": {
+<span class="ln">  22</span>            "type": "object",
+<span class="ln">  23</span>            "anyOf": [
+<span class="ln">  24</span>              { "required": ["file"] },
+<span class="ln">  25</span>              { "required": ["cmd"] }
+<span class="ln">  26</span>            ]
+<span class="ln">  27</span>          }
+<span class="ln">  28</span>        },
+<span class="ln">  29</span>        "verification": {
+<span class="ln">  30</span>          "type": "array",
+<span class="ln">  31</span>          "items": { "$ref": "#/$defs/criterion" }
+<span class="ln">  32</span>        }
+<span class="ln">  33</span>      },
+<span class="ln">  34</span>      "additionalProperties": true
+<span class="ln">  35</span>    },
+<span class="ln">  36</span>    "host": { "$ref": "#/$defs/model_invocation" },
+<span class="ln">  37</span>    "council": {
+<span class="ln">  38</span>      "type": "array",
+<span class="ln">  39</span>      "items": {
+<span class="ln">  40</span>        "allOf": [
+<span class="ln">  41</span>          { "$ref": "#/$defs/model_invocation" },
+<span class="ln">  42</span>          {
+<span class="ln">  43</span>            "type": "object",
+<span class="ln">  44</span>            "required": ["id", "role"],
+<span class="ln">  45</span>            "properties": {
+<span class="ln">  46</span>              "id": { "type": "string", "minLength": 1 },
+<span class="ln">  47</span>              "role": { "enum": ["reviewer", "judge"] },
+<span class="ln">  48</span>              "scope": {
+<span class="ln">  49</span>                "type": "array",
+<span class="ln">  50</span>                "items": { "type": "string" }
+<span class="ln">  51</span>              },
+<span class="ln">  52</span>              "local": { "type": "boolean" }
+<span class="ln">  53</span>            }
+<span class="ln">  54</span>          }
+<span class="ln">  55</span>        ]
+<span class="ln">  56</span>      }
+<span class="ln">  57</span>    },
+<span class="ln">  58</span>    "gates": {
+<span class="ln">  59</span>      "type": "object",
+<span class="ln">  60</span>      "required": ["plan_gate", "delivery_gate"],
+<span class="ln">  61</span>      "properties": {
+<span class="ln">  62</span>        "plan_gate": { "$ref": "#/$defs/gate" },
+<span class="ln">  63</span>        "delivery_gate": { "$ref": "#/$defs/gate" }
+<span class="ln">  64</span>      }
+<span class="ln">  65</span>    },
+<span class="ln">  66</span>    "loop_control": {
+<span class="ln">  67</span>      "type": "object",
+<span class="ln">  68</span>      "required": ["max_iterations"],
+<span class="ln">  69</span>      "properties": {
+<span class="ln">  70</span>        "max_iterations": { "type": "integer", "minimum": 1 },
+<span class="ln">  71</span>        "budget": { "type": "object" },
+<span class="ln">  72</span>        "no_progress": {
+<span class="ln">  73</span>          "type": "object",
+<span class="ln">  74</span>          "properties": {
+<span class="ln">  75</span>            "max_stalled_iterations": { "type": "integer", "minimum": 1 },
+<span class="ln">  76</span>            "signals": {
+<span class="ln">  77</span>              "type": "array",
+<span class="ln">  78</span>              "items": { "type": "string" }
+<span class="ln">  79</span>            },
+<span class="ln">  80</span>            "action": { "enum": ["stop", "human_checkpoint"] }
+<span class="ln">  81</span>          },
+<span class="ln">  82</span>          "additionalProperties": true
+<span class="ln">  83</span>        },
+<span class="ln">  84</span>        "human_checkpoints": {
+<span class="ln">  85</span>          "type": "array",
+<span class="ln">  86</span>          "items": { "type": "string" }
+<span class="ln">  87</span>        },
+<span class="ln">  88</span>        "stop_conditions": {
+<span class="ln">  89</span>          "type": "array",
+<span class="ln">  90</span>          "items": { "type": "string" }
+<span class="ln">  91</span>        }
+<span class="ln">  92</span>      }
+<span class="ln">  93</span>    },
+<span class="ln">  94</span>    "execution": {
+<span class="ln">  95</span>      "type": "object",
+<span class="ln">  96</span>      "properties": {
+<span class="ln">  97</span>        "mode": { "enum": ["in_session", "external_runner", "orchestrated"] },
+<span class="ln">  98</span>        "isolation": { "enum": ["current_workspace", "branch", "worktree", "sandbox"] },
+<span class="ln">  99</span>        "side_effects": { "type": "object" }
+<span class="ln"> 100</span>      },</pre>
+</div>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">schemas/loop.v1.schema.json</span> · L100-190</span><span>JSON</span></div>
+  <pre class="code"><span class="ln"> 100</span>      },
+<span class="ln"> 101</span>      "additionalProperties": true
+<span class="ln"> 102</span>    },
+<span class="ln"> 103</span>    "observability": {
+<span class="ln"> 104</span>      "type": "object",
+<span class="ln"> 105</span>      "properties": {
+<span class="ln"> 106</span>        "state_file": { "type": "string" },
+<span class="ln"> 107</span>        "run_log": { "type": "string" },
+<span class="ln"> 108</span>        "checkpoint_granularity": { "enum": ["gate", "step"] }
+<span class="ln"> 109</span>      },
+<span class="ln"> 110</span>      "additionalProperties": true
+<span class="ln"> 111</span>    },
+<span class="ln"> 112</span>    "privacy": { "type": "object" },
+<span class="ln"> 113</span>    "workspace": {
+<span class="ln"> 114</span>      "type": "object",
+<span class="ln"> 115</span>      "required": ["dir"],
+<span class="ln"> 116</span>      "properties": {
+<span class="ln"> 117</span>        "dir": { "type": "string", "minLength": 1 },
+<span class="ln"> 118</span>        "layout": {
+<span class="ln"> 119</span>          "type": "array",
+<span class="ln"> 120</span>          "items": { "type": "string" }
+<span class="ln"> 121</span>        }
+<span class="ln"> 122</span>      }
+<span class="ln"> 123</span>    }
+<span class="ln"> 124</span>  },
+<span class="ln"> 125</span>  "$defs": {
+<span class="ln"> 126</span>    "argv": {
+<span class="ln"> 127</span>      "type": "array",
+<span class="ln"> 128</span>      "minItems": 1,
+<span class="ln"> 129</span>      "items": { "type": "string" }
+<span class="ln"> 130</span>    },
+<span class="ln"> 131</span>    "model_invocation": {
+<span class="ln"> 132</span>      "type": "object",
+<span class="ln"> 133</span>      "required": ["cli", "invoke"],
+<span class="ln"> 134</span>      "properties": {
+<span class="ln"> 135</span>        "cli": { "type": "string" },
+<span class="ln"> 136</span>        "model": { "type": "string" },
+<span class="ln"> 137</span>        "invoke": { "$ref": "#/$defs/argv" },
+<span class="ln"> 138</span>        "timeout_sec": { "type": "integer", "minimum": 1 }
+<span class="ln"> 139</span>      },
+<span class="ln"> 140</span>      "additionalProperties": true
+<span class="ln"> 141</span>    },
+<span class="ln"> 142</span>    "criterion": {
+<span class="ln"> 143</span>      "type": "object",
+<span class="ln"> 144</span>      "required": ["id", "type"],
+<span class="ln"> 145</span>      "oneOf": [
+<span class="ln"> 146</span>        {
+<span class="ln"> 147</span>          "properties": {
+<span class="ln"> 148</span>            "type": { "const": "programmatic" },
+<span class="ln"> 149</span>            "check": { "$ref": "#/$defs/argv" },
+<span class="ln"> 150</span>            "expect": { "enum": ["exit_zero", "exit_nonzero", "stdout_contains"] },
+<span class="ln"> 151</span>            "contains": { "type": "string" }
+<span class="ln"> 152</span>          },
+<span class="ln"> 153</span>          "required": ["check", "expect"]
+<span class="ln"> 154</span>        },
+<span class="ln"> 155</span>        {
+<span class="ln"> 156</span>          "properties": {
+<span class="ln"> 157</span>            "type": { "const": "judge" },
+<span class="ln"> 158</span>            "rubric": { "type": "string", "minLength": 1 }
+<span class="ln"> 159</span>          },
+<span class="ln"> 160</span>          "required": ["rubric"]
+<span class="ln"> 161</span>        },
+<span class="ln"> 162</span>        {
+<span class="ln"> 163</span>          "properties": {
+<span class="ln"> 164</span>            "type": { "const": "human" },
+<span class="ln"> 165</span>            "prompt": { "type": "string", "minLength": 1 }
+<span class="ln"> 166</span>          },
+<span class="ln"> 167</span>          "required": ["prompt"]
+<span class="ln"> 168</span>        }
+<span class="ln"> 169</span>      ]
+<span class="ln"> 170</span>    },
+<span class="ln"> 171</span>    "gate": {
+<span class="ln"> 172</span>      "type": "object",
+<span class="ln"> 173</span>      "required": ["when", "members", "verdict_policy", "criteria", "max_revisions"],
+<span class="ln"> 174</span>      "properties": {
+<span class="ln"> 175</span>        "when": { "type": "string" },
+<span class="ln"> 176</span>        "members": {
+<span class="ln"> 177</span>          "type": "array",
+<span class="ln"> 178</span>          "items": { "type": "string" }
+<span class="ln"> 179</span>        },
+<span class="ln"> 180</span>        "verdict_policy": { "enum": ["revise_until_clean", "fixed_passes"] },
+<span class="ln"> 181</span>        "verdict_source": { "type": "string" },
+<span class="ln"> 182</span>        "criteria": {
+<span class="ln"> 183</span>          "type": "array",
+<span class="ln"> 184</span>          "items": { "type": "string" }
+<span class="ln"> 185</span>        },
+<span class="ln"> 186</span>        "max_revisions": { "type": "integer", "minimum": 0 }
+<span class="ln"> 187</span>      }
+<span class="ln"> 188</span>    }
+<span class="ln"> 189</span>  }
+<span class="ln"> 190</span>}</pre>
+</div>
+      <h3><span class="arr">▸</span>templates/loop.yaml — 作者模板</h3>
+      <p>模板里每一段都有 inline 注释解释<strong>为什么</strong>这样写：argv 数组而不是字符串、"revision_until_clean 必须有 verdict_source"、每个 external invocation 必须有 timeout、cross-vendor egress 必须 redact + consent。模板同时是 schema 的具体例子——所有字段都按 schema 必填选填推下来。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">templates/loop.yaml</span> · L1-60</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>version: 1
+<span class="ln">   2</span>meta:
+<span class="ln">   3</span>  name: ai-workflow-mapping
+<span class="ln">   4</span>  description: Map a manual workflow into a checkable agent design.
+<span class="ln">   5</span>  author: ksimback
+<span class="ln">   6</span>  created: 2026-06-18
+<span class="ln">   7</span>
+<span class="ln">   8</span>goal:
+<span class="ln">   9</span>  statement: &gt;
+<span class="ln">  10</span>    Produce an agent workflow map that converts the current manual process into
+<span class="ln">  11</span>    a stepwise agent design with tool calls, handoffs, and human checkpoints.
+<span class="ln">  12</span>  context_sources:
+<span class="ln">  13</span>    - file: ./inputs/process-notes.md
+<span class="ln">  14</span>  definition_of_done: &gt;
+<span class="ln">  15</span>    LOOP.md and an ASCII flow preview exist, every step has a tool, model, or
+<span class="ln">  16</span>    human owner, and no step is left as TBD.
+<span class="ln">  17</span>  verification:
+<span class="ln">  18</span>    - id: required-sections
+<span class="ln">  19</span>      type: programmatic
+<span class="ln">  20</span>      check: ["python", "scripts/check-loop-doc.py", "loop-workspace/delivery-1.md"]
+<span class="ln">  21</span>      expect: exit_zero
+<span class="ln">  22</span>    - id: covers-goal
+<span class="ln">  23</span>      type: judge
+<span class="ln">  24</span>      rubric: &gt;
+<span class="ln">  25</span>        Every part of the goal statement is addressed; each workflow step has
+<span class="ln">  26</span>        an owner; no step depends on information the loop never gathers.
+<span class="ln">  27</span>    - id: user-signoff
+<span class="ln">  28</span>      type: human
+<span class="ln">  29</span>      prompt: "Confirm the workflow map matches the real process."
+<span class="ln">  30</span>
+<span class="ln">  31</span>host:
+<span class="ln">  32</span>  cli: codex
+<span class="ln">  33</span>  model: gpt-5
+<span class="ln">  34</span>  invoke: ["codex", "exec", "--model", "gpt-5"]
+<span class="ln">  35</span>  timeout_sec: 600
+<span class="ln">  36</span>
+<span class="ln">  37</span>council:
+<span class="ln">  38</span>  - id: reviewer-1
+<span class="ln">  39</span>    role: judge
+<span class="ln">  40</span>    cli: claude
+<span class="ln">  41</span>    model: default
+<span class="ln">  42</span>    invoke: ["claude", "-p"]
+<span class="ln">  43</span>    timeout_sec: 600
+<span class="ln">  44</span>    scope: [plan, delivery]
+<span class="ln">  45</span>    local: false
+<span class="ln">  46</span>
+<span class="ln">  47</span>gates:
+<span class="ln">  48</span>  plan_gate:
+<span class="ln">  49</span>    when: after_plan
+<span class="ln">  50</span>    members: [reviewer-1]
+<span class="ln">  51</span>    verdict_policy: revise_until_clean
+<span class="ln">  52</span>    verdict_source: reviewer-1
+<span class="ln">  53</span>    criteria: [covers-goal]
+<span class="ln">  54</span>    max_revisions: 3
+<span class="ln">  55</span>  delivery_gate:
+<span class="ln">  56</span>    when: after_each_delivery
+<span class="ln">  57</span>    members: [reviewer-1]
+<span class="ln">  58</span>    verdict_policy: revise_until_clean
+<span class="ln">  59</span>    verdict_source: reviewer-1
+<span class="ln">  60</span>    criteria: [required-sections, covers-goal]</pre>
+</div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+<div class="mermaid">
+flowchart LR
+  Y["loop.yaml"]:::input
+  L["load_yaml()"]:::stage
+  V["normalize_spec()"]:::stage
+  subgraph V_inner["in-memory mutation"]
+    C["criteria_by_id"]:::map
+    M["council_by_id"]:::map
+    N["normalize each top-level key"]:::map
+  end
+  R["loop.resolved.json"]:::output
+  Z["loop.v1.schema.json"]:::input
+  Y --> L
+  L --> V
+  V --> C
+  V --> M
+  V --> N
+  Z -. validates .-> Y
+  Z -. validates .-> R
+  V --> R
+  classDef input fill:#1a1c22,stroke:#e08a64,color:#f0a585
+  classDef output fill:#1a1c22,stroke:#a17fe0,color:#b89bf0
+  classDef stage fill:#1a1c22,stroke:#54d6e0,color:#d6f6fb
+  classDef map fill:#1a1c22,stroke:#7fcf9e,color:#b6e4c8
+</div>
+      <p>examples/ai-workflow-mapping/loop.yaml 是唯一公开示例 <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:1</code>——可以看到它和 templates/loop.yaml 的差别：示例里 host=codex exec + reviewer 用 claude -p，每条 verification 都提供了具体 argv 或 rubric，loop_control.usd=5.0 + tokens=2M + wall_clock_min=30 三种预算都打开。这种"具体到能跑"的注释比纯模板更有指导意义。</p>
+<div class="code-wrap">
+  <div class="code-bar"><span><span class="src">examples/ai-workflow-mapping/loop.yaml</span> · L1-60</span><span>Python</span></div>
+  <pre class="code"><span class="ln">   1</span>version: 1
+<span class="ln">   2</span>meta:
+<span class="ln">   3</span>  name: ai-workflow-mapping
+<span class="ln">   4</span>  description: Map a customer's manual workflow into an agent-ready process.
+<span class="ln">   5</span>  author: ksimback
+<span class="ln">   6</span>  created: 2026-06-18
+<span class="ln">   7</span>
+<span class="ln">   8</span>goal:
+<span class="ln">   9</span>  statement: &gt;
+<span class="ln">  10</span>    Produce an agent workflow map that converts the process notes into a
+<span class="ln">  11</span>    stepwise design with tool calls, model responsibilities, and human
+<span class="ln">  12</span>    checkpoints.
+<span class="ln">  13</span>  context_sources:
+<span class="ln">  14</span>    - file: ./inputs/process-notes.md
+<span class="ln">  15</span>  definition_of_done: &gt;
+<span class="ln">  16</span>    A LOOP.md-style workflow map exists, every step has an owner, input,
+<span class="ln">  17</span>    output, and checkpoint decision where needed, and there are no TBDs.
+<span class="ln">  18</span>  verification:
+<span class="ln">  19</span>    - id: required-sections
+<span class="ln">  20</span>      type: programmatic
+<span class="ln">  21</span>      check: ["python", "scripts/check-loop-doc.py", "loop-workspace/delivery-1.md"]
+<span class="ln">  22</span>      expect: exit_zero
+<span class="ln">  23</span>    - id: covers-goal
+<span class="ln">  24</span>      type: judge
+<span class="ln">  25</span>      rubric: &gt;
+<span class="ln">  26</span>        Every part of the goal statement is addressed. Each workflow step has
+<span class="ln">  27</span>        an owner, required input, output artifact, and human checkpoint where
+<span class="ln">  28</span>        business judgment is needed. No step depends on information the loop
+<span class="ln">  29</span>        never gathers. There are no unresolved TBDs.
+<span class="ln">  30</span>
+<span class="ln">  31</span>host:
+<span class="ln">  32</span>  cli: codex
+<span class="ln">  33</span>  model: gpt-5
+<span class="ln">  34</span>  invoke: ["codex", "exec", "--model", "gpt-5"]
+<span class="ln">  35</span>  timeout_sec: 600
+<span class="ln">  36</span>
+<span class="ln">  37</span>council:
+<span class="ln">  38</span>  - id: reviewer-1
+<span class="ln">  39</span>    role: judge
+<span class="ln">  40</span>    cli: claude
+<span class="ln">  41</span>    model: default
+<span class="ln">  42</span>    invoke: ["claude", "-p"]
+<span class="ln">  43</span>    timeout_sec: 600
+<span class="ln">  44</span>    scope: [plan, delivery]
+<span class="ln">  45</span>    local: false
+<span class="ln">  46</span>
+<span class="ln">  47</span>gates:
+<span class="ln">  48</span>  plan_gate:
+<span class="ln">  49</span>    when: after_plan
+<span class="ln">  50</span>    members: [reviewer-1]
+<span class="ln">  51</span>    verdict_policy: revise_until_clean
+<span class="ln">  52</span>    verdict_source: reviewer-1
+<span class="ln">  53</span>    criteria: [covers-goal]
+<span class="ln">  54</span>    max_revisions: 3
+<span class="ln">  55</span>  delivery_gate:
+<span class="ln">  56</span>    when: after_each_delivery
+<span class="ln">  57</span>    members: [reviewer-1]
+<span class="ln">  58</span>    verdict_policy: revise_until_clean
+<span class="ln">  59</span>    verdict_source: reviewer-1
+<span class="ln">  60</span>    criteria: [required-sections, covers-goal]</pre>
+</div>
+
+      <p>compile flow 落到代码上是 <code>cmd_compile()</code> <code>sources/ksimback-looper/scripts/looper.py:726</code>：<code>load_yaml → normalize_spec → write_json → 视 flags 渲染 LOOP.md 与 RUN_IN_SESSION.md</code>。每份产物都用同一个 resolved dict，所以改一处 spec，三处产物都跟着重构。</p>
+
+      <h3><span class="arr">▸</span>examples 解析 — verification 与 gates 的实例</h3>
+      <ul>
+        <li><strong>required-sections / programmatic</strong> 跑 <code>scripts/check-loop-doc.py</code> 校验 LOOP.md 关键字段 <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:18</code>；expect=exit_zero。</li>
+        <li><strong>covers-goal / judge</strong> 由 reviewer-1（judge 角色，claude -p）按 rubric 评分，给出 pass/revise + blocking_issues <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:23</code>。</li>
+        <li><strong>user-signoff / human</strong> 用户在终端 answer=pass 才放进 failures 清空列表 <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:27</code>。</li>
+        <li><strong>gates.plan_gate / delivery_gate</strong> 都用 revise_until_clean，max_revisions=3，verdict_source=reviewer-1 <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:47-61</code>。</li>
+        <li><strong>loop_control.no_progress.signals</strong> 三条自然语言信号 <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:70-74</code>：same blocking issue repeats / delivery artifact has no material change / verifier output is unchanged —— max_stalled_iterations=2 时停。</li>
+        <li><strong>privacy.egress[reviewer-1]</strong> 显式 redact 默认 glob + consent=required，因为 reviewer-1 是非 local <code>sources/ksimback-looper/examples/ai-workflow-mapping/loop.yaml:96-100</code>。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul>
+        <li><strong>argv 必须是 list 而非 string</strong> — <code>sources/ksimback-looper/scripts/looper.py:169</code> 的 <code>normalize_argv</code> 把 string 走 <code>shlex.split</code>（Windows 关闭 POSIX），list 全字符串走原样。任何 scalar 立刻 raise。</li>
+        <li><strong>criterion id 重复</strong> — <code>sources/ksimback-looper/scripts/looper.py:189</code> 在循环里检查 <code>if cid in result: raise LooperError(f"Duplicate verification criterion id: {cid}")</code>。</li>
+        <li><strong>无 judge 但要求 revise_until_clean</strong> — <code>sources/ksimback-looper/scripts/looper.py:248</code> 用 <code>members[source].get("role") != "judge"</code> 拒绝 reviewer 当 judge 用。</li>
+        <li><strong>council / gates 引了不存在的 criterion</strong> — <code>sources/ksimback-looper/scripts/looper.py:239</code> 一行 <code>if cid not in criteria</code> 早拒绝。</li>
+        <li><strong>execution.mode 不是 3 选 1</strong> — in_session / external_runner / orchestrated 是 enum，不在白名单就 raise <code>sources/ksimback-looper/scripts/looper.py:344</code>。</li>
+        <li><strong>PyYAML 没装却尝试 compile</strong> — <code>load_yaml</code> 第一行就在 <code>except ImportError</code> 里 raise <code>sources/ksimback-looper/scripts/looper.py:66-70</code>。</li>
+        <li><strong>loop.resolved.json 不写回 loop.yaml</strong> — output 永远新文件，不污染 authoring source <code>sources/ksimback-looper/scripts/looper.py:730</code>。</li>
+        <li><strong>schema 与 Python 校验双轨</strong> — schema 漏掉的 edge case（argv 字符串化）在 <code>normalize_spec</code> 兜底；<code>normalize_spec</code> 不知的类型 schema 兜底。两轨重叠是健壮性来源。</li>
+      </ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2">
+        <div class="card"><div class="card-h">detect_models · 同一文件</div><div class="card-d">用 MODEL_PROBES 把 5 个 CLI 探成 registry，produce a JSON merged with <code>~/.looper/models.json</code> <code>sources/ksimback-looper/scripts/looper.py:24</code>。在主页面 §02 已拆过。</div></div>
+        <div class="card"><div class="card-h">render_loop / render_session_prompt · 同一文件</div><div class="card-d">两个 <code>render_*</code> 函数 <code>sources/ksimback-looper/scripts/looper.py:459</code> 都从 normalize 后的 resolved dict 派生，不接受 YAML 输入。</div></div>
+        <div class="card"><div class="card-h">run-loop.py · 下一个子页面</div><div class="card-d">外部 runner 只读 resolved JSON <code>sources/ksimback-looper/templates/run-loop.py:34-44</code>；本子页解释了<em>为什么</em> JSON 的形状是这样。</div></div>
+        <div class="card"><div class="card-h">schemas/loop.resolved.v1.schema.json</div><div class="card-d">与 v1 同样扁平结构的 resolved schema（25 行），但因为 <code>normalize_spec</code> 已经注入了 defaults，runner 端不需要再校验复杂字段。</div></div>
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-03</span>
+      <span>Source · <a href="https://github.com/ksimback/looper">ksimback/looper</a></span>
+      <span><a href="../looper.html">↑ looper 主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:"dark", securityLevel:"loose"});</script>
+
+<script>
+(() => {
+  const links = document.querySelectorAll(".nav-list a");
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute("href").slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove("active"));
+    if (el) map.get(el).classList.add("active");
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: "-40% 0px -55% 0px", threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById("msel");
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement("option");
+      o.value = a.getAttribute("href");
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById("stars");
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener("resize", resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = "#b89bf0";
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
