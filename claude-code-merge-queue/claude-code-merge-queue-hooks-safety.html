@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>hooks + safety gates · claude-code-merge-queue</title>
+<meta name="description" content="WorktreeCreate、Husky pre-push、preflight script 如何把约定变成默认路径。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#66d9e8; --star-soft:#a5f3fc; --star-deep:#0891b2; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Merge<b>Queue</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">Merge<b>Queue</b></div><div class="sub">子页面 · 深度解析</div></div><span class="nav-ver">TypeScript · Node CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#section-1"><span class="idx">01</span>架构</a></li>
+<li><a href="#section-2"><span class="idx">02</span>核心</a></li>
+<li><a href="#section-3"><span class="idx">03</span>流程</a></li>
+<li><a href="#section-4"><span class="idx">04</span>测试</a></li>
+<li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★295 · 2026-07</div><div><a href="https://github.com/funador/claude-code-merge-queue" target="_blank">funador/claude-code-merge-queue</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">hooks + safety gates <em>深度解析</em></h1><p class="hero-desc">WorktreeCreate、Husky pre-push、preflight script 如何把约定变成默认路径。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · DETAIL</div><h2 class="sec-title">导入链与契约</h2><h3>Claude hook 契约</h3><p>WorktreeCreate hook 是 Claude Code 提供的阻塞式创建事件。项目在 <code>src/hooks/worktree-create.ts:179</code> 读取 stdin，<code>src/hooks/worktree-create.ts:189</code> 解析 main checkout，最后 <code>src/hooks/worktree-create.ts:197</code> 创建 lane 并输出绝对路径。这个输出就是 Claude 接下来进入的 worktree。</p><p>init wiring 负责把 hook 装进用户 repo。<code>src/lib/wire-hooks.ts:45</code> 写入或合并 .claude/settings.json，<code>src/lib/wire-hooks.ts:99</code> 处理 Husky pre-push，<code>src/lib/wire-hooks.ts:144</code> 设置 core.hooksPath，避免 pre-push 文件存在但 git 不执行。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/hooks/worktree-create.ts:179</span> · L179-204</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">179</span>export async function runWorktreeCreateHook(): Promise&lt;void&gt; {
+<span class="ln">180</span>  let input: HookInput = {};
+<span class="ln">181</span>  try {
+<span class="ln">182</span>    input = JSON.parse(await readStdin()) as HookInput;
+<span class="ln">183</span>  } catch {
+<span class="ln">184</span>    /* no/invalid stdin — fall back to process.cwd() below */
+<span class="ln">185</span>  }
+<span class="ln">186</span>  const fromCwd = input.cwd ?? process.cwd();
+<span class="ln">187</span>
+<span class="ln">188</span>  try {
+<span class="ln">189</span>    const mainTop = resolveMainCheckout(fromCwd);
+<span class="ln">190</span>    if (expectsLocalInstall(mainTop) &amp;&amp; isEphemeralNpxCopy(fileURLToPath(import.meta.url))) {
+<span class="ln">191</span>      throw new Error(
+<span class="ln">192</span>        &quot;running from npx&#x27;s ephemeral cache, not this project&#x27;s own installed dependency — &quot; +
+<span class="ln">193</span>          &quot;node_modules is missing or broken. Run `npm install` in the main checkout and try again.&quot;,
+<span class="ln">194</span>      );
+<span class="ln">195</span>    }
+<span class="ln">196</span>    const cfg = hasConfig(mainTop) ? await loadConfig(mainTop) : { ...DEFAULTS };
+<span class="ln">197</span>    const { wt } = createLane(mainTop, cfg);
+<span class="ln">198</span>    process.stdout.write(wt + &quot;\n&quot;);
+<span class="ln">199</span>    process.exit(0);
+<span class="ln">200</span>  } catch (err) {
+<span class="ln">201</span>    process.stderr.write(`claude-code-merge-queue worktree-create hook failed: ${err instanceof Error ? err.message : String(err)}\n`);
+<span class="ln">202</span>    process.exit(1);
+<span class="ln">203</span>  }
+<span class="ln">204</span>}</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/wire-hooks.ts:45</span> · L45-73</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">45</span>export function wireClaudeSettings(root: string): WireResult {
+<span class="ln">46</span>  const dir = join(root, &quot;.claude&quot;);
+<span class="ln">47</span>  const path = join(dir, &quot;settings.json&quot;);
+<span class="ln">48</span>
+<span class="ln">49</span>  if (!existsSync(path)) {
+<span class="ln">50</span>    mkdirSync(dir, { recursive: true });
+<span class="ln">51</span>    const settings: ClaudeSettings = {
+<span class="ln">52</span>      hooks: { WorktreeCreate: [{ hooks: [{ type: &quot;command&quot;, command: HOOK_COMMAND }] }] },
+<span class="ln">53</span>    };
+<span class="ln">54</span>    writeFileSync(path, JSON.stringify(settings, null, 2) + &quot;\n&quot;);
+<span class="ln">55</span>    return &quot;created&quot;;
+<span class="ln">56</span>  }
+<span class="ln">57</span>
+<span class="ln">58</span>  let settings: ClaudeSettings;
+<span class="ln">59</span>  try {
+<span class="ln">60</span>    settings = JSON.parse(readFileSync(path, &quot;utf8&quot;)) as ClaudeSettings;
+<span class="ln">61</span>  } catch {
+<span class="ln">62</span>    return &quot;unparseable&quot;; // leave it alone — don&#x27;t guess at broken JSON
+<span class="ln">63</span>  }
+<span class="ln">64</span>
+<span class="ln">65</span>  settings.hooks ??= {};
+<span class="ln">66</span>  settings.hooks.WorktreeCreate ??= [];
+<span class="ln">67</span>  const alreadyWired = settings.hooks.WorktreeCreate.some((group) =&gt; group.hooks?.some((h) =&gt; h.command?.includes(HOOK_COMMAND)));
+<span class="ln">68</span>  if (alreadyWired) return &quot;already-wired&quot;;
+<span class="ln">69</span>
+<span class="ln">70</span>  settings.hooks.WorktreeCreate.push({ hooks: [{ type: &quot;command&quot;, command: HOOK_COMMAND }] });
+<span class="ln">71</span>  writeFileSync(path, JSON.stringify(settings, null, 2) + &quot;\n&quot;);
+<span class="ln">72</span>  return &quot;merged&quot;;
+<span class="ln">73</span>}</pre>
+</div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · DETAIL</div><h2 class="sec-title">核心实现逐段拆</h2><h3>lane 创建策略</h3><p>createLane 的原子性来自 git 自己。<code>src/hooks/worktree-create.ts:84</code> 从 lane 1 开始递增，<code>src/hooks/worktree-create.ts:91</code> 跳过已存在路径，<code>src/hooks/worktree-create.ts:107</code> 或 <code>src/hooks/worktree-create.ts:109</code> 调 git worktree add。若竞争者刚抢走同一 lane，<code>src/hooks/worktree-create.ts:112</code> 捕获失败并继续下一轮。</p><p>hook 还保护 npx 陷阱。<code>src/hooks/worktree-create.ts:150</code> 检测 _npx cache path，<code>src/hooks/worktree-create.ts:163</code> 只有当宿主 package.json 声明依赖时才期待本地安装，<code>src/hooks/worktree-create.ts:190</code> 在本地安装应存在却跑到 ephemeral npx copy 时直接报错。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/hooks/worktree-create.ts:76</span> · L76-132</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">76</span>export function createLane(mainTop: string, cfg: ClaudeCodeMergeQueueConfig): { wt: string; branch: string; lane: number } {
+<span class="ln">77</span>  // Clean up administrative entries for worktrees whose directories are
+<span class="ln">78</span>  // already gone (e.g. someone `rm -rf`&#x27;d one instead of `git worktree
+<span class="ln">79</span>  // remove`) so reusing that lane number&#x27;s branch name doesn&#x27;t fail with
+<span class="ln">80</span>  // &quot;already checked out elsewhere.&quot;
+<span class="ln">81</span>  tryGit([&quot;worktree&quot;, &quot;prune&quot;], mainTop);
+<span class="ln">82</span>
+<span class="ln">83</span>  const repoName = basename(mainTop);
+<span class="ln">84</span>  let lane = 0;
+<span class="ln">85</span>  for (;;) {
+<span class="ln">86</span>    lane += 1;
+<span class="ln">87</span>    if (lane &gt; MAX_LANE_ATTEMPTS) {
+<span class="ln">88</span>      throw new Error(`could not claim a lane after ${MAX_LANE_ATTEMPTS} attempts — is mainTop (&#x27;${mainTop}&#x27;) actually the repo root?`);
+<span class="ln">89</span>    }
+<span class="ln">90</span>    const wt = join(dirname(mainTop), `${repoName}${cfg.worktreeSuffix}${lane}`);
+<span class="ln">91</span>    if (existsSync(wt)) continue; // still claimed — try the next lane
+<span class="ln">92</span>
+<span class="ln">93</span>    const branch = `${cfg.branchPrefix}${lane}`;
+<span class="ln">94</span>    const branchExists = tryGit([&quot;show-ref&quot;, &quot;--verify&quot;, &quot;--quiet&quot;, `refs/heads/${branch}`], mainTop).ok;
+<span class="ln">95</span>
+<span class="ln">96</span>    // Base every new lane on the main checkout&#x27;s own current HEAD — never on
+<span class="ln">97</span>    // origin/integrationBranch. The main checkout is kept fast-forwarded by
+<span class="ln">98</span>    // `sync` precisely so its local HEAD IS the trusted, up-to-date view;
+<span class="ln">99</span>    // reading origin directly instead can be *behind* local HEAD (a commit
+<span class="ln">100</span>    // made here but not yet pushed) and silently drop it from every new
+<span class="ln">101</span>    // lane. That&#x27;s not a hypothetical: it breaks the literal Quickstart —
+<span class="ln">102</span>    // `init` writes claude-code-merge-queue.config.mjs/CLAUDE.md/.claude locally, and the
+<span class="ln">103</span>    // very first lane created before that commit is pushed anywhere would
+<span class="ln">104</span>    // otherwise come up with none of it.
+<span class="ln">105</span>    let add;
+<span class="ln">106</span>    if (branchExists) {
+<span class="ln">107</span>      add = tryGit([&quot;worktree&quot;, &quot;add&quot;, wt, branch], mainTop);
+<span class="ln">108</span>    } else {
+<span class="ln">109</span>      add = tryGit([&quot;worktree&quot;, &quot;add&quot;, wt, &quot;-b&quot;, branch], mainTop);
+<span class="ln">110</span>    }
+<span class="ln">111</span>
+<span class="ln">112</span>    if (!add.ok) {
+<span class="ln">113</span>      // Someone else claimed this exact lane between our existsSync check
+<span class="ln">114</span>      // and `git worktree add` — the same race a `mkdir` guards against.
+<span class="ln">115</span>      // Try the next one.
+<span class="ln">116</span>      continue;
+<span class="ln">117</span>    }
+<span class="ln">118</span>
+<span class="ln">119</span>    for (const rel of cfg.symlinks) {
+<span class="ln">120</span>      const src = join(mainTop, rel);
+<span class="ln">121</span>      const dest = join(wt, rel);
+<span class="ln">122</span>      if (!existsSync(src) || existsSync(dest)) continue;
+<span class="ln">123</span>      try {
+<span class="ln">124</span>        mkdirSync(dirname(dest), { recursive: true });
+<span class="ln">125</span>        symlinkSync(src, dest);
+<span class="ln">126</span>      } catch {
+<span class="ln">127</span>        /* best-effort — a missing symlink degrades to &quot;run npm install,&quot; not a hard failure */
+<span class="ln">128</span>      }
+<span class="ln">129</span>    }
+<span class="ln">130</span>
+<span class="ln">131</span>    return { wt, branch, lane };
+<span class="ln">132</span>  }</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/hooks/worktree-create.ts:150</span> · L150-204</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">150</span>export function isEphemeralNpxCopy(selfPath: string): boolean {
+<span class="ln">151</span>  return selfPath.includes(`${sep}_npx${sep}`);
+<span class="ln">152</span>}
+<span class="ln">153</span>
+<span class="ln">154</span>// The guard above only makes sense for a host project that&#x27;s an npm project
+<span class="ln">155</span>// with claude-code-merge-queue as a real dependency — hola, say. A non-Node host repo
+<span class="ln">156</span>// (a Haskell/Lua/Rust/whatever project with no package.json at all) has
+<span class="ln">157</span>// nowhere to install claude-code-merge-queue INTO; npx&#x27;s ephemeral cache is the only way
+<span class="ln">158</span>// it can ever run claude-code-merge-queue commands, not a fallback masking a broken
+<span class="ln">159</span>// local install. Only expect a local install — and therefore only treat
+<span class="ln">160</span>// ephemeral execution as suspicious — when the host&#x27;s own package.json
+<span class="ln">161</span>// actually lists claude-code-merge-queue as a dependency. No package.json, or one that
+<span class="ln">162</span>// doesn&#x27;t mention claude-code-merge-queue: ephemeral execution is completely normal.
+<span class="ln">163</span>export function expectsLocalInstall(mainTop: string): boolean {
+<span class="ln">164</span>  let pkg: { dependencies?: Record&lt;string, string&gt;; devDependencies?: Record&lt;string, string&gt; };
+<span class="ln">165</span>  try {
+<span class="ln">166</span>    pkg = JSON.parse(readFileSync(join(mainTop, &quot;package.json&quot;), &quot;utf8&quot;)) as typeof pkg;
+<span class="ln">167</span>  } catch {
+<span class="ln">168</span>    return false; // no package.json, or unreadable/invalid — nothing &quot;expected&quot; to be there
+<span class="ln">169</span>  }
+<span class="ln">170</span>  return Boolean(pkg.dependencies?.[&quot;claude-code-merge-queue&quot;] || pkg.devDependencies?.[&quot;claude-code-merge-queue&quot;]);
+<span class="ln">171</span>}
+<span class="ln">172</span>
+<span class="ln">173</span>async function readStdin(): Promise&lt;string&gt; {
+<span class="ln">174</span>  const chunks: Buffer[] = [];
+<span class="ln">175</span>  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+<span class="ln">176</span>  return Buffer.concat(chunks).toString(&quot;utf8&quot;);
+<span class="ln">177</span>}
+<span class="ln">178</span>
+<span class="ln">179</span>export async function runWorktreeCreateHook(): Promise&lt;void&gt; {
+<span class="ln">180</span>  let input: HookInput = {};
+<span class="ln">181</span>  try {
+<span class="ln">182</span>    input = JSON.parse(await readStdin()) as HookInput;
+<span class="ln">183</span>  } catch {
+<span class="ln">184</span>    /* no/invalid stdin — fall back to process.cwd() below */
+<span class="ln">185</span>  }
+<span class="ln">186</span>  const fromCwd = input.cwd ?? process.cwd();
+<span class="ln">187</span>
+<span class="ln">188</span>  try {
+<span class="ln">189</span>    const mainTop = resolveMainCheckout(fromCwd);
+<span class="ln">190</span>    if (expectsLocalInstall(mainTop) &amp;&amp; isEphemeralNpxCopy(fileURLToPath(import.meta.url))) {
+<span class="ln">191</span>      throw new Error(
+<span class="ln">192</span>        &quot;running from npx&#x27;s ephemeral cache, not this project&#x27;s own installed dependency — &quot; +
+<span class="ln">193</span>          &quot;node_modules is missing or broken. Run `npm install` in the main checkout and try again.&quot;,
+<span class="ln">194</span>      );
+<span class="ln">195</span>    }
+<span class="ln">196</span>    const cfg = hasConfig(mainTop) ? await loadConfig(mainTop) : { ...DEFAULTS };
+<span class="ln">197</span>    const { wt } = createLane(mainTop, cfg);
+<span class="ln">198</span>    process.stdout.write(wt + &quot;\n&quot;);
+<span class="ln">199</span>    process.exit(0);
+<span class="ln">200</span>  } catch (err) {
+<span class="ln">201</span>    process.stderr.write(`claude-code-merge-queue worktree-create hook failed: ${err instanceof Error ? err.message : String(err)}\n`);
+<span class="ln">202</span>    process.exit(1);
+<span class="ln">203</span>  }
+<span class="ln">204</span>}</pre>
+</div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · DETAIL</div><h2 class="sec-title">关键流程</h2><h3>增量 wiring</h3><p>wiring 逻辑是 additive/idempotent。<code>src/lib/wire-hooks.ts:49</code> 缺 settings 就创建；<code>src/lib/wire-hooks.ts:65</code> 保留现有 hooks 并补 WorktreeCreate；<code>src/lib/wire-hooks.ts:112</code> 检查已有 pre-push 是否包含 marker；<code>src/lib/wire-hooks.ts:115</code> 追加功能片段而不是复制整段 shebang 和说明。</p><p>CLI init 把这些 wiring 串起来。<code>src/bin/claude-code-merge-queue.ts:31</code> 进入 init，<code>src/bin/claude-code-merge-queue.ts:45</code> 先保护已有 config，<code>src/bin/claude-code-merge-queue.ts:99</code> 写 Claude settings，<code>src/bin/claude-code-merge-queue.ts:118</code> 写 Husky，<code>src/bin/claude-code-merge-queue.ts:166</code> 写 package scripts。</p><div class="flow">init → config/CLAUDE.md → WorktreeCreate hook → Husky pre-push → preflight script → package scripts</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/wire-hooks.ts:99</span> · L99-157</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">99</span>export function wireHuskyPrePush(root: string): WireResult {
+<span class="ln">100</span>  const huskyDir = join(root, &quot;.husky&quot;);
+<span class="ln">101</span>  if (!existsSync(huskyDir)) return &quot;no-husky&quot;;
+<span class="ln">102</span>
+<span class="ln">103</span>  const path = join(huskyDir, &quot;pre-push&quot;);
+<span class="ln">104</span>  const template = shippedPrePushTemplate();
+<span class="ln">105</span>
+<span class="ln">106</span>  if (!existsSync(path)) {
+<span class="ln">107</span>    writeFileSync(path, template);
+<span class="ln">108</span>    chmodSync(path, 0o755);
+<span class="ln">109</span>    return &quot;created&quot;;
+<span class="ln">110</span>  }
+<span class="ln">111</span>
+<span class="ln">112</span>  const existing = readFileSync(path, &quot;utf8&quot;);
+<span class="ln">113</span>  if (existing.includes(PRE_PUSH_MARKER)) return &quot;already-wired&quot;;
+<span class="ln">114</span>
+<span class="ln">115</span>  const marker = &quot;# --- Claude Code Merge Queue (appended by `claude-code-merge-queue init`) — see node_modules/claude-code-merge-queue/hooks/pre-push for the full comments ---&quot;;
+<span class="ln">116</span>  appendFileSync(path, `\n${marker}\n${functionalSnippet(template)}`);
+<span class="ln">117</span>  chmodSync(path, 0o755);
+<span class="ln">118</span>  return &quot;merged&quot;;
+<span class="ln">119</span>}
+<span class="ln">120</span>
+<span class="ln">121</span>export type HooksPathResult = &quot;set&quot; | &quot;already-set&quot; | &quot;custom-path&quot;;
+<span class="ln">122</span>
+<span class="ln">123</span>/**
+<span class="ln">124</span> * A `.husky/pre-push` file on disk enforces nothing on its own — git only
+<span class="ln">125</span> * runs it if `core.hooksPath` points somewhere that resolves to it, which is
+<span class="ln">126</span> * normally set as a side effect of the package manager&#x27;s install step
+<span class="ln">127</span> * (husky&#x27;s own `prepare` script). On a freshly cloned repo where nobody&#x27;s
+<span class="ln">128</span> * run that install yet — the exact state Quickstart leaves you in right
+<span class="ln">129</span> * after `init` — the file is silently inert and a direct push sails through
+<span class="ln">130</span> * uncontested. Since Claude Code Merge Queue is the one promising &quot;pushes are gated now,&quot;
+<span class="ln">131</span> * it sets this itself instead of depending on a step that may not have
+<span class="ln">132</span> * happened yet, mirroring exactly what `husky install` itself does.
+<span class="ln">133</span> *
+<span class="ln">134</span> * Husky v9 changed its own convention mid-flight: v6–v8 point
+<span class="ln">135</span> * core.hooksPath directly at `.husky` (hook files run as-is); v9 points it
+<span class="ln">136</span> * at `.husky/_`, a generated wrapper directory that then execs the real
+<span class="ln">137</span> * `.husky/&lt;hookname&gt;` file. Both are legitimate, already-correct setups —
+<span class="ln">138</span> * only treat something OTHER than either as a deliberate custom path worth
+<span class="ln">139</span> * warning about. `.husky/_` doesn&#x27;t exist yet on the fresh-clone/no-install
+<span class="ln">140</span> * case this function exists for, so `.husky` remains the right thing to set
+<span class="ln">141</span> * when nothing&#x27;s configured at all; if the project turns out to be v9,
+<span class="ln">142</span> * husky&#x27;s own next real install corrects it to `.husky/_`.
+<span class="ln">143</span> */
+<span class="ln">144</span>export function ensureHooksPath(root: string): HooksPathResult {
+<span class="ln">145</span>  let current: string | null;
+<span class="ln">146</span>  try {
+<span class="ln">147</span>    current = execFileSync(&quot;git&quot;, [&quot;config&quot;, &quot;core.hooksPath&quot;], { cwd: root, encoding: &quot;utf8&quot; }).trim();
+<span class="ln">148</span>  } catch {
+<span class="ln">149</span>    current = null; // unset
+<span class="ln">150</span>  }
+<span class="ln">151</span>
+<span class="ln">152</span>  if (current === &quot;.husky&quot; || current === &quot;.husky/_&quot;) return &quot;already-set&quot;;
+<span class="ln">153</span>  if (current) return &quot;custom-path&quot;; // respect an existing deliberate setup — don&#x27;t override it
+<span class="ln">154</span>
+<span class="ln">155</span>  execFileSync(&quot;git&quot;, [&quot;config&quot;, &quot;core.hooksPath&quot;, &quot;.husky&quot;], { cwd: root });
+<span class="ln">156</span>  return &quot;set&quot;;
+<span class="ln">157</span>}</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/bin/claude-code-merge-queue.ts:31</span> · L31-80</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">31</span>async function init(): Promise&lt;void&gt; {
+<span class="ln">32</span>  const root = findRepoRoot();
+<span class="ln">33</span>  if (!root) {
+<span class="ln">34</span>    console.error(&quot;claude-code-merge-queue init: not inside a git repo.&quot;);
+<span class="ln">35</span>    process.exit(1);
+<span class="ln">36</span>  }
+<span class="ln">37</span>  const { writeFileSync, readFileSync: read, existsSync, appendFileSync } = await import(&quot;node:fs&quot;);
+<span class="ln">38</span>  const { join } = await import(&quot;node:path&quot;);
+<span class="ln">39</span>
+<span class="ln">40</span>  // What actually got newly written or modified this run — only these need
+<span class="ln">41</span>  // committing. If everything below was already wired from a previous run,
+<span class="ln">42</span>  // there&#x27;s nothing new to tell you to commit.
+<span class="ln">43</span>  const writtenFiles: string[] = [];
+<span class="ln">44</span>
+<span class="ln">45</span>  if (hasConfig(root)) {
+<span class="ln">46</span>    console.log(&quot;claude-code-merge-queue init: claude-code-merge-queue.config.mjs already exists — leaving it alone.&quot;);
+<span class="ln">47</span>  } else {
+<span class="ln">48</span>    writtenFiles.push(&quot;claude-code-merge-queue.config.mjs&quot;);
+<span class="ln">49</span>    const detectedBranch = detectCurrentBranch(root);
+<span class="ln">50</span>    const detectedCheck = detectCheckCommand(root);
+<span class="ln">51</span>    const generated = {
+<span class="ln">52</span>      ...DEFAULTS,
+<span class="ln">53</span>      ...(detectedBranch ? { integrationBranch: detectedBranch } : {}),
+<span class="ln">54</span>      ...(detectedCheck ? { checkCommand: detectedCheck } : {}),
+<span class="ln">55</span>    };
+<span class="ln">56</span>    const template = `// claude-code-merge-queue.config.mjs — generated by \`claude-code-merge-queue init\`. Edit freely.
+<span class="ln">57</span>// Its presence here is what turns Claude Code Merge Queue ON for this repo.
+<span class="ln">58</span>
+<span class="ln">59</span>/** @type {import(&quot;claude-code-merge-queue&quot;).ClaudeCodeMergeQueueConfig} */
+<span class="ln">60</span>export default ${JSON.stringify(generated, null, 2)};
+<span class="ln">61</span>`;
+<span class="ln">62</span>    writeFileSync(join(root, &quot;claude-code-merge-queue.config.mjs&quot;), template);
+<span class="ln">63</span>    console.log(`claude-code-merge-queue init: wrote ${join(root, &quot;claude-code-merge-queue.config.mjs&quot;)}`);
+<span class="ln">64</span>    if (detectedBranch &amp;&amp; detectedBranch !== DEFAULTS.integrationBranch) {
+<span class="ln">65</span>      console.log(`  (detected current branch &quot;${detectedBranch}&quot; — set as integrationBranch instead of the &quot;${DEFAULTS.integrationBranch}&quot; default)`);
+<span class="ln">66</span>    } else if (!detectedBranch) {
+<span class="ln">67</span>      console.log(&quot;&quot;);
+<span class="ln">68</span>      console.log(`  ⚠️  Couldn&#x27;t detect the current branch (detached HEAD?) — integrationBranch`);
+<span class="ln">69</span>      console.log(`      defaulted to &quot;${DEFAULTS.integrationBranch}&quot;. Verify that&#x27;s actually right`);
+<span class="ln">70</span>      console.log(`      in claude-code-merge-queue.config.mjs before committing it.`);
+<span class="ln">71</span>    }
+<span class="ln">72</span>    if (detectedCheck) {
+<span class="ln">73</span>      console.log(`  (detected &quot;${detectedCheck}&quot; from package.json — set as checkCommand)`);
+<span class="ln">74</span>    } else {
+<span class="ln">75</span>      console.log(&quot;&quot;);
+<span class="ln">76</span>      console.log(&quot;  ⚠️  No checkCommand detected (no check:push/check/ci/test script found in&quot;);
+<span class="ln">77</span>      console.log(&quot;      package.json). Every push is BLOCKED until you set one — or set&quot;);
+<span class="ln">78</span>      console.log(&quot;      checksRequired: false to deliberately run with no checks.&quot;);
+<span class="ln">79</span>    }
+<span class="ln">80</span>  }</pre>
+</div></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · DETAIL</div><h2 class="sec-title">边界与失败</h2><p>wire-hooks 的测试关注“不要覆盖用户已有配置”。<code>test/wire-hooks.test.ts:30</code> 先写一个 PreToolUse hook，再验证 merge 后仍存在；<code>test/wire-hooks.test.ts:90</code> 写自定义 pre-push，再确认追加块没有删 custom logic；<code>test/wire-hooks.test.ts:130</code> 验证 fresh clone 时 core.hooksPath 会被设置。</p><p>worktree 测试覆盖并发和路径解析。<code>test/worktree-create.test.ts:84</code> 同时启动四个 hook worker，<code>test/worktree-create.test.ts:109</code> 检查路径全不同；<code>test/worktree-create.test.ts:119</code> 从已创建 lane 内再次触发 hook，防止 mainTop 解析回归成无限循环。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/wire-hooks.test.ts:30</span> · L30-117</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">30</span>test(&quot;wireClaudeSettings merges into an existing settings.json without dropping other hooks&quot;, () =&gt; {
+<span class="ln">31</span>  const dir = scratchDir();
+<span class="ln">32</span>  try {
+<span class="ln">33</span>    mkdirSync(join(dir, &quot;.claude&quot;));
+<span class="ln">34</span>    writeFileSync(
+<span class="ln">35</span>      join(dir, &quot;.claude&quot;, &quot;settings.json&quot;),
+<span class="ln">36</span>      JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: &quot;command&quot;, command: &quot;echo hi&quot; }] }] } }),
+<span class="ln">37</span>    );
+<span class="ln">38</span>    assert.equal(wireClaudeSettings(dir), &quot;merged&quot;);
+<span class="ln">39</span>    const written = JSON.parse(readFileSync(join(dir, &quot;.claude&quot;, &quot;settings.json&quot;), &quot;utf8&quot;));
+<span class="ln">40</span>    assert.equal(written.hooks.PreToolUse[0].hooks[0].command, &quot;echo hi&quot;, &quot;existing hook must survive&quot;);
+<span class="ln">41</span>    assert.equal(written.hooks.WorktreeCreate[0].hooks[0].command, &quot;npx claude-code-merge-queue hook worktree-create&quot;);
+<span class="ln">42</span>  } finally {
+<span class="ln">43</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">44</span>  }
+<span class="ln">45</span>});
+<span class="ln">46</span>
+<span class="ln">47</span>test(&quot;wireClaudeSettings is idempotent&quot;, () =&gt; {
+<span class="ln">48</span>  const dir = scratchDir();
+<span class="ln">49</span>  try {
+<span class="ln">50</span>    wireClaudeSettings(dir);
+<span class="ln">51</span>    assert.equal(wireClaudeSettings(dir), &quot;already-wired&quot;);
+<span class="ln">52</span>  } finally {
+<span class="ln">53</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">54</span>  }
+<span class="ln">55</span>});
+<span class="ln">56</span>
+<span class="ln">57</span>test(&quot;wireClaudeSettings leaves unparseable JSON untouched&quot;, () =&gt; {
+<span class="ln">58</span>  const dir = scratchDir();
+<span class="ln">59</span>  try {
+<span class="ln">60</span>    mkdirSync(join(dir, &quot;.claude&quot;));
+<span class="ln">61</span>    writeFileSync(join(dir, &quot;.claude&quot;, &quot;settings.json&quot;), &quot;{ not valid json&quot;);
+<span class="ln">62</span>    assert.equal(wireClaudeSettings(dir), &quot;unparseable&quot;);
+<span class="ln">63</span>    assert.equal(readFileSync(join(dir, &quot;.claude&quot;, &quot;settings.json&quot;), &quot;utf8&quot;), &quot;{ not valid json&quot;);
+<span class="ln">64</span>  } finally {
+<span class="ln">65</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">66</span>  }
+<span class="ln">67</span>});
+<span class="ln">68</span>
+<span class="ln">69</span>test(&quot;wireHuskyPrePush does nothing when there&#x27;s no .husky directory&quot;, () =&gt; {
+<span class="ln">70</span>  const dir = scratchDir();
+<span class="ln">71</span>  try {
+<span class="ln">72</span>    assert.equal(wireHuskyPrePush(dir), &quot;no-husky&quot;);
+<span class="ln">73</span>    assert.ok(!existsSync(join(dir, &quot;.husky&quot;)));
+<span class="ln">74</span>  } finally {
+<span class="ln">75</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">76</span>  }
+<span class="ln">77</span>});
+<span class="ln">78</span>
+<span class="ln">79</span>test(&quot;wireHuskyPrePush creates pre-push when .husky exists but the hook doesn&#x27;t&quot;, () =&gt; {
+<span class="ln">80</span>  const dir = scratchDir();
+<span class="ln">81</span>  try {
+<span class="ln">82</span>    mkdirSync(join(dir, &quot;.husky&quot;));
+<span class="ln">83</span>    assert.equal(wireHuskyPrePush(dir), &quot;created&quot;);
+<span class="ln">84</span>    assert.match(readFileSync(join(dir, &quot;.husky&quot;, &quot;pre-push&quot;), &quot;utf8&quot;), /claude-code-merge-queue check-push/);
+<span class="ln">85</span>  } finally {
+<span class="ln">86</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">87</span>  }
+<span class="ln">88</span>});
+<span class="ln">89</span>
+<span class="ln">90</span>test(&quot;wireHuskyPrePush appends to an existing custom pre-push without dropping it&quot;, () =&gt; {
+<span class="ln">91</span>  const dir = scratchDir();
+<span class="ln">92</span>  try {
+<span class="ln">93</span>    mkdirSync(join(dir, &quot;.husky&quot;));
+<span class="ln">94</span>    writeFileSync(join(dir, &quot;.husky&quot;, &quot;pre-push&quot;), &quot;#!/usr/bin/env sh\necho custom logic\n&quot;);
+<span class="ln">95</span>    assert.equal(wireHuskyPrePush(dir), &quot;merged&quot;);
+<span class="ln">96</span>    const content = readFileSync(join(dir, &quot;.husky&quot;, &quot;pre-push&quot;), &quot;utf8&quot;);
+<span class="ln">97</span>    assert.match(content, /echo custom logic/);
+<span class="ln">98</span>    assert.match(content, /claude-code-merge-queue check-push/);
+<span class="ln">99</span>  } finally {
+<span class="ln">100</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">101</span>  }
+<span class="ln">102</span>});
+<span class="ln">103</span>
+<span class="ln">104</span>test(&quot;wireHuskyPrePush&#x27;s appended block has no duplicate shebang or self-referential &#x27;copy this file&#x27; prose&quot;, () =&gt; {
+<span class="ln">105</span>  const dir = scratchDir();
+<span class="ln">106</span>  try {
+<span class="ln">107</span>    mkdirSync(join(dir, &quot;.husky&quot;));
+<span class="ln">108</span>    writeFileSync(join(dir, &quot;.husky&quot;, &quot;pre-push&quot;), &quot;#!/usr/bin/env sh\necho custom logic\n&quot;);
+<span class="ln">109</span>    wireHuskyPrePush(dir);
+<span class="ln">110</span>    const content = readFileSync(join(dir, &quot;.husky&quot;, &quot;pre-push&quot;), &quot;utf8&quot;);
+<span class="ln">111</span>    const shebangCount = content.split(&quot;\n&quot;).filter((l) =&gt; l.startsWith(&quot;#!&quot;)).length;
+<span class="ln">112</span>    assert.equal(shebangCount, 1, &quot;only the file&#x27;s own original shebang should be present&quot;);
+<span class="ln">113</span>    assert.doesNotMatch(content, /Copy this file to \.husky/);
+<span class="ln">114</span>  } finally {
+<span class="ln">115</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">116</span>  }
+<span class="ln">117</span>});</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/worktree-create.test.ts:84</span> · L84-155</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">84</span>test(&quot;concurrent WorktreeCreate hook invocations never collide on the same lane&quot;, async () =&gt; {
+<span class="ln">85</span>  const mainTop = makeScratchRepo();
+<span class="ln">86</span>  try {
+<span class="ln">87</span>    const N = 4;
+<span class="ln">88</span>    const children = Array.from({ length: N }, () =&gt;
+<span class="ln">89</span>      spawn(&quot;node&quot;, [&quot;--import&quot;, &quot;tsx&quot;, WORKER], { stdio: [&quot;pipe&quot;, &quot;pipe&quot;, &quot;inherit&quot;] }),
+<span class="ln">90</span>    );
+<span class="ln">91</span>    for (const child of children) {
+<span class="ln">92</span>      child.stdin.end(JSON.stringify({ cwd: mainTop }));
+<span class="ln">93</span>    }
+<span class="ln">94</span>
+<span class="ln">95</span>    const results = await Promise.all(
+<span class="ln">96</span>      children.map(
+<span class="ln">97</span>        (child) =&gt;
+<span class="ln">98</span>          new Promise&lt;{ code: number; stdout: string }&gt;((resolve) =&gt; {
+<span class="ln">99</span>            let stdout = &quot;&quot;;
+<span class="ln">100</span>            child.stdout.on(&quot;data&quot;, (d) =&gt; (stdout += d));
+<span class="ln">101</span>            child.on(&quot;exit&quot;, (code) =&gt; resolve({ code: code ?? 1, stdout: stdout.trim() }));
+<span class="ln">102</span>          }),
+<span class="ln">103</span>      ),
+<span class="ln">104</span>    );
+<span class="ln">105</span>
+<span class="ln">106</span>    for (const r of results) {
+<span class="ln">107</span>      assert.equal(r.code, 0, `worker should exit 0, got ${r.code}`);
+<span class="ln">108</span>    }
+<span class="ln">109</span>    const paths = results.map((r) =&gt; r.stdout);
+<span class="ln">110</span>    assert.equal(new Set(paths).size, N, `all ${N} claimed lanes should be distinct paths, got: ${paths.join(&quot;, &quot;)}`);
+<span class="ln">111</span>    for (const p of paths) {
+<span class="ln">112</span>      assert.ok(existsSync(p), `claimed worktree ${p} should exist on disk`);
+<span class="ln">113</span>    }
+<span class="ln">114</span>  } finally {
+<span class="ln">115</span>    cleanupRepoAndLanes(mainTop);
+<span class="ln">116</span>  }
+<span class="ln">117</span>});
+<span class="ln">118</span>
+<span class="ln">119</span>test(&quot;the hook resolves the main checkout correctly when invoked from INSIDE an already-created lane worktree, not just from mainTop itself&quot;, async () =&gt; {
+<span class="ln">120</span>  // `git rev-parse --git-common-dir` returns the relative string &quot;.git&quot; from
+<span class="ln">121</span>  // the main checkout, but an ABSOLUTE path when run from a linked worktree.
+<span class="ln">122</span>  // A previous, separate path-join implementation only handled the relative
+<span class="ln">123</span>  // case correctly; from inside a real linked worktree it produced a
+<span class="ln">124</span>  // nonsense path, which meant createLane&#x27;s lane-claim loop found no
+<span class="ln">125</span>  // existing lane ever &quot;in the way&quot; and no `git worktree add` ever
+<span class="ln">126</span>  // succeeding either — an unbounded loop that burned CPU indefinitely
+<span class="ln">127</span>  // instead of failing. This reproduces exactly that invocation shape.
+<span class="ln">128</span>  const mainTop = makeScratchRepo();
+<span class="ln">129</span>  try {
+<span class="ln">130</span>    const first = createLane(mainTop, DEFAULTS);
+<span class="ln">131</span>
+<span class="ln">132</span>    const child = spawn(&quot;node&quot;, [&quot;--import&quot;, &quot;tsx&quot;, WORKER], { stdio: [&quot;pipe&quot;, &quot;pipe&quot;, &quot;inherit&quot;] });
+<span class="ln">133</span>    child.stdin.end(JSON.stringify({ cwd: first.wt })); // cwd is INSIDE the lane, not mainTop
+<span class="ln">134</span>
+<span class="ln">135</span>    const result = await Promise.race([
+<span class="ln">136</span>      new Promise&lt;{ code: number; stdout: string }&gt;((resolve) =&gt; {
+<span class="ln">137</span>        let stdout = &quot;&quot;;
+<span class="ln">138</span>        child.stdout.on(&quot;data&quot;, (d) =&gt; (stdout += d));
+<span class="ln">139</span>        child.on(&quot;exit&quot;, (code) =&gt; resolve({ code: code ?? 1, stdout: stdout.trim() }));
+<span class="ln">140</span>      }),
+<span class="ln">141</span>      new Promise&lt;never&gt;((_, reject) =&gt;
+<span class="ln">142</span>        setTimeout(() =&gt; {
+<span class="ln">143</span>          child.kill(&quot;SIGKILL&quot;);
+<span class="ln">144</span>          reject(new Error(&quot;hook did not exit within 10s — likely regressed into the unbounded lane-claim loop&quot;));
+<span class="ln">145</span>        }, 10_000),
+<span class="ln">146</span>      ),
+<span class="ln">147</span>    ]);
+<span class="ln">148</span>
+<span class="ln">149</span>    assert.equal(result.code, 0, &quot;hook should exit 0&quot;);
+<span class="ln">150</span>    assert.equal(result.stdout, expectedLanePath(mainTop, 2), &quot;should claim lane 2, resolved back to the true mainTop&quot;);
+<span class="ln">151</span>    assert.ok(existsSync(result.stdout));
+<span class="ln">152</span>  } finally {
+<span class="ln">153</span>    cleanupRepoAndLanes(mainTop);
+<span class="ln">154</span>  }
+<span class="ln">155</span>});</pre>
+</div></section><section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · DETAIL</div><h2 class="sec-title">关联模块</h2><p>pre-push 的安全门在 <code>src/lib/check-push.ts:52</code>，checkCommand 的执行在 <code>src/lib/check-command.ts:60</code>。两者被 CLI 的 <code>src/bin/claude-code-merge-queue.ts:259</code> check-push 分支组合起来：先看 ref 是否允许，再跑项目自己的 lint/test/build。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/check-push.ts:37</span> · L37-90</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">37</span>export function parseRefUpdates(stdin: string): RefUpdate[] {
+<span class="ln">38</span>  return stdin
+<span class="ln">39</span>    .split(&quot;\n&quot;)
+<span class="ln">40</span>    .map((l) =&gt; l.trim())
+<span class="ln">41</span>    .filter(Boolean)
+<span class="ln">42</span>    .map((line) =&gt; {
+<span class="ln">43</span>      const [localRef, localSha, remoteRef, remoteSha] = line.split(/\s+/);
+<span class="ln">44</span>      return { localRef: localRef ?? &quot;&quot;, localSha: localSha ?? &quot;&quot;, remoteRef: remoteRef ?? &quot;&quot;, remoteSha: remoteSha ?? &quot;&quot; };
+<span class="ln">45</span>    });
+<span class="ln">46</span>}
+<span class="ln">47</span>
+<span class="ln">48</span>function emergencyConfirmed(env: NodeJS.ProcessEnv): boolean {
+<span class="ln">49</span>  return env.CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH === &quot;1&quot;;
+<span class="ln">50</span>}
+<span class="ln">51</span>
+<span class="ln">52</span>export function checkPush(
+<span class="ln">53</span>  refUpdates: RefUpdate[],
+<span class="ln">54</span>  cfg: Pick&lt;ClaudeCodeMergeQueueConfig, &quot;integrationBranch&quot; | &quot;productionBranch&quot; | &quot;protectedBranches&quot;&gt;,
+<span class="ln">55</span>  env: NodeJS.ProcessEnv,
+<span class="ln">56</span>): CheckResult {
+<span class="ln">57</span>  const integrationRef = `refs/heads/${cfg.integrationBranch}`;
+<span class="ln">58</span>  const protectedBranches = cfg.productionBranch ? [...cfg.protectedBranches, cfg.productionBranch] : cfg.protectedBranches;
+<span class="ln">59</span>  const protectedRefs = new Set(protectedBranches.map((b) =&gt; `refs/heads/${b}`));
+<span class="ln">60</span>
+<span class="ln">61</span>  for (const { remoteRef } of refUpdates) {
+<span class="ln">62</span>    const branch = remoteRef.replace(&quot;refs/heads/&quot;, &quot;&quot;);
+<span class="ln">63</span>
+<span class="ln">64</span>    if (protectedRefs.has(remoteRef) &amp;&amp; !emergencyConfirmed(env)) {
+<span class="ln">65</span>      return {
+<span class="ln">66</span>        ok: false,
+<span class="ln">67</span>        message: [
+<span class="ln">68</span>          &quot;&quot;,
+<span class="ln">69</span>          `✋ Direct pushes to &#x27;${branch}&#x27; are blocked.`,
+<span class="ln">70</span>          `   This is a protected branch — promote it deliberately, not with a stray push.`,
+<span class="ln">71</span>          `   Emergency override:  CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH=1 git push …`,
+<span class="ln">72</span>          &quot;&quot;,
+<span class="ln">73</span>        ].join(&quot;\n&quot;),
+<span class="ln">74</span>      };
+<span class="ln">75</span>    }
+<span class="ln">76</span>    if (remoteRef === integrationRef &amp;&amp; env.CLAUDE_CODE_MERGE_QUEUE_LANDING !== &quot;1&quot; &amp;&amp; !emergencyConfirmed(env)) {
+<span class="ln">77</span>      return {
+<span class="ln">78</span>        ok: false,
+<span class="ln">79</span>        message: [
+<span class="ln">80</span>          &quot;&quot;,
+<span class="ln">81</span>          `✋ Direct pushes to &#x27;${cfg.integrationBranch}&#x27; are blocked — landing goes through the queue.`,
+<span class="ln">82</span>          `   Land your work:  claude-code-merge-queue land`,
+<span class="ln">83</span>          `   Genuine emergency:  CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH=1 git push …`,
+<span class="ln">84</span>          &quot;&quot;,
+<span class="ln">85</span>        ].join(&quot;\n&quot;),
+<span class="ln">86</span>      };
+<span class="ln">87</span>    }
+<span class="ln">88</span>  }
+<span class="ln">89</span>  return { ok: true };
+<span class="ln">90</span>}</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/check-command.ts:24</span> · L24-84</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">24</span>export function detectPackageManager(root: string): &quot;npm&quot; | &quot;pnpm&quot; | &quot;yarn&quot; | &quot;bun&quot; {
+<span class="ln">25</span>  if (existsSync(join(root, &quot;pnpm-lock.yaml&quot;)) || existsSync(join(root, &quot;pnpm-workspace.yaml&quot;))) return &quot;pnpm&quot;;
+<span class="ln">26</span>  if (existsSync(join(root, &quot;yarn.lock&quot;))) return &quot;yarn&quot;;
+<span class="ln">27</span>  if (existsSync(join(root, &quot;bun.lockb&quot;)) || existsSync(join(root, &quot;bun.lock&quot;))) return &quot;bun&quot;;
+<span class="ln">28</span>  return &quot;npm&quot;;
+<span class="ln">29</span>}
+<span class="ln">30</span>
+<span class="ln">31</span>/** Look at package.json&#x27;s own scripts for something to run — best-effort, never throws. */
+<span class="ln">32</span>export function detectCheckCommand(root: string): string | null {
+<span class="ln">33</span>  const pkgPath = join(root, &quot;package.json&quot;);
+<span class="ln">34</span>  if (!existsSync(pkgPath)) return null;
+<span class="ln">35</span>  try {
+<span class="ln">36</span>    const pkg = JSON.parse(readFileSync(pkgPath, &quot;utf8&quot;)) as { scripts?: Record&lt;string, string&gt; };
+<span class="ln">37</span>    const found = CANDIDATE_SCRIPTS.find((name) =&gt; pkg.scripts?.[name]);
+<span class="ln">38</span>    return found ? `${detectPackageManager(root)} run ${found}` : null;
+<span class="ln">39</span>  } catch {
+<span class="ln">40</span>    return null;
+<span class="ln">41</span>  }
+<span class="ln">42</span>}
+<span class="ln">43</span>
+<span class="ln">44</span>/**
+<span class="ln">45</span> * Run the configured check command. Returns the exit code to propagate.
+<span class="ln">46</span> *
+<span class="ln">47</span> * A null checkCommand is only ever silent if checksRequired was explicitly
+<span class="ln">48</span> * turned off — the default is to FAIL the push, because a merge queue that
+<span class="ln">49</span> * lets unverified code through by default isn&#x27;t one, it&#x27;s a false sense of
+<span class="ln">50</span> * safety.
+<span class="ln">51</span> *
+<span class="ln">52</span> * Always runs from `root`, not whatever the caller&#x27;s cwd happens to be. In
+<span class="ln">53</span> * the real git-push flow that&#x27;s moot — git always resets cwd to the repo
+<span class="ln">54</span> * root before running a hook — but `check-push` is also a directly
+<span class="ln">55</span> * user-runnable command, and silently depending on git&#x27;s hook behavior for
+<span class="ln">56</span> * correctness (instead of just being correct on its own) is exactly the
+<span class="ln">57</span> * kind of implicit assumption that bites the first time someone runs it by
+<span class="ln">58</span> * hand from a subdirectory.
+<span class="ln">59</span> */
+<span class="ln">60</span>export function runCheckCommand(cfg: Pick&lt;ClaudeCodeMergeQueueConfig, &quot;checkCommand&quot; | &quot;checksRequired&quot;&gt;, root: string): number {
+<span class="ln">61</span>  if (!cfg.checkCommand) {
+<span class="ln">62</span>    if (cfg.checksRequired) {
+<span class="ln">63</span>      console.error([
+<span class="ln">64</span>        &quot;&quot;,
+<span class="ln">65</span>        &quot;✋ No checkCommand configured, and checksRequired is true (the default).&quot;,
+<span class="ln">66</span>        &quot;   This push would land with NOTHING verifying it — no lint, no test, no build.&quot;,
+<span class="ln">67</span>        &quot;   Set checkCommand in claude-code-merge-queue.config.mjs, e.g. \&quot;npm run check\&quot;.&quot;,
+<span class="ln">68</span>        &quot;   Or, if you really have nothing to check yet, set checksRequired: false —&quot;,
+<span class="ln">69</span>        &quot;   deliberately, so it&#x27;s a visible, committed choice, not a silent gap.&quot;,
+<span class="ln">70</span>        &quot;&quot;,
+<span class="ln">71</span>      ].join(&quot;\n&quot;));
+<span class="ln">72</span>      return 1;
+<span class="ln">73</span>    }
+<span class="ln">74</span>    console.log(&quot;claude-code-merge-queue check-push: no checkCommand configured (checksRequired: false — running with no checks, on purpose).&quot;);
+<span class="ln">75</span>    return 0;
+<span class="ln">76</span>  }
+<span class="ln">77</span>
+<span class="ln">78</span>  console.log(`claude-code-merge-queue check-push: running &quot;${cfg.checkCommand}&quot;…`);
+<span class="ln">79</span>  const result = spawnSync(cfg.checkCommand, { shell: true, stdio: &quot;inherit&quot;, cwd: root });
+<span class="ln">80</span>  if (result.status !== 0) {
+<span class="ln">81</span>    console.error(`\n✋ checkCommand failed (exit ${result.status ?? 1}) — landing blocked.`);
+<span class="ln">82</span>  }
+<span class="ln">83</span>  return result.status ?? 1;
+<span class="ln">84</span>}</pre>
+</div></section><section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · DETAIL</div><h2 class="sec-title">源码判断</h2><p>这组 hook 的价值在于把流程入口前移到 lane 创建和 push 之前，而不是等冲突发生后再要求 agent 修。风险也很现实：<code>src/lib/check-push.ts:48</code> 的 emergency env var 说明它不是恶意环境下的强安全边界，但对“误操作”和“忘记流程”的防护已经足够实用。</p></section><div class="foot"><span>Generated · 2026-07-07</span><span>Source · <a href="https://github.com/funador/claude-code-merge-queue">funador/claude-code-merge-queue</a></span><span><a href="../index.html">↑ 返回索引</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.004}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a5f3fc';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script>
+</body></html>

@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>land + sync · claude-code-merge-queue</title>
+<meta name="description" content="land 如何串行 rebase/push，sync 如何让主 checkout 安全跟上。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#66d9e8; --star-soft:#a5f3fc; --star-deep:#0891b2; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Merge<b>Queue</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">Merge<b>Queue</b></div><div class="sub">子页面 · 深度解析</div></div><span class="nav-ver">TypeScript · Node CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#section-1"><span class="idx">01</span>架构</a></li>
+<li><a href="#section-2"><span class="idx">02</span>核心</a></li>
+<li><a href="#section-3"><span class="idx">03</span>流程</a></li>
+<li><a href="#section-4"><span class="idx">04</span>测试</a></li>
+<li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★295 · 2026-07</div><div><a href="https://github.com/funador/claude-code-merge-queue" target="_blank">funador/claude-code-merge-queue</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">land + sync <em>深度解析</em></h1><p class="hero-desc">land 如何串行 rebase/push，sync 如何让主 checkout 安全跟上。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · DETAIL</div><h2 class="sec-title">导入链与契约</h2><h3>land 的入口约束</h3><p>land 是唯一被授权落到 integrationBranch 的路径。<code>src/land.ts:39</code> 进入函数后先加载配置，<code>src/land.ts:46</code> 读取当前 branch，<code>src/land.ts:47</code> 直接拒绝从 integrationBranch、protectedBranches 或 detached HEAD 运行。这个约束避免 agent 在主 checkout 上直接 land，确保 lane 语义成立。</p><p>它还承认 build tool 会重写文件。<code>src/land.ts:64</code> 读取 regenerableFiles，<code>src/land.ts:65</code> 的 discardRegenerableDirt 只会丢弃白名单文件；<code>src/land.ts:71</code> 把其他 dirty file 当成真实 WIP，不替用户猜。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/land.ts:39</span> · L39-78</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">39</span>export async function land(): Promise&lt;void&gt; {
+<span class="ln">40</span>  if (!hasConfig()) {
+<span class="ln">41</span>    console.error(&quot;claude-code-merge-queue land: no claude-code-merge-queue.config found at the repo root. Run `claude-code-merge-queue init` first.&quot;);
+<span class="ln">42</span>    process.exit(1);
+<span class="ln">43</span>  }
+<span class="ln">44</span>  const cfg = await loadConfig();
+<span class="ln">45</span>
+<span class="ln">46</span>  const branch = execSync(&quot;git rev-parse --abbrev-ref HEAD&quot;, { encoding: &quot;utf8&quot; }).trim();
+<span class="ln">47</span>  if (branch === cfg.integrationBranch || cfg.protectedBranches.includes(branch) || branch === &quot;HEAD&quot;) {
+<span class="ln">48</span>    console.error(`claude-code-merge-queue land: refusing to run from &#x27;${branch}&#x27; — land is for lane branches only.`);
+<span class="ln">49</span>    process.exit(1);
+<span class="ln">50</span>  }
+<span class="ln">51</span>
+<span class="ln">52</span>  // A rebase refuses to run at all with a dirty tree. Build-tool-regenerated
+<span class="ln">53</span>  // noise shouldn&#x27;t block landing — discard ONLY the configured
+<span class="ln">54</span>  // regenerableFiles, exactly like sync does for the fast-forward on the
+<span class="ln">55</span>  // other end. Any other dirty file is real work-in-progress: leave it alone
+<span class="ln">56</span>  // and let the rebase fail loud.
+<span class="ln">57</span>  //
+<span class="ln">58</span>  // Checked here AND again right before the rebase itself (not just once):
+<span class="ln">59</span>  // a build tool can regenerate one of these files at any point, including
+<span class="ln">60</span>  // during the (possibly long) wait for the landing queue lock below. A
+<span class="ln">61</span>  // single check up front leaves that whole wait as a window where the
+<span class="ln">62</span>  // exact same harmless noise reappears and gets misreported as a real
+<span class="ln">63</span>  // rebase conflict instead of silently discarded like it should be.
+<span class="ln">64</span>  const regenerable = new Set(cfg.regenerableFiles);
+<span class="ln">65</span>  function discardRegenerableDirt(): void {
+<span class="ln">66</span>    const status = execSync(&quot;git status --porcelain&quot;, { encoding: &quot;utf8&quot; });
+<span class="ln">67</span>    const dirty = status
+<span class="ln">68</span>      .split(&quot;\n&quot;)
+<span class="ln">69</span>      .filter(Boolean)
+<span class="ln">70</span>      .map((line) =&gt; line.slice(3).trim());
+<span class="ln">71</span>    const blocking = dirty.filter((f) =&gt; !regenerable.has(f));
+<span class="ln">72</span>    if (dirty.length &gt; 0 &amp;&amp; blocking.length === 0) {
+<span class="ln">73</span>      execSync(`git checkout -- ${dirty.map((f) =&gt; `&quot;${f}&quot;`).join(&quot; &quot;)}`);
+<span class="ln">74</span>    }
+<span class="ln">75</span>  }
+<span class="ln">76</span>  discardRegenerableDirt();
+<span class="ln">77</span>
+<span class="ln">78</span>  const lock = createQueueLock(&quot;land&quot;);</pre>
+</div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · DETAIL</div><h2 class="sec-title">核心实现逐段拆</h2><h3>串行落地主线</h3><p>落地锁在 <code>src/land.ts:78</code> 获取，等待日志由 <code>src/land.ts:81</code> 的 onWait 提供，agent 或人能看到前面还有几个 landing。拿锁后 <code>src/land.ts:93</code> 再清一次 regenerable dirt，因为等待队列期间文件可能又被构建工具重写；这个二次检查来自真实 bug。</p><p>实际 git 流程非常保守：<code>src/land.ts:96</code> fetch，<code>src/land.ts:99</code> rebase，失败则 <code>src/land.ts:101</code> abort；成功后 <code>src/land.ts:107</code> push 到 integrationBranch，并在 <code>src/land.ts:109</code> 设置 landing env，让 pre-push hook 知道这是合法路径。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/land.ts:78</span> · L78-126</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">78</span>  const lock = createQueueLock(&quot;land&quot;);
+<span class="ln">79</span>  await lock.acquire({
+<span class="ln">80</span>    label: branch,
+<span class="ln">81</span>    onWait: ({ ahead, holder }) =&gt; {
+<span class="ln">82</span>      if (ahead &gt; 0) {
+<span class="ln">83</span>        console.log(`${DIM}[land-queue] ${branch}: waiting — ${ahead} landing${ahead === 1 ? &quot;&quot; : &quot;s&quot;} ahead…${RESET}`);
+<span class="ln">84</span>      } else if (holder) {
+<span class="ln">85</span>        console.log(`${DIM}[land-queue] ${branch}: next up — waiting for &#x27;${holder.label ?? holder.lane}&#x27; to finish landing…${RESET}`);
+<span class="ln">86</span>      }
+<span class="ln">87</span>    },
+<span class="ln">88</span>  });
+<span class="ln">89</span>
+<span class="ln">90</span>  let exitCode = 0;
+<span class="ln">91</span>  try {
+<span class="ln">92</span>    console.log(`${DIM}[land-queue] ${branch}: lock acquired — landing…${RESET}`);
+<span class="ln">93</span>    discardRegenerableDirt(); // re-check right before the rebase — see comment above
+<span class="ln">94</span>
+<span class="ln">95</span>    console.log(`${DIM}fetching origin/${cfg.integrationBranch}…${RESET}`);
+<span class="ln">96</span>    execSync(`git fetch origin ${cfg.integrationBranch} --quiet`, { stdio: &quot;inherit&quot; });
+<span class="ln">97</span>
+<span class="ln">98</span>    console.log(`${DIM}rebasing onto origin/${cfg.integrationBranch}…${RESET}`);
+<span class="ln">99</span>    const rebase = spawnSync(&quot;git&quot;, [&quot;rebase&quot;, `origin/${cfg.integrationBranch}`], { stdio: &quot;inherit&quot; });
+<span class="ln">100</span>    if (rebase.status !== 0) {
+<span class="ln">101</span>      spawnSync(&quot;git&quot;, [&quot;rebase&quot;, &quot;--abort&quot;], { stdio: &quot;ignore&quot; });
+<span class="ln">102</span>      console.error(`\n${RED}land: rebase onto origin/${cfg.integrationBranch} conflicted — aborted, working tree left clean.${RESET}`);
+<span class="ln">103</span>      console.error(`Resolve it yourself (git fetch origin ${cfg.integrationBranch} &amp;&amp; git rebase origin/${cfg.integrationBranch}), then re-run &#x27;claude-code-merge-queue land&#x27;.`);
+<span class="ln">104</span>      exitCode = 1;
+<span class="ln">105</span>    } else {
+<span class="ln">106</span>      console.log(`${DIM}pushing to ${cfg.integrationBranch} (this is where your CI/checks hook runs)…${RESET}`);
+<span class="ln">107</span>      const push = spawnSync(&quot;git&quot;, [&quot;push&quot;, &quot;origin&quot;, `HEAD:${cfg.integrationBranch}`], {
+<span class="ln">108</span>        stdio: &quot;inherit&quot;,
+<span class="ln">109</span>        env: { ...process.env, CLAUDE_CODE_MERGE_QUEUE_LANDING: &quot;1&quot; },
+<span class="ln">110</span>      });
+<span class="ln">111</span>      if (push.status !== 0) {
+<span class="ln">112</span>        console.error(`\n${RED}land: push to ${cfg.integrationBranch} failed — see output above.${RESET}`);
+<span class="ln">113</span>        console.error(`Fix the failure, then re-run &#x27;claude-code-merge-queue land&#x27;.`);
+<span class="ln">114</span>        exitCode = 1;
+<span class="ln">115</span>      } else {
+<span class="ln">116</span>        console.log(`${GREEN}✓ ${branch} landed on ${cfg.integrationBranch}.${RESET}`);
+<span class="ln">117</span>        // Landing isn&#x27;t &quot;done&quot; until the checkout that actually serves your
+<span class="ln">118</span>        // dev server can see it — call sync in-process rather than shelling
+<span class="ln">119</span>        // back out to the CLI, so this doesn&#x27;t depend on `claude-code-merge-queue` being
+<span class="ln">120</span>        // resolvable on PATH. Pass this lane&#x27;s own already-loaded cfg through
+<span class="ln">121</span>        // rather than letting sync() reload from MAIN — MAIN hasn&#x27;t been
+<span class="ln">122</span>        // fast-forwarded yet at this exact moment (that&#x27;s what sync is about
+<span class="ln">123</span>        // to do), so if this push just introduced or changed
+<span class="ln">124</span>        // claude-code-merge-queue.config.mjs itself, a fresh MAIN-side load would silently
+<span class="ln">125</span>        // fall back to DEFAULTS instead of the real config.
+<span class="ln">126</span>        exitCode = await sync(cfg);</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/check-command.ts:60</span> · L60-84</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">60</span>export function runCheckCommand(cfg: Pick&lt;ClaudeCodeMergeQueueConfig, &quot;checkCommand&quot; | &quot;checksRequired&quot;&gt;, root: string): number {
+<span class="ln">61</span>  if (!cfg.checkCommand) {
+<span class="ln">62</span>    if (cfg.checksRequired) {
+<span class="ln">63</span>      console.error([
+<span class="ln">64</span>        &quot;&quot;,
+<span class="ln">65</span>        &quot;✋ No checkCommand configured, and checksRequired is true (the default).&quot;,
+<span class="ln">66</span>        &quot;   This push would land with NOTHING verifying it — no lint, no test, no build.&quot;,
+<span class="ln">67</span>        &quot;   Set checkCommand in claude-code-merge-queue.config.mjs, e.g. \&quot;npm run check\&quot;.&quot;,
+<span class="ln">68</span>        &quot;   Or, if you really have nothing to check yet, set checksRequired: false —&quot;,
+<span class="ln">69</span>        &quot;   deliberately, so it&#x27;s a visible, committed choice, not a silent gap.&quot;,
+<span class="ln">70</span>        &quot;&quot;,
+<span class="ln">71</span>      ].join(&quot;\n&quot;));
+<span class="ln">72</span>      return 1;
+<span class="ln">73</span>    }
+<span class="ln">74</span>    console.log(&quot;claude-code-merge-queue check-push: no checkCommand configured (checksRequired: false — running with no checks, on purpose).&quot;);
+<span class="ln">75</span>    return 0;
+<span class="ln">76</span>  }
+<span class="ln">77</span>
+<span class="ln">78</span>  console.log(`claude-code-merge-queue check-push: running &quot;${cfg.checkCommand}&quot;…`);
+<span class="ln">79</span>  const result = spawnSync(cfg.checkCommand, { shell: true, stdio: &quot;inherit&quot;, cwd: root });
+<span class="ln">80</span>  if (result.status !== 0) {
+<span class="ln">81</span>    console.error(`\n✋ checkCommand failed (exit ${result.status ?? 1}) — landing blocked.`);
+<span class="ln">82</span>  }
+<span class="ln">83</span>  return result.status ?? 1;
+<span class="ln">84</span>}</pre>
+</div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · DETAIL</div><h2 class="sec-title">关键流程</h2><h3>同步主 checkout</h3><p>push 成功不是结束。<code>src/land.ts:126</code> 直接调用 sync(cfg)，把主 checkout 快进。sync 的保护在 <code>src/sync.ts:151</code> 读取当前 branch，<code>src/sync.ts:163</code> 如果不是 integrationBranch 就拒绝行动；<code>src/sync.ts:177</code> 只做 merge --ff-only，避免自动生成 merge commit。</p><p>依赖同步是更细的工程判断。<code>src/sync.ts:75</code> 检查 lockfile 是否变化，<code>src/sync.ts:81</code> 如果 package.json 删除了依赖就不自动 install，避免共享 node_modules 把旧 lane 需要的 binary 删除；安全的版本 bump 才在 <code>src/sync.ts:91</code> 自动 install。</p><div class="flow">land queue → rebase → push → pre-push checkCommand → sync main checkout → optional dependency refresh</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/sync.ts:139</span> · L139-221</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">139</span>export async function sync(providedCfg?: ClaudeCodeMergeQueueConfig): Promise&lt;number&gt; {
+<span class="ln">140</span>  let MAIN: string;
+<span class="ln">141</span>  try {
+<span class="ln">142</span>    MAIN = resolveMainCheckout(process.cwd());
+<span class="ln">143</span>  } catch {
+<span class="ln">144</span>    console.error(&quot;claude-code-merge-queue sync: not inside a git repo — nothing to do.&quot;);
+<span class="ln">145</span>    return 0;
+<span class="ln">146</span>  }
+<span class="ln">147</span>
+<span class="ln">148</span>  const cfg = providedCfg ?? (await loadConfig(MAIN));
+<span class="ln">149</span>  const regenerable = new Set(cfg.regenerableFiles);
+<span class="ln">150</span>
+<span class="ln">151</span>  const branchRes = git(MAIN, [&quot;rev-parse&quot;, &quot;--abbrev-ref&quot;, &quot;HEAD&quot;], { allowFail: true });
+<span class="ln">152</span>  const branch = branchRes.out.trim();
+<span class="ln">153</span>  if (!branch || branch === &quot;HEAD&quot;) {
+<span class="ln">154</span>    console.error(&quot;claude-code-merge-queue sync: the checkout is detached or unresolved — left untouched.&quot;);
+<span class="ln">155</span>    return 0;
+<span class="ln">156</span>  }
+<span class="ln">157</span>  // The main checkout is meant to stay parked on integrationBranch permanently
+<span class="ln">158</span>  // (that&#x27;s what makes &quot;fast-forward it&quot; a safe, unattended operation). If
+<span class="ln">159</span>  // it&#x27;s on something else — someone switched branches in it by hand, or ran
+<span class="ln">160</span>  // `land` from a single non-worktree checkout instead of a lane worktree —
+<span class="ln">161</span>  // fast-forwarding &quot;whatever HEAD happens to be&quot; silently does the wrong
+<span class="ln">162</span>  // thing. Say so plainly instead of surfacing a raw git error later.
+<span class="ln">163</span>  if (branch !== cfg.integrationBranch) {
+<span class="ln">164</span>    console.error(
+<span class="ln">165</span>      `claude-code-merge-queue sync: this checkout is on &#x27;${branch}&#x27;, not the configured integrationBranch ` +
+<span class="ln">166</span>        `(&#x27;${cfg.integrationBranch}&#x27;). sync only fast-forwards the main checkout — run it from ` +
+<span class="ln">167</span>        `there, or check out &#x27;${cfg.integrationBranch}&#x27; here first. Left untouched.`,
+<span class="ln">168</span>    );
+<span class="ln">169</span>    return 0;
+<span class="ln">170</span>  }
+<span class="ln">171</span>  const upstream = `origin/${branch}`;
+<span class="ln">172</span>
+<span class="ln">173</span>  const before = git(MAIN, [&quot;rev-parse&quot;, &quot;--short&quot;, &quot;HEAD&quot;], { allowFail: true }).out.trim();
+<span class="ln">174</span>
+<span class="ln">175</span>  git(MAIN, [&quot;fetch&quot;, &quot;origin&quot;, &quot;--quiet&quot;], { allowFail: true });
+<span class="ln">176</span>
+<span class="ln">177</span>  const tryFastForward = () =&gt; git(MAIN, [&quot;merge&quot;, &quot;--ff-only&quot;, upstream], { allowFail: true });
+<span class="ln">178</span>
+<span class="ln">179</span>  let res = tryFastForward();
+<span class="ln">180</span>
+<span class="ln">181</span>  // Retry transient lock contention (another lane landing at the same instant).
+<span class="ln">182</span>  for (let i = 0; i &lt; LOCK_RETRIES &amp;&amp; !res.ok &amp;&amp; /index\.lock|Unable to create|another git process/i.test(res.out); i++) {
+<span class="ln">183</span>    sleep(400);
+<span class="ln">184</span>    res = tryFastForward();
+<span class="ln">185</span>  }
+<span class="ln">186</span>
+<span class="ln">187</span>  // Blocked by a locally-modified regenerable file? Discard it and retry once.
+<span class="ln">188</span>  if (!res.ok &amp;&amp; /would be overwritten by merge/i.test(res.out)) {
+<span class="ln">189</span>    const files = res.out
+<span class="ln">190</span>      .split(&quot;\n&quot;)
+<span class="ln">191</span>      .map((l) =&gt; l.trim())
+<span class="ln">192</span>      .filter((l) =&gt; l &amp;&amp; !/would be overwritten|please commit|aborting|^error:/i.test(l));
+<span class="ln">193</span>    const blocking = files.filter((f) =&gt; !regenerable.has(f));
+<span class="ln">194</span>    if (blocking.length === 0 &amp;&amp; files.length &gt; 0) {
+<span class="ln">195</span>      git(MAIN, [&quot;checkout&quot;, &quot;--&quot;, ...files], { allowFail: true });
+<span class="ln">196</span>      res = tryFastForward();
+<span class="ln">197</span>    } else {
+<span class="ln">198</span>      console.error(`claude-code-merge-queue sync: ${branch} has local changes blocking fast-forward (${blocking.join(&quot;, &quot;)}). Left untouched — resolve in the checkout.`);
+<span class="ln">199</span>      return 0;
+<span class="ln">200</span>    }
+<span class="ln">201</span>  }
+<span class="ln">202</span>
+<span class="ln">203</span>  if (res.ok) {
+<span class="ln">204</span>    const after = git(MAIN, [&quot;rev-parse&quot;, &quot;--short&quot;, &quot;HEAD&quot;], { allowFail: true }).out.trim();
+<span class="ln">205</span>    if (before === after) {
+<span class="ln">206</span>      console.log(`claude-code-merge-queue sync: ${branch} already current at ${after}.`);
+<span class="ln">207</span>    } else {
+<span class="ln">208</span>      console.log(`claude-code-merge-queue sync: fast-forwarded ${branch} ${before} → ${after} — the dev server will pick it up.`);
+<span class="ln">209</span>      refreshDependenciesIfChanged(MAIN, before, after);
+<span class="ln">210</span>    }
+<span class="ln">211</span>    return 0;
+<span class="ln">212</span>  }
+<span class="ln">213</span>
+<span class="ln">214</span>  if (/Not possible to fast-forward|diverging|non-fast-forward/i.test(res.out)) {
+<span class="ln">215</span>    console.error(`claude-code-merge-queue sync: local ${branch} has DIVERGED from ${upstream} (something was committed directly on the checkout). Left untouched — reconcile it manually.`);
+<span class="ln">216</span>    return 0;
+<span class="ln">217</span>  }
+<span class="ln">218</span>
+<span class="ln">219</span>  console.error(`claude-code-merge-queue sync: could not fast-forward ${branch} — left untouched.\n${res.out.trim()}`);
+<span class="ln">220</span>  return 0;
+<span class="ln">221</span>}</pre>
+</div></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · DETAIL</div><h2 class="sec-title">边界与失败</h2><p>land 测试重现了“等待期间 regenerable file 又变脏”的事故。<code>test/land.test.ts:59</code> 的测试先让一个 worker 持有 land 锁，<code>test/land.test.ts:92</code> 启动真实 CLI land，等它进入等待后在 <code>test/land.test.ts:99</code> 写脏 generated.txt。最后 <code>test/land.test.ts:101</code> 等 land 退出并断言成功。</p><p>sync 测试则覆盖 bootstrap gap。<code>test/sync.test.ts:113</code> 证明 bare sync 会因 main checkout 没有新 config 而退回 DEFAULTS；<code>test/sync.test.ts:138</code> 证明 land 传入 already-loaded cfg 可以修掉这个 gap。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/land.test.ts:59</span> · L59-114</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">59</span>test(&quot;land discards a regenerable file that gets re-dirtied while waiting for the landing queue lock&quot;, async () =&gt; {
+<span class="ln">60</span>  // The exact bug this closes: land only ever checked for stray regenerable
+<span class="ln">61</span>  // dirt ONCE, before joining the queue. A build tool re-touching that same
+<span class="ln">62</span>  // file during the (possibly long) wait for the lock — the whole point of
+<span class="ln">63</span>  // the queue existing at all — went uncaught, so the rebase that runs the
+<span class="ln">64</span>  // moment the lock is actually acquired failed on a &quot;conflict&quot; that was
+<span class="ln">65</span>  // really just the identical harmless noise land is supposed to discard.
+<span class="ln">66</span>  //
+<span class="ln">67</span>  // Both waits below are polled for real evidence, not guessed timeouts:
+<span class="ln">68</span>  // the holder&#x27;s own &quot;start&quot; event, and land&#x27;s own &quot;waiting for the queue&quot;
+<span class="ln">69</span>  // log line. A sleep-based version of this test passed even against the
+<span class="ln">70</span>  // unfixed code, because a lucky race let `land` finish before the dirt
+<span class="ln">71</span>  // was even written — proving nothing.
+<span class="ln">72</span>  const { base, lane } = makeRepoWithLane();
+<span class="ln">73</span>  const resultsFile = join(base, &quot;lock-results.ndjson&quot;);
+<span class="ln">74</span>  let holder: ReturnType&lt;typeof spawn&gt; | undefined;
+<span class="ln">75</span>  let landProcess: ReturnType&lt;typeof spawn&gt; | undefined;
+<span class="ln">76</span>  try {
+<span class="ln">77</span>    writeFileSync(join(lane, &quot;lane-work.txt&quot;), &quot;real change\n&quot;);
+<span class="ln">78</span>    git(lane, [&quot;add&quot;, &quot;-A&quot;]);
+<span class="ln">79</span>    git(lane, [&quot;commit&quot;, &quot;-q&quot;, &quot;-m&quot;, &quot;lane work&quot;]);
+<span class="ln">80</span>
+<span class="ln">81</span>    // Hold the real &quot;land&quot; queue lock from a separate process, targeting
+<span class="ln">82</span>    // this same repo, so it resolves to the identical cross-worktree queue.
+<span class="ln">83</span>    holder = spawn(&quot;node&quot;, [&quot;--import&quot;, &quot;tsx&quot;, WORKER, lane, &quot;land&quot;, resultsFile, &quot;2000&quot;], {
+<span class="ln">84</span>      stdio: &quot;ignore&quot;,
+<span class="ln">85</span>    });
+<span class="ln">86</span>    await pollUntil(
+<span class="ln">87</span>      () =&gt; existsSync(resultsFile) &amp;&amp; readFileSync(resultsFile, &quot;utf8&quot;).includes(&#x27;&quot;start&quot;&#x27;),
+<span class="ln">88</span>      &quot;the holder process to actually acquire the lock&quot;,
+<span class="ln">89</span>    );
+<span class="ln">90</span>
+<span class="ln">91</span>    let landOutput = &quot;&quot;;
+<span class="ln">92</span>    landProcess = spawn(&quot;node&quot;, [CLI, &quot;land&quot;], { cwd: lane });
+<span class="ln">93</span>    landProcess.stdout?.on(&quot;data&quot;, (d: Buffer) =&gt; (landOutput += d.toString()));
+<span class="ln">94</span>    landProcess.stderr?.on(&quot;data&quot;, (d: Buffer) =&gt; (landOutput += d.toString()));
+<span class="ln">95</span>    await pollUntil(() =&gt; /land-queue/.test(landOutput), &quot;land to actually be queued, waiting on the holder&quot;);
+<span class="ln">96</span>
+<span class="ln">97</span>    // land is now genuinely blocked in the queue — regenerate the
+<span class="ln">98</span>    // configured regenerable file while it waits.
+<span class="ln">99</span>    writeFileSync(join(lane, &quot;generated.txt&quot;), &quot;build output v2\n&quot;);
+<span class="ln">100</span>
+<span class="ln">101</span>    const exitCode = await waitExit(landProcess);
+<span class="ln">102</span>    assert.equal(exitCode, 0, `land should succeed by discarding the re-dirtied regenerable file, not fail on a false conflict.\n--- land output ---\n${landOutput}`);
+<span class="ln">103</span>
+<span class="ln">104</span>    // Query the bare remote directly rather than the main checkout&#x27;s
+<span class="ln">105</span>    // origin/dev — that&#x27;s just a local tracking ref and only updates on a
+<span class="ln">106</span>    // fetch this test never asked for.
+<span class="ln">107</span>    const devLog = execFileSync(&quot;git&quot;, [&quot;--git-dir&quot;, join(base, &quot;remote.git&quot;), &quot;log&quot;, &quot;dev&quot;, &quot;--oneline&quot;], { encoding: &quot;utf8&quot; });
+<span class="ln">108</span>    assert.match(devLog, /lane work/, &quot;the lane&#x27;s real commit must have actually landed&quot;);
+<span class="ln">109</span>  } finally {
+<span class="ln">110</span>    holder?.kill();
+<span class="ln">111</span>    landProcess?.kill();
+<span class="ln">112</span>    rmSync(base, { recursive: true, force: true });
+<span class="ln">113</span>  }
+<span class="ln">114</span>});</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/sync.test.ts:113</span> · L113-180</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">113</span>test(&quot;bare sync() falls back to DEFAULTS when MAIN has no config yet — and can wrongly refuse a real integrationBranch that isn&#x27;t literally \&quot;main\&quot;&quot;, async () =&gt; {
+<span class="ln">114</span>  // The exact bootstrap gap: the main checkout doesn&#x27;t have
+<span class="ln">115</span>  // claude-code-merge-queue.config.mjs yet (this push just introduced it, and sync is
+<span class="ln">116</span>  // what&#x27;s supposed to bring it over) — a bare sync() has no way to know
+<span class="ln">117</span>  // the real integrationBranch is &quot;dev&quot;, not DEFAULTS&#x27; &quot;main&quot;.
+<span class="ln">118</span>  const { dir } = makeRepoWithRemote(&quot;dev&quot;);
+<span class="ln">119</span>  const cwd = process.cwd();
+<span class="ln">120</span>  try {
+<span class="ln">121</span>    process.chdir(dir);
+<span class="ln">122</span>    let stderr = &quot;&quot;;
+<span class="ln">123</span>    const origError = console.error;
+<span class="ln">124</span>    console.error = (...args: unknown[]) =&gt; {
+<span class="ln">125</span>      stderr += args.join(&quot; &quot;);
+<span class="ln">126</span>    };
+<span class="ln">127</span>    const code = await sync();
+<span class="ln">128</span>    console.error = origError;
+<span class="ln">129</span>
+<span class="ln">130</span>    assert.equal(code, 0);
+<span class="ln">131</span>    assert.match(stderr, /not the configured integrationBranch \(&#x27;main&#x27;\)/, &quot;falls back to DEFAULTS.integrationBranch, not the project&#x27;s real one&quot;);
+<span class="ln">132</span>  } finally {
+<span class="ln">133</span>    process.chdir(cwd);
+<span class="ln">134</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">135</span>  }
+<span class="ln">136</span>});
+<span class="ln">137</span>
+<span class="ln">138</span>test(&quot;sync(providedCfg) uses the caller&#x27;s already-loaded config instead of re-deriving from MAIN — fixes the bootstrap gap above&quot;, async () =&gt; {
+<span class="ln">139</span>  const { dir, remote } = makeRepoWithRemote(&quot;dev&quot;);
+<span class="ln">140</span>  const cwd = process.cwd();
+<span class="ln">141</span>  try {
+<span class="ln">142</span>    const other = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-sync-other-&quot;));
+<span class="ln">143</span>    execFileSync(&quot;git&quot;, [&quot;clone&quot;, &quot;--quiet&quot;, remote, other]);
+<span class="ln">144</span>    git(other, [&quot;config&quot;, &quot;user.email&quot;, &quot;test@test.com&quot;]);
+<span class="ln">145</span>    git(other, [&quot;config&quot;, &quot;user.name&quot;, &quot;Test&quot;]);
+<span class="ln">146</span>    // The bare remote&#x27;s own HEAD symref reflects git&#x27;s global default branch
+<span class="ln">147</span>    // (main/master), not &quot;dev&quot; — explicitly track it rather than relying on
+<span class="ln">148</span>    // clone to have checked it out.
+<span class="ln">149</span>    git(other, [&quot;checkout&quot;, &quot;-q&quot;, &quot;-b&quot;, &quot;dev&quot;, &quot;origin/dev&quot;]);
+<span class="ln">150</span>    writeFileSync(join(other, &quot;file.txt&quot;), &quot;v2\n&quot;);
+<span class="ln">151</span>    git(other, [&quot;add&quot;, &quot;-A&quot;]);
+<span class="ln">152</span>    git(other, [&quot;commit&quot;, &quot;-q&quot;, &quot;-m&quot;, &quot;landed elsewhere&quot;]);
+<span class="ln">153</span>    git(other, [&quot;push&quot;, &quot;-q&quot;, &quot;origin&quot;, &quot;dev&quot;]);
+<span class="ln">154</span>    const remoteHead = git(other, [&quot;rev-parse&quot;, &quot;HEAD&quot;]).trim();
+<span class="ln">155</span>    rmSync(other, { recursive: true, force: true });
+<span class="ln">156</span>
+<span class="ln">157</span>    process.chdir(dir);
+<span class="ln">158</span>    const code = await sync({ ...DEFAULTS, integrationBranch: &quot;dev&quot; });
+<span class="ln">159</span>    assert.equal(code, 0);
+<span class="ln">160</span>    assert.equal(git(dir, [&quot;rev-parse&quot;, &quot;HEAD&quot;]).trim(), remoteHead, &quot;should have fast-forwarded using the provided config, not DEFAULTS&quot;);
+<span class="ln">161</span>  } finally {
+<span class="ln">162</span>    process.chdir(cwd);
+<span class="ln">163</span>    rmSync(dir, { recursive: true, force: true });
+<span class="ln">164</span>  }
+<span class="ln">165</span>});
+<span class="ln">166</span>
+<span class="ln">167</span>test(&quot;sync runs an install when the fast-forwarded range changed package-lock.json — the shared node_modules every lane symlinks would otherwise go stale&quot;, async () =&gt; {
+<span class="ln">168</span>  const { dir, remote } = makeRepoWithRemote();
+<span class="ln">169</span>  const cwd = process.cwd();
+<span class="ln">170</span>  const { binDir, marker } = fakePackageManagerBin();
+<span class="ln">171</span>  const originalPath = process.env.PATH;
+<span class="ln">172</span>  try {
+<span class="ln">173</span>    pushLockfileChange(remote, &quot;package-lock.json&quot;, &quot;bump a dep&quot;);
+<span class="ln">174</span>
+<span class="ln">175</span>    process.chdir(dir);
+<span class="ln">176</span>    process.env.PATH = `${binDir}:${originalPath}`;
+<span class="ln">177</span>    const code = await sync();
+<span class="ln">178</span>    assert.equal(code, 0);
+<span class="ln">179</span>    assert.ok(existsSync(marker), &quot;expected npm install to have run&quot;);
+<span class="ln">180</span>    assert.equal(readFileSync(marker, &quot;utf8&quot;).trim(), &quot;install&quot;);</pre>
+</div></section><section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · DETAIL</div><h2 class="sec-title">关联模块</h2><p>check-push 和 land 是一对：land 在 <code>src/land.ts:109</code> 设置 landing env，check-push 在 <code>src/lib/check-push.ts:76</code> 验证它。CLI 在 <code>src/bin/claude-code-merge-queue.ts:286</code> 调 checkPush，随后 <code>src/bin/claude-code-merge-queue.ts:291</code> 调 runCheckCommand。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/bin/claude-code-merge-queue.ts:259</span> · L259-292</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">259</span>    case &quot;check-push&quot;: {
+<span class="ln">260</span>      const root = findRepoRoot();
+<span class="ln">261</span>      if (!root || !hasConfig(root)) {
+<span class="ln">262</span>        // No config means Claude Code Merge Queue isn&#x27;t enabled for this repo — nothing to enforce.
+<span class="ln">263</span>        process.exit(0);
+<span class="ln">264</span>      }
+<span class="ln">265</span>      const cfg = await loadConfig(root);
+<span class="ln">266</span>      const stdin = await readStdin();
+<span class="ln">267</span>      const refUpdates = parseRefUpdates(stdin);
+<span class="ln">268</span>
+<span class="ln">269</span>      // git still invokes pre-push (with empty stdin) for a push that
+<span class="ln">270</span>      // updates zero refs — e.g. re-pushing a branch that&#x27;s already exactly
+<span class="ln">271</span>      // up to date on the remote. There&#x27;s nothing to block (nothing is
+<span class="ln">272</span>      // actually changing on the remote either way) and nothing meaningful
+<span class="ln">273</span>      // for checkCommand to verify — running it anyway just produces a
+<span class="ln">274</span>      // confusing, unrelated failure (a missing devDependency, say) that
+<span class="ln">275</span>      // looks exactly like a real block but isn&#x27;t one. Recognize &quot;nothing
+<span class="ln">276</span>      // to push&quot; explicitly instead of silently falling through both checks.
+<span class="ln">277</span>      if (refUpdates.length === 0) {
+<span class="ln">278</span>        console.log(&quot;claude-code-merge-queue check-push: nothing being pushed (already up to date) — skipping checks.&quot;);
+<span class="ln">279</span>        process.exit(0);
+<span class="ln">280</span>      }
+<span class="ln">281</span>
+<span class="ln">282</span>      if (process.env.CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH === &quot;1&quot;) {
+<span class="ln">283</span>        console.log(&quot;\n🚨 CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH is set — bypassing the landing queue.\n&quot;);
+<span class="ln">284</span>      }
+<span class="ln">285</span>
+<span class="ln">286</span>      const result = checkPush(refUpdates, cfg, process.env);
+<span class="ln">287</span>      if (!result.ok) {
+<span class="ln">288</span>        console.error(result.message);
+<span class="ln">289</span>        process.exit(1);
+<span class="ln">290</span>      }
+<span class="ln">291</span>      process.exit(runCheckCommand(cfg, root));
+<span class="ln">292</span>      return;</pre>
+</div></section><section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · DETAIL</div><h2 class="sec-title">源码判断</h2><p>这个设计把“测试是 reviewer”落成了流程，但它也明确暴露了信任边界。<code>src/lib/check-command.ts:61</code> 在 checkCommand 为空且 checksRequired 为 true 时失败；如果用户显式关掉 checksRequired，系统尊重这个选择。这是工具该有的姿态：强默认，允许明示放弃。</p></section><div class="foot"><span>Generated · 2026-07-07</span><span>Source · <a href="https://github.com/funador/claude-code-merge-queue">funador/claude-code-merge-queue</a></span><span><a href="../index.html">↑ 返回索引</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.004}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a5f3fc';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script>
+</body></html>

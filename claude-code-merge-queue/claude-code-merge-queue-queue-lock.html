@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FIFO queue-lock · claude-code-merge-queue</title>
+<meta name="description" content="PID-liveness FIFO lock 如何让 build 和 land 在本机跨 worktree 串行执行。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#66d9e8; --star-soft:#a5f3fc; --star-deep:#0891b2; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Merge<b>Queue</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">Merge<b>Queue</b></div><div class="sub">子页面 · 深度解析</div></div><span class="nav-ver">TypeScript · Node CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#section-1"><span class="idx">01</span>架构</a></li>
+<li><a href="#section-2"><span class="idx">02</span>核心</a></li>
+<li><a href="#section-3"><span class="idx">03</span>流程</a></li>
+<li><a href="#section-4"><span class="idx">04</span>测试</a></li>
+<li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★295 · 2026-07</div><div><a href="https://github.com/funador/claude-code-merge-queue" target="_blank">funador/claude-code-merge-queue</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">FIFO queue-lock <em>深度解析</em></h1><p class="hero-desc">PID-liveness FIFO lock 如何让 build 和 land 在本机跨 worktree 串行执行。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · DETAIL</div><h2 class="sec-title">导入链与契约</h2><h3>锁的公共接口</h3><p>QueueLock 的公共契约很小：<code>src/lib/queue-lock.ts:43</code> 定义 AcquireOptions，<code>src/lib/queue-lock.ts:48</code> 暴露 acquire/release/lane/held。这个接口克制，意味着 build-lock 和 land 可以共用一套互斥原语，而不用各自发明不同的排队语义。<code>src/lib/queue-lock.ts:55</code> 的 repoKey 又把锁绑定到 git common dir，不会让同一个 repo 的多个 worktree 锁分裂。</p><p>真正的设计点在 <code>src/lib/queue-lock.ts:73</code> 到 <code>src/lib/queue-lock.ts:80</code>：queueName 决定是 build 队列还是 land 队列，repo hash 决定作用域，tickets 子目录和 lock 文件分别承担排队和持锁状态。<code>src/lib/queue-lock.ts:82</code> 还把当前目录名作为 lane，方便等待日志显示是哪条 lane。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/queue-lock.ts:43</span> · L43-86</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">43</span>export interface AcquireOptions {
+<span class="ln">44</span>  label?: string;
+<span class="ln">45</span>  onWait?: (info: { ahead: number; holder: LockHolder | null }) =&gt; void;
+<span class="ln">46</span>}
+<span class="ln">47</span>
+<span class="ln">48</span>export interface QueueLock {
+<span class="ln">49</span>  acquire(options?: AcquireOptions): Promise&lt;void&gt;;
+<span class="ln">50</span>  release(): void;
+<span class="ln">51</span>  readonly lane: string;
+<span class="ln">52</span>  readonly held: boolean;
+<span class="ln">53</span>}
+<span class="ln">54</span>
+<span class="ln">55</span>function repoKey(): string {
+<span class="ln">56</span>  try {
+<span class="ln">57</span>    const commonDir = execSync(&quot;git rev-parse --git-common-dir&quot;, {
+<span class="ln">58</span>      encoding: &quot;utf8&quot;,
+<span class="ln">59</span>    }).trim();
+<span class="ln">60</span>    // Resolve to an absolute, worktree-independent path so every worktree of
+<span class="ln">61</span>    // the same repo hashes to the same queue.
+<span class="ln">62</span>    return execSync(`cd &quot;${commonDir}&quot; &amp;&amp; pwd -P`, { encoding: &quot;utf8&quot; }).trim();
+<span class="ln">63</span>  } catch {
+<span class="ln">64</span>    return process.cwd();
+<span class="ln">65</span>  }
+<span class="ln">66</span>}
+<span class="ln">67</span>
+<span class="ln">68</span>/**
+<span class="ln">69</span> * Create a named FIFO lock. Each distinct `queueName` is an independent
+<span class="ln">70</span> * mutex — &quot;build&quot; and &quot;land&quot; never contend with each other even though
+<span class="ln">71</span> * they share this exact same code.
+<span class="ln">72</span> */
+<span class="ln">73</span>export function createQueueLock(queueName: string): QueueLock {
+<span class="ln">74</span>  const QUEUE_DIR = join(
+<span class="ln">75</span>    tmpdir(),
+<span class="ln">76</span>    `claude-code-merge-queue-${queueName}-queue-${createHash(&quot;sha1&quot;).update(repoKey()).digest(&quot;hex&quot;).slice(0, 12)}`,
+<span class="ln">77</span>  );
+<span class="ln">78</span>  const TICKETS_DIR = join(QUEUE_DIR, &quot;tickets&quot;);
+<span class="ln">79</span>  const LOCK_FILE = join(QUEUE_DIR, &quot;lock&quot;);
+<span class="ln">80</span>  mkdirSync(TICKETS_DIR, { recursive: true });
+<span class="ln">81</span>
+<span class="ln">82</span>  const lane = basename(process.cwd());
+<span class="ln">83</span>  const ME = process.pid;
+<span class="ln">84</span>  const TICKET_TS = Date.now();
+<span class="ln">85</span>  const TICKET_NAME = `${TICKET_TS}-${ME}`;
+<span class="ln">86</span>  const TICKET_FILE = join(TICKETS_DIR, TICKET_NAME);</pre>
+</div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · DETAIL</div><h2 class="sec-title">核心实现逐段拆</h2><h3>公平队列</h3><p>排队公平性来自 <code>src/lib/queue-lock.ts:103</code> 的 pruneDeadTickets 和 <code>src/lib/queue-lock.ts:122</code> 的排序。它按 timestamp 再按 pid 排序，所以不是“谁 poll 得快谁赢”。这比简单 while-lock-file-exists 更重要，因为多个 coding agent 往往会同时结束测试，公平队列能减少重复 rebase 和饥饿。</p><p>原子抢锁在 <code>src/lib/queue-lock.ts:140</code>。写临时文件后用 <code>src/lib/queue-lock.ts:144</code> 的 linkSync 建立 lock 文件：如果目标已存在，文件系统保证失败。失败后 <code>src/lib/queue-lock.ts:154</code> 读取 holder，并在 <code>src/lib/queue-lock.ts:155</code> 判断 PID 是否还活着；死 holder 会在 <code>src/lib/queue-lock.ts:157</code> 被回收。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/queue-lock.ts:88</span> · L88-127</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">88</span>  function alive(pid: number): boolean {
+<span class="ln">89</span>    if (!pid || pid === ME) return pid === ME;
+<span class="ln">90</span>    try {
+<span class="ln">91</span>      process.kill(pid, 0);
+<span class="ln">92</span>      return true;
+<span class="ln">93</span>    } catch (e) {
+<span class="ln">94</span>      return (e as NodeJS.ErrnoException).code === &quot;EPERM&quot;; // exists but owned by someone else
+<span class="ln">95</span>    }
+<span class="ln">96</span>  }
+<span class="ln">97</span>
+<span class="ln">98</span>  function pidOf(name: string): number {
+<span class="ln">99</span>    const dash = name.lastIndexOf(&quot;-&quot;);
+<span class="ln">100</span>    return dash === -1 ? 0 : Number(name.slice(dash + 1));
+<span class="ln">101</span>  }
+<span class="ln">102</span>
+<span class="ln">103</span>  function pruneDeadTickets(): string[] {
+<span class="ln">104</span>    let names: string[];
+<span class="ln">105</span>    try {
+<span class="ln">106</span>      names = readdirSync(TICKETS_DIR);
+<span class="ln">107</span>    } catch {
+<span class="ln">108</span>      return [];
+<span class="ln">109</span>    }
+<span class="ln">110</span>    const live: string[] = [];
+<span class="ln">111</span>    for (const name of names) {
+<span class="ln">112</span>      if (alive(pidOf(name))) {
+<span class="ln">113</span>        live.push(name);
+<span class="ln">114</span>      } else {
+<span class="ln">115</span>        try {
+<span class="ln">116</span>          unlinkSync(join(TICKETS_DIR, name));
+<span class="ln">117</span>        } catch {
+<span class="ln">118</span>          /* someone else cleaned it */
+<span class="ln">119</span>        }
+<span class="ln">120</span>      }
+<span class="ln">121</span>    }
+<span class="ln">122</span>    live.sort((a, b) =&gt; {
+<span class="ln">123</span>      const [ta, pa] = a.split(&quot;-&quot;).map(Number) as [number, number];
+<span class="ln">124</span>      const [tb, pb] = b.split(&quot;-&quot;).map(Number) as [number, number];
+<span class="ln">125</span>      return ta - tb || pa - pb;
+<span class="ln">126</span>    });
+<span class="ln">127</span>    return live;</pre>
+</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/queue-lock.ts:130</span> · L130-164</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">130</span>  function readLockHolder(): LockHolder | null {
+<span class="ln">131</span>    try {
+<span class="ln">132</span>      return JSON.parse(readFileSync(LOCK_FILE, &quot;utf8&quot;)) as LockHolder;
+<span class="ln">133</span>    } catch {
+<span class="ln">134</span>      return null;
+<span class="ln">135</span>    }
+<span class="ln">136</span>  }
+<span class="ln">137</span>
+<span class="ln">138</span>  // Atomically take the lock via link() (fails if it already exists). Reclaim
+<span class="ln">139</span>  // a lock whose holder is dead. Returns true iff we now hold it.
+<span class="ln">140</span>  function tryTakeLock(info: LockHolder): boolean {
+<span class="ln">141</span>    const tmp = `${LOCK_FILE}.${ME}.tmp`;
+<span class="ln">142</span>    writeFileSync(tmp, JSON.stringify(info));
+<span class="ln">143</span>    try {
+<span class="ln">144</span>      linkSync(tmp, LOCK_FILE);
+<span class="ln">145</span>      unlinkSync(tmp);
+<span class="ln">146</span>      return true;
+<span class="ln">147</span>    } catch (e) {
+<span class="ln">148</span>      try {
+<span class="ln">149</span>        unlinkSync(tmp);
+<span class="ln">150</span>      } catch {
+<span class="ln">151</span>        /* noop */
+<span class="ln">152</span>      }
+<span class="ln">153</span>      if ((e as NodeJS.ErrnoException).code !== &quot;EEXIST&quot;) throw e;
+<span class="ln">154</span>      const holder = readLockHolder();
+<span class="ln">155</span>      if (!holder || !alive(holder.pid)) {
+<span class="ln">156</span>        try {
+<span class="ln">157</span>          unlinkSync(LOCK_FILE);
+<span class="ln">158</span>        } catch {
+<span class="ln">159</span>          /* another waiter beat us to it */
+<span class="ln">160</span>        }
+<span class="ln">161</span>      }
+<span class="ln">162</span>      return false;
+<span class="ln">163</span>    }
+<span class="ln">164</span>  }</pre>
+</div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · DETAIL</div><h2 class="sec-title">关键流程</h2><h3>获取与释放</h3><p>acquire 的循环在 <code>src/lib/queue-lock.ts:192</code> 开始：先写 ticket，再每轮 prune，检查自己在队列中的位置。只有 <code>src/lib/queue-lock.ts:201</code> 满足 ahead <= 0 且 lockFree 时才尝试拿锁。成功后 <code>src/lib/queue-lock.ts:205</code> 删除自己的 ticket，说明 holder 与 waiter 身份分离，队列目录不会把已持锁者重复算作等待者。</p><p>release 也保持幂等：<code>src/lib/queue-lock.ts:167</code> 只在 held 时删除 lock，并验证 <code>src/lib/queue-lock.ts:170</code> holder pid 是自己；随后 <code>src/lib/queue-lock.ts:179</code> 不管是否 held 都尝试删 ticket。这让正常退出和异常恢复走同一条清理路径。</p><div class="flow">ticket file → prune dead pids → oldest live ticket → linkSync lock → release/unlink</div><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/queue-lock.ts:166</span> · L166-221</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">166</span>  let HOLD = false;
+<span class="ln">167</span>  function release(): void {
+<span class="ln">168</span>    if (HOLD) {
+<span class="ln">169</span>      const holder = readLockHolder();
+<span class="ln">170</span>      if (holder &amp;&amp; holder.pid === ME) {
+<span class="ln">171</span>        try {
+<span class="ln">172</span>          unlinkSync(LOCK_FILE);
+<span class="ln">173</span>        } catch {
+<span class="ln">174</span>          /* already gone */
+<span class="ln">175</span>        }
+<span class="ln">176</span>      }
+<span class="ln">177</span>      HOLD = false;
+<span class="ln">178</span>    }
+<span class="ln">179</span>    try {
+<span class="ln">180</span>      unlinkSync(TICKET_FILE);
+<span class="ln">181</span>    } catch {
+<span class="ln">182</span>      /* already gone */
+<span class="ln">183</span>    }
+<span class="ln">184</span>  }
+<span class="ln">185</span>
+<span class="ln">186</span>  const sleep = (ms: number) =&gt; new Promise((r) =&gt; setTimeout(r, ms));
+<span class="ln">187</span>
+<span class="ln">188</span>  /**
+<span class="ln">189</span>   * Wait for and take the lock. `onWait({ahead, holder})` fires whenever the
+<span class="ln">190</span>   * queue position changes, so callers can print progress.
+<span class="ln">191</span>   */
+<span class="ln">192</span>  async function acquire({ label, onWait }: AcquireOptions = {}): Promise&lt;void&gt; {
+<span class="ln">193</span>    writeFileSync(TICKET_FILE, JSON.stringify({ pid: ME, lane, label, ts: TICKET_TS }));
+<span class="ln">194</span>    let announced = -1;
+<span class="ln">195</span>    for (;;) {
+<span class="ln">196</span>      const queue = pruneDeadTickets();
+<span class="ln">197</span>      const ahead = queue.indexOf(TICKET_NAME); // 0 = our turn
+<span class="ln">198</span>      const holder = readLockHolder();
+<span class="ln">199</span>      const lockFree = !holder || !alive(holder.pid);
+<span class="ln">200</span>
+<span class="ln">201</span>      if (ahead &lt;= 0 &amp;&amp; lockFree) {
+<span class="ln">202</span>        if (tryTakeLock({ pid: ME, lane, label, ts: Date.now() })) {
+<span class="ln">203</span>          HOLD = true;
+<span class="ln">204</span>          try {
+<span class="ln">205</span>            unlinkSync(TICKET_FILE);
+<span class="ln">206</span>          } catch {
+<span class="ln">207</span>            /* noop */
+<span class="ln">208</span>          }
+<span class="ln">209</span>          return;
+<span class="ln">210</span>        }
+<span class="ln">211</span>      }
+<span class="ln">212</span>
+<span class="ln">213</span>      if (ahead &gt; 0 &amp;&amp; ahead !== announced) {
+<span class="ln">214</span>        announced = ahead;
+<span class="ln">215</span>        onWait?.({ ahead, holder: null });
+<span class="ln">216</span>      } else if (ahead &lt;= 0 &amp;&amp; holder &amp;&amp; alive(holder.pid) &amp;&amp; announced !== 0) {
+<span class="ln">217</span>        announced = 0;
+<span class="ln">218</span>        onWait?.({ ahead: 0, holder });
+<span class="ln">219</span>      }
+<span class="ln">220</span>      await sleep(POLL_MS);
+<span class="ln">221</span>    }</pre>
+</div></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · DETAIL</div><h2 class="sec-title">边界与失败</h2><p>测试直接覆盖了两个最关键性质。<code>test/queue-lock.test.ts:32</code> 启动四个真实 worker，<code>test/queue-lock.test.ts:49</code> 按开始时间排序，再用 <code>test/queue-lock.test.ts:53</code> 断言区间不重叠。崩溃恢复测试在 <code>test/queue-lock.test.ts:59</code> 开始，<code>test/queue-lock.test.ts:75</code> 用 kill -9 杀 holder，随后 <code>test/queue-lock.test.ts:80</code> 启动第二个 worker，证明没有永久死锁。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/queue-lock.test.ts:32</span> · L32-88</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">32</span>test(&quot;mutual exclusion: four concurrent workers never overlap while holding the lock&quot;, async () =&gt; {
+<span class="ln">33</span>  const dir = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-lock-test-&quot;));
+<span class="ln">34</span>  const resultsFile = join(dir, &quot;results.ndjson&quot;);
+<span class="ln">35</span>  const queueName = `test-mutex-${process.pid}-${Date.now()}`;
+<span class="ln">36</span>
+<span class="ln">37</span>  const workers = [0, 1, 2, 3].map(() =&gt; spawnWorker(queueName, resultsFile, 150));
+<span class="ln">38</span>  await Promise.all(workers.map(waitExit));
+<span class="ln">39</span>
+<span class="ln">40</span>  const events = readEvents(resultsFile);
+<span class="ln">41</span>  const intervals = new Map&lt;number, { start: number; end: number }&gt;();
+<span class="ln">42</span>  for (const e of events) {
+<span class="ln">43</span>    const cur = intervals.get(e.pid) ?? { start: 0, end: 0 };
+<span class="ln">44</span>    cur[e.event === &quot;start&quot; ? &quot;start&quot; : &quot;end&quot;] = e.t;
+<span class="ln">45</span>    intervals.set(e.pid, cur);
+<span class="ln">46</span>  }
+<span class="ln">47</span>  assert.equal(intervals.size, 4, &quot;expected all four workers to record start+end&quot;);
+<span class="ln">48</span>
+<span class="ln">49</span>  const sorted = [...intervals.values()].sort((a, b) =&gt; a.start - b.start);
+<span class="ln">50</span>  for (let i = 1; i &lt; sorted.length; i++) {
+<span class="ln">51</span>    const prev = sorted[i - 1]!;
+<span class="ln">52</span>    const cur = sorted[i]!;
+<span class="ln">53</span>    assert.ok(cur.start &gt;= prev.end, `worker holding [${prev.start},${prev.end}] overlapped worker starting at ${cur.start}`);
+<span class="ln">54</span>  }
+<span class="ln">55</span>
+<span class="ln">56</span>  rmSync(dir, { recursive: true, force: true });
+<span class="ln">57</span>});
+<span class="ln">58</span>
+<span class="ln">59</span>test(&quot;crash safety: a killed holder is reclaimed, not a permanent deadlock&quot;, async () =&gt; {
+<span class="ln">60</span>  const dir = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-lock-test-&quot;));
+<span class="ln">61</span>  const resultsFile = join(dir, &quot;results.ndjson&quot;);
+<span class="ln">62</span>  const queueName = `test-crash-${process.pid}-${Date.now()}`;
+<span class="ln">63</span>
+<span class="ln">64</span>  // Worker A holds the lock for far longer than the test&#x27;s patience — it
+<span class="ln">65</span>  // should never release it gracefully. It gets SIGKILLed instead.
+<span class="ln">66</span>  const holder = spawnWorker(queueName, resultsFile, 60_000);
+<span class="ln">67</span>
+<span class="ln">68</span>  const deadline = Date.now() + 5_000;
+<span class="ln">69</span>  while (Date.now() &lt; deadline) {
+<span class="ln">70</span>    if (existsSync(resultsFile) &amp;&amp; readFileSync(resultsFile, &quot;utf8&quot;).includes(&#x27;&quot;start&quot;&#x27;)) break;
+<span class="ln">71</span>    await new Promise((r) =&gt; setTimeout(r, 50));
+<span class="ln">72</span>  }
+<span class="ln">73</span>  assert.ok(existsSync(resultsFile) &amp;&amp; readFileSync(resultsFile, &quot;utf8&quot;).includes(&#x27;&quot;start&quot;&#x27;), &quot;holder never acquired the lock&quot;);
+<span class="ln">74</span>
+<span class="ln">75</span>  execSync(`kill -9 ${holder.pid}`);
+<span class="ln">76</span>
+<span class="ln">77</span>  // Worker B should still be able to acquire the SAME queue — if the lock
+<span class="ln">78</span>  // weren&#x27;t reclaimed via PID-liveness, this would hang until the test
+<span class="ln">79</span>  // runner&#x27;s own timeout, not queue-lock&#x27;s (there is no queue-lock timeout).
+<span class="ln">80</span>  const second = spawnWorker(queueName, resultsFile, 10);
+<span class="ln">81</span>  const code = await waitExit(second);
+<span class="ln">82</span>  assert.equal(code, 0, &quot;second worker should acquire and finish cleanly after the holder was killed&quot;);
+<span class="ln">83</span>
+<span class="ln">84</span>  const events = readEvents(resultsFile).filter((e) =&gt; e.pid === second.pid);
+<span class="ln">85</span>  assert.equal(events.length, 2, &quot;second worker should have recorded both start and end&quot;);
+<span class="ln">86</span>
+<span class="ln">87</span>  rmSync(dir, { recursive: true, force: true });
+<span class="ln">88</span>});</pre>
+</div></section><section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · DETAIL</div><h2 class="sec-title">关联模块</h2><p>这个锁不是孤立模块。land 在 <code>src/land.ts:78</code> 创建名为 land 的队列，build-lock 在 <code>src/build-lock.ts:1</code> 使用同类语义，而 ephemeral resource 在 <code>src/lib/ephemeral.ts:105</code> 把 claim/use/release 模式迁移到测试资源。换句话说，项目把“进程活性判断”作为基础工程原语复用。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/ephemeral.ts:97</span> · L97-126</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">97</span>/**
+<span class="ln">98</span> * Run `fn` against a freshly created resource, prune any orphans left by a
+<span class="ln">99</span> * previous crashed run first, and always release the claim — including on
+<span class="ln">100</span> * a thrown error. If THIS process is killed before the `finally` runs, the
+<span class="ln">101</span> * resource isn&#x27;t leaked forever: the next call to `withEphemeralResource`
+<span class="ln">102</span> * (in the next test run, from any lane) prunes it via `orphans()` before
+<span class="ln">103</span> * creating its own.
+<span class="ln">104</span> */
+<span class="ln">105</span>export async function withEphemeralResource&lt;T&gt;(
+<span class="ln">106</span>  provider: EphemeralResourceProvider&lt;T&gt;,
+<span class="ln">107</span>  registry: ClaimRegistry,
+<span class="ln">108</span>  fn: (resource: T) =&gt; Promise&lt;void&gt;,
+<span class="ln">109</span>): Promise&lt;void&gt; {
+<span class="ln">110</span>  for (const orphan of registry.orphans()) {
+<span class="ln">111</span>    await provider.destroyOrphan(orphan);
+<span class="ln">112</span>    registry.release(orphan.id);
+<span class="ln">113</span>  }
+<span class="ln">114</span>
+<span class="ln">115</span>  const id = `${Date.now()}-${process.pid}`;
+<span class="ln">116</span>  const claim: Claim = { id, pid: process.pid, createdAt: Date.now() };
+<span class="ln">117</span>  registry.record(claim);
+<span class="ln">118</span>
+<span class="ln">119</span>  const resource = await provider.create();
+<span class="ln">120</span>  try {
+<span class="ln">121</span>    await fn(resource);
+<span class="ln">122</span>  } finally {
+<span class="ln">123</span>    await provider.destroy(resource);
+<span class="ln">124</span>    registry.release(id);
+<span class="ln">125</span>  }
+<span class="ln">126</span>}</pre>
+</div></section><section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · DETAIL</div><h2 class="sec-title">源码判断</h2><p>这套锁的优势是简单、可审计、无需 daemon；代价是只能协调一台机器。<code>src/lib/queue-lock.ts:74</code> 把状态放在 os tmpdir，跨机器不会共享；但这正好匹配项目定位：本地 parallel Claude Code agents 的交通灯，而不是云端 merge queue。</p></section><div class="foot"><span>Generated · 2026-07-07</span><span>Source · <a href="https://github.com/funador/claude-code-merge-queue">funador/claude-code-merge-queue</a></span><span><a href="../index.html">↑ 返回索引</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.004}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a5f3fc';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script>
+</body></html>

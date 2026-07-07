@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>claude-code-merge-queue · 本地并行 Claude Code 合并队列源码解析</title>
+<meta name="description" content="funador/claude-code-merge-queue source-level analysis" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#66d9e8; --star-soft:#a5f3fc; --star-deep:#0891b2; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Merge<b>Queue</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">Merge<b>Queue</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · Node CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#section-1"><span class="idx">01</span>架构</a></li>
+<li><a href="#section-2"><span class="idx">02</span>核心</a></li>
+<li><a href="#section-3"><span class="idx">03</span>流程</a></li>
+<li><a href="#section-4"><span class="idx">04</span>测试</a></li>
+<li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★295 · 2026-07</div><div><a href="https://github.com/funador/claude-code-merge-queue" target="_blank">funador/claude-code-merge-queue</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">claude-code-merge-queue <em>本地合并队列</em></h1><p class="hero-desc">这个项目解决的是 parallel Claude Code agents 的最后一公里：Claude 原生 worktree 已经把多个 agent 隔离开，但 build、test、rebase、push、dev checkout 仍然共享本机资源。它用零运行时依赖的 TypeScript CLI，把 land/build/sync/preview/hook/pre-push 串成一套本地交通灯。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 295</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">4.5K</div><div class="stat-lbl">TS LOC</div></div><div class="stat"><div class="stat-num">31</div><div class="stat-lbl">TS/Test Files</div></div><div class="stat"><div class="stat-num">2026-07</div><div class="stat-lbl">Created</div></div></div></div><div><div class="flow"><span class="flow-node">Claude lanes</span>
+   │ WorktreeCreate hook
+   ▼
+<span class="flow-stage">lane/1 lane/2 lane/3</span>
+   │ build-lock / land queue
+   ▼
+<span class="flow-node">integrationBranch</span> → sync → main checkout</div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+<p>项目的核心判断很朴素：Claude Code 的 <code>--worktree</code> 让每个 agent 有自己的目录，但没有解决多个 agent 同时抢同一个 integration branch、同一个 build/test 资源、同一个 dev checkout 的问题。源码入口 <code>src/bin/claude-code-merge-queue.ts:31</code> 把 init、hook、land、sync、promote、preview、build-lock、check-push 都收在一个 CLI 里；配置层 <code>src/lib/config.ts:19</code> 又把 branchPrefix、worktreeSuffix、integrationBranch、checkCommand 等差异外置，所以它不是单仓库脚本，而是可迁移的本地 agent 交通系统。</p>
+<p>最值得拆的地方，是它没有用“让 agent 遵守说明”当可靠性基础。landing 队列在 <code>src/land.ts:78</code> 获取跨 worktree FIFO lock，pre-push 在 <code>src/lib/check-push.ts:52</code> 阻断绕过队列的直推，WorktreeCreate hook 在 <code>src/hooks/worktree-create.ts:76</code> 把 Claude 原生 worktree 创建接管成 numbered lanes，sync 在 <code>src/sync.ts:139</code> 负责把主 checkout 快进到刚落地的 commit。它把人类流程约定变成了文件锁、git hook、环境变量和测试门禁。</p>
+<h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">Node CLI + Git worktree + FIFO lock + Husky pre-push hook。关键状态放在 git、tmpdir 和配置文件里，没有服务端。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">lane、integrationBranch、QueueLock、WorktreeCreate hook、checkCommand、ephemeral resource claim。</div></div><div class="card"><div class="card-h">测试信号</div><div class="card-d">test/ 目录覆盖 queue-lock、land、sync、worktree-create、wire-hooks、check-push 等关键路径。</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">运行时零依赖；开发依赖 TypeScript/tsx/@types/node。用户项目只需要 Git、Node、可选 Husky。</div></div></div></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">本地 Agent 交通灯：<em>三把锁</em>和两个钩子</h2>
+<p>架构可以分成四层。第一层是 CLI 调度，<code>src/bin/claude-code-merge-queue.ts:196</code> 用一个 switch 分派所有子命令，并且在 <code>src/bin/claude-code-merge-queue.ts:259</code> 直接把 check-push 暴露给 git hook。第二层是配置，<code>src/lib/config.ts:87</code> 定义默认 branchPrefix、worktreeSuffix、symlinks 和 buildOutputDirs，<code>src/lib/config.ts:196</code> 加载用户 repo 的 config 并做校验。第三层是队列锁，<code>src/lib/queue-lock.ts:73</code> 创建 per-repo/per-queue 的 FIFO mutex。第四层是 hook 和同步，<code>src/hooks/worktree-create.ts:179</code> 响应 Claude 的 WorktreeCreate 事件，<code>src/sync.ts:175</code> fetch 之后只做 ff-only。</p>
+<h3><span class="arr">▸</span>系统拓扑</h3><div class="flow"><span class="flow-node">claude --worktree</span>
+   <span class="flow-arr">→</span> WorktreeCreate hook (<code>src/hooks/worktree-create.ts:179</code>)
+   <span class="flow-arr">→</span> lane/N + symlinked env/node_modules (<code>src/hooks/worktree-create.ts:119</code>)
+   <span class="flow-arr">→</span> build-lock queue (<code>src/build-lock.ts:1</code>)
+   <span class="flow-arr">→</span> land FIFO queue (<code>src/land.ts:78</code>)
+   <span class="flow-arr">→</span> pre-push gate (<code>src/lib/check-push.ts:76</code>)
+   <span class="flow-arr">→</span> sync main checkout (<code>src/sync.ts:203</code>)</div>
+<h3><span class="arr">▸</span>CLI 是薄调度，状态在底层模块</h3><p>CLI 自身不保存队列状态，而是把每个命令委托给模块：<code>src/bin/claude-code-merge-queue.ts:222</code> 跑 land，<code>src/bin/claude-code-merge-queue.ts:224</code> 跑 sync，<code>src/bin/claude-code-merge-queue.ts:253</code> 跑 preview，<code>src/bin/claude-code-merge-queue.ts:255</code> 跑 build-lock。这让可测试性更好，因为 lock、hook、sync 都能在 test 目录里独立构造 scratch repo。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/bin/claude-code-merge-queue.ts:196</span> · L196-258</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">196</span>async function main(): Promise&lt;void&gt; {
+<span class="ln">197</span>  switch (command) {
+<span class="ln">198</span>    case &quot;init&quot;:
+<span class="ln">199</span>      return init();
+<span class="ln">200</span>    case &quot;hook&quot;: {
+<span class="ln">201</span>      const sub = rest[0];
+<span class="ln">202</span>      if (sub === &quot;worktree-create&quot;) return runWorktreeCreateHook();
+<span class="ln">203</span>      console.error(`claude-code-merge-queue hook: unknown hook &quot;${sub ?? &quot;&quot;}&quot;. Only &quot;worktree-create&quot; is supported.`);
+<span class="ln">204</span>      process.exit(1);
+<span class="ln">205</span>      return;
+<span class="ln">206</span>    }
+<span class="ln">207</span>    case &quot;port&quot;: {
+<span class="ln">208</span>      const root = findRepoRoot();
+<span class="ln">209</span>      if (!root || !hasConfig(root)) {
+<span class="ln">210</span>        console.error(&quot;claude-code-merge-queue port: no claude-code-merge-queue.config found — not a lane.&quot;);
+<span class="ln">211</span>        process.exit(1);
+<span class="ln">212</span>      }
+<span class="ln">213</span>      const cfg = await loadConfig(root);
+<span class="ln">214</span>      const port = lanePort(process.cwd(), cfg);
+<span class="ln">215</span>      if (port === null) {
+<span class="ln">216</span>        console.error(&quot;claude-code-merge-queue port: current directory doesn&#x27;t look like a lane worktree.&quot;);
+<span class="ln">217</span>        process.exit(1);
+<span class="ln">218</span>      }
+<span class="ln">219</span>      console.log(port);
+<span class="ln">220</span>      return;
+<span class="ln">221</span>    }
+<span class="ln">222</span>    case &quot;land&quot;:
+<span class="ln">223</span>      return land();
+<span class="ln">224</span>    case &quot;sync&quot;:
+<span class="ln">225</span>      process.exit(await sync());
+<span class="ln">226</span>      return;
+<span class="ln">227</span>    case &quot;promote&quot;:
+<span class="ln">228</span>      process.exit(await promote());
+<span class="ln">229</span>      return;
+<span class="ln">230</span>    case &quot;prune&quot;: {
+<span class="ln">231</span>      // `land` already does this automatically as a side effect of every
+<span class="ln">232</span>      // successful landing — this is the on-demand escape hatch for
+<span class="ln">233</span>      // &quot;clean these up right now&quot; instead of waiting for the next lane to
+<span class="ln">234</span>      // land something. Same safety rules apply: only already-merged
+<span class="ln">235</span>      // branches, never anything with a live process inside, never the
+<span class="ln">236</span>      // worktree this command itself is running from.
+<span class="ln">237</span>      const root = findRepoRoot();
+<span class="ln">238</span>      if (!root || !hasConfig(root)) {
+<span class="ln">239</span>        console.error(&quot;claude-code-merge-queue prune: no claude-code-merge-queue.config found — nothing to do.&quot;);
+<span class="ln">240</span>        process.exit(0);
+<span class="ln">241</span>      }
+<span class="ln">242</span>      const cfg = await loadConfig(root);
+<span class="ln">243</span>      const mainTop = resolveMainCheckout(process.cwd());
+<span class="ln">244</span>      const pruned = pruneLandedLanes(mainTop, cfg, process.cwd());
+<span class="ln">245</span>      if (pruned.length === 0) {
+<span class="ln">246</span>        console.log(&quot;claude-code-merge-queue prune: nothing to clean up — no already-landed sibling lanes found.&quot;);
+<span class="ln">247</span>      } else {
+<span class="ln">248</span>        const names = pruned.map((p) =&gt; p.split(&quot;/&quot;).pop()).join(&quot;, &quot;);
+<span class="ln">249</span>        console.log(`claude-code-merge-queue prune: removed ${pruned.length} already-landed lane${pruned.length === 1 ? &quot;&quot; : &quot;s&quot;}: ${names}`);
+<span class="ln">250</span>      }
+<span class="ln">251</span>      return;
+<span class="ln">252</span>    }
+<span class="ln">253</span>    case &quot;preview&quot;:
+<span class="ln">254</span>      return runPreview(rest);
+<span class="ln">255</span>    case &quot;build-lock&quot;: {
+<span class="ln">256</span>      const parts = rest[0] === &quot;--&quot; ? rest.slice(1) : rest;
+<span class="ln">257</span>      return buildLock(parts);
+<span class="ln">258</span>    }</pre>
+</div><a class="deep-link" href="claude-code-merge-queue/claude-code-merge-queue-queue-lock.html">深度阅读 · FIFO queue-lock</a>
+<h3><span class="arr">▸</span>配置文件是迁移边界</h3><p>配置接口在 <code>src/lib/config.ts:19</code> 明确列出所有可迁移维度：lane 命名、端口、integrationBranch、productionBranch、protectedBranches、regenerableFiles、symlinks、buildOutputDirs 和 checkCommand。校验函数 <code>src/lib/config.ts:106</code> 把无效配置一次性列出，而不是让错误延迟到 git push 或 worktree add 才爆炸。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/config.ts:19</span> · L19-99</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">19</span>export interface ClaudeCodeMergeQueueConfig {
+<span class="ln">20</span>  /** Lane branches are named &quot;&lt;branchPrefix&gt;&lt;n&gt;&quot; — lane/1, lane/2, ... */
+<span class="ln">21</span>  branchPrefix: string;
+<span class="ln">22</span>  /** Sibling worktree dirs are named &quot;&lt;repo&gt;&lt;worktreeSuffix&gt;&lt;n&gt;&quot; — ../myapp-lane-1. */
+<span class="ln">23</span>  worktreeSuffix: string;
+<span class="ln">24</span>  /** First lane&#x27;s dev-server port. Lane n gets portBase + n. */
+<span class="ln">25</span>  portBase: number;
+<span class="ln">26</span>  /** The shared branch `claude-code-merge-queue land` rebases onto and pushes to. */
+<span class="ln">27</span>  integrationBranch: string;
+<span class="ln">28</span>  /**
+<span class="ln">29</span>   * The production branch, if you run a two-stage model (agents land on
+<span class="ln">30</span>   * `integrationBranch`; a human promotes that to `productionBranch` on
+<span class="ln">31</span>   * their own schedule via `claude-code-merge-queue promote`). `null` means
+<span class="ln">32</span>   * `integrationBranch` IS production — no separate promotion step, and
+<span class="ln">33</span>   * `claude-code-merge-queue promote` is a no-op. When set, this branch is automatically
+<span class="ln">34</span>   * protected by the pre-push hook — you don&#x27;t need to also list it in
+<span class="ln">35</span>   * `protectedBranches`.
+<span class="ln">36</span>   */
+<span class="ln">37</span>  productionBranch: string | null;
+<span class="ln">38</span>  /**
+<span class="ln">39</span>   * Extra branches the pre-push hook refuses a *direct* push to, beyond
+<span class="ln">40</span>   * integrationBranch (always protected) and productionBranch (protected
+<span class="ln">41</span>   * automatically when set). Most repos running the standard two-stage
+<span class="ln">42</span>   * model don&#x27;t need this at all.
+<span class="ln">43</span>   */
+<span class="ln">44</span>  protectedBranches: string[];
+<span class="ln">45</span>  /**
+<span class="ln">46</span>   * Files a build tool regenerates on its own (next-env.d.ts, a rewritten
+<span class="ln">47</span>   * tsconfig &quot;include&quot; array, ...) that should never block a rebase or a
+<span class="ln">48</span>   * fast-forward. Empty by default — you&#x27;ll meet your first one the hard
+<span class="ln">49</span>   * way, and then you add it here once, for good.
+<span class="ln">50</span>   */
+<span class="ln">51</span>  regenerableFiles: string[];
+<span class="ln">52</span>  /**
+<span class="ln">53</span>   * Git-ignored paths copied by reference (symlinked) into every new lane
+<span class="ln">54</span>   * so it never needs a fresh install or a copy of your secrets.
+<span class="ln">55</span>   */
+<span class="ln">56</span>  symlinks: string[];
+<span class="ln">57</span>  /**
+<span class="ln">58</span>   * Build-output directories `preview` never copies onto the main checkout,
+<span class="ln">59</span>   * on top of the fixed, always-excluded set (.git, node_modules, .env,
+<span class="ln">60</span>   * .env.local). `preview` itself doesn&#x27;t know or care what framework
+<span class="ln">61</span>   * you&#x27;re running — it just rsyncs source files onto a checkout your dev
+<span class="ln">62</span>   * server is watching. The default list covers the common cases; add your
+<span class="ln">63</span>   * own (&quot;.output&quot; for Nuxt, &quot;.svelte-kit&quot; for SvelteKit, ...) rather than
+<span class="ln">64</span>   * assuming this tool knows your build tool.
+<span class="ln">65</span>   */
+<span class="ln">66</span>  buildOutputDirs: string[];
+<span class="ln">67</span>  /**
+<span class="ln">68</span>   * The command `claude-code-merge-queue check-push` runs (in addition to the branch
+<span class="ln">69</span>   * protections) before a landing is allowed through — your lint/typecheck/
+<span class="ln">70</span>   * test/build, whatever &quot;green&quot; means for this repo. `null` means nothing
+<span class="ln">71</span>   * runs. That&#x27;s a real, dangerous state for a tool whose whole pitch is
+<span class="ln">72</span>   * &quot;tested before merge,&quot; so it&#x27;s only silent if `checksRequired` is
+<span class="ln">73</span>   * explicitly set to `false` too — otherwise a null checkCommand FAILS the
+<span class="ln">74</span>   * push rather than landing something nobody verified.
+<span class="ln">75</span>   */
+<span class="ln">76</span>  checkCommand: string | null;
+<span class="ln">77</span>  /**
+<span class="ln">78</span>   * When true (the default) and `checkCommand` is null, `check-push` fails
+<span class="ln">79</span>   * the push instead of landing unverified code. Set to `false` yourself to
+<span class="ln">80</span>   * deliberately run with no checks — a real repo state (nothing to test
+<span class="ln">81</span>   * yet), but one that should be a visible, committed, code-reviewable
+<span class="ln">82</span>   * choice, not a silent default.
+<span class="ln">83</span>   */
+<span class="ln">84</span>  checksRequired: boolean;
+<span class="ln">85</span>}
+<span class="ln">86</span>
+<span class="ln">87</span>export const DEFAULTS: ClaudeCodeMergeQueueConfig = {
+<span class="ln">88</span>  branchPrefix: &quot;lane/&quot;,
+<span class="ln">89</span>  worktreeSuffix: &quot;-lane-&quot;,
+<span class="ln">90</span>  portBase: 3000,
+<span class="ln">91</span>  integrationBranch: &quot;main&quot;,
+<span class="ln">92</span>  productionBranch: null,
+<span class="ln">93</span>  protectedBranches: [],
+<span class="ln">94</span>  regenerableFiles: [],
+<span class="ln">95</span>  symlinks: [&quot;.env&quot;, &quot;.env.local&quot;, &quot;node_modules&quot;],
+<span class="ln">96</span>  buildOutputDirs: [&quot;dist&quot;, &quot;build&quot;, &quot;.next&quot;],
+<span class="ln">97</span>  checkCommand: null,
+<span class="ln">98</span>  checksRequired: true,
+<span class="ln">99</span>};</pre>
+</div></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">核心模块：<em>队列、落地、hook、同步</em></h2>
+<h3><span class="arr">▸</span>QueueLock：用硬链接原子抢锁</h3><p><code>src/lib/queue-lock.ts:73</code> 先用 git common dir 计算 repoKey，确保同一个 repo 的所有 worktree 命中同一个队列目录；<code>src/lib/queue-lock.ts:103</code> 每轮 prune dead tickets；<code>src/lib/queue-lock.ts:140</code> 用 linkSync 把临时文件硬链接成 lock 文件，借文件系统原子性避免两个进程同时持锁。它不是 timeout 锁，而是用 <code>src/lib/queue-lock.ts:88</code> 的 PID liveness 判断 holder 是否还活着。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/queue-lock.ts:73</span> · L73-127</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">73</span>export function createQueueLock(queueName: string): QueueLock {
+<span class="ln">74</span>  const QUEUE_DIR = join(
+<span class="ln">75</span>    tmpdir(),
+<span class="ln">76</span>    `claude-code-merge-queue-${queueName}-queue-${createHash(&quot;sha1&quot;).update(repoKey()).digest(&quot;hex&quot;).slice(0, 12)}`,
+<span class="ln">77</span>  );
+<span class="ln">78</span>  const TICKETS_DIR = join(QUEUE_DIR, &quot;tickets&quot;);
+<span class="ln">79</span>  const LOCK_FILE = join(QUEUE_DIR, &quot;lock&quot;);
+<span class="ln">80</span>  mkdirSync(TICKETS_DIR, { recursive: true });
+<span class="ln">81</span>
+<span class="ln">82</span>  const lane = basename(process.cwd());
+<span class="ln">83</span>  const ME = process.pid;
+<span class="ln">84</span>  const TICKET_TS = Date.now();
+<span class="ln">85</span>  const TICKET_NAME = `${TICKET_TS}-${ME}`;
+<span class="ln">86</span>  const TICKET_FILE = join(TICKETS_DIR, TICKET_NAME);
+<span class="ln">87</span>
+<span class="ln">88</span>  function alive(pid: number): boolean {
+<span class="ln">89</span>    if (!pid || pid === ME) return pid === ME;
+<span class="ln">90</span>    try {
+<span class="ln">91</span>      process.kill(pid, 0);
+<span class="ln">92</span>      return true;
+<span class="ln">93</span>    } catch (e) {
+<span class="ln">94</span>      return (e as NodeJS.ErrnoException).code === &quot;EPERM&quot;; // exists but owned by someone else
+<span class="ln">95</span>    }
+<span class="ln">96</span>  }
+<span class="ln">97</span>
+<span class="ln">98</span>  function pidOf(name: string): number {
+<span class="ln">99</span>    const dash = name.lastIndexOf(&quot;-&quot;);
+<span class="ln">100</span>    return dash === -1 ? 0 : Number(name.slice(dash + 1));
+<span class="ln">101</span>  }
+<span class="ln">102</span>
+<span class="ln">103</span>  function pruneDeadTickets(): string[] {
+<span class="ln">104</span>    let names: string[];
+<span class="ln">105</span>    try {
+<span class="ln">106</span>      names = readdirSync(TICKETS_DIR);
+<span class="ln">107</span>    } catch {
+<span class="ln">108</span>      return [];
+<span class="ln">109</span>    }
+<span class="ln">110</span>    const live: string[] = [];
+<span class="ln">111</span>    for (const name of names) {
+<span class="ln">112</span>      if (alive(pidOf(name))) {
+<span class="ln">113</span>        live.push(name);
+<span class="ln">114</span>      } else {
+<span class="ln">115</span>        try {
+<span class="ln">116</span>          unlinkSync(join(TICKETS_DIR, name));
+<span class="ln">117</span>        } catch {
+<span class="ln">118</span>          /* someone else cleaned it */
+<span class="ln">119</span>        }
+<span class="ln">120</span>      }
+<span class="ln">121</span>    }
+<span class="ln">122</span>    live.sort((a, b) =&gt; {
+<span class="ln">123</span>      const [ta, pa] = a.split(&quot;-&quot;).map(Number) as [number, number];
+<span class="ln">124</span>      const [tb, pb] = b.split(&quot;-&quot;).map(Number) as [number, number];
+<span class="ln">125</span>      return ta - tb || pa - pb;
+<span class="ln">126</span>    });
+<span class="ln">127</span>    return live;</pre>
+</div>
+<h3><span class="arr">▸</span>Land：把 rebase/push/check 放进同一把门</h3><p>land 模块先拒绝从 integrationBranch 自己运行，见 <code>src/land.ts:46</code> 到 <code>src/land.ts:50</code>；然后在等待队列之前和拿到锁之后各清理一次 regenerable dirt，见 <code>src/land.ts:64</code> 与 <code>src/land.ts:93</code>。真正落地时，<code>src/land.ts:96</code> fetch，<code>src/land.ts:99</code> rebase，<code>src/land.ts:107</code> push，并在 push 环境里注入 <code>CLAUDE_CODE_MERGE_QUEUE_LANDING</code>。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/land.ts:39</span> · L39-110</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">39</span>export async function land(): Promise&lt;void&gt; {
+<span class="ln">40</span>  if (!hasConfig()) {
+<span class="ln">41</span>    console.error(&quot;claude-code-merge-queue land: no claude-code-merge-queue.config found at the repo root. Run `claude-code-merge-queue init` first.&quot;);
+<span class="ln">42</span>    process.exit(1);
+<span class="ln">43</span>  }
+<span class="ln">44</span>  const cfg = await loadConfig();
+<span class="ln">45</span>
+<span class="ln">46</span>  const branch = execSync(&quot;git rev-parse --abbrev-ref HEAD&quot;, { encoding: &quot;utf8&quot; }).trim();
+<span class="ln">47</span>  if (branch === cfg.integrationBranch || cfg.protectedBranches.includes(branch) || branch === &quot;HEAD&quot;) {
+<span class="ln">48</span>    console.error(`claude-code-merge-queue land: refusing to run from &#x27;${branch}&#x27; — land is for lane branches only.`);
+<span class="ln">49</span>    process.exit(1);
+<span class="ln">50</span>  }
+<span class="ln">51</span>
+<span class="ln">52</span>  // A rebase refuses to run at all with a dirty tree. Build-tool-regenerated
+<span class="ln">53</span>  // noise shouldn&#x27;t block landing — discard ONLY the configured
+<span class="ln">54</span>  // regenerableFiles, exactly like sync does for the fast-forward on the
+<span class="ln">55</span>  // other end. Any other dirty file is real work-in-progress: leave it alone
+<span class="ln">56</span>  // and let the rebase fail loud.
+<span class="ln">57</span>  //
+<span class="ln">58</span>  // Checked here AND again right before the rebase itself (not just once):
+<span class="ln">59</span>  // a build tool can regenerate one of these files at any point, including
+<span class="ln">60</span>  // during the (possibly long) wait for the landing queue lock below. A
+<span class="ln">61</span>  // single check up front leaves that whole wait as a window where the
+<span class="ln">62</span>  // exact same harmless noise reappears and gets misreported as a real
+<span class="ln">63</span>  // rebase conflict instead of silently discarded like it should be.
+<span class="ln">64</span>  const regenerable = new Set(cfg.regenerableFiles);
+<span class="ln">65</span>  function discardRegenerableDirt(): void {
+<span class="ln">66</span>    const status = execSync(&quot;git status --porcelain&quot;, { encoding: &quot;utf8&quot; });
+<span class="ln">67</span>    const dirty = status
+<span class="ln">68</span>      .split(&quot;\n&quot;)
+<span class="ln">69</span>      .filter(Boolean)
+<span class="ln">70</span>      .map((line) =&gt; line.slice(3).trim());
+<span class="ln">71</span>    const blocking = dirty.filter((f) =&gt; !regenerable.has(f));
+<span class="ln">72</span>    if (dirty.length &gt; 0 &amp;&amp; blocking.length === 0) {
+<span class="ln">73</span>      execSync(`git checkout -- ${dirty.map((f) =&gt; `&quot;${f}&quot;`).join(&quot; &quot;)}`);
+<span class="ln">74</span>    }
+<span class="ln">75</span>  }
+<span class="ln">76</span>  discardRegenerableDirt();
+<span class="ln">77</span>
+<span class="ln">78</span>  const lock = createQueueLock(&quot;land&quot;);
+<span class="ln">79</span>  await lock.acquire({
+<span class="ln">80</span>    label: branch,
+<span class="ln">81</span>    onWait: ({ ahead, holder }) =&gt; {
+<span class="ln">82</span>      if (ahead &gt; 0) {
+<span class="ln">83</span>        console.log(`${DIM}[land-queue] ${branch}: waiting — ${ahead} landing${ahead === 1 ? &quot;&quot; : &quot;s&quot;} ahead…${RESET}`);
+<span class="ln">84</span>      } else if (holder) {
+<span class="ln">85</span>        console.log(`${DIM}[land-queue] ${branch}: next up — waiting for &#x27;${holder.label ?? holder.lane}&#x27; to finish landing…${RESET}`);
+<span class="ln">86</span>      }
+<span class="ln">87</span>    },
+<span class="ln">88</span>  });
+<span class="ln">89</span>
+<span class="ln">90</span>  let exitCode = 0;
+<span class="ln">91</span>  try {
+<span class="ln">92</span>    console.log(`${DIM}[land-queue] ${branch}: lock acquired — landing…${RESET}`);
+<span class="ln">93</span>    discardRegenerableDirt(); // re-check right before the rebase — see comment above
+<span class="ln">94</span>
+<span class="ln">95</span>    console.log(`${DIM}fetching origin/${cfg.integrationBranch}…${RESET}`);
+<span class="ln">96</span>    execSync(`git fetch origin ${cfg.integrationBranch} --quiet`, { stdio: &quot;inherit&quot; });
+<span class="ln">97</span>
+<span class="ln">98</span>    console.log(`${DIM}rebasing onto origin/${cfg.integrationBranch}…${RESET}`);
+<span class="ln">99</span>    const rebase = spawnSync(&quot;git&quot;, [&quot;rebase&quot;, `origin/${cfg.integrationBranch}`], { stdio: &quot;inherit&quot; });
+<span class="ln">100</span>    if (rebase.status !== 0) {
+<span class="ln">101</span>      spawnSync(&quot;git&quot;, [&quot;rebase&quot;, &quot;--abort&quot;], { stdio: &quot;ignore&quot; });
+<span class="ln">102</span>      console.error(`\n${RED}land: rebase onto origin/${cfg.integrationBranch} conflicted — aborted, working tree left clean.${RESET}`);
+<span class="ln">103</span>      console.error(`Resolve it yourself (git fetch origin ${cfg.integrationBranch} &amp;&amp; git rebase origin/${cfg.integrationBranch}), then re-run &#x27;claude-code-merge-queue land&#x27;.`);
+<span class="ln">104</span>      exitCode = 1;
+<span class="ln">105</span>    } else {
+<span class="ln">106</span>      console.log(`${DIM}pushing to ${cfg.integrationBranch} (this is where your CI/checks hook runs)…${RESET}`);
+<span class="ln">107</span>      const push = spawnSync(&quot;git&quot;, [&quot;push&quot;, &quot;origin&quot;, `HEAD:${cfg.integrationBranch}`], {
+<span class="ln">108</span>        stdio: &quot;inherit&quot;,
+<span class="ln">109</span>        env: { ...process.env, CLAUDE_CODE_MERGE_QUEUE_LANDING: &quot;1&quot; },
+<span class="ln">110</span>      });</pre>
+</div><a class="deep-link" href="claude-code-merge-queue/claude-code-merge-queue-land-sync.html">深度阅读 · land + sync</a>
+<h3><span class="arr">▸</span>WorktreeCreate hook：把 Claude 的原生隔离接入 lane 规范</h3><p>hook 的巧妙点在于不重新发明 worktree。<code>src/hooks/worktree-create.ts:76</code> 的 createLane 只是寻找最低可用 lane 编号，然后调用 git worktree add；<code>src/hooks/worktree-create.ts:96</code> 特意以 main checkout 当前 HEAD 为 base，避免 init 刚写出的本地配置还没 push 时，新 lane 丢掉本地 wiring commit。<code>src/hooks/worktree-create.ts:119</code> 负责 symlink .env、node_modules 等 gitignored 路径。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/hooks/worktree-create.ts:76</span> · L76-132</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">76</span>export function createLane(mainTop: string, cfg: ClaudeCodeMergeQueueConfig): { wt: string; branch: string; lane: number } {
+<span class="ln">77</span>  // Clean up administrative entries for worktrees whose directories are
+<span class="ln">78</span>  // already gone (e.g. someone `rm -rf`&#x27;d one instead of `git worktree
+<span class="ln">79</span>  // remove`) so reusing that lane number&#x27;s branch name doesn&#x27;t fail with
+<span class="ln">80</span>  // &quot;already checked out elsewhere.&quot;
+<span class="ln">81</span>  tryGit([&quot;worktree&quot;, &quot;prune&quot;], mainTop);
+<span class="ln">82</span>
+<span class="ln">83</span>  const repoName = basename(mainTop);
+<span class="ln">84</span>  let lane = 0;
+<span class="ln">85</span>  for (;;) {
+<span class="ln">86</span>    lane += 1;
+<span class="ln">87</span>    if (lane &gt; MAX_LANE_ATTEMPTS) {
+<span class="ln">88</span>      throw new Error(`could not claim a lane after ${MAX_LANE_ATTEMPTS} attempts — is mainTop (&#x27;${mainTop}&#x27;) actually the repo root?`);
+<span class="ln">89</span>    }
+<span class="ln">90</span>    const wt = join(dirname(mainTop), `${repoName}${cfg.worktreeSuffix}${lane}`);
+<span class="ln">91</span>    if (existsSync(wt)) continue; // still claimed — try the next lane
+<span class="ln">92</span>
+<span class="ln">93</span>    const branch = `${cfg.branchPrefix}${lane}`;
+<span class="ln">94</span>    const branchExists = tryGit([&quot;show-ref&quot;, &quot;--verify&quot;, &quot;--quiet&quot;, `refs/heads/${branch}`], mainTop).ok;
+<span class="ln">95</span>
+<span class="ln">96</span>    // Base every new lane on the main checkout&#x27;s own current HEAD — never on
+<span class="ln">97</span>    // origin/integrationBranch. The main checkout is kept fast-forwarded by
+<span class="ln">98</span>    // `sync` precisely so its local HEAD IS the trusted, up-to-date view;
+<span class="ln">99</span>    // reading origin directly instead can be *behind* local HEAD (a commit
+<span class="ln">100</span>    // made here but not yet pushed) and silently drop it from every new
+<span class="ln">101</span>    // lane. That&#x27;s not a hypothetical: it breaks the literal Quickstart —
+<span class="ln">102</span>    // `init` writes claude-code-merge-queue.config.mjs/CLAUDE.md/.claude locally, and the
+<span class="ln">103</span>    // very first lane created before that commit is pushed anywhere would
+<span class="ln">104</span>    // otherwise come up with none of it.
+<span class="ln">105</span>    let add;
+<span class="ln">106</span>    if (branchExists) {
+<span class="ln">107</span>      add = tryGit([&quot;worktree&quot;, &quot;add&quot;, wt, branch], mainTop);
+<span class="ln">108</span>    } else {
+<span class="ln">109</span>      add = tryGit([&quot;worktree&quot;, &quot;add&quot;, wt, &quot;-b&quot;, branch], mainTop);
+<span class="ln">110</span>    }
+<span class="ln">111</span>
+<span class="ln">112</span>    if (!add.ok) {
+<span class="ln">113</span>      // Someone else claimed this exact lane between our existsSync check
+<span class="ln">114</span>      // and `git worktree add` — the same race a `mkdir` guards against.
+<span class="ln">115</span>      // Try the next one.
+<span class="ln">116</span>      continue;
+<span class="ln">117</span>    }
+<span class="ln">118</span>
+<span class="ln">119</span>    for (const rel of cfg.symlinks) {
+<span class="ln">120</span>      const src = join(mainTop, rel);
+<span class="ln">121</span>      const dest = join(wt, rel);
+<span class="ln">122</span>      if (!existsSync(src) || existsSync(dest)) continue;
+<span class="ln">123</span>      try {
+<span class="ln">124</span>        mkdirSync(dirname(dest), { recursive: true });
+<span class="ln">125</span>        symlinkSync(src, dest);
+<span class="ln">126</span>      } catch {
+<span class="ln">127</span>        /* best-effort — a missing symlink degrades to &quot;run npm install,&quot; not a hard failure */
+<span class="ln">128</span>      }
+<span class="ln">129</span>    }
+<span class="ln">130</span>
+<span class="ln">131</span>    return { wt, branch, lane };
+<span class="ln">132</span>  }</pre>
+</div>
+<h3><span class="arr">▸</span>pre-push：把“请走队列”变成硬失败</h3><p>如果只有 land 命令，agent 仍然可能手写 git push。<code>src/lib/check-push.ts:52</code> 解析 ref update 后逐个远端 ref 检查，<code>src/lib/check-push.ts:76</code> 阻断未设置 landing 环境变量的 integrationBranch 直推，<code>src/lib/check-push.ts:64</code> 同时保护 production/protected branches。它承认 emergency env var 是 convention，但能挡住大多数误操作。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/check-push.ts:52</span> · L52-90</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">52</span>export function checkPush(
+<span class="ln">53</span>  refUpdates: RefUpdate[],
+<span class="ln">54</span>  cfg: Pick&lt;ClaudeCodeMergeQueueConfig, &quot;integrationBranch&quot; | &quot;productionBranch&quot; | &quot;protectedBranches&quot;&gt;,
+<span class="ln">55</span>  env: NodeJS.ProcessEnv,
+<span class="ln">56</span>): CheckResult {
+<span class="ln">57</span>  const integrationRef = `refs/heads/${cfg.integrationBranch}`;
+<span class="ln">58</span>  const protectedBranches = cfg.productionBranch ? [...cfg.protectedBranches, cfg.productionBranch] : cfg.protectedBranches;
+<span class="ln">59</span>  const protectedRefs = new Set(protectedBranches.map((b) =&gt; `refs/heads/${b}`));
+<span class="ln">60</span>
+<span class="ln">61</span>  for (const { remoteRef } of refUpdates) {
+<span class="ln">62</span>    const branch = remoteRef.replace(&quot;refs/heads/&quot;, &quot;&quot;);
+<span class="ln">63</span>
+<span class="ln">64</span>    if (protectedRefs.has(remoteRef) &amp;&amp; !emergencyConfirmed(env)) {
+<span class="ln">65</span>      return {
+<span class="ln">66</span>        ok: false,
+<span class="ln">67</span>        message: [
+<span class="ln">68</span>          &quot;&quot;,
+<span class="ln">69</span>          `✋ Direct pushes to &#x27;${branch}&#x27; are blocked.`,
+<span class="ln">70</span>          `   This is a protected branch — promote it deliberately, not with a stray push.`,
+<span class="ln">71</span>          `   Emergency override:  CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH=1 git push …`,
+<span class="ln">72</span>          &quot;&quot;,
+<span class="ln">73</span>        ].join(&quot;\n&quot;),
+<span class="ln">74</span>      };
+<span class="ln">75</span>    }
+<span class="ln">76</span>    if (remoteRef === integrationRef &amp;&amp; env.CLAUDE_CODE_MERGE_QUEUE_LANDING !== &quot;1&quot; &amp;&amp; !emergencyConfirmed(env)) {
+<span class="ln">77</span>      return {
+<span class="ln">78</span>        ok: false,
+<span class="ln">79</span>        message: [
+<span class="ln">80</span>          &quot;&quot;,
+<span class="ln">81</span>          `✋ Direct pushes to &#x27;${cfg.integrationBranch}&#x27; are blocked — landing goes through the queue.`,
+<span class="ln">82</span>          `   Land your work:  claude-code-merge-queue land`,
+<span class="ln">83</span>          `   Genuine emergency:  CLAUDE_CODE_MERGE_QUEUE_EMERGENCY_PUSH=1 git push …`,
+<span class="ln">84</span>          &quot;&quot;,
+<span class="ln">85</span>        ].join(&quot;\n&quot;),
+<span class="ln">86</span>      };
+<span class="ln">87</span>    }
+<span class="ln">88</span>  }
+<span class="ln">89</span>  return { ok: true };
+<span class="ln">90</span>}</pre>
+</div><a class="deep-link" href="claude-code-merge-queue/claude-code-merge-queue-hooks-safety.html">深度阅读 · hooks + safety gates</a></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">关键流程：<em>从 lane 创建到主 checkout 更新</em></h2>
+<p>完整路径是：Claude 触发 WorktreeCreate hook，hook 创建 lane worktree；agent 在 lane 中提交；agent 执行 land；land 拿 FIFO 锁、fetch、rebase、push；pre-push hook 运行 checkCommand；push 成功后 land 调 sync，让主 checkout ff-only 到最新。这里每一步都能在源码里找到硬边界：<code>src/hooks/worktree-create.ts:197</code> 输出 worktree path，<code>src/land.ts:79</code> 等队列，<code>src/lib/check-command.ts:60</code> 执行 checkCommand，<code>src/sync.ts:177</code> 只允许 ff-only merge。</p>
+<h3><span class="arr">▸</span>Landing path</h3><div class="flow">lane branch
+  <span class="flow-arr">→</span> <span class="flow-node">discard regenerable dirt</span> (<code>src/land.ts:65</code>)
+  <span class="flow-arr">→</span> <span class="flow-node">createQueueLock("land")</span> (<code>src/land.ts:78</code>)
+  <span class="flow-arr">→</span> git fetch + rebase (<code>src/land.ts:95</code>, <code>src/land.ts:99</code>)
+  <span class="flow-arr">→</span> git push with landing env (<code>src/land.ts:107</code>)
+  <span class="flow-arr">→</span> sync main checkout (<code>src/land.ts:126</code>)</div>
+<h3><span class="arr">▸</span>Sync path</h3><div class="flow">main checkout
+  <span class="flow-arr">→</span> verify current branch == integrationBranch (<code>src/sync.ts:163</code>)
+  <span class="flow-arr">→</span> fetch origin (<code>src/sync.ts:175</code>)
+  <span class="flow-arr">→</span> merge --ff-only (<code>src/sync.ts:177</code>)
+  <span class="flow-arr">→</span> refresh dependencies if lockfile changed (<code>src/sync.ts:75</code>)</div></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div><h2 class="sec-title">测试覆盖：它真的测并发和崩溃</h2>
+<p>测试不是只测纯函数。<code>test/queue-lock.test.ts:32</code> 启动四个真实 worker 验证互斥，<code>test/queue-lock.test.ts:59</code> 用 SIGKILL 杀掉 holder 再证明第二个 worker 能重新拿锁。land 测试在 <code>test/land.test.ts:59</code> 构造真实 git repo + lane + remote，特意让 regenerable file 在等待队列期间被重新写脏，复现过去 bug。worktree 测试在 <code>test/worktree-create.test.ts:84</code> 并发启动多个 hook，确认不会撞 lane。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/queue-lock.test.ts:32</span> · L32-88</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">32</span>test(&quot;mutual exclusion: four concurrent workers never overlap while holding the lock&quot;, async () =&gt; {
+<span class="ln">33</span>  const dir = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-lock-test-&quot;));
+<span class="ln">34</span>  const resultsFile = join(dir, &quot;results.ndjson&quot;);
+<span class="ln">35</span>  const queueName = `test-mutex-${process.pid}-${Date.now()}`;
+<span class="ln">36</span>
+<span class="ln">37</span>  const workers = [0, 1, 2, 3].map(() =&gt; spawnWorker(queueName, resultsFile, 150));
+<span class="ln">38</span>  await Promise.all(workers.map(waitExit));
+<span class="ln">39</span>
+<span class="ln">40</span>  const events = readEvents(resultsFile);
+<span class="ln">41</span>  const intervals = new Map&lt;number, { start: number; end: number }&gt;();
+<span class="ln">42</span>  for (const e of events) {
+<span class="ln">43</span>    const cur = intervals.get(e.pid) ?? { start: 0, end: 0 };
+<span class="ln">44</span>    cur[e.event === &quot;start&quot; ? &quot;start&quot; : &quot;end&quot;] = e.t;
+<span class="ln">45</span>    intervals.set(e.pid, cur);
+<span class="ln">46</span>  }
+<span class="ln">47</span>  assert.equal(intervals.size, 4, &quot;expected all four workers to record start+end&quot;);
+<span class="ln">48</span>
+<span class="ln">49</span>  const sorted = [...intervals.values()].sort((a, b) =&gt; a.start - b.start);
+<span class="ln">50</span>  for (let i = 1; i &lt; sorted.length; i++) {
+<span class="ln">51</span>    const prev = sorted[i - 1]!;
+<span class="ln">52</span>    const cur = sorted[i]!;
+<span class="ln">53</span>    assert.ok(cur.start &gt;= prev.end, `worker holding [${prev.start},${prev.end}] overlapped worker starting at ${cur.start}`);
+<span class="ln">54</span>  }
+<span class="ln">55</span>
+<span class="ln">56</span>  rmSync(dir, { recursive: true, force: true });
+<span class="ln">57</span>});
+<span class="ln">58</span>
+<span class="ln">59</span>test(&quot;crash safety: a killed holder is reclaimed, not a permanent deadlock&quot;, async () =&gt; {
+<span class="ln">60</span>  const dir = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-lock-test-&quot;));
+<span class="ln">61</span>  const resultsFile = join(dir, &quot;results.ndjson&quot;);
+<span class="ln">62</span>  const queueName = `test-crash-${process.pid}-${Date.now()}`;
+<span class="ln">63</span>
+<span class="ln">64</span>  // Worker A holds the lock for far longer than the test&#x27;s patience — it
+<span class="ln">65</span>  // should never release it gracefully. It gets SIGKILLed instead.
+<span class="ln">66</span>  const holder = spawnWorker(queueName, resultsFile, 60_000);
+<span class="ln">67</span>
+<span class="ln">68</span>  const deadline = Date.now() + 5_000;
+<span class="ln">69</span>  while (Date.now() &lt; deadline) {
+<span class="ln">70</span>    if (existsSync(resultsFile) &amp;&amp; readFileSync(resultsFile, &quot;utf8&quot;).includes(&#x27;&quot;start&quot;&#x27;)) break;
+<span class="ln">71</span>    await new Promise((r) =&gt; setTimeout(r, 50));
+<span class="ln">72</span>  }
+<span class="ln">73</span>  assert.ok(existsSync(resultsFile) &amp;&amp; readFileSync(resultsFile, &quot;utf8&quot;).includes(&#x27;&quot;start&quot;&#x27;), &quot;holder never acquired the lock&quot;);
+<span class="ln">74</span>
+<span class="ln">75</span>  execSync(`kill -9 ${holder.pid}`);
+<span class="ln">76</span>
+<span class="ln">77</span>  // Worker B should still be able to acquire the SAME queue — if the lock
+<span class="ln">78</span>  // weren&#x27;t reclaimed via PID-liveness, this would hang until the test
+<span class="ln">79</span>  // runner&#x27;s own timeout, not queue-lock&#x27;s (there is no queue-lock timeout).
+<span class="ln">80</span>  const second = spawnWorker(queueName, resultsFile, 10);
+<span class="ln">81</span>  const code = await waitExit(second);
+<span class="ln">82</span>  assert.equal(code, 0, &quot;second worker should acquire and finish cleanly after the holder was killed&quot;);
+<span class="ln">83</span>
+<span class="ln">84</span>  const events = readEvents(resultsFile).filter((e) =&gt; e.pid === second.pid);
+<span class="ln">85</span>  assert.equal(events.length, 2, &quot;second worker should have recorded both start and end&quot;);
+<span class="ln">86</span>
+<span class="ln">87</span>  rmSync(dir, { recursive: true, force: true });
+<span class="ln">88</span>});</pre>
+</div>
+<h3><span class="arr">▸</span>worktree 与 hook wiring 也有回归测试</h3><p><code>test/worktree-create.test.ts:61</code> 验证新 lane 基于 main checkout 的当前 HEAD，而不是 stale origin；<code>test/wire-hooks.test.ts:30</code> 确认写入 Claude settings 时不会丢掉已有 hook；<code>test/wire-hooks.test.ts:90</code> 验证合并 Husky pre-push 时保留用户自定义逻辑。这些测试说明作者把真实事故转成了持久 guardrail。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">test/worktree-create.test.ts:61</span> · L61-117</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">61</span>test(&quot;createLane bases a new lane on the main checkout&#x27;s own HEAD, not a stale origin/integrationBranch&quot;, () =&gt; {
+<span class="ln">62</span>  const mainTop = makeScratchRepo();
+<span class="ln">63</span>  const remote = mkdtempSync(join(tmpdir(), &quot;claude-code-merge-queue-wt-remote-&quot;));
+<span class="ln">64</span>  try {
+<span class="ln">65</span>    execFileSync(&quot;git&quot;, [&quot;init&quot;, &quot;-q&quot;, &quot;--bare&quot;, remote]);
+<span class="ln">66</span>    execFileSync(&quot;git&quot;, [&quot;branch&quot;, &quot;-M&quot;, &quot;main&quot;], { cwd: mainTop });
+<span class="ln">67</span>    execFileSync(&quot;git&quot;, [&quot;remote&quot;, &quot;add&quot;, &quot;origin&quot;, remote], { cwd: mainTop });
+<span class="ln">68</span>    execFileSync(&quot;git&quot;, [&quot;push&quot;, &quot;-q&quot;, &quot;origin&quot;, &quot;main&quot;], { cwd: mainTop });
+<span class="ln">69</span>
+<span class="ln">70</span>    // A commit made locally but never pushed — e.g. `claude-code-merge-queue init`&#x27;s own
+<span class="ln">71</span>    // wiring commit, right after Quickstart, before anyone has pushed it.
+<span class="ln">72</span>    execFileSync(&quot;node&quot;, [&quot;-e&quot;, &quot;require(&#x27;fs&#x27;).writeFileSync(&#x27;claude-code-merge-queue.config.mjs&#x27;, &#x27;x&#x27;)&quot;], { cwd: mainTop });
+<span class="ln">73</span>    execFileSync(&quot;git&quot;, [&quot;add&quot;, &quot;-A&quot;], { cwd: mainTop });
+<span class="ln">74</span>    execFileSync(&quot;git&quot;, [&quot;commit&quot;, &quot;-q&quot;, &quot;-m&quot;, &quot;local-only wiring commit&quot;], { cwd: mainTop });
+<span class="ln">75</span>
+<span class="ln">76</span>    const { wt } = createLane(mainTop, { ...DEFAULTS, integrationBranch: &quot;main&quot; });
+<span class="ln">77</span>    assert.ok(existsSync(join(wt, &quot;claude-code-merge-queue.config.mjs&quot;)), &quot;new lane must inherit the unpushed local commit, not fall back to stale origin/main&quot;);
+<span class="ln">78</span>  } finally {
+<span class="ln">79</span>    cleanupRepoAndLanes(mainTop);
+<span class="ln">80</span>    rmSync(remote, { recursive: true, force: true });
+<span class="ln">81</span>  }
+<span class="ln">82</span>});
+<span class="ln">83</span>
+<span class="ln">84</span>test(&quot;concurrent WorktreeCreate hook invocations never collide on the same lane&quot;, async () =&gt; {
+<span class="ln">85</span>  const mainTop = makeScratchRepo();
+<span class="ln">86</span>  try {
+<span class="ln">87</span>    const N = 4;
+<span class="ln">88</span>    const children = Array.from({ length: N }, () =&gt;
+<span class="ln">89</span>      spawn(&quot;node&quot;, [&quot;--import&quot;, &quot;tsx&quot;, WORKER], { stdio: [&quot;pipe&quot;, &quot;pipe&quot;, &quot;inherit&quot;] }),
+<span class="ln">90</span>    );
+<span class="ln">91</span>    for (const child of children) {
+<span class="ln">92</span>      child.stdin.end(JSON.stringify({ cwd: mainTop }));
+<span class="ln">93</span>    }
+<span class="ln">94</span>
+<span class="ln">95</span>    const results = await Promise.all(
+<span class="ln">96</span>      children.map(
+<span class="ln">97</span>        (child) =&gt;
+<span class="ln">98</span>          new Promise&lt;{ code: number; stdout: string }&gt;((resolve) =&gt; {
+<span class="ln">99</span>            let stdout = &quot;&quot;;
+<span class="ln">100</span>            child.stdout.on(&quot;data&quot;, (d) =&gt; (stdout += d));
+<span class="ln">101</span>            child.on(&quot;exit&quot;, (code) =&gt; resolve({ code: code ?? 1, stdout: stdout.trim() }));
+<span class="ln">102</span>          }),
+<span class="ln">103</span>      ),
+<span class="ln">104</span>    );
+<span class="ln">105</span>
+<span class="ln">106</span>    for (const r of results) {
+<span class="ln">107</span>      assert.equal(r.code, 0, `worker should exit 0, got ${r.code}`);
+<span class="ln">108</span>    }
+<span class="ln">109</span>    const paths = results.map((r) =&gt; r.stdout);
+<span class="ln">110</span>    assert.equal(new Set(paths).size, N, `all ${N} claimed lanes should be distinct paths, got: ${paths.join(&quot;, &quot;)}`);
+<span class="ln">111</span>    for (const p of paths) {
+<span class="ln">112</span>      assert.ok(existsSync(p), `claimed worktree ${p} should exist on disk`);
+<span class="ln">113</span>    }
+<span class="ln">114</span>  } finally {
+<span class="ln">115</span>    cleanupRepoAndLanes(mainTop);
+<span class="ln">116</span>  }
+<span class="ln">117</span>});</pre>
+</div></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div><h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+<h3><span class="arr">▸</span>亮点：同一套 liveness 模式复用三次</h3><p>queue lock 在 <code>src/lib/queue-lock.ts:88</code> 用 PID 判断 ticket/holder；ephemeral resource 在 <code>src/lib/ephemeral.ts:56</code> 用 ClaimRegistry 保存 claim，并在 <code>src/lib/ephemeral.ts:110</code> 先清理 orphan 再创建新资源；WorktreeCreate hook 则用 “worktree path 是否存在 + git worktree add 原子性” 代替 PID。三个地方的共同点是：不靠 magic timeout。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">src/lib/ephemeral.ts:56</span> · L56-126</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">56</span>export class ClaimRegistry {
+<span class="ln">57</span>  private readonly dir: string;
+<span class="ln">58</span>
+<span class="ln">59</span>  constructor(registryDir: string) {
+<span class="ln">60</span>    this.dir = registryDir;
+<span class="ln">61</span>    mkdirSync(this.dir, { recursive: true });
+<span class="ln">62</span>  }
+<span class="ln">63</span>
+<span class="ln">64</span>  record(claim: Claim): void {
+<span class="ln">65</span>    writeFileSync(join(this.dir, claim.id), JSON.stringify(claim));
+<span class="ln">66</span>  }
+<span class="ln">67</span>
+<span class="ln">68</span>  release(id: string): void {
+<span class="ln">69</span>    try {
+<span class="ln">70</span>      unlinkSync(join(this.dir, id));
+<span class="ln">71</span>    } catch {
+<span class="ln">72</span>      /* already gone */
+<span class="ln">73</span>    }
+<span class="ln">74</span>  }
+<span class="ln">75</span>
+<span class="ln">76</span>  /** Every claim whose owning PID is no longer alive — safe to destroy. */
+<span class="ln">77</span>  orphans(): Claim[] {
+<span class="ln">78</span>    let names: string[];
+<span class="ln">79</span>    try {
+<span class="ln">80</span>      names = readdirSync(this.dir);
+<span class="ln">81</span>    } catch {
+<span class="ln">82</span>      return [];
+<span class="ln">83</span>    }
+<span class="ln">84</span>    const found: Claim[] = [];
+<span class="ln">85</span>    for (const name of names) {
+<span class="ln">86</span>      try {
+<span class="ln">87</span>        const claim = JSON.parse(readFileSync(join(this.dir, name), &quot;utf8&quot;)) as Claim;
+<span class="ln">88</span>        if (!alive(claim.pid)) found.push(claim);
+<span class="ln">89</span>      } catch {
+<span class="ln">90</span>        /* unreadable claim file — leave it, don&#x27;t guess */
+<span class="ln">91</span>      }
+<span class="ln">92</span>    }
+<span class="ln">93</span>    return found;
+<span class="ln">94</span>  }
+<span class="ln">95</span>}
+<span class="ln">96</span>
+<span class="ln">97</span>/**
+<span class="ln">98</span> * Run `fn` against a freshly created resource, prune any orphans left by a
+<span class="ln">99</span> * previous crashed run first, and always release the claim — including on
+<span class="ln">100</span> * a thrown error. If THIS process is killed before the `finally` runs, the
+<span class="ln">101</span> * resource isn&#x27;t leaked forever: the next call to `withEphemeralResource`
+<span class="ln">102</span> * (in the next test run, from any lane) prunes it via `orphans()` before
+<span class="ln">103</span> * creating its own.
+<span class="ln">104</span> */
+<span class="ln">105</span>export async function withEphemeralResource&lt;T&gt;(
+<span class="ln">106</span>  provider: EphemeralResourceProvider&lt;T&gt;,
+<span class="ln">107</span>  registry: ClaimRegistry,
+<span class="ln">108</span>  fn: (resource: T) =&gt; Promise&lt;void&gt;,
+<span class="ln">109</span>): Promise&lt;void&gt; {
+<span class="ln">110</span>  for (const orphan of registry.orphans()) {
+<span class="ln">111</span>    await provider.destroyOrphan(orphan);
+<span class="ln">112</span>    registry.release(orphan.id);
+<span class="ln">113</span>  }
+<span class="ln">114</span>
+<span class="ln">115</span>  const id = `${Date.now()}-${process.pid}`;
+<span class="ln">116</span>  const claim: Claim = { id, pid: process.pid, createdAt: Date.now() };
+<span class="ln">117</span>  registry.record(claim);
+<span class="ln">118</span>
+<span class="ln">119</span>  const resource = await provider.create();
+<span class="ln">120</span>  try {
+<span class="ln">121</span>    await fn(resource);
+<span class="ln">122</span>  } finally {
+<span class="ln">123</span>    await provider.destroy(resource);
+<span class="ln">124</span>    registry.release(id);
+<span class="ln">125</span>  }
+<span class="ln">126</span>}</pre>
+</div>
+<h3><span class="arr">▸</span>风险：本地工具不是安全边界</h3><p>pre-push gate 能挡误操作，但 <code>src/lib/check-push.ts:48</code> 暴露 emergency env var，README 也承认它不是 adversarial security boundary。sync 的 <code>src/sync.ts:91</code> 会在 lockfile changed 时跑 package manager install，这对共享 node_modules 是必要的，但 <code>src/sync.ts:81</code> 也特意检查 dependency removal，避免把旧 lane 依赖删掉。</p>
+<div class="g2"><div class="card"><div class="card-h">强项</div><div class="card-d">把并发 agent 的冲突点缩成本地可验证机制：FIFO lock、pre-push、ff-only sync、worktree hook。</div></div><div class="card"><div class="card-h">限制</div><div class="card-d">只协调一台机器；两台机器同时推仍回到 git 非 fast-forward 语义。</div></div><div class="card"><div class="card-h">强项</div><div class="card-d">大量测试使用真实 git repo、真实 child process、真实 hook wiring，覆盖工程事故而非只测 happy path。</div></div><div class="card"><div class="card-h">限制</div><div class="card-d">如果 checkCommand 是空壳，队列只能保证“跑过检查”，不能保证检查真的有价值。</div></div></div></section>
+<div class="foot"><span>Generated · 2026-07-07</span><span>Source · <a href="https://github.com/funador/claude-code-merge-queue">funador/claude-code-merge-queue</a></span><span><a href="index.html">↑ 返回索引</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.004}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a5f3fc';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script>
+</body></html>
