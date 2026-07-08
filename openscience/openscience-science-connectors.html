@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>科学数据库连接器 Registry · 深度解析 · openscience</title>
+<meta name="description" content="openscience science connectors 子模块完整解析 — 这一页拆 OpenScience 如何把 UniProt、PDB、ChEMBL、arXiv 等外部数据库收敛成一个统一 search/fetch 契约。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #58c4b6;
+  --star-soft:  #8ee7dc;
+  --star-deep:  #2d8e84;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">openscience<b>Science</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">openscience<b>Science</b></div>
+      <div class="sub">science connectors · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../openscience.html">← 返回 openscience 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">科学数据库连接器 Registry <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆 OpenScience 如何把 UniProt、PDB、ChEMBL、arXiv 等外部数据库收敛成一个统一 search/fetch 契约。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>科学连接器的核心不是某个 API，而是统一契约。<code>backend/cli/src/science/connectors/types.ts:76</code> 定义 Connector，<code>backend/cli/src/science/connectors/types.ts:107</code> 定义 ConnectorRegistry，<code>backend/cli/src/science/connectors/index.ts:16</code> 创建共享 registry，<code>backend/cli/src/science/connectors/index.ts:30</code> 把 proteins/genomics/chemistry/pathways/literature/omics 批量注册。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/science/connectors/index.ts</span> · L14-32</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">14</span>import { ConnectorRegistry } from &quot;./types&quot;
+<span class="ln">15</span>
+<span class="ln">16</span>export const registry = new ConnectorRegistry()
+<span class="ln">17</span>
+<span class="ln">18</span>// ── connector imports ──────────────────────────────────────────────────────
+<span class="ln">19</span>// AUTO: connectors registered here by integration
+<span class="ln">20</span>// (feature agents: create ./impl/&lt;id&gt;.ts, then add an import + registry.register
+<span class="ln">21</span>//  call inside the block below during the integration stage — do NOT edit this
+<span class="ln">22</span>//  file yourself.)
+<span class="ln">23</span>import proteins from &quot;./proteins&quot;
+<span class="ln">24</span>import genomics from &quot;./genomics&quot;
+<span class="ln">25</span>import chemistry from &quot;./chemistry&quot;
+<span class="ln">26</span>import pathways from &quot;./pathways&quot;
+<span class="ln">27</span>import literature from &quot;./literature&quot;
+<span class="ln">28</span>import omics from &quot;./omics&quot;
+<span class="ln">29</span>
+<span class="ln">30</span>for (const c of [...proteins, ...genomics, ...chemistry, ...pathways, ...literature, ...omics]) {
+<span class="ln">31</span>  registry.register(c)
+<span class="ln">32</span>}</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Connector 契约把数据库差异压成 search/fetch</h3>
+      <p>接口在 <code>backend/cli/src/science/connectors/types.ts:77</code> 要求稳定 id，在 <code>backend/cli/src/science/connectors/types.ts:83</code> 标注 domain，在 <code>backend/cli/src/science/connectors/types.ts:89</code> 暴露 search，在 <code>backend/cli/src/science/connectors/types.ts:91</code> 暴露 fetch。SearchOptions 的 <code>backend/cli/src/science/connectors/types.ts:43</code> 到 <code>backend/cli/src/science/connectors/types.ts:51</code> 允许 limit、organism、params、AbortSignal，这些正是科研检索最常见的控制面。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/science/connectors/types.ts</span> · L42-92</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">42</span>/** Options accepted by `search`. Connectors ignore fields they don&#x27;t support. */
+<span class="ln">43</span>export interface SearchOptions {
+<span class="ln">44</span>  /** Max hits to return. Connectors clamp to their own ceiling. */
+<span class="ln">45</span>  limit?: number
+<span class="ln">46</span>  /** Organism / taxon filter where meaningful (e.g. NCBI taxon id). */
+<span class="ln">47</span>  organism?: string
+<span class="ln">48</span>  /** Free-form per-source knobs. */
+<span class="ln">49</span>  params?: Record&lt;string, unknown&gt;
+<span class="ln">50</span>  /** Abort signal wired through from the tool context. */
+<span class="ln">51</span>  signal?: AbortSignal
+<span class="ln">52</span>}
+<span class="ln">53</span>
+<span class="ln">54</span>/** Options accepted by `fetch`. */
+<span class="ln">55</span>export interface FetchOptions {
+<span class="ln">56</span>  /** Desired representation, e.g. &quot;json&quot; | &quot;pdb&quot; | &quot;fasta&quot; | &quot;sdf&quot;. */
+<span class="ln">57</span>  format?: string
+<span class="ln">58</span>  params?: Record&lt;string, unknown&gt;
+<span class="ln">59</span>  signal?: AbortSignal
+<span class="ln">60</span>}
+<span class="ln">61</span>
+<span class="ln">62</span>/**
+<span class="ln">63</span> * Per-host politeness limits a connector can request for its HTTP calls.
+<span class="ln">64</span> *
+<span class="ln">65</span> * Applied per URL host by the shared http layer, so a multi-DB fan-out is never
+<span class="ln">66</span> * over-serialized. arXiv, for example, asks for ~1 request every 3s
+<span class="ln">67</span> * (`minIntervalMs: 3000`); keyless Semantic Scholar wants ~1000ms.
+<span class="ln">68</span> */
+<span class="ln">69</span>export interface RateLimit {
+<span class="ln">70</span>  /** Minimum spacing between the START of requests to the same host, in ms. */
+<span class="ln">71</span>  minIntervalMs?: number
+<span class="ln">72</span>  /** Max concurrent in-flight requests to the same host. */
+<span class="ln">73</span>  maxConcurrent?: number
+<span class="ln">74</span>}
+<span class="ln">75</span>
+<span class="ln">76</span>/** The uniform contract every scientific data source implements. */
+<span class="ln">77</span>export interface Connector {
+<span class="ln">78</span>  /** Unique, stable, lowercase id used to route (e.g. &quot;uniprot&quot;, &quot;rcsb-pdb&quot;). */
+<span class="ln">79</span>  id: string
+<span class="ln">80</span>  /** Display name (e.g. &quot;UniProt&quot;, &quot;RCSB PDB&quot;). */
+<span class="ln">81</span>  name: string
+<span class="ln">82</span>  /** Primary domain for grouping in the catalog. */
+<span class="ln">83</span>  domain: ConnectorDomain
+<span class="ln">84</span>  /** One-line description shown in `science_list_dbs`. */
+<span class="ln">85</span>  description: string
+<span class="ln">86</span>  /** Homepage / docs URL. */
+<span class="ln">87</span>  homepage?: string
+<span class="ln">88</span>  /** Search the source; returns normalized hits. */
+<span class="ln">89</span>  search(query: string, opts?: SearchOptions): Promise&lt;ConnectorHit[]&gt;
+<span class="ln">90</span>  /** Fetch a single record by id. Return shape is source-specific. */
+<span class="ln">91</span>  fetch(id: string, opts?: FetchOptions): Promise&lt;unknown&gt;
+<span class="ln">92</span>}</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Registry 提供 UI 和工具都能消费的 catalog</h3>
+      <p>Registry 在 <code>backend/cli/src/science/connectors/types.ts:108</code> 用 Map 存储连接器，<code>backend/cli/src/science/connectors/types.ts:110</code> 防止重复 id，<code>backend/cli/src/science/connectors/types.ts:125</code> 返回全部连接器，<code>backend/cli/src/science/connectors/types.ts:129</code> 支持按 domain 过滤，<code>backend/cli/src/science/connectors/types.ts:134</code> 把函数剥离成可序列化 catalog。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/science/connectors/types.ts</span> · L103-142</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">103</span>/**
+<span class="ln">104</span> * In-memory registry of connectors. A single shared instance lives in
+<span class="ln">105</span> * `./index.ts`; feature agents call `.register()` there.
+<span class="ln">106</span> */
+<span class="ln">107</span>export class ConnectorRegistry {
+<span class="ln">108</span>  private readonly connectors = new Map&lt;string, Connector&gt;()
+<span class="ln">109</span>
+<span class="ln">110</span>  register(connector: Connector): void {
+<span class="ln">111</span>    if (this.connectors.has(connector.id)) {
+<span class="ln">112</span>      throw new Error(`Connector &quot;${connector.id}&quot; is already registered`)
+<span class="ln">113</span>    }
+<span class="ln">114</span>    this.connectors.set(connector.id, connector)
+<span class="ln">115</span>  }
+<span class="ln">116</span>
+<span class="ln">117</span>  get(id: string): Connector | undefined {
+<span class="ln">118</span>    return this.connectors.get(id)
+<span class="ln">119</span>  }
+<span class="ln">120</span>
+<span class="ln">121</span>  has(id: string): boolean {
+<span class="ln">122</span>    return this.connectors.has(id)
+<span class="ln">123</span>  }
+<span class="ln">124</span>
+<span class="ln">125</span>  all(): Connector[] {
+<span class="ln">126</span>    return [...this.connectors.values()]
+<span class="ln">127</span>  }
+<span class="ln">128</span>
+<span class="ln">129</span>  byDomain(domain: ConnectorDomain): Connector[] {
+<span class="ln">130</span>    return this.all().filter((c) =&gt; c.domain === domain)
+<span class="ln">131</span>  }
+<span class="ln">132</span>
+<span class="ln">133</span>  /** Serializable catalog for tools / UI (drops the search/fetch functions). */
+<span class="ln">134</span>  catalog(): CatalogEntry[] {
+<span class="ln">135</span>    return this.all().map(({ id, name, domain, description, homepage }) =&gt; ({
+<span class="ln">136</span>      id,
+<span class="ln">137</span>      name,
+<span class="ln">138</span>      domain,
+<span class="ln">139</span>      description,
+<span class="ln">140</span>      homepage,
+<span class="ln">141</span>    }))
+<span class="ln">142</span>  }</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow"><span class="flow-node">connector impl</span> → <span class="flow-node">Connector contract</span> → <span class="flow-node">registry.register</span> → <span class="flow-node">science_search / science_list_dbs</span> → <span class="flow-node">workspace artifact</span></div>
+      <p>这条路径把外部数据库差异藏在连接器内部。<code>backend/cli/src/science/connectors/types.ts:26</code> 的 ConnectorHit 统一 id/title/summary/url/score，<code>backend/cli/src/science/connectors/types.ts:62</code> 的 RateLimit 给 HTTP 层限流提示，<code>backend/cli/src/science/connectors/index.ts:35</code> 再导出 types 与 http，让实现层共享同一工具箱。</p>
+
+      <h3><span class="arr">▸</span>为什么这样拆</h3>
+      <p>这个子模块的拆法不是按文件大小，而是按运行时责任边界来切。主页面已经把 <code>backend/cli/src/index.ts:55</code>、<code>backend/cli/src/config/config.ts:75</code>、<code>backend/cli/src/provider/provider.ts:57</code>、<code>backend/cli/src/science/connectors/types.ts:76</code> 和 <code>tooling/plugin/src/index.ts:148</code> 串成整体；子页面只展开其中一个闭环，避免把所有源码证据挤成行号清单。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>Registry 只防重复 id，见 <code>backend/cli/src/science/connectors/types.ts:111</code>；连接器结果质量仍依赖具体实现。</li><li>RateLimit 是连接器可请求的策略，<code>backend/cli/src/science/connectors/types.ts:69</code> 到 <code>backend/cli/src/science/connectors/types.ts:73</code> 没有强制每个实现都声明。</li><li>Catalog 在 <code>backend/cli/src/science/connectors/types.ts:133</code> 会丢弃函数，适合 UI，但调试时要回到具体 connector 源码。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">前端 artifact renderer</div><div class="card-d">科学结果渲染 registry 在 <code>frontend/workspace/src/science/renderers/registry.ts:41</code>。</div></div><div class="card"><div class="card-h">Agent 分工</div><div class="card-d">biology/ml/physics agents 在 <code>backend/cli/src/agent/agent.ts:97</code>、<code>backend/cli/src/agent/agent.ts:114</code>、<code>backend/cli/src/agent/agent.ts:131</code>。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-08</span>
+      <span>Source · <a href="https://github.com/synthetic-sciences/openscience">synthetic-sciences/openscience</a></span>
+      <span><a href="../openscience.html">↑ openscience 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

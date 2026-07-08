@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>插件 Hooks 与前端 Artifact 渲染 · 深度解析 · openscience</title>
+<meta name="description" content="openscience plugin and UI 子模块完整解析 — 这一页拆扩展面：插件能接入 chat、tool、permission、compaction；前端 artifact renderer 用 registry 让科学结果可视化不污染聊天路径。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #58c4b6;
+  --star-soft:  #8ee7dc;
+  --star-deep:  #2d8e84;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">openscience<b>Science</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">openscience<b>Science</b></div>
+      <div class="sub">plugin and UI · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../openscience.html">← 返回 openscience 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">插件 Hooks 与前端 Artifact 渲染 <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆扩展面：插件能接入 chat、tool、permission、compaction；前端 artifact renderer 用 registry 让科学结果可视化不污染聊天路径。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>插件输入在 <code>tooling/plugin/src/index.ts:26</code> 给出 client、project、directory、worktree、serverUrl 和 shell，Hooks 从 <code>tooling/plugin/src/index.ts:148</code> 开始声明。前端渲染侧，<code>frontend/workspace/src/science/renderers/registry.ts:41</code> 用 Map 存 renderer，<code>frontend/workspace/src/science/renderers/registry.ts:43</code> 通过 register 扩展 kind。两边都是 registry/hook 风格。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/tooling/plugin/src/index.ts</span> · L26-35</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">26</span>export type PluginInput = {
+<span class="ln">27</span>  client: ReturnType&lt;typeof createOpenScienceClient&gt;
+<span class="ln">28</span>  project: Project
+<span class="ln">29</span>  directory: string
+<span class="ln">30</span>  worktree: string
+<span class="ln">31</span>  serverUrl: URL
+<span class="ln">32</span>  $: BunShell
+<span class="ln">33</span>}
+<span class="ln">34</span>
+<span class="ln">35</span>export type Plugin = (input: PluginInput) =&gt; Promise&lt;Hooks&gt;</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Hooks 细到 chat 参数、工具调用和权限询问</h3>
+      <p>Hooks 在 <code>tooling/plugin/src/index.ts:149</code> 支持 event，在 <code>tooling/plugin/src/index.ts:151</code> 支持 tool 定义，在 <code>tooling/plugin/src/index.ts:171</code> 可改 chat params，在 <code>tooling/plugin/src/index.ts:179</code> 可介入 permission.ask，在 <code>tooling/plugin/src/index.ts:184</code> 和 <code>tooling/plugin/src/index.ts:188</code> 分别包住工具执行前后。它的扩展点覆盖了模型、工具和治理三条线。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/tooling/plugin/src/index.ts</span> · L148-226</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">148</span>export interface Hooks {
+<span class="ln">149</span>  event?: (input: { event: Event }) =&gt; Promise&lt;void&gt;
+<span class="ln">150</span>  config?: (input: Config) =&gt; Promise&lt;void&gt;
+<span class="ln">151</span>  tool?: {
+<span class="ln">152</span>    [key: string]: ToolDefinition
+<span class="ln">153</span>  }
+<span class="ln">154</span>  auth?: AuthHook
+<span class="ln">155</span>  /**
+<span class="ln">156</span>   * Called when a new message is received
+<span class="ln">157</span>   */
+<span class="ln">158</span>  &quot;chat.message&quot;?: (
+<span class="ln">159</span>    input: {
+<span class="ln">160</span>      sessionID: string
+<span class="ln">161</span>      agent?: string
+<span class="ln">162</span>      model?: { providerID: string; modelID: string }
+<span class="ln">163</span>      messageID?: string
+<span class="ln">164</span>      variant?: string
+<span class="ln">165</span>    },
+<span class="ln">166</span>    output: { message: UserMessage; parts: Part[] },
+<span class="ln">167</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">168</span>  /**
+<span class="ln">169</span>   * Modify parameters sent to LLM
+<span class="ln">170</span>   */
+<span class="ln">171</span>  &quot;chat.params&quot;?: (
+<span class="ln">172</span>    input: { sessionID: string; agent: string; model: Model; provider: ProviderContext; message: UserMessage },
+<span class="ln">173</span>    output: { temperature: number; topP: number; topK: number; options: Record&lt;string, any&gt; },
+<span class="ln">174</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">175</span>  &quot;chat.headers&quot;?: (
+<span class="ln">176</span>    input: { sessionID: string; agent: string; model: Model; provider: ProviderContext; message: UserMessage },
+<span class="ln">177</span>    output: { headers: Record&lt;string, string&gt; },
+<span class="ln">178</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">179</span>  &quot;permission.ask&quot;?: (input: Permission, output: { status: &quot;ask&quot; | &quot;deny&quot; | &quot;allow&quot; }) =&gt; Promise&lt;void&gt;
+<span class="ln">180</span>  &quot;command.execute.before&quot;?: (
+<span class="ln">181</span>    input: { command: string; sessionID: string; arguments: string },
+<span class="ln">182</span>    output: { parts: Part[] },
+<span class="ln">183</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">184</span>  &quot;tool.execute.before&quot;?: (
+<span class="ln">185</span>    input: { tool: string; sessionID: string; callID: string },
+<span class="ln">186</span>    output: { args: any },
+<span class="ln">187</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">188</span>  &quot;tool.execute.after&quot;?: (
+<span class="ln">189</span>    input: { tool: string; sessionID: string; callID: string },
+<span class="ln">190</span>    output: {
+<span class="ln">191</span>      title: string
+<span class="ln">192</span>      output: string
+<span class="ln">193</span>      metadata: any
+<span class="ln">194</span>    },
+<span class="ln">195</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">196</span>  &quot;experimental.chat.messages.transform&quot;?: (
+<span class="ln">197</span>    input: {},
+<span class="ln">198</span>    output: {
+<span class="ln">199</span>      messages: {
+<span class="ln">200</span>        info: Message
+<span class="ln">201</span>        parts: Part[]
+<span class="ln">202</span>      }[]
+<span class="ln">203</span>    },
+<span class="ln">204</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">205</span>  &quot;experimental.chat.system.transform&quot;?: (
+<span class="ln">206</span>    input: { sessionID?: string; model: Model },
+<span class="ln">207</span>    output: {
+<span class="ln">208</span>      system: string[]
+<span class="ln">209</span>    },
+<span class="ln">210</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">211</span>  /**
+<span class="ln">212</span>   * Called before session compaction starts. Allows plugins to customize
+<span class="ln">213</span>   * the compaction prompt.
+<span class="ln">214</span>   *
+<span class="ln">215</span>   * - `context`: Additional context strings appended to the default prompt
+<span class="ln">216</span>   * - `prompt`: If set, replaces the default compaction prompt entirely
+<span class="ln">217</span>   */
+<span class="ln">218</span>  &quot;experimental.session.compacting&quot;?: (
+<span class="ln">219</span>    input: { sessionID: string },
+<span class="ln">220</span>    output: { context: string[]; prompt?: string },
+<span class="ln">221</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">222</span>  &quot;experimental.text.complete&quot;?: (
+<span class="ln">223</span>    input: { sessionID: string; messageID: string; partID: string },
+<span class="ln">224</span>    output: { text: string },
+<span class="ln">225</span>  ) =&gt; Promise&lt;void&gt;
+<span class="ln">226</span>}</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Artifact renderer 让科学对象成为一等 UI 元素</h3>
+      <p>前端 registry 在 <code>frontend/workspace/src/science/renderers/registry.ts:14</code> 列出 protein-structure、genome-track、chem-2d、chem-3d、msa、sequence、pdf、latex 等 kind；<code>frontend/workspace/src/science/renderers/registry.ts:25</code> 定义 renderer props，<code>frontend/workspace/src/science/renderers/registry.ts:43</code> 到 <code>frontend/workspace/src/science/renderers/registry.ts:57</code> 提供 register/get/has/kinds。这样新增渲染器不需要改聊天主路径。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/frontend/workspace/src/science/renderers/registry.ts</span> · L13-67</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">13</span>/** Known artifact kinds. Extend as renderer agents add support. */
+<span class="ln">14</span>export type ArtifactKind =
+<span class="ln">15</span>  | &quot;protein-structure&quot; // molstar / 3dmol — .pdb / .cif / mmCIF
+<span class="ln">16</span>  | &quot;genome-track&quot; // igv.js — BAM/VCF/BED/bigWig tracks
+<span class="ln">17</span>  | &quot;chem-2d&quot; // RDKit — 2D molecule depiction from SMILES/MOL
+<span class="ln">18</span>  | &quot;chem-3d&quot; // 3Dmol — 3D molecule from MOL/SDF/XYZ
+<span class="ln">19</span>  | &quot;msa&quot; // multiple sequence alignment viewer
+<span class="ln">20</span>  | &quot;sequence&quot; // linear nucleotide/protein sequence
+<span class="ln">21</span>  | &quot;pdf&quot; // pdfjs-dist — inline PDF pages
+<span class="ln">22</span>  | &quot;latex&quot; // katex — rendered math / equations
+<span class="ln">23</span>  | (string &amp; {})
+<span class="ln">24</span>
+<span class="ln">25</span>/** Props every science renderer receives. */
+<span class="ln">26</span>export interface ArtifactRenderProps {
+<span class="ln">27</span>  /** The artifact kind (redundant with lookup key; handy for shared renderers). */
+<span class="ln">28</span>  kind: ArtifactKind
+<span class="ln">29</span>  /**
+<span class="ln">30</span>   * The artifact payload. Shape is kind-specific — e.g. { pdb: string } for
+<span class="ln">31</span>   * protein-structure, { smiles: string } for chem-2d, { tex: string } for latex.
+<span class="ln">32</span>   * Renderers validate/narrow this themselves.
+<span class="ln">33</span>   */
+<span class="ln">34</span>  data: unknown
+<span class="ln">35</span>  /** Optional display height hint in px. */
+<span class="ln">36</span>  height?: number
+<span class="ln">37</span>}
+<span class="ln">38</span>
+<span class="ln">39</span>export type ArtifactRenderer = Component&lt;ArtifactRenderProps&gt;
+<span class="ln">40</span>
+<span class="ln">41</span>const renderers = new Map&lt;string, ArtifactRenderer&gt;()
+<span class="ln">42</span>
+<span class="ln">43</span>export function register(kind: ArtifactKind, renderer: ArtifactRenderer): void {
+<span class="ln">44</span>  renderers.set(kind, renderer)
+<span class="ln">45</span>}
+<span class="ln">46</span>
+<span class="ln">47</span>export function get(kind: ArtifactKind): ArtifactRenderer | undefined {
+<span class="ln">48</span>  return renderers.get(kind)
+<span class="ln">49</span>}
+<span class="ln">50</span>
+<span class="ln">51</span>export function has(kind: ArtifactKind): boolean {
+<span class="ln">52</span>  return renderers.has(kind)
+<span class="ln">53</span>}
+<span class="ln">54</span>
+<span class="ln">55</span>export function kinds(): string[] {
+<span class="ln">56</span>  return [...renderers.keys()]
+<span class="ln">57</span>}
+<span class="ln">58</span>
+<span class="ln">59</span>/**
+<span class="ln">60</span> * Side-effect registrations live in `./index.ts` so `ScienceArtifact` can import
+<span class="ln">61</span> * that module once and have every renderer registered.
+<span class="ln">62</span> *
+<span class="ln">63</span> * AUTO: renderers registered here by integration
+<span class="ln">64</span> * (feature agents: create ./impl/&lt;kind&gt;.tsx exporting a renderer, then add a
+<span class="ln">65</span> *  `register(&quot;&lt;kind&gt;&quot;, &lt;Renderer&gt;)` call in ./index.ts during integration — do
+<span class="ln">66</span> *  NOT edit this registry file or the chat rendering path yourself.)
+<span class="ln">67</span> */</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow"><span class="flow-node">Plugin package</span> → <span class="flow-node">Hooks</span> → <span class="flow-node">chat/tool/permission interception</span>
+<span class="flow-node">Science artifact</span> → <span class="flow-node">renderer registry</span> → <span class="flow-node">inline workspace view</span></div>
+      <p>扩展系统的优点是两端都很薄。插件只需要返回 Hooks，见 <code>tooling/plugin/src/index.ts:35</code>；renderer 只需要注册 kind 和 component，见 <code>frontend/workspace/src/science/renderers/registry.ts:43</code>。与此相对，配置层会从 `.openscience` 目录加载插件，证据在 <code>backend/cli/src/config/config.ts:166</code>、<code>backend/cli/src/config/config.ts:178</code>、<code>backend/cli/src/config/config.ts:185</code>，所以插件目录的信任边界必须清楚。</p>
+
+      <h3><span class="arr">▸</span>为什么这样拆</h3>
+      <p>这个子模块的拆法不是按文件大小，而是按运行时责任边界来切。主页面已经把 <code>backend/cli/src/index.ts:55</code>、<code>backend/cli/src/config/config.ts:75</code>、<code>backend/cli/src/provider/provider.ts:57</code>、<code>backend/cli/src/science/connectors/types.ts:76</code> 和 <code>tooling/plugin/src/index.ts:148</code> 串成整体；子页面只展开其中一个闭环，避免把所有源码证据挤成行号清单。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>Hooks 可改 tool args，<code>tooling/plugin/src/index.ts:184</code> 的能力很强，应该配合权限策略使用。</li><li>Renderer registry 接受 string 扩展 kind，<code>frontend/workspace/src/science/renderers/registry.ts:23</code> 灵活但也需要命名约定。</li><li>配置加载会自动安装依赖，<code>backend/cli/src/config/config.ts:272</code> 和 <code>backend/cli/src/config/config.ts:281</code> 需要可信插件源。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">Config 发现插件</div><div class="card-d"><code>backend/cli/src/config/config.ts:166</code> 扫描配置目录，<code>backend/cli/src/config/config.ts:185</code> 加载 plugin。</div></div><div class="card"><div class="card-h">Science connectors</div><div class="card-d">连接器 registry 和 renderer registry 结构相似，见 <code>backend/cli/src/science/connectors/types.ts:107</code>。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-08</span>
+      <span>Source · <a href="https://github.com/synthetic-sciences/openscience">synthetic-sciences/openscience</a></span>
+      <span><a href="../openscience.html">↑ openscience 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

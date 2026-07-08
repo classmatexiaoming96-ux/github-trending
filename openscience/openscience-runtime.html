@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CLI / Server 启动链路 · 深度解析 · openscience</title>
+<meta name="description" content="openscience runtime 子模块完整解析 — 这一页拆 `openscience` 从命令行进入本地浏览器工作台的全过程：命令注册、web handler、配置同步、server 绑定和退出清理。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #58c4b6;
+  --star-soft:  #8ee7dc;
+  --star-deep:  #2d8e84;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">openscience<b>Science</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">openscience<b>Science</b></div>
+      <div class="sub">runtime · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../openscience.html">← 返回 openscience 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">CLI / Server 启动链路 <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆 `openscience` 从命令行进入本地浏览器工作台的全过程：命令注册、web handler、配置同步、server 绑定和退出清理。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>启动链的入口是 yargs 命令表，<code>backend/cli/src/index.ts:55</code> 创建 CLI，<code>backend/cli/src/index.ts:72</code> 注册 middleware，<code>backend/cli/src/index.ts:122</code> 把 WebCommand 作为默认工作台入口。随后 <code>backend/cli/src/cli/cmd/web.ts:60</code> 定义 `web/$0` 命令，<code>backend/cli/src/cli/cmd/web.ts:147</code> 才真正绑定 server。这个分层让 CLI 启动、凭证注入和浏览器工作台解耦。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/index.ts</span> · L55-72</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">55</span>const cli = yargs(hideBin(process.argv))
+<span class="ln">56</span>  .parserConfiguration({ &quot;populate--&quot;: true })
+<span class="ln">57</span>  .scriptName(&quot;openscience&quot;)
+<span class="ln">58</span>  .wrap(100)
+<span class="ln">59</span>  .help(&quot;help&quot;, &quot;show help&quot;)
+<span class="ln">60</span>  .alias(&quot;help&quot;, &quot;h&quot;)
+<span class="ln">61</span>  .version(&quot;version&quot;, &quot;show version number&quot;, Installation.VERSION)
+<span class="ln">62</span>  .alias(&quot;version&quot;, &quot;v&quot;)
+<span class="ln">63</span>  .option(&quot;print-logs&quot;, {
+<span class="ln">64</span>    describe: &quot;print logs to stderr&quot;,
+<span class="ln">65</span>    type: &quot;boolean&quot;,
+<span class="ln">66</span>  })
+<span class="ln">67</span>  .option(&quot;log-level&quot;, {
+<span class="ln">68</span>    describe: &quot;log level&quot;,
+<span class="ln">69</span>    type: &quot;string&quot;,
+<span class="ln">70</span>    choices: [&quot;DEBUG&quot;, &quot;INFO&quot;, &quot;WARN&quot;, &quot;ERROR&quot;],
+<span class="ln">71</span>  })
+<span class="ln">72</span>  .middleware(async (opts) =&gt; {</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>命令 middleware 先准备环境，再交给具体命令</h3>
+      <p>middleware 在 <code>backend/cli/src/index.ts:73</code> 初始化日志，在 <code>backend/cli/src/index.ts:83</code> 设置 AGENT/OPENSCIENCE 标记，在 <code>backend/cli/src/index.ts:96</code> 刷新远端配置，再通过 <code>backend/cli/src/index.ts:101</code> 和 <code>backend/cli/src/index.ts:105</code> 注入凭证与 compute key。这解释了为什么 provider SDK import 顺序被文件顶部注释强调。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/index.ts</span> · L72-109</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">72</span>  .middleware(async (opts) =&gt; {
+<span class="ln">73</span>    await Log.init({
+<span class="ln">74</span>      print: process.argv.includes(&quot;--print-logs&quot;),
+<span class="ln">75</span>      dev: Installation.isLocal(),
+<span class="ln">76</span>      level: (() =&gt; {
+<span class="ln">77</span>        if (opts.logLevel) return opts.logLevel as Log.Level
+<span class="ln">78</span>        if (Installation.isLocal()) return &quot;DEBUG&quot;
+<span class="ln">79</span>        return &quot;INFO&quot;
+<span class="ln">80</span>      })(),
+<span class="ln">81</span>    })
+<span class="ln">82</span>
+<span class="ln">83</span>    process.env.AGENT = &quot;1&quot;
+<span class="ln">84</span>    process.env.OPENSCIENCE = &quot;1&quot;
+<span class="ln">85</span>
+<span class="ln">86</span>    Log.Default.info(&quot;openscience&quot;, {
+<span class="ln">87</span>      version: Installation.VERSION,
+<span class="ln">88</span>      args: process.argv.slice(2),
+<span class="ln">89</span>    })
+<span class="ln">90</span>
+<span class="ln">91</span>    // Cheap /sync/version probe (10s TTL). When the server-side version
+<span class="ln">92</span>    // has changed, a full /api/cli/sync runs in the background so the new
+<span class="ln">93</span>    // env applies to the NEXT command — the current one uses whatever is
+<span class="ln">94</span>    // already cached on disk. Replaces a blocking 5s Promise.race that
+<span class="ln">95</span>    // ran on every invocation regardless of staleness.
+<span class="ln">96</span>    await OpenScience.refreshIfStale().catch(() =&gt; {})
+<span class="ln">97</span>
+<span class="ln">98</span>    // Inject decrypted service credentials (settings ▸ Credentials) into the
+<span class="ln">99</span>    // process env so skills/tools/connectors actually use them. Dynamic import
+<span class="ln">100</span>    // keeps the credential route module out of every command&#x27;s static graph.
+<span class="ln">101</span>    await import(&quot;./server/routes/settings/credentials&quot;).then((m) =&gt; m.applyCredentialEnv()).catch(() =&gt; {})
+<span class="ln">102</span>
+<span class="ln">103</span>    // Same for BYOK GPU provider keys (settings ▸ Compute) — decrypt and inject
+<span class="ln">104</span>    // under the canonical env var names the compute skills read.
+<span class="ln">105</span>    await import(&quot;./server/routes/settings/compute&quot;).then((m) =&gt; m.ComputeSettings.applyComputeEnv()).catch(() =&gt; {})
+<span class="ln">106</span>
+<span class="ln">107</span>    // Retry any failed usage reports from previous sessions
+<span class="ln">108</span>    OpenScience.flushPendingUsage().catch(() =&gt; {})
+<span class="ln">109</span>  })</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>web 命令在绑定前完成 onboarding 和同步预算</h3>
+      <p>web handler 先在 <code>backend/cli/src/cli/cmd/web.ts:79</code> 解析网络选项，<code>backend/cli/src/cli/cmd/web.ts:87</code> 处理 onboarding，<code>backend/cli/src/cli/cmd/web.ts:100</code> 判断登录状态，<code>backend/cli/src/cli/cmd/web.ts:121</code> 设置 6 秒同步预算，最后 <code>backend/cli/src/cli/cmd/web.ts:147</code> 才 listen。它故意让“模型配置刷新”跑在浏览器首屏之前。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/cli/src/cli/cmd/web.ts</span> · L79-154</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">79</span>    const opts = await resolveNetworkOptions(args)
+<span class="ln">80</span>    UI.empty()
+<span class="ln">81</span>    UI.println(UI.logo(&quot;  &quot;))
+<span class="ln">82</span>    UI.empty()
+<span class="ln">83</span>
+<span class="ln">84</span>    // First launch on this machine with nothing configured → walk the user
+<span class="ln">85</span>    // through setup (managed vs BYOK vs skip) before we bind the server, so
+<span class="ln">86</span>    // the browser&#x27;s first request already sees a usable model.
+<span class="ln">87</span>    if (await needsOnboarding()) {
+<span class="ln">88</span>      await runOnboarding()
+<span class="ln">89</span>      UI.empty()
+<span class="ln">90</span>    }
+<span class="ln">91</span>
+<span class="ln">92</span>    // Run the dashboard sync BEFORE starting the server — and without
+<span class="ln">93</span>    // the 5s race timeout the global middleware uses. The model picker
+<span class="ln">94</span>    // and provider whitelist live in ~/.config/openscience/openscience-synced.json;
+<span class="ln">95</span>    // Config.state() reads that file once on first request and caches
+<span class="ln">96</span>    // for the process lifetime. If we start the HTTP server first, the
+<span class="ln">97</span>    // browser can race the sync and the picker shows the previous run&#x27;s
+<span class="ln">98</span>    // catalogue. Doing it here, await-ed, guarantees the next browser
+<span class="ln">99</span>    // request sees the freshly-synced whitelist.
+<span class="ln">100</span>    const authed = await OpenScience.isAuthenticated()
+<span class="ln">101</span>    if (!authed) {
+<span class="ln">102</span>      // Only nudge when there&#x27;s genuinely no way to run a model. A BYOK key
+<span class="ln">103</span>      // (env var or `keys add`) is a first-class, account-free setup — don&#x27;t
+<span class="ln">104</span>      // badger those users to connect Atlas.
+<span class="ln">105</span>      if (!(await isConfigured())) {
+<span class="ln">106</span>        UI.println(UI.Style.TEXT_WARNING_BOLD + &quot;  ⚠  No model configured&quot;, UI.Style.TEXT_NORMAL)
+<span class="ln">107</span>        UI.println(
+<span class="ln">108</span>          UI.Style.TEXT_NORMAL,
+<span class="ln">109</span>          &quot;  Run `openscience login` for Atlas managed models, or `openscience keys add` for your own key.&quot;,
+<span class="ln">110</span>        )
+<span class="ln">111</span>        UI.println(UI.Style.TEXT_DIM, &quot;  Continuing with free demo models for now.&quot;)
+<span class="ln">112</span>        UI.empty()
+<span class="ln">113</span>      }
+<span class="ln">114</span>    } else {
+<span class="ln">115</span>      // Sync managed config before binding so the browser&#x27;s first request sees
+<span class="ln">116</span>      // the fresh provider whitelist. But cap the wait: syncServices() has no
+<span class="ln">117</span>      // internal timeout, so a slow/unresponsive backend would otherwise hang
+<span class="ln">118</span>      // the launch forever (the server never binds). If the sync outlasts the
+<span class="ln">119</span>      // cap, bind anyway and let it finish in the background — the global
+<span class="ln">120</span>      // middleware also syncs per-request as a backstop.
+<span class="ln">121</span>      const SYNC_BUDGET_MS = 6000
+<span class="ln">122</span>      const synced = OpenScience.syncServices().catch(() =&gt; null)
+<span class="ln">123</span>      const result = await Promise.race([
+<span class="ln">124</span>        synced,
+<span class="ln">125</span>        new Promise&lt;&quot;timeout&quot;&gt;((r) =&gt; setTimeout(() =&gt; r(&quot;timeout&quot;), SYNC_BUDGET_MS)),
+<span class="ln">126</span>      ])
+<span class="ln">127</span>      if (result === &quot;timeout&quot;) {
+<span class="ln">128</span>        UI.println(
+<span class="ln">129</span>          UI.Style.TEXT_DIM,
+<span class="ln">130</span>          &quot;  (managed-config sync is slow — continuing; the model picker will refresh shortly)&quot;,
+<span class="ln">131</span>        )
+<span class="ln">132</span>        UI.empty()
+<span class="ln">133</span>      } else if (result) {
+<span class="ln">134</span>        const noun = result.credentials === 1 ? &quot;credential&quot; : &quot;credentials&quot;
+<span class="ln">135</span>        UI.println(
+<span class="ln">136</span>          UI.Style.TEXT_INFO_BOLD + &quot;  ✓ Synced&quot;,
+<span class="ln">137</span>          UI.Style.TEXT_NORMAL,
+<span class="ln">138</span>          `${result.credentials} ${noun} from connected services`,
+<span class="ln">139</span>        )
+<span class="ln">140</span>        UI.empty()
+<span class="ln">141</span>      } else {
+<span class="ln">142</span>        UI.println(UI.Style.TEXT_DIM, &quot;  (sync skipped — using cached config from previous run)&quot;)
+<span class="ln">143</span>        UI.empty()
+<span class="ln">144</span>      }
+<span class="ln">145</span>    }
+<span class="ln">146</span>
+<span class="ln">147</span>    const server = Server.listen(opts)
+<span class="ln">148</span>
+<span class="ln">149</span>    const base = `http://localhost:${server.port}`
+<span class="ln">150</span>    UI.println(UI.Style.TEXT_INFO_BOLD + &quot;  Web interface:    &quot;, UI.Style.TEXT_NORMAL, base)
+<span class="ln">151</span>    UI.empty()
+<span class="ln">152</span>    UI.println(UI.Style.TEXT_DIM, &quot;  Opening your browser… if it doesn&#x27;t open, visit the URL above.&quot;)
+<span class="ln">153</span>
+<span class="ln">154</span>    openUrl(base)</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow"><span class="flow-node">index.ts middleware</span> → <span class="flow-node">credential env</span> → <span class="flow-node">WebCommand</span> → <span class="flow-node">syncServices budget</span> → <span class="flow-node">Server.listen</span> → <span class="flow-node">openUrl</span></div>
+      <p>这个流程的工程价值在于避免首屏 race。<code>backend/cli/src/cli/cmd/web.ts:92</code> 的注释明确说 synced whitelist 被 Config.state 首次请求缓存；如果 <code>backend/cli/src/cli/cmd/web.ts:147</code> 先启动 server，浏览器可能看到上一轮模型目录。退出阶段也没有忘：<code>backend/cli/src/cli/cmd/web.ts:164</code> 等 SIGINT/SIGTERM，<code>backend/cli/src/cli/cmd/web.ts:173</code> 用 watchdog 防止 SSE 长连接卡死退出。</p>
+
+      <h3><span class="arr">▸</span>为什么这样拆</h3>
+      <p>这个子模块的拆法不是按文件大小，而是按运行时责任边界来切。主页面已经把 <code>backend/cli/src/index.ts:55</code>、<code>backend/cli/src/config/config.ts:75</code>、<code>backend/cli/src/provider/provider.ts:57</code>、<code>backend/cli/src/science/connectors/types.ts:76</code> 和 <code>tooling/plugin/src/index.ts:148</code> 串成整体；子页面只展开其中一个闭环，避免把所有源码证据挤成行号清单。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>如果 syncServices 很慢，<code>backend/cli/src/cli/cmd/web.ts:127</code> 选择继续启动，风险是模型 picker 稍后刷新而不是阻断。</li><li>macOS TCC 检测在 <code>backend/cli/src/cli/cmd/web.ts:17</code> 使用 Desktop 读目录作为信号，空 Desktop 也被当成可能阻塞。</li><li>顶层 finally 在 <code>backend/cli/src/index.ts:198</code> 到 <code>backend/cli/src/index.ts:202</code> 强制退出，避免 MCP 子进程挂住。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">安全边界</div><div class="card-d">Host/Origin guard 见 <code>backend/cli/src/server/host-guard.ts:46</code> 与 <code>backend/cli/src/server/host-guard.ts:70</code>。</div></div><div class="card"><div class="card-h">Provider 初始化</div><div class="card-d">Provider SDK 依赖 <code>backend/cli/src/index.ts:1</code> 的 preload-env 顺序。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-08</span>
+      <span>Source · <a href="https://github.com/synthetic-sciences/openscience">synthetic-sciences/openscience</a></span>
+      <span><a href="../openscience.html">↑ openscience 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
