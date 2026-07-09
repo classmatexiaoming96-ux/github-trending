@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Brain loop 与降级恢复 · agent-chief</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #8b5cf6;
+  --star-soft: #a78bfa;
+  --star-deep: #5b21b6;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">agent<b>chief</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">agent<b>chief</b></div><div class="sub">brain loop · 深度解析</div></div>
+    <span class="nav-ver">Python · local-first</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+      <li><a href="#core"><span class="idx">01</span>核心实现</a></li>
+      <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+      <li><a href="#edge"><span class="idx">03</span>边界失败</a></li>
+      <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★318 · 2026-07-04</div><div><a href="https://github.com/SmileLikeYe/agent-chief">SmileLikeYe/agent-chief</a></div><div><a href="index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+    <div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Brain loop 与降级恢复 <em>深度解析</em></h1><p class="hero-desc">拆解 Brain.process 如何把 payload 变成 Decision，并在 judge 出错时保守降级。</p></div>
+    <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>这个子页面聚焦 brain loop。关键证据包括 core/brain.py:52；core/brain.py:115；core/brain.py:247；core/brain.py:271；core/brain.py:130；core/state.py:1。这些引用不是源码索引，而是帮助定位边界：入口在哪里、数据对象在哪里、失败时由谁兜底。</p>
+      <h3><span class="arr">▸</span>Brain 构造参数</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">core/brain.py</span> · core/brain.py:49-91</span><span>Python</span></div>
+        <pre class="code"><span class="ln">49</span>class Brain:
+<span class="ln">50</span>    """The triage→associate→decide loop for one incoming event (SPEC §4.2)."""
+<span class="ln">51</span>
+<span class="ln">52</span>    def __init__(
+<span class="ln">53</span>        self,
+<span class="ln">54</span>        state: State,
+<span class="ln">55</span>        judge: Judge,
+<span class="ln">56</span>        *,
+<span class="ln">57</span>        policy_path,
+<span class="ln">58</span>        quiet_hours: str = "23:00-08:00",
+<span class="ln">59</span>        night_whitelist: list[str] | None = None,
+<span class="ln">60</span>        scene_engine=None,
+<span class="ln">61</span>        classifier: SimilarityClassifier | None = None,
+<span class="ln">62</span>        memory=None,
+<span class="ln">63</span>        inferrer=None,
+<span class="ln">64</span>        shadow=None,
+<span class="ln">65</span>        audit: AuditLog | None = None,
+<span class="ln">66</span>        user_profile: str = "",
+<span class="ln">67</span>        default_executor: str = "claude_code",
+<span class="ln">68</span>        embedder=None,
+<span class="ln">69</span>        actor: Callable | None = None,
+<span class="ln">70</span>        now_fn: Callable[[], datetime] = lambda: datetime.now(UTC),
+<span class="ln">71</span>        judge_timeout: float = 150.0,  # &gt; HTTPJudge worst case (2 attempts x 60s) + slack
+<span class="ln">72</span>    ):
+<span class="ln">73</span>        self.state = state
+<span class="ln">74</span>        self.judge = judge
+<span class="ln">75</span>        self.policy_path = policy_path
+<span class="ln">76</span>        self.quiet_hours = quiet_hours
+<span class="ln">77</span>        self.night_whitelist = night_whitelist or ["family", "production_incident"]
+<span class="ln">78</span>        self.scene_engine = scene_engine
+<span class="ln">79</span>        self.classifier = classifier
+<span class="ln">80</span>        self.memory = memory
+<span class="ln">81</span>        self.inferrer = inferrer
+<span class="ln">82</span>        self.shadow = shadow
+<span class="ln">83</span>        self.audit = audit
+<span class="ln">84</span>        self.user_profile = user_profile
+<span class="ln">85</span>        self.default_executor = default_executor
+<span class="ln">86</span>        self.embedder = embedder
+<span class="ln">87</span>        self.actor = actor  # async (Event, Decision) -&gt; None; delivery/dispatch side
+<span class="ln">88</span>        self.now_fn = now_fn
+<span class="ln">89</span>        self.judge_timeout = judge_timeout
+<span class="ln">90</span>        self._degraded: bool | None = None  # None = unknown until first judgment
+<span class="ln">91</span>        self._last_error: str | None = None</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      <h3><span class="arr">▸</span>process 主流程</h3><p>process 在 <code>core/brain.py:115</code> 到 <code>core/brain.py:198</code> 完成 normalize、policy、scene、dedup、triage merge、stage1、stage2/judge、shadow、save 和 actor 调度。它像一条很克制的事件流水线。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">core/brain.py</span> · core/brain.py:115-198</span><span>Python</span></div>
+        <pre class="code"><span class="ln">115</span>    async def process(self, payload: dict | Event) -&gt; Decision:
+<span class="ln">116</span>        from ingest.normalize import normalize
+<span class="ln">117</span>
+<span class="ln">118</span>        now = self.now_fn()
+<span class="ln">119</span>        clock = _StageClock()
+<span class="ln">120</span>        if isinstance(payload, Event):
+<span class="ln">121</span>            event = payload
+<span class="ln">122</span>        else:
+<span class="ln">123</span>            event = await normalize(payload, inferrer=self.inferrer, now=now)
+<span class="ln">124</span>        clock.mark("normalize")
+<span class="ln">125</span>
+<span class="ln">126</span>        policy = load_policy(self.policy_path)
+<span class="ln">127</span>        scene = self._scene(now)
+<span class="ln">128</span>        recent_keys = await self.state.recent_dedup_keys(now - timedelta(hours=24))
+<span class="ln">129</span>
+<span class="ln">130</span>        # Triage merge (SPEC §4.2 step 1): a same-topic near-duplicate within
+<span class="ln">131</span>        # 10 min folds into the earlier event; the earlier decision stands.
+<span class="ln">132</span>        if self.embedder:
+<span class="ln">133</span>            recent = await self.state.recent_events(now - timedelta(minutes=10))
+<span class="ln">134</span>            prior = find_mergeable(event, [e for e in recent if e.id != event.id],
+<span class="ln">135</span>                                   embedder=self.embedder)
+<span class="ln">136</span>            clock.mark("triage_merge", note="merged into prior" if prior else "no near-duplicate")
+<span class="ln">137</span>            if prior:
+<span class="ln">138</span>                merged = merge_events(prior, event)
+<span class="ln">139</span>                await self.state.save_event(merged)
+<span class="ln">140</span>                existing = await self.state.load_decision(prior.id)
+<span class="ln">141</span>                if existing:
+<span class="ln">142</span>                    # the prior decision (and its trace) stands for the merged event
+<span class="ln">143</span>                    return existing.model_copy(
+<span class="ln">144</span>                        update={"reason": existing.reason + "; merged near-duplicate"}
+<span class="ln">145</span>                    )
+<span class="ln">146</span>
+<span class="ln">147</span>        hit = stage1(
+<span class="ln">148</span>            event,
+<span class="ln">149</span>            now=now,
+<span class="ln">150</span>            policy=policy,
+<span class="ln">151</span>            quiet_hours=self.quiet_hours,
+<span class="ln">152</span>            night_whitelist=self.night_whitelist,
+<span class="ln">153</span>            recent_dedup_keys=recent_keys,
+<span class="ln">154</span>        )
+<span class="ln">155</span>        if hit:
+<span class="ln">156</span>            clock.mark("stage1", note=f"rule {hit.rule} fired")
+<span class="ln">157</span>            decision = Decision(
+<span class="ln">158</span>                event_id=event.id,
+<span class="ln">159</span>                route=hit.route,  # type: ignore[arg-type]
+<span class="ln">160</span>                scene=scene.scene,
+<span class="ln">161</span>                scene_confidence=scene.confidence,
+<span class="ln">162</span>                cost=0.0,
+<span class="ln">163</span>                matched_rules=[hit.rule],
+<span class="ln">164</span>                reason=hit.reason,
+<span class="ln">165</span>                stage=1,
+<span class="ln">166</span>                trace=DecisionTrace(stages=clock.stages),
+<span class="ln">167</span>            )
+<span class="ln">168</span>        else:
+<span class="ln">169</span>            clock.mark("stage1", note="no hard rule fired")
+<span class="ln">170</span>            decision = await self._stage2_or_judge(event, scene, policy, now, clock)
+<span class="ln">171</span>
+<span class="ln">172</span>        if self.shadow:
+<span class="ln">173</span>            route, annotation = await self.shadow.apply(decision, now=now)
+<span class="ln">174</span>            if annotation:
+<span class="ln">175</span>                decision = decision.model_copy(
+<span class="ln">176</span>                    update={"route": route, "reason": f"{decision.reason}; {annotation}"}
+<span class="ln">177</span>                )
+<span class="ln">178</span>
+<span class="ln">179</span>        await self.state.save_event(event)
+<span class="ln">180</span>        await self.state.save_decision(decision)
+<span class="ln">181</span>        if self.actor:
+<span class="ln">182</span>            asyncio.ensure_future(self._act_safely(event, decision))
+<span class="ln">183</span>        if self.audit:
+<span class="ln">184</span>            self.audit.write(
+<span class="ln">185</span>                {
+<span class="ln">186</span>                    "at": now.isoformat(),
+<span class="ln">187</span>                    "event_id": event.id,
+<span class="ln">188</span>                    "route": decision.route,
+<span class="ln">189</span>                    "stage": decision.stage,
+<span class="ln">190</span>                    "score": decision.score,
+<span class="ln">191</span>                    "scene": decision.scene,
+<span class="ln">192</span>                    "reason": decision.reason,
+<span class="ln">193</span>                    "cost": decision.cost,
+<span class="ln">194</span>                    "prompt_version": decision.trace.prompt_version if decision.trace else None,
+<span class="ln">195</span>                    "degraded": decision.degraded,
+<span class="ln">196</span>                }
+<span class="ln">197</span>            )
+<span class="ln">198</span>        return decision</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>judge 降级</h3><p>降级块在 <code>core/brain.py:247</code> 到 <code>core/brain.py:282</code>，异常时写入 degraded meta，并把 route 保守设为 digest。恢复后 <code>core/brain.py:283</code> 到 <code>core/brain.py:286</code> 清除标记。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">core/brain.py</span> · core/brain.py:247-286</span><span>Python</span></div>
+        <pre class="code"><span class="ln">247</span>        try:
+<span class="ln">248</span>            result = await asyncio.wait_for(
+<span class="ln">249</span>                self.judge.judge(event, context), self.judge_timeout
+<span class="ln">250</span>            )
+<span class="ln">251</span>        except Exception as exc:  # malformed output, timeout, backend down — never crash
+<span class="ln">252</span>            logger.warning("judge %s unavailable (%s); degrading to rules-only", backend, exc)
+<span class="ln">253</span>            last_error = f"{type(exc).__name__}: {exc}"[:200]
+<span class="ln">254</span>            if self._degraded is not True or last_error != self._last_error:
+<span class="ln">255</span>                # transition or changed failure mode: refresh the marker, but
+<span class="ln">256</span>                # preserve `since` from any still-active record (incl. one
+<span class="ln">257</span>                # written before a daemon restart mid-outage)
+<span class="ln">258</span>                current = await load_degraded(self.state)
+<span class="ln">259</span>                await self.state.set_meta(
+<span class="ln">260</span>                    DEGRADED_KEY,
+<span class="ln">261</span>                    {
+<span class="ln">262</span>                        "active": True,
+<span class="ln">263</span>                        "since": current["since"] if current else now.isoformat(),
+<span class="ln">264</span>                        "last_error": last_error,
+<span class="ln">265</span>                    },
+<span class="ln">266</span>                )
+<span class="ln">267</span>                self._degraded, self._last_error = True, last_error
+<span class="ln">268</span>            clock.mark("judge", note=f"FAILED: {type(exc).__name__}")
+<span class="ln">269</span>            # retries that failed were still paid for — bill them (JudgeError.usage)
+<span class="ln">270</span>            usage = getattr(exc, "usage", None)
+<span class="ln">271</span>            return Decision(
+<span class="ln">272</span>                event_id=event.id,
+<span class="ln">273</span>                route="digest",  # conservative: never interrupt, never drop, while blind
+<span class="ln">274</span>                scene=scene.scene,
+<span class="ln">275</span>                scene_confidence=scene.confidence,
+<span class="ln">276</span>                cost=self._bill(backend, usage),
+<span class="ln">277</span>                reason=f"judge unavailable ({type(exc).__name__}); "
+<span class="ln">278</span>                "conservative rules-only routing to digest",
+<span class="ln">279</span>                stage=3,
+<span class="ln">280</span>                degraded=True,
+<span class="ln">281</span>                trace=self._usage_trace(clock, backend, usage),
+<span class="ln">282</span>            )
+<span class="ln">283</span>        if self._degraded is not False:  # recovery (or first success): clear marker once
+<span class="ln">284</span>            await self.state.set_meta(DEGRADED_KEY, {"active": False})
+<span class="ln">285</span>            self._degraded = False
+<span class="ln">286</span>        clock.mark("judge", note=f"backend {backend}")</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">brain loop input → normalize state → score / verify → persisted Decision</div>
+      <p>流程上，brain loop 并不是一个孤立函数。它会和 core/brain.py:52、core/brain.py:115、core/brain.py:247 共同形成一个闭环：先产生可解释中间状态，再把 route、score、cost 或 rejected reason 存回系统。</p>
+    </section>
+    <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <h3><span class="arr">▸</span>失败不是异常，而是产品路径</h3>
+      <p>边界处理在源码里是显式产品逻辑：core/brain.py:271 负责保守降级，core/brain.py:130 负责避免重复或噪声，core/state.py:1 负责留下可追踪状态。这让 agent-chief 的可信度来自失败路径，而不是只来自 happy path。</p>
+      <ul><li>judge 不可用时不得盲目 interrupt。</li><li>历史相似事件只能在阈值内复用，不应跳过新奇事件。</li><li>派发结果必须验证，不能信任“done”的自述。</li></ul>
+    </section>
+    <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">主页面</div><div class="card-d"><a href="../agent-chief.html">返回 agent-chief 总览</a></div></div><div class="card"><div class="card-h">源码</div><div class="card-d"><a href="https://github.com/SmileLikeYe/agent-chief">SmileLikeYe/agent-chief</a></div></div></div>
+    </section>
+    
+    <div class="foot"><span>Generated · 2026-07-09</span><span>Source · <a href="https://github.com/SmileLikeYe/agent-chief">SmileLikeYe/agent-chief</a></span></div>
+  </main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.remove('active')); map.get(e.target)?.classList.add('active'); } }), { rootMargin: '-40% 0px -55% 0px' });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) { links.forEach(a => { const o=document.createElement('option'); o.value=a.getAttribute('href'); o.textContent=a.textContent.trim(); sel.appendChild(o); }); sel.addEventListener('change', e => location.href=e.target.value); }
+  const canvas=document.getElementById('stars'); if(canvas){const ctx=canvas.getContext('2d'); const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;}; resize(); addEventListener('resize',resize); const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005})); const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a78bfa';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();}); requestAnimationFrame(tick);}; tick();}
+})();
+</script>
+</body>
+</html>
