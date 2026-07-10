@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>homerail · 可审计的本地 DAG Agent 运行时 · 源码观测台</title>
+<meta name="description" content="xiaotianfotos/homerail 源码级深度解析 — HomeRail 以 Manager、Node、Worker 和统一协议构成 voice-first 本地 Agent 编排栈，重点拆解 DAG 状态推进、失败纠正、运行审计与中断恢复。" />
+<meta property="og:title" content="homerail · 源码观测台" />
+<meta property="og:description" content="HomeRail 以 Manager、Node、Worker 和统一协议构成 voice-first 本地 Agent 编排栈，重点拆解 DAG 状态推进、失败纠正、运行审计与中断恢复。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #63b3ed;
+  --star-soft:  #9bd7ff;
+  --star-deep:  #2879ad;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">homerail<b>Rail</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">homerail<b>Rail</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">TypeScript · npm workspaces · Docker</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>四层控制面与数据面</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>DAG 引擎与 Worker 执行环</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从 READY 到可审计完成</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>纠正、重试与恢复测试</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>值得借鉴的工程亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>边界与部署风险</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★366 · 2026-07</div>
+      <div><a href="https://github.com/xiaotianfotos/homerail" target="_blank">xiaotianfotos/homerail</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">homerail <em>可审计的本地 DAG Agent 运行时</em></h1>
+          <p class="hero-desc">HomeRail 把语音入口、DAG 编排、容器化 Agent Worker 与本地审计串成一个可观察的运行时。它不把“多 Agent”停留在 prompt 层，而是把节点状态、交接端口、重试预算、会话与证据都写成可验证契约。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 366</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">85K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">538</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">today</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>HomeRail 的核心不是再包装一个聊天 UI，而是把 Agent 任务变成显式图运行。<code>sources/manager/src/orchestration/dag-engine.ts:3</code>、<code>sources/manager/src/orchestration/dag-engine.ts:12</code>、<code>sources/manager/src/orchestration/dag-engine.ts:16</code>、<code>sources/manager/src/orchestration/dag-engine.ts:18</code>、<code>sources/manager/src/orchestration/dag-engine.ts:20</code>、<code>sources/manager/src/orchestration/dag-engine.ts:23</code> 分别定义节点状态、整张图、交接记录、依赖满足集合、邮箱与失败端口；这些结构让系统可以回答“哪个节点能跑、为什么没跑、失败后流向哪里”，而不是依赖模型在自然语言里自行记忆。</p>
+      <p>执行面也没有和控制面揉成一团：<code>sources/manager/src/runtime/active-runs.ts:61</code>、<code>sources/manager/src/runtime/active-runs.ts:69</code>、<code>sources/manager/src/runtime/active-runs.ts:73</code>、<code>sources/manager/src/runtime/active-runs.ts:74</code>、<code>sources/manager/src/runtime/active-runs.ts:75</code>、<code>sources/manager/src/runtime/active-runs.ts:76</code> 把运行状态、预算计数和节点会话收进 ActiveRun，<code>sources/worker/src/prompt-runner.ts:167</code>、<code>sources/worker/src/prompt-runner.ts:174</code>、<code>sources/worker/src/prompt-runner.ts:182</code>、<code>sources/worker/src/prompt-runner.ts:192</code>、<code>sources/worker/src/prompt-runner.ts:228</code>、<code>sources/worker/src/prompt-runner.ts:256</code> 则在 Worker 内创建 DAG 工具、审计器、流式通道和具体模型客户端。Manager 决定何时调度，Worker 只执行一轮并通过 handoff 或 node_error 回报，职责切分清楚。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">Manager 控制面 + Node 容器生命周期 + Worker 执行面 + Protocol 契约层；DAG 通过端口和 mailbox 传递数据。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">DAGRun / ActiveRun / DispatchEnvelope / AgentSession；状态、预算、会话和审计互相独立但由 runId 串联。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">仓库约 85K 行 TypeScript/JavaScript、538 个文件；本次关注状态推进、调度与审计，而非宣称模型精度。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Claude SDK、Codex App Server、Kimi Code、多种容器 Provider、WebSocket 控制通道和本地 Voice UI。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">四层控制面与数据面</h2>
+      <p>从源码关系看，UI/Voice 只负责把意图交给 Manager；Manager 在 <code>sources/manager/src/runtime/active-runs.ts:336</code>、<code>sources/manager/src/runtime/active-runs.ts:341</code>、<code>sources/manager/src/runtime/active-runs.ts:357</code>、<code>sources/manager/src/runtime/active-runs.ts:360</code>、<code>sources/manager/src/runtime/active-runs.ts:365</code>、<code>sources/manager/src/runtime/active-runs.ts:377</code> 创建运行、解析限制并发布 READY 事件，随后 Node 层按能力启动 Worker。Worker 的 <code>sources/worker/src/prompt-runner.ts:193</code>、<code>sources/worker/src/prompt-runner.ts:207</code>、<code>sources/worker/src/prompt-runner.ts:231</code>、<code>sources/worker/src/prompt-runner.ts:238</code>、<code>sources/worker/src/prompt-runner.ts:239</code>、<code>sources/worker/src/prompt-runner.ts:240</code> 把文本流、调试流和会话身份封装回 WebSocket，因此前端观察到的是结构化事件，而不是直接耦合某一家模型 SDK。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="node">Voice / Web UI</span><span class="arrow">→</span><span class="node">Manager API</span><span class="arrow">→</span><span class="node hot">DAG ActiveRun</span><span class="arrow">→</span><span class="node">Node Provider</span><span class="arrow">→</span><span class="node">Worker + Agent Backend</span><br><span class="node">JSONL Audit</span><span class="arrow">← events / tools / usage ←</span><span class="node">WebSocket Event Bus</span></div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>协议层规定消息与工具契约；Manager 维护 DAG 和运行预算；Node 管容器及挂载；Worker 适配具体模型并产出审计证据。四层都能独立测试，故障不会被一个巨型服务吞掉。</p>
+      <div class="g3"><div class="card"><div class="card-h">homerail_protocol</div><div class="card-d">跨进程消息、Agent 配置、DAG 端口与工具 schema。</div></div><div class="card"><div class="card-h">homerail_manager</div><div class="card-d">图验证、ActiveRun、调度、恢复和事件总线。</div></div><div class="card"><div class="card-h">homerail_worker / node</div><div class="card-d">模型后端、工具执行、审计以及容器生命周期。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_manager/src/orchestration/dag-engine.ts</span> · L3-21</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">3</span>export type NodeState =
+<span class="ln">4</span>  | "PENDING"
+<span class="ln">5</span>  | "READY"
+<span class="ln">6</span>  | "RUNNING"
+<span class="ln">7</span>  | "COMPLETED"
+<span class="ln">8</span>  | "FAILED"
+<span class="ln">9</span>  | "CANCELLED"
+<span class="ln">10</span>  | "SKIPPED";
+<span class="ln">11</span>
+<span class="ln">12</span>export interface DAGRun {
+<span class="ln">13</span>  runId: string;
+<span class="ln">14</span>  graph: DAGGraphData;
+<span class="ln">15</span>  loopSources: Set&lt;string&gt;;
+<span class="ln">16</span>  nodeStates: Map&lt;string, NodeState&gt;;
+<span class="ln">17</span>  handoffedNodes: Set&lt;string&gt;;
+<span class="ln">18</span>  afterSatisfied: Map&lt;string, Set&lt;string&gt;&gt;;
+<span class="ln">19</span>  inputSatisfied: Map&lt;string, Set&lt;string&gt;&gt;;
+<span class="ln">20</span>  mailboxes: Map&lt;string, Map&lt;string, unknown[]&gt;&gt;;
+<span class="ln">21</span>}</pre>
+      </div>
+
+      <a class="deep-link" href="homerail/homerail-dag-runtime.html">深度阅读 · DAG 状态机与调度预算</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">DAG 引擎与 Worker 执行环</h2>
+
+      <h3><span class="arr">▸</span>状态晋升不是“上游结束就跑”，还要确认路由真的命中</h3>
+      <p>节点初始状态由 after_dep 决定，<code>sources/manager/src/orchestration/dag-engine.ts:65</code>、<code>sources/manager/src/orchestration/dag-engine.ts:67</code>、<code>sources/manager/src/orchestration/dag-engine.ts:70</code>、<code>sources/manager/src/orchestration/dag-engine.ts:76</code>、<code>sources/manager/src/orchestration/dag-engine.ts:77</code>、<code>sources/manager/src/orchestration/dag-engine.ts:83</code> 初始化每个节点的状态与邮箱；真正晋升时，<code>sources/manager/src/orchestration/dag-engine.ts:106</code>、<code>sources/manager/src/orchestration/dag-engine.ts:109</code>、<code>sources/manager/src/orchestration/dag-engine.ts:110</code>、<code>sources/manager/src/orchestration/dag-engine.ts:113</code>、<code>sources/manager/src/orchestration/dag-engine.ts:120</code>、<code>sources/manager/src/orchestration/dag-engine.ts:125</code> 同时检查依赖是否完成、显式输入边是否被选中。这个双重条件避免条件分支没有走到某节点时，节点仍因“所有前驱都结束”而误启动。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">homerail_manager/src/orchestration/dag-engine.ts</span> · L234-260</span><span>TypeScript</span></div><pre class="code"><span class="ln">234</span>export function handoff(
+<span class="ln">235</span>  run: DAGRun,
+<span class="ln">236</span>  fromNode: string,
+<span class="ln">237</span>  port: string,
+<span class="ln">238</span>  content: unknown,
+<span class="ln">239</span>): DAGTransitionResult {
+<span class="ln">240</span>  if (!run.nodeStates.has(fromNode)) {
+<span class="ln">241</span>    throw new Error(`Unknown node: ${fromNode}`);
+<span class="ln">242</span>  }
+<span class="ln">243</span>
+<span class="ln">244</span>  const matchingDownstream = run.graph.edges.filter(
+<span class="ln">245</span>    (edge) =&gt;
+<span class="ln">246</span>      edge.from_node === fromNode &amp;&amp;
+<span class="ln">247</span>      edge.label !== "after_dep" &amp;&amp;
+<span class="ln">248</span>      edge.to_node !== "" &amp;&amp;
+<span class="ln">249</span>      edgeMatchesHandoff(edge, port),
+<span class="ln">250</span>  );
+<span class="ln">251</span>  const terminalFailure = isFailurePort(port) &amp;&amp; matchingDownstream.length === 0;
+<span class="ln">252</span>  run.handoffedNodes.add(fromNode);
+<span class="ln">253</span>  run.nodeStates.set(
+<span class="ln">254</span>    fromNode,
+<span class="ln">255</span>    terminalFailure
+<span class="ln">256</span>      ? "FAILED"
+<span class="ln">257</span>      : run.loopSources.has(fromNode)
+<span class="ln">258</span>        ? "RUNNING"
+<span class="ln">259</span>        : "COMPLETED",
+<span class="ln">260</span>  );</pre></div><p></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_manager/src/orchestration/dag-engine.ts</span> · L106-126</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">106</span>function _tryPromote(run: DAGRun, nodeId: string): void {
+<span class="ln">107</span>  if (run.nodeStates.get(nodeId) !== "PENDING") return;
+<span class="ln">108</span>  const deps = _incomingAfterDeps(run.graph.edges, nodeId);
+<span class="ln">109</span>  const satisfiedDeps = run.afterSatisfied.get(nodeId);
+<span class="ln">110</span>  const satisfied = deps.every((e) =&gt; satisfiedDeps?.has(e.from_node));
+<span class="ln">111</span>  if (!satisfied) return;
+<span class="ln">112</span>
+<span class="ln">113</span>  const routedInputs = run.inputSatisfied.get(nodeId);
+<span class="ln">114</span>  for (const dep of deps) {
+<span class="ln">115</span>    const explicitFromDep = _incomingExplicitEdgesFrom(
+<span class="ln">116</span>      run.graph.edges,
+<span class="ln">117</span>      nodeId,
+<span class="ln">118</span>      dep.from_node,
+<span class="ln">119</span>    );
+<span class="ln">120</span>    if (explicitFromDep.length &gt; 0 &amp;&amp; !routedInputs?.has(dep.from_node)) {
+<span class="ln">121</span>      return;
+<span class="ln">122</span>    }
+<span class="ln">123</span>  }
+<span class="ln">124</span>
+<span class="ln">125</span>  run.nodeStates.set(nodeId, "READY");
+<span class="ln">126</span>}</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Worker 把模型事件折叠为统一流，并把“未 handoff”视为错误</h3>
+      <p>Worker 在 <code>sources/worker/src/prompt-runner.ts:228</code>、<code>sources/worker/src/prompt-runner.ts:229</code>、<code>sources/worker/src/prompt-runner.ts:230</code>、<code>sources/worker/src/prompt-runner.ts:231</code>、<code>sources/worker/src/prompt-runner.ts:243</code>、<code>sources/worker/src/prompt-runner.ts:249</code> 校验模型协议、创建适配器并先保存去密后的会话配置；事件循环从 <code>sources/worker/src/prompt-runner.ts:256</code>、<code>sources/worker/src/prompt-runner.ts:258</code>、<code>sources/worker/src/prompt-runner.ts:263</code>、<code>sources/worker/src/prompt-runner.ts:291</code>、<code>sources/worker/src/prompt-runner.ts:303</code>、<code>sources/worker/src/prompt-runner.ts:312</code> 将文本、调试、工具调用和工具结果分别发往 UI、transcript 与 tool-events。若循环正常结束但 DAG 工具没有 yielded，<code>sources/worker/src/prompt-runner.ts:352</code>、<code>sources/worker/src/prompt-runner.ts:355</code>、<code>sources/worker/src/prompt-runner.ts:360</code>、<code>sources/worker/src/prompt-runner.ts:364</code> 会主动发送 node_error，阻止“模型说完了但图没有前进”的假成功。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">homerail_worker/src/prompt-runner.ts</span> · L228-260</span><span>TypeScript</span></div><pre class="code"><span class="ln">228</span>  try {
+<span class="ln">229</span>    assertAgentRuntimeProtocol(agentBackend, job.llmProtocol);
+<span class="ln">230</span>    const agent = createAgentClient(agentBackend);
+<span class="ln">231</span>    const context: AgentRunContext = {
+<span class="ln">232</span>      systemPrompt: job.systemPrompt,
+<span class="ln">233</span>      provider: job.llmProvider,
+<span class="ln">234</span>      protocol: job.llmProtocol,
+<span class="ln">235</span>      model: job.dagConfig.model,
+<span class="ln">236</span>      apiKey: job.llmApiKey ?? process.env.LLM_API_KEY ?? "",
+<span class="ln">237</span>      baseUrl: resolveAgentBaseUrl(job, agentBackend),
+<span class="ln">238</span>      workspace: process.env.WORKSPACE ?? process.cwd(),
+<span class="ln">239</span>      sessionId: job.dagConfig.session_id ?? job.runId,
+<span class="ln">240</span>      abortSignal: deps.abortSignal,
+<span class="ln">241</span>    };
+<span class="ln">242</span>    try {
+<span class="ln">243</span>      saveSession({
+<span class="ln">244</span>        sessionId,
+<span class="ln">245</span>        runId: job.runId,
+<span class="ln">246</span>        nodeId: job.dagConfig.node_id,
+<span class="ln">247</span>        messages: [{ role: "user", content: job.task }],
+<span class="ln">248</span>        toolCallState: { inFlight: false },
+<span class="ln">249</span>        agentConfig: redactAgentContext(context),
+<span class="ln">250</span>        timestamp: Date.now(),
+<span class="ln">251</span>      });
+<span class="ln">252</span>    } catch {
+<span class="ln">253</span>      // Best-effort.
+<span class="ln">254</span>    }
+<span class="ln">255</span>    let errorMessage: string | null = null;
+<span class="ln">256</span>    for await (const event of agent.run(job.task, dagTools, context)) {
+<span class="ln">257</span>      switch (event.type) {
+<span class="ln">258</span>        case "text":
+<span class="ln">259</span>          sendContent(event.text);
+<span class="ln">260</span>          audit?.transcript.write({ event: "text", text: event.text });</pre></div><p></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_worker/src/prompt-runner.ts</span> · L167-190</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">167</span>  // Create DAG tools state
+<span class="ln">168</span>  const dagState = createDagToolsState(job.dagConfig, job.runId, wsSend);
+<span class="ln">169</span>  const dagTools = createDagTools(dagState);
+<span class="ln">170</span>  const unregisterInboxHandler = deps.registerInboxHandler?.((content) =&gt; {
+<span class="ln">171</span>    deliverInbox(dagState, content);
+<span class="ln">172</span>  });
+<span class="ln">173</span>
+<span class="ln">174</span>  // Create audit writers
+<span class="ln">175</span>  let audit: AuditWriters | null = null;
+<span class="ln">176</span>  try {
+<span class="ln">177</span>    audit = createAuditWriters(job.runId, auditDir);
+<span class="ln">178</span>  } catch {
+<span class="ln">179</span>    // Non-fatal — audit is best-effort
+<span class="ln">180</span>  }
+<span class="ln">181</span>
+<span class="ln">182</span>  // Write initial transcript entry
+<span class="ln">183</span>  audit?.transcript.write({
+<span class="ln">184</span>    event: "prompt_start",
+<span class="ln">185</span>    node_id: job.dagConfig.node_id,
+<span class="ln">186</span>    run_id: job.runId,
+<span class="ln">187</span>    sender: job.sender,
+<span class="ln">188</span>    task_preview: job.task.slice(0, 500),
+<span class="ln">189</span>  });
+<span class="ln">190</span>  appendSessionTranscript("prompt_start", { task_preview: job.task.slice(0, 500) });</pre>
+      </div>
+
+      <a class="deep-link" href="homerail/homerail-audit-resume.html">深度阅读 · 审计证据、校验和与会话恢复</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从 READY 到可审计完成</h2>
+      <p>一轮执行的关键链条是 READY → 构造 DispatchEnvelope → Provider 发送 → RUNNING → Worker 事件流 → handoff → 下游 mailbox。<code>sources/manager/src/runtime/active-runs.ts:1343</code>、<code>sources/manager/src/runtime/active-runs.ts:1344</code>、<code>sources/manager/src/runtime/active-runs.ts:1355</code>、<code>sources/manager/src/runtime/active-runs.ts:1357</code>、<code>sources/manager/src/runtime/active-runs.ts:1360</code>、<code>sources/manager/src/runtime/active-runs.ts:1375</code> 把输入、稳定 sessionId、Agent 配置和能力要求装进 envelope；<code>sources/manager/src/runtime/active-runs.ts:1389</code>、<code>sources/manager/src/runtime/active-runs.ts:1398</code>、<code>sources/manager/src/runtime/active-runs.ts:1407</code>、<code>sources/manager/src/runtime/active-runs.ts:1412</code>、<code>sources/manager/src/runtime/active-runs.ts:1420</code>、<code>sources/manager/src/runtime/active-runs.ts:1445</code> 再逐个调度 READY 节点、执行预算门禁、处理一次瞬时重试并最终切到 RUNNING。</p>
+
+      <h3><span class="arr">▸</span>成功路径：显式端口驱动下游</h3>
+      <div class="flow"><span class="node">READY</span><span class="arrow">→ build envelope →</span><span class="node">dispatcher</span><span class="arrow">→</span><span class="node hot">RUNNING</span><span class="arrow">→ handoff(port)</span><span class="node">mailbox</span><span class="arrow">→</span><span class="node">next READY</span></div>
+
+      <h3><span class="arr">▸</span>失败路径：纠正预算优先，耗尽后再自动交接或终止</h3>
+      <div class="flow"><span class="node">node_error</span><span class="arrow">→</span><span class="node">correction mailbox</span><span class="arrow">→ retry</span><span class="node hot">READY</span><span class="arrow">→ exhausted</span><span class="node">auto handoff / FAILED</span></div>
+
+      <a class="deep-link" href="homerail/homerail-dag-runtime.html">深度阅读 · 交接、条件分支与瞬时调度重试</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">纠正、重试与恢复测试</h2>
+      <p>仓库不是只测 happy path。纠正测试从 <code>sources/manager/tests/dag-correction-retry.test.ts:76</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:77</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:81</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:84</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:88</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:90</code> 验证缺少 handoff 时节点回到 READY 并收到 correction 输入；<code>sources/manager/tests/dag-correction-retry.test.ts:93</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:99</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:101</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:103</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:105</code> 验证纠正次数耗尽后的自动成功端口；<code>sources/manager/tests/dag-correction-retry.test.ts:108</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:111</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:113</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:117</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:118</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:119</code> 则确认可重试派发失败只重试一次并记录计数。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>测试还明确区分瞬时故障和能力不匹配：<code>sources/manager/tests/dag-correction-retry.test.ts:122</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:125</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:127</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:128</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:131</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:135</code>、<code>sources/manager/tests/dag-correction-retry.test.ts:136</code> 用 retryable:false 模拟找不到满足能力的 Worker，要求不重试、运行失败、节点进入 FAILED。这个断言与 <code>sources/manager/src/runtime/active-runs.ts:1421</code>、<code>sources/manager/src/runtime/active-runs.ts:1422</code>、<code>sources/manager/src/runtime/active-runs.ts:1423</code>、<code>sources/manager/src/runtime/active-runs.ts:1439</code>、<code>sources/manager/src/runtime/active-runs.ts:1440</code> 的生产逻辑对应，避免把确定性配置错误伪装成网络抖动反复消耗预算。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/dag-correction-retry.test.ts</span> · L76-105</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">76</span>  it("reschedules a node with a correction prompt before failing the run", () =&gt; {
+<span class="ln">77</span>    const parsed = parseDAGYaml(correctionYaml(1));
+<span class="ln">78</span>    createActiveRun("run-correction", parsed);
+<span class="ln">79</span>    const dispatcher = new FlakyDispatcher({ status: "dispatched", targetType: "fake", targetId: "first" });
+<span class="ln">80</span>
+<span class="ln">81</span>    expect(dispatchReadyNodes("run-correction", dispatcher)).toBe(1);
+<span class="ln">82</span>    expect(getActiveRun("run-correction")?.dagRun.nodeStates.get("start")).toBe("RUNNING");
+<span class="ln">83</span>
+<span class="ln">84</span>    const correction = requestNodeCorrection("run-correction", "start", "agent ended without DAG handoff");
+<span class="ln">85</span>    expect(correction.status).toBe("scheduled");
+<span class="ln">86</span>    expect(getActiveRun("run-correction")?.dagRun.nodeStates.get("start")).toBe("READY");
+<span class="ln">87</span>
+<span class="ln">88</span>    expect(dispatchReadyNodes("run-correction", dispatcher)).toBe(1);
+<span class="ln">89</span>    expect(dispatcher.calls).toHaveLength(2);
+<span class="ln">90</span>    expect(dispatcher.calls[1].inputs.correction?.[0]).toContain("agent ended without DAG handoff");
+<span class="ln">91</span>  });
+<span class="ln">92</span>
+<span class="ln">93</span>  it("auto-handoffs on a success port after correction attempts are exhausted", () =&gt; {
+<span class="ln">94</span>    const parsed = parseDAGYaml(correctionYaml(1));
+<span class="ln">95</span>    createActiveRun("run-auto-handoff", parsed);
+<span class="ln">96</span>    const dispatcher = new FlakyDispatcher({ status: "dispatched", targetType: "fake", targetId: "first" });
+<span class="ln">97</span>    dispatchReadyNodes("run-auto-handoff", dispatcher);
+<span class="ln">98</span>
+<span class="ln">99</span>    expect(requestNodeCorrection("run-auto-handoff", "start", "missing handoff").status).toBe("scheduled");
+<span class="ln">100</span>    dispatchReadyNodes("run-auto-handoff", dispatcher);
+<span class="ln">101</span>    expect(requestNodeCorrection("run-auto-handoff", "start", "missing handoff again").status).toBe("exhausted");
+<span class="ln">102</span>
+<span class="ln">103</span>    const run = autoHandoffAfterCorrectionExhausted("run-auto-handoff", "start", "missing handoff again");
+<span class="ln">104</span>    expect(run?.status).toBe("completed");
+<span class="ln">105</span>    expect(run?.dagRun.nodeStates.get("start")).toBe("COMPLETED");</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>条件边未命中时节点必须 SKIPPED，而不是因 after_dep 满足被误唤醒。</li><li>Agent 正常结束但没有 handoff 会触发 correction；次数受 max_corrections_per_node 限制。</li><li>瞬时派发错误最多重试一次；能力不匹配等确定性失败不重试。</li><li>Manager 冷重启会重放 handoff 历史，但孤儿 RUNNING 节点会被降级为失败。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">值得借鉴的工程亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">显式状态机</div><div class="card-d">节点可达性、条件分支、循环唤醒和终止条件均由代码推进，不把控制权交给模型措辞。</div></div><div class="card"><div class="card-h">预算化容错</div><div class="card-d">dispatch、handoff、edge traversal、correction 都有上限，避免自治循环无限扩张。</div></div><div class="card"><div class="card-h">双轨证据</div><div class="card-d">transcript 和 tool-events 分离写入，结束时为 transcript 写校验和，可检查证据是否完整。</div></div><div class="card"><div class="card-h">可替换模型后端</div><div class="card-d">Worker 在统一事件协议下适配 Claude、Codex App Server、Kimi 等运行时。</div></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>HomeRail 仍是 2026 年 7 月刚创建的早期项目。<code>sources/worker/src/audit/index.ts:57</code>、<code>sources/worker/src/audit/index.ts:63</code>、<code>sources/worker/src/audit/index.ts:70</code>、<code>sources/worker/src/audit/index.ts:77</code>、<code>sources/worker/src/audit/index.ts:79</code>、<code>sources/worker/src/audit/index.ts:85</code> 能检查审计文件、校验和 sidecar 与工具事件，但 PromptRunner 的审计创建在 <code>sources/worker/src/prompt-runner.ts:174</code>、<code>sources/worker/src/prompt-runner.ts:177</code>、<code>sources/worker/src/prompt-runner.ts:178</code>、<code>sources/worker/src/prompt-runner.ts:179</code> 被明确设计为 best-effort：审计器初始化失败不会阻断任务。这有利于可用性，却意味着“任务完成”不自动等于“证据完整”，生产环境必须额外把 completeness 结果纳入发布门禁。</p>
+      <div class="g2"><div class="card"><div class="card-h">早期 API 变化</div><div class="card-d">协议标记 v0.1.x，模块数量大且变化快，集成方应锁定提交与 schema。</div></div><div class="card"><div class="card-h">本地密钥与挂载</div><div class="card-d">多 Provider、容器和外部模型意味着密钥、workspace mount 与网络策略需要独立审计。</div></div><div class="card"><div class="card-h">Best-effort 审计</div><div class="card-d">审计写入失败不阻止 Agent 继续；强合规场景要把证据缺失升级为硬失败。</div></div><div class="card"><div class="card-h">恢复语义</div><div class="card-d">冷恢复会把孤儿 RUNNING 节点判失败；长任务需明确是否允许自动补偿或人工接管。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-07-10</span>
+      <span>Source · <a href="https://github.com/xiaotianfotos/homerail">xiaotianfotos/homerail</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../homerail.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

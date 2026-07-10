@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>审计证据、校验和与会话恢复 · 深度解析 · homerail</title>
+<meta name="description" content="homerail Audit & resume 子模块完整解析 — HomeRail 源码级模块解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #63b3ed;
+  --star-soft:  #9bd7ff;
+  --star-deep:  #2879ad;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">homerail<b>Rail</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">homerail<b>Rail</b></div>
+      <div class="sub">Audit & resume · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../homerail.html">← 返回 homerail 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">审计证据、校验和与会话恢复 <em>深度解析</em></h1>
+      <p class="hero-desc">HomeRail 不只保存模型最终文本：它分离记录 transcript、工具事件和会话快照，并在中断恢复时删除未完成工具调用，避免重复上下文污染。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>PromptRunner 启动时先在 <code>sources/worker/src/prompt-runner.ts:167</code>、<code>sources/worker/src/prompt-runner.ts:168</code>、<code>sources/worker/src/prompt-runner.ts:169</code>、<code>sources/worker/src/prompt-runner.ts:174</code>、<code>sources/worker/src/prompt-runner.ts:175</code>、<code>sources/worker/src/prompt-runner.ts:177</code> 创建 DAG 工具与两个审计 writer；<code>sources/worker/src/prompt-runner.ts:182</code>、<code>sources/worker/src/prompt-runner.ts:183</code>、<code>sources/worker/src/prompt-runner.ts:185</code>、<code>sources/worker/src/prompt-runner.ts:186</code>、<code>sources/worker/src/prompt-runner.ts:188</code>、<code>sources/worker/src/prompt-runner.ts:190</code> 立即写入 prompt_start 和裁剪后的任务预览。审计失败被视为非致命，但 session transcript 仍有另一条 best-effort 写入路径，因此运行控制与证据采集不会互相锁死。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_worker/src/audit/index.ts</span> · L32-46</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">32</span>export interface AuditWriters {
+<span class="ln">33</span>  transcript: TranscriptWriter;
+<span class="ln">34</span>  toolEvents: ToolEventWriter;
+<span class="ln">35</span>}
+<span class="ln">36</span>
+<span class="ln">37</span>export function createAuditWriters(
+<span class="ln">38</span>  runId: string,
+<span class="ln">39</span>  baseDir?: string,
+<span class="ln">40</span>): AuditWriters {
+<span class="ln">41</span>  assertSafeToolEventRunId(runId);
+<span class="ln">42</span>  return {
+<span class="ln">43</span>    transcript: createTranscriptWriter(runId, baseDir),
+<span class="ln">44</span>    toolEvents: createToolEventWriter(runId, baseDir),
+<span class="ln">45</span>  };
+<span class="ln">46</span>}</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Transcript 追加 JSONL，关闭时生成 sidecar 校验和</h3>
+      <p>Transcript writer 在 <code>sources/worker/src/audit/transcript-writer.ts:19</code>、<code>sources/worker/src/audit/transcript-writer.ts:23</code>、<code>sources/worker/src/audit/transcript-writer.ts:24</code>、<code>sources/worker/src/audit/transcript-writer.ts:25</code>、<code>sources/worker/src/audit/transcript-writer.ts:26</code>、<code>sources/worker/src/audit/transcript-writer.ts:27</code> 校验 runId、创建目录并以 append 模式打开文件；每条记录由 <code>sources/worker/src/audit/transcript-writer.ts:29</code>、<code>sources/worker/src/audit/transcript-writer.ts:30</code>、<code>sources/worker/src/audit/transcript-writer.ts:31</code>、<code>sources/worker/src/audit/transcript-writer.ts:32</code>、<code>sources/worker/src/audit/transcript-writer.ts:39</code>、<code>sources/worker/src/audit/transcript-writer.ts:41</code> 加上时间戳后写入，close 回调在 <code>sources/worker/src/audit/transcript-writer.ts:42</code>、<code>sources/worker/src/audit/transcript-writer.ts:43</code>、<code>sources/worker/src/audit/transcript-writer.ts:45</code>、<code>sources/worker/src/audit/transcript-writer.ts:46</code> 生成校验和 sidecar。这样长运行不必把全文留在内存，同时结束后可以检查文件是否被截断或篡改。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_worker/src/audit/transcript-writer.ts</span> · L19-48</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">19</span>export function createTranscriptWriter(
+<span class="ln">20</span>  runId: string,
+<span class="ln">21</span>  baseDir?: string,
+<span class="ln">22</span>): TranscriptWriter {
+<span class="ln">23</span>  const safeRunId = assertSafeRunId(runId);
+<span class="ln">24</span>  const dir = baseDir ?? homerailPath("audit", "transcripts");
+<span class="ln">25</span>  mkdirSync(dir, { recursive: true });
+<span class="ln">26</span>  const filePath = join(dir, `${safeRunId}.jsonl`);
+<span class="ln">27</span>  const stream: Writable = createWriteStream(filePath, { flags: "a" });
+<span class="ln">28</span>
+<span class="ln">29</span>  return {
+<span class="ln">30</span>    write(entry: Record&lt;string, unknown&gt;) {
+<span class="ln">31</span>      const line = JSON.stringify({ ...entry, ts: Date.now() }) + "\n";
+<span class="ln">32</span>      stream.write(line);
+<span class="ln">33</span>    },
+<span class="ln">34</span>    flush() {
+<span class="ln">35</span>      return new Promise&lt;void&gt;((resolve, reject) =&gt; {
+<span class="ln">36</span>        stream.write("", (err) =&gt; (err ? reject(err) : resolve()));
+<span class="ln">37</span>      });
+<span class="ln">38</span>    },
+<span class="ln">39</span>    close() {
+<span class="ln">40</span>      return new Promise&lt;void&gt;((resolve, reject) =&gt; {
+<span class="ln">41</span>        stream.end(() =&gt; {
+<span class="ln">42</span>          writeTranscriptChecksum(filePath);
+<span class="ln">43</span>          resolve();
+<span class="ln">44</span>        });
+<span class="ln">45</span>        stream.on("error", reject);
+<span class="ln">46</span>      });
+<span class="ln">47</span>    },
+<span class="ln">48</span>  };</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Session 快照去除密钥，中断在工具调用中则剔除半成品消息</h3>
+      <p>会话快照的数据契约在 <code>sources/worker/src/session/session-store.ts:24</code>、<code>sources/worker/src/session/session-store.ts:25</code>、<code>sources/worker/src/session/session-store.ts:26</code>、<code>sources/worker/src/session/session-store.ts:27</code>、<code>sources/worker/src/session/session-store.ts:29</code>、<code>sources/worker/src/session/session-store.ts:33</code> 保存 run、node、消息、工具调用状态和去密配置；写盘前 <code>sources/worker/src/session/session-store.ts:79</code>、<code>sources/worker/src/session/session-store.ts:80</code>、<code>sources/worker/src/session/session-store.ts:81</code>、<code>sources/worker/src/session/session-store.ts:82</code>、<code>sources/worker/src/session/session-store.ts:83</code>、<code>sources/worker/src/session/session-store.ts:87</code> 只保留 provider、model 与 workspace，不持久化 API key。恢复时 <code>sources/worker/src/session/resume.ts:16</code>、<code>sources/worker/src/session/resume.ts:17</code>、<code>sources/worker/src/session/resume.ts:20</code>、<code>sources/worker/src/session/resume.ts:25</code>、<code>sources/worker/src/session/resume.ts:29</code>、<code>sources/worker/src/session/resume.ts:30</code> 判断是否中断于工具调用，并按 pendingToolCallId 同时删除未完成的 tool_use 与可能的局部 tool_result。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/homerail_worker/src/session/resume.ts</span> · L16-44</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">16</span>export function resumeSession(runId: string, baseDir?: string): ResumeResult | null {
+<span class="ln">17</span>  const state = loadSession(runId, baseDir);
+<span class="ln">18</span>  if (!state) return null;
+<span class="ln">19</span>
+<span class="ln">20</span>  const wasInterrupted = state.toolCallState.inFlight;
+<span class="ln">21</span>
+<span class="ln">22</span>  // If interrupted mid-tool, strip the in-flight tool_use from the
+<span class="ln">23</span>  // conversation so the agent can re-execute cleanly.
+<span class="ln">24</span>  let messages = state.messages;
+<span class="ln">25</span>  if (wasInterrupted &amp;&amp; state.toolCallState.pendingToolCallId) {
+<span class="ln">26</span>    // Remove any tool_result that might have been partially written for
+<span class="ln">27</span>    // the pending call, and keep everything up to but not including the
+<span class="ln">28</span>    // pending assistant message.
+<span class="ln">29</span>    const pendingId = state.toolCallState.pendingToolCallId;
+<span class="ln">30</span>    messages = messages.filter(
+<span class="ln">31</span>      (m) =&gt; m.tool_call_id !== pendingId &amp;&amp; !m.tool_calls?.some((tc) =&gt; tc.id === pendingId),
+<span class="ln">32</span>    );
+<span class="ln">33</span>  }
+<span class="ln">34</span>
+<span class="ln">35</span>  return {
+<span class="ln">36</span>    context: {
+<span class="ln">37</span>      ...state.agentConfig,
+<span class="ln">38</span>      apiKey: "",
+<span class="ln">39</span>      baseUrl: "",
+<span class="ln">40</span>    },
+<span class="ln">41</span>    messages,
+<span class="ln">42</span>    wasInterrupted,
+<span class="ln">43</span>  };
+<span class="ln">44</span>}</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow"><span class="node">prompt_start</span><span class="arrow">→</span><span class="node">transcript.jsonl</span><span class="arrow">+</span><span class="node">tool-events/run.jsonl</span><span class="arrow">→ close</span><span class="node hot">checksum sidecar</span><br><span class="node">session.json</span><span class="arrow">→ crash → sanitize pending call →</span><span class="node">resume context</span></div>
+      <p>工具事件单独按 runId 分片。<code>sources/worker/src/audit/tool-event-writer.ts:19</code>、<code>sources/worker/src/audit/tool-event-writer.ts:20</code>、<code>sources/worker/src/audit/tool-event-writer.ts:23</code>、<code>sources/worker/src/audit/tool-event-writer.ts:24</code>、<code>sources/worker/src/audit/tool-event-writer.ts:35</code>、<code>sources/worker/src/audit/tool-event-writer.ts:36</code> 先阻断路径穿越并计算文件位置，<code>sources/worker/src/audit/tool-event-writer.ts:43</code>、<code>sources/worker/src/audit/tool-event-writer.ts:44</code>、<code>sources/worker/src/audit/tool-event-writer.ts:45</code>、<code>sources/worker/src/audit/tool-event-writer.ts:47</code>、<code>sources/worker/src/audit/tool-event-writer.ts:50</code>、<code>sources/worker/src/audit/tool-event-writer.ts:52</code> 再把事件补上 run_id 和时间戳后追加。读取逻辑在 <code>sources/worker/src/audit/tool-event-writer.ts:69</code>、<code>sources/worker/src/audit/tool-event-writer.ts:71</code>、<code>sources/worker/src/audit/tool-event-writer.ts:72</code>、<code>sources/worker/src/audit/tool-event-writer.ts:74</code>、<code>sources/worker/src/audit/tool-event-writer.ts:75</code>、<code>sources/worker/src/audit/tool-event-writer.ts:77</code> 同时兼容新版分片文件和旧版全局文件，并按时间排序。</p><h3><span class="arr">▸</span>完整性检查必须成为上层策略，而不是假设</h3><p><code>sources/worker/src/audit/index.ts:63</code>、<code>sources/worker/src/audit/index.ts:67</code>、<code>sources/worker/src/audit/index.ts:68</code>、<code>sources/worker/src/audit/index.ts:71</code>、<code>sources/worker/src/audit/index.ts:74</code>、<code>sources/worker/src/audit/index.ts:77</code> 检查 transcript 是否存在并计算当前 hash，<code>sources/worker/src/audit/index.ts:79</code>、<code>sources/worker/src/audit/index.ts:80</code>、<code>sources/worker/src/audit/index.ts:81</code>、<code>sources/worker/src/audit/index.ts:84</code>、<code>sources/worker/src/audit/index.ts:85</code>、<code>sources/worker/src/audit/index.ts:89</code> 再验证 sidecar 和 tool-events。返回值是 complete 加 missing 列表，而 PromptRunner 的审计写入本身是 best-effort；高合规部署应在工作流末端显式调用这一检查，并把缺证据当成失败或人工复核。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>runId 含斜杠、反斜杠或非白名单字符会被拒绝，防止审计路径逃逸。</li><li>审计 writer 创建失败不会阻断 Agent；因此业务成功与证据完整必须分别判定。</li><li>旧版 tool-events.jsonl 仍会被读取，并按 run_id 过滤后与新版分片合并。</li><li>工具调用中断时删除未完成调用，可能导致外部副作用已发生但对话中没有结果；工具本身仍需幂等键。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">DAG Runtime</div><div class="card-d"><a href="homerail-dag-runtime.html">查看状态晋升、handoff 与调度预算 →</a></div></div><div class="card"><div class="card-h">返回总览</div><div class="card-d"><a href="../homerail.html">回到 HomeRail 架构与风险总览 →</a></div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-10</span>
+      <span>Source · <a href="https://github.com/xiaotianfotos/homerail">xiaotianfotos/homerail</a></span>
+      <span><a href="../homerail.html">↑ homerail 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
