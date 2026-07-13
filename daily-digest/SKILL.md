@@ -1,145 +1,141 @@
+---
+name: daily-digest
+description: 每天自动汇编一期「AI 每日速递」深色主题日报 HTML，并部署到 GitHub Pages。内容源覆盖 Google News（AI 要闻）、arXiv（AI 论文）、Hacker News + Reddit（社区热议）、Show HN/产品概念、GitHub Trending（开源热门），要求同刊与近 3 天去重。Use when updating or auditing the daily-digest publishing workflow, entry page, or generated issue requirements.
+---
+
 # Daily Digest — AI 每日速递
 
-## 1. 概述
+## 1. 定位
 
-**技能名称**: Daily Digest (日报)  
-**目标**: 每日抓取 AI/科技资讯，生成结构化日报，供 GitHub Pages 展示。  
-**单一部署位置**: GitHub Pages (`https://classmatexiaoming96-ux.github.io/daily-digest/`)  
-**单一源仓库**: `classmatexiaoming96-ux.github.io` (user page repo)  
-**入口**: user page 主页 → Hero 项目索引「📰 每日 AI 速递」→ `daily-digest/`  
-**技能定义文档**: `/root/repos/skills/daily-digest/SKILL.md`（这里是简洁版，详细版见技能仓库）
+每天一刊的 AI 情报日报。一次任务必须完成：
 
-> **注意**：`github-trending` 仓库不再维护 daily-digest 内容。2026-07-01 已删除所有 daily-digest 相关文件，
-> 将 `calendar.html` 改为跳转到 `daily-digest/calendar.html` 的迁移页。所有日报内容都归属于 user page 仓库。
-> 此 SKILL.md 保留在此仅做文档参考，不复用。
+1. 生成 `daily-digest/YYYY-MM-DD.html`
+2. 更新 `daily-digest/manifest.js`
+3. 更新展示入口
+4. commit、pull --rebase、push
+5. 验证线上入口包含新刊，且新页面 HTTP 200
 
-## 2. 数据源（2026-07-01 审计确认）
+部署目标是 user page 仓库 `classmatexiaoming96-ux.github.io` 的 `daily-digest/` 子目录：
+`https://classmatexiaoming96-ux.github.io/daily-digest/`
 
-| 模块 | 数据来源 | 说明 |
-|------|----------|------|
-| Google News | Google News RSS (CN + EN) | 当天 AI/科技相关重大新闻 |
-| Hacker News | HN Algolia API（近 36h, points>40, AI 关键词过滤） | 社区热议 |
-| Reddit | r/MachineLearning · LocalLLaMA · artificial · OpenAI · singularity | 社区热议 |
-| Show HN | HN Show HN（近 3 天） | 产品·概念 |
-| GitHub | `github.com/trending` 抓取 + Search API 兜底 | 开源热门 |
+> 本文件是 `github-trending` 仓库里的远端参考副本。可执行脚本和模板的本地工作副本在
+> `~/.codex/skills/daily-digest/`；自动任务里的增强版源在当前工作区的
+> `automation-skills/daily-digest/`。三者的栏目要求必须保持一致。
 
-> **X/Twitter 替代策略**：旧版（github-trending 时期）曾用 Nitter 实例抓取 X/Twitter，
-> 但 Nitter 实例普遍不稳定且多已下线。实际 cron 流程使用 skills 仓库的脚本，
-> 以 **HN + Reddit** 替代 X/Twitter 作为社区热议源，效果更稳定。
-> 如果未来需要恢复 X 数据，可考虑三条路：
-> 1. 找可用 Nitter 实例（当前列表已标注失效）
-> 2. 使用 X API 需要申请开发者密钥
-> 3. 用第三方分析工具（如 TweetHunter、Brandwatch）提供的数据简报
+## 2. 信源与栏目
 
-## 3. 工作流（实际 cron 流程）
+栏目顺序固定为：
 
-由 Hermes Agent cron job 每日 08:00 UTC 执行，分 3 步：
+1. 今日要闻
+2. AI 论文
+3. 社区热议
+4. 产品 · 概念
+5. 开源热门
 
-```
-cron job (Hermes Agent)
-├── Step 1: prefetch.py
-│   └── 抓取 Google News + HN + Reddit + Show HN + GitHub Trending
-│   └── 输出 ~/.hermes/daily-digest/data/YYYY-MM-DD.json
-├── Step 2: 人工策展
-│   └── 读 raw data → 筛选/提炼 → 写入 ~/.hermes/daily-digest/content/YYYY-MM-DD.json
-└── Step 3: build.py
-    └── content/*.json + 模板 → YYYY-MM-DD.html + manifest.js
-    └── push 到 user page 仓库的 daily-digest/ 目录
-```
+| 桶 | 来源 | 对应栏目 |
+|---|---|---|
+| `google_news` | Google News RSS（en + zh-CN，`when:1d`） | 今日要闻 |
+| `papers` | arXiv Atom API（cs.AI + cs.LG + cs.CL，按提交时间） | AI 论文 |
+| `hacker_news` | HN Algolia API（近 36h、points>40，AI 关键词过滤） | 社区热议 |
+| `reddit` | r/MachineLearning · LocalLLaMA · artificial · OpenAI · singularity 的 `top?t=day` | 社区热议 |
+| `show_hn` | HN Show HN（近 3 天，AI 关键词） | 产品 · 概念 |
+| `github` | `github.com/trending` 抓取 + Search API 兜底 | 开源热门 |
 
-> 不依赖 GitHub Actions。prefetch 走本机 cron，通过 Hermes agent 驱动。
-> 部署目标是 `classmatexiaoming96-ux.github.io`，不是 `github-trending`。
+## 3. 策展要求
 
-## 4. 文件结构
+- 今日要闻：5–7 条，含 1 条 lead。只选今天真正发生或迫近的事件，合并重复新闻稿。
+- AI 论文：3–5 篇。必须来自 arXiv 原文链接，优先 Agent、推理、代码模型、评测、记忆、RAG、多模态和效率方向。`why` 必须用简体中文讲清“新在哪里、为什么值得看”，不能只翻译摘要。
+- 社区热议：4–6 条。从 HN + Reddit 选真正有讨论价值的内容，优先能提炼观点的帖子。
+- 产品 · 概念：3–5 条。可来自 Show HN、要闻或 trending，既可以是具体产品，也可以是当周反复出现的概念/趋势。
+- 开源热门：5–7 个。必须 AI/LLM/coding-agent/dev-tool 相关，并保留真实 `stars` / `stars_today`。
+- 每条内容必须有稳定 `event_key`。论文建议使用 `arxiv-2607-12345` 这类键。
+- 同一期内同一事件、论文、产品或仓库只能出现一次；跨来源、跨 URL、换标题也要合并。
+- 生成前要避开最近 3 天已展示的主要消息。只有确有新进展时才允许重复，并在摘要第一句写清新增内容。
 
-```
-user page repo (classmatexiaoming96-ux.github.io)
-├── index.html              # 主页，Hero 有「📰 每日 AI 速递」卡片
-├── daily-digest/           # 日报模块 ← 唯一 source of truth
-│   ├── index.html          # viewer（iframe + manifest.js）
-│   ├── calendar.html       # 日历视图
-│   ├── manifest.js         # 归档清单 (auto-generated)
-│   ├── 2025-06-17.html     # No.41
-│   ├── 2025-06-18.html     # No.42
-│   ├── 2026-06-30.html     # No.43
-│   ├── 2026-07-01.html     # No.44（最新）
-│   └── assets/             # 样式/脚本
-│       ├── digest.css
-│       ├── calendar.css
-│       ├── calendar.js
-│       └── viewer.js
-└── .github/workflows/
-    └── pages.yml           # 仅 GitHub Pages 部署，不负责日报生成
+## 4. 受限网络兼容路径
 
-Hermes 执行端 (~/.hermes/skills/daily-digest/)
-├── SKILL.md                # 详尽的技能定义文档
-├── scripts/
-│   ├── prefetch.py         # 数据抓取
-│   └── build.py            # HTML 生成 + manifest 维护
-├── templates/
-│   └── digest.template.html
-└── web/                    # viewer/日历/样式脚手架
-    ├── index.html
-    ├── calendar.html
-    ├── manifest.js
-    └── assets/
+后台任务可能以 `workspace-write + networkAccess=false` 启动。每个子任务开始时先执行独立顶层 `curl` 预检；不要把联网动作藏进 Python subprocess、`sh -c`、复杂管道或未授权脚本内部。
+
+Daily Digest 在受限模式下必须按这个路径执行：
+
+```bash
+curl -fsSIL --retry 8 --retry-all-errors --retry-delay 2 --max-time 20 https://news.google.com/
+
+python3 /Users/miaoxiaoming/.codex/skills/daily-digest/scripts/prefetch.py \
+  --date "$(date +%F)" \
+  --out ~/.hermes/daily-digest/data
+
+curl -fsSL --retry 4 --retry-all-errors --retry-delay 8 --max-time 45 \
+  'https://export.arxiv.org/api/query?search_query=cat%3Acs.AI%20OR%20cat%3Acs.LG%20OR%20cat%3Acs.CL&start=0&max_results=40&sortBy=submittedDate&sortOrder=descending' \
+  -o /tmp/daily-digest-arxiv.xml
+
+python3 scripts/merge_arxiv.py \
+  --bundle ~/.hermes/daily-digest/data/$(date +%F).json \
+  --xml /tmp/daily-digest-arxiv.xml
 ```
 
-## 5. 日历页面 (`daily-digest/calendar.html`)
+Google News、HN、GitHub、arXiv 四个关键桶中任意两个为空时，不得继续生成并发布；先重试一次并报告具体空桶。
 
-- 展示当前月份日历，左侧「‹ 上个月」右侧「› 下个月」
-- 有日报的日期高亮显示（可点击 → `index.html#YYYY-MM-DD`）
-- 无日报的日期灰色不可点击
-- 基于 client-side `manifest.js` 数据，不发 fetch 请求
-- 新一期只需 build.py 重写 manifest.js
+## 5. Content Schema
 
-## 6. 「点不进去」排查链路
+```jsonc
+{
+  "date": "2026-07-13",
+  "weekday": "星期一",
+  "edition": 54,
+  "intro": "一句话导读…",
+  "headline_title": "用于 manifest/日历的当期标题",
+  "sections": {
+    "headlines": {
+      "lead": { "event_key": "", "tag": "", "title": "", "summary": "", "source": "", "url": "", "time": "" },
+      "items": [ { "event_key": "", "title": "", "summary": "", "source": "", "url": "", "time": "", "tag": "" } ]
+    },
+    "papers": {
+      "items": [ { "event_key": "arxiv-id", "title": "", "why": "", "summary": "", "authors": [""], "categories": ["cs.AI"], "published": "", "url": "" } ]
+    },
+    "community": {
+      "items": [ { "event_key": "", "title": "", "summary": "", "quote": "", "platform": "Hacker News", "points": 0, "comments": 0, "url": "" } ]
+    },
+    "products": {
+      "items": [ { "event_key": "", "icon": "", "name": "", "tagline": "", "summary": "", "tag": "", "url": "" } ]
+    },
+    "repos": {
+      "items": [ { "event_key": "", "owner": "", "name": "", "desc": "", "lang": "", "stars": "", "stars_today": "", "url": "", "tag": "" } ]
+    }
+  }
+}
+```
 
-按这个顺序查：
+## 6. 校验
 
-1. `manifest.js`（远端）→ `<script src="manifest.js">` 加载后 `window.DIGESTS` 是否有目标日期
-2. 对应 `daily-digest/YYYY-MM-DD.html` 是否存在（curl 是否 200）
-3. `.cal-cell.has` class 是否加到目标日期上（calendar.js 检查 manifest.js 数据决定）
-4. click handler: `calendar.js` 只在有 `.has` 的 cell 上绑定跳转 → `index.html#YYYY-MM-DD`
-5. `index.html` 通过 `location.hash` 加载对应 iframe 内容
+生成后至少检查：
 
-链路：`manifest.js` → `calendar.js` → `.has` class → click handler → `index.html#hash` → iframe load
+```bash
+grep -c "assets/digest.css" ~/.hermes/daily-digest/$(date +%F).html
+grep -c '>AI 论文<' ~/.hermes/daily-digest/$(date +%F).html
+grep -o 'sec-no">[0-9]*' ~/.hermes/daily-digest/$(date +%F).html
+```
 
-> 注意：旧 `github-trending/data/` 下的文件已被删除；现在 path 是 `daily-digest/YYYY-MM-DD.html`。
+预期：
 
-## 7. 已知陷阱（2026-07-01 复盘）
+- 样式引用为 `1`
+- 有合格论文时 `AI 论文` 为 `1`
+- 五栏齐全时可见 `01 02 03 04 05`
+
+推送前检查 `git diff daily-digest/manifest.js`，确保不会把旧刊标题和导读压缩成只剩日期。推送后验证：
+
+```bash
+curl -fsSL https://classmatexiaoming96-ux.github.io/daily-digest/manifest.js | grep "$(date +%F)"
+curl -fsSI https://classmatexiaoming96-ux.github.io/daily-digest/$(date +%F).html
+```
+
+## 7. 已知陷阱
 
 | 坑 | 后果 | 规避 |
 |---|---|---|
-| `github-trending` 仓库曾错放 daily-digest 内容 | 两个仓库不一致、「点不进去」 | 2026-07-01 已删旧数据 + 改跳转页，切到单一仓库 |
-| Nitter 实例不稳定 | X/Twitter 数据流中断 | 已用 HN + Reddit 替代 |
-| prefetch 直接写 `data/` 目录 | 跳过了人工策展环节，质量差 | 改用 2 步：prefetch→raw data→人工策展→content→build→HTML |
-| 工作流用 glob `*.json` 而不是 `*.html` | dates.json 长期为旧数据（2025-06 幽灵） | 已改用 `*.html` glob，且当前不再需要 dates.json |
-
-## 8. 审计结论（2026-07-01）
-
-2026-07-01 对 daily-digest SKILL.md 完整审计发现：
-
-### 8.1 三份文档不一致（已全部修复）
-
-| 维度 | ~~github-trending 新版~~ | skills 仓库（真实源） | user page 仓库 |
-|------|------------------------|----------------------|---------------|
-| 部署目标 | ❌ 说的 `github-trending/` | ✅ `daily-digest/` | N/A |
-| 数据源 | ❌ 说的 Nitter/X | ✅ HN+Reddit | N/A |
-| 工作流 | ❌ 说的 GitHub Actions | ✅ Hermes cron | N/A |
-| 文件结构 | ❌ 说的旧结构 | ✅ 当前实际结构 | N/A |
-
-### 8.2 X/Twitter 数据源状态
-
-- 旧代码（github-trending `prefetch.py`）使用 Nitter 实例抓 X/Twitter（RSS 格式）
-- Nitter 实例清单：`nitter.net`、`nitter.privacydev.net`、`nitter.poast.org`、`nitter.unixfox.eu`（多数不稳定）
-- **实际 cron 使用的脚本（skills 仓库）已弃用 Nitter**，改用 HN + Reddit 替代
-- 如果效铭需要恢复 X/Twitter 数据，需：
-  1. 找一个可用 Nitter 实例（skills 仓库 prefetch.py 第 183 行已有 reddit fallback 逻辑，可做参考）
-  2. 或申请 X API 密钥
-  3. 或维持现有 HN+Reddit 替代方案（当前已正常产出 4 期日报）
-
-### 8.3 skills 仓库远端状态
-
-- skills 仓库 local = origin/main（已同步），daily-digest 模块自 3 月起无改动
-- github-trending 的旧 prefetch.py/prefetch_sources 已变成死代码（不再被任何 cron/workflow 引用）
+| 使用旧版四栏 skill | 没有 AI 论文栏目 | 以本文件和 `~/.codex/skills/daily-digest/SKILL.md` 的五栏要求为准 |
+| arXiv 抓取失败后继续发布 | 论文栏缺失 | 重试；无法安全补足时在报告中明确失败原因 |
+| 论文只是新闻稿重复版本 | 论文栏没有新增价值 | 只放 arXiv 原文，并写中文 `why` |
+| 同一事件跨来源重复 | 主页面信息密度下降 | 统一 `event_key`，依赖 build.py 的同刊与近 3 天去重 |
+| manifest 旧刊元数据被覆盖 | 日历/阅读器标题丢失 | 以线上 manifest 为基底，只插入新刊对象 |
+| 推错仓库 | 全站 404 或入口缺失 | 生成内容推 `classmatexiaoming96-ux.github.io`，本仓库只保存参考文档和拆解页 |
