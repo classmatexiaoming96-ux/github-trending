@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>quantumbyte · 把意图变成可验证应用 · 源码观测台</title>
+<meta name="description" content="QuantumByteOSS/quantumbyte 源码级深度解析 — 从项目创建、Postgres 队列、SSE 合流到需求 Harness 的完整源码路径" />
+<meta property="og:title" content="quantumbyte · 源码观测台" />
+<meta property="og:description" content="从项目创建、Postgres 队列、SSE 合流到需求 Harness 的完整源码路径" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #73d7ff;
+  --star-soft:  rgba(115,215,255,.15);
+  --star-deep:  #2789b5;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">quantumbyte<b>QB</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">quantumbyte<b>QB</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">TypeScript · Python · Next.js · Postgres · Claude Agent SDK</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>三应用，一张状态表</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>消息与实时状态</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从意图到可验收应用</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>验证契约与边界</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>值得借鉴的工程决策</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>仍在快速成形的开放核心</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★252 · 2026-07-14</div>
+      <div><a href="https://github.com/QuantumByteOSS/quantumbyte" target="_blank">QuantumByteOSS/quantumbyte</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">quantumbyte <em>把意图变成可验证应用</em></h1>
+          <p class="hero-desc">QuantumByte 不是只有一个“输入提示词、输出代码”的界面。它把生成任务写进 Postgres，由独立 worker 接手，再用同一条 SSE 同步聊天、项目状态、资产和业务需求验证结果；更关键的是，验证者只读源码，避免生成者给自己打分。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 252</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">7.5k</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">164</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-07-15</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow"><b>intent</b> → Project/PENDING → worker<br/>↓ SSE snapshot　↓ git workspace<br/><b>requirements</b> → read-only harness → verdict</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>入口把首条产品意图和 Project 记录放进同一事务语义：创建时直接生成 PENDING 用户消息，因此页面层不需要再发第二个启动请求，调度器也能只观察数据库状态 对应源码落点是 <code>src/app/api/projects/route.ts:32</code>、<code>src/app/api/projects/route.ts:34</code>、<code>src/app/api/projects/route.ts:39</code>、<code>src/app/api/projects/route.ts:40</code>、<code>src/app/api/projects/route.ts:42</code>、<code>src/app/api/projects/route.ts:45</code>、<code>src/app/api/projects/route.ts:48</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <p>后续对话仍沿用相同契约：接口只做输入清洗、附件链接拼接与 PENDING 入库，不在 Web 进程里运行模型。这个分离让 Agent 执行时间不会绑住 HTTP 请求 对应源码落点是 <code>src/app/api/projects/[id]/chat/route.ts:17</code>、<code>src/app/api/projects/[id]/chat/route.ts:22</code>、<code>src/app/api/projects/[id]/chat/route.ts:37</code>、<code>src/app/api/projects/[id]/chat/route.ts:41</code>、<code>src/app/api/projects/[id]/chat/route.ts:46</code>、<code>src/app/api/projects/[id]/chat/route.ts:48</code>、<code>src/app/api/projects/[id]/chat/route.ts:53</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">Web/API、Orchestrator、Worker 三应用；Postgres 同时充当真相源与轻量队列。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">Project、ChatMessage、HarnessRequirement/HarnessResult，以及项目到 Worker 的软亲和。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">SSE 每 400ms 读取快照，15 秒 keepalive，单连接最长 5 分钟。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">生成项目仓库、实时预览、附件资产、需求清单与逐项验收结果。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">三应用，一张状态表</h2>
+      <p>系统拓扑的关键不在消息中间件，而在“数据库即协议”：Web 写状态，Worker 更新状态，SSE 路由读取快照。每条连接有明确轮询、保活和最长时限，避免永久占用浏览器连接 对应源码落点是 <code>src/app/api/projects/[id]/chat/stream/route.ts:5</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:8</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:9</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:10</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:15</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:18</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:21</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">Browser → Next.js API → PostgreSQL ← Orchestrator/Worker<br/>　↑　　　　　SSE snapshot　　　　　↓<br/>Preview iframe ← generated workspace → GitHub</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>前端把聊天与 Harness 汇入单一 hook：先读取普通 GET 快照，再在任务或验证运行时打开 SSE。这不是简单 UI 封装，而是对浏览器同源连接上限的架构响应 对应源码落点是 <code>src/components/blueprint/use-project-stream.ts:37</code>、<code>src/components/blueprint/use-project-stream.ts:40</code>、<code>src/components/blueprint/use-project-stream.ts:42</code>、<code>src/components/blueprint/use-project-stream.ts:44</code>、<code>src/components/blueprint/use-project-stream.ts:48</code>、<code>src/components/blueprint/use-project-stream.ts:57</code>、<code>src/components/blueprint/use-project-stream.ts:60</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="g3"><div class="card"><div class="card-h">Web</div><div class="card-d">创建项目、上传资产、投递消息并聚合实时快照。</div></div><div class="card"><div class="card-h">Orchestrator</div><div class="card-d">认领 PENDING 消息，维护项目到 Worker 的亲和与租约。</div></div><div class="card"><div class="card-h">Worker + Harness</div><div class="card-d">运行 Agent、提交仓库，并以只读工具逐条验证业务需求。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/api/projects/route.ts</span> · L32-60</span><span>TypeScript · Python</span></div>
+        <pre class="code">  32  export async function POST(req: NextRequest) {
+  33    const body = await req.json().catch(() =&gt; null);
+  34    const prompt = typeof body?.prompt === &#x27;string&#x27; ? body.prompt.trim() : &#x27;&#x27;;
+  35    if (!prompt) {
+  36      return NextResponse.json({ error: &#x27;prompt is required&#x27; }, { status: 400 });
+  37    }
+  38  
+  39    const title = prompt.length &gt; 48 ? `${prompt.slice(0, 48)}…` : prompt;
+  40    const project = await prisma.project.create({
+  41      data: {
+  42        id: ulid(),
+  43        prompt,
+  44        title,
+  45        generationStatus: &#x27;DRAFT&#x27;,
+  46        // Seed the prompt as the first chat turn (PENDING) so the blueprint
+  47        // chat renders it and the orchestrator triggers the agent immediately.
+  48        chatMessages: {
+  49          create: {
+  50            id: ulid(),
+  51            role: &#x27;USER&#x27;,
+  52            content: prompt,
+  53            status: &#x27;PENDING&#x27;,
+  54          },
+  55        },
+  56      },
+  57    });
+  58  
+  59    return NextResponse.json(project, { status: 201 });
+  60  }</pre>
+      </div>
+
+      <a class="deep-link" href="quantumbyte/quantumbyte-project-lifecycle.html">深度阅读 · 项目创建与预览生命周期</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">消息与实时状态</h2>
+
+      <h3><span class="arr">▸</span>PENDING 是跨进程交接点</h3>
+      <p>消息接口落库后立即返回 201，真正的 Agent 由外部 Worker 运行。这里把“用户请求被接受”和“模型已经完成”拆成两个状态，使失败重试、租约恢复和多 Worker 分配都有可观测锚点 对应源码落点是 <code>src/app/api/projects/[id]/chat/route.ts:53</code>、<code>src/app/api/projects/[id]/chat/route.ts:54</code>、<code>src/app/api/projects/[id]/chat/route.ts:55</code>、<code>src/app/api/projects/[id]/chat/route.ts:56</code>、<code>src/app/api/projects/[id]/chat/route.ts:57</code>、<code>src/app/api/projects/[id]/chat/route.ts:59</code>、<code>src/app/api/projects/[id]/chat/route.ts:63</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/api/projects/[id]/chat/route.ts</span> · L48-68</span><span>TypeScript · Python</span></div>
+        <pre class="code">  48    const project = await prisma.project.findUnique({ where: { id } });
+  49    if (!project) {
+  50      return NextResponse.json({ error: &#x27;project not found&#x27; }, { status: 404 });
+  51    }
+  52  
+  53    // Persist the user turn as PENDING and stop. The orchestrator assigns it to a
+  54    // worker; the worker (Claude Agent SDK, warm session) runs the turn and writes
+  55    // the ASSISTANT reply + flips this row to COMPLETED/FAILED (RFC 0003). The web
+  56    // app never runs the agent — the client polls the GET endpoint for the result.
+  57    const message = await prisma.chatMessage.create({
+  58      data: {
+  59        id: ulid(),
+  60        projectId: id,
+  61        role: &#x27;USER&#x27;,
+  62        content,
+  63        status: &#x27;PENDING&#x27;,
+  64      },
+  65    });
+  66  
+  67    return NextResponse.json({ message }, { status: 201 });
+  68  }</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>一条 SSE 承载四类状态</h3>
+      <p>流接口并行读取消息、项目、资产和需求，序列化为统一快照。它只在 JSON 变化时发送数据，空闲时发送注释型 keepalive，因此前端得到的是一致视图，不必自行拼接四条异步订阅 对应源码落点是 <code>src/app/api/projects/[id]/chat/stream/route.ts:41</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:45</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:51</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:56</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:67</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:71</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:77</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/api/projects/[id]/chat/stream/route.ts</span> · L41-100</span><span>TypeScript · Python</span></div>
+        <pre class="code">  41        const tick = async (): Promise&lt;boolean&gt; =&gt; {
+  42          // Also tail the Project (title/desc/logo) + its assets so product edits
+  43          // made by the worker&#x27;s qb-designer tools surface live — the worker bumps
+  44          // Project.updatedAt / inserts Asset rows, and this snapshot picks it up.
+  45          // Also tail the harness tables + harnessRunning flag so pass-3 verdicts and
+  46          // the running indicator stream over this same connection (browsers cap ~6
+  47          // per origin, so the harness UI shares the chat stream instead of opening
+  48          // its own). The worker runs the harness right after the turn settles, so
+  49          // the in-flight condition below also keys off harnessRunning to keep this
+  50          // connection open across that hand-off.
+  51          const [messages, project, assets, requirements] = await Promise.all([
+  52            prisma.chatMessage.findMany({
+  53              where: { projectId: id },
+  54              orderBy: { createdAt: &#x27;asc&#x27; },
+  55            }),
+  56            prisma.project.findUnique({
+  57              where: { id },
+  58              select: {
+  59                title: true,
+  60                desc: true,
+  61                logo: true,
+  62                status: true,
+  63                updatedAt: true,
+  64                harnessRunning: true,
+  65              },
+  66            }),
+  67            prisma.asset.findMany({
+  68              where: { projectId: id },
+  69              orderBy: { createdAt: &#x27;asc&#x27; },
+  70            }),
+  71            prisma.harnessRequirement.findMany({
+  72              where: { projectId: id },
+  73              include: { result: true },
+  74              orderBy: { createdAt: &#x27;asc&#x27; },
+  75            }),
+  76          ]);
+  77          const harness = {
+  78            requirements: requirements.map(serializeRequirement),
+  79            results: requirements
+  80              .map((r) =&gt; r.result)
+  81              .filter((r) =&gt; r !== null)
+  82              .map(serializeResult),
+  83            is_running: project?.harnessRunning ?? false,
+  84          };
+  85          const payload = { messages, project, assets, harness };
+  86          const snapshot = JSON.stringify(payload);
+  87          if (snapshot !== lastSnapshot) {
+  88            lastSnapshot = snapshot;
+  89            send(snapshot);
+  90            lastKeepalive = Date.now();
+  91          } else if (Date.now() - lastKeepalive &gt; KEEPALIVE_MS) {
+  92            controller.enqueue(encoder.encode(&#x27;: keepalive\n\n&#x27;));
+  93            lastKeepalive = Date.now();
+  94          }
+  95  
+  96          const inFlight =
+  97            messages.some((m) =&gt; m.status === &#x27;PENDING&#x27; || m.status === &#x27;PROCESSING&#x27;) ||
+  98            (project?.harnessRunning ?? false);
+  99          return inFlight;
+ 100        };</pre>
+      </div>
+
+      <a class="deep-link" href="quantumbyte/quantumbyte-realtime-stream.html">深度阅读 · SSE 合流与前端恢复</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从意图到可验收应用</h2>
+      <p>客户端启动时先并发读取聊天与验证快照，只有状态进入运行中才打开流。这种“快照 + 临时增量”模式让刷新页面可恢复，又避免空闲项目长期保持 EventSource 对应源码落点是 <code>src/components/blueprint/use-project-stream.ts:64</code>、<code>src/components/blueprint/use-project-stream.ts:65</code>、<code>src/components/blueprint/use-project-stream.ts:66</code>、<code>src/components/blueprint/use-project-stream.ts:67</code>、<code>src/components/blueprint/use-project-stream.ts:69</code>、<code>src/components/blueprint/use-project-stream.ts:73</code>、<code>src/components/blueprint/use-project-stream.ts:75</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+
+      <h3><span class="arr">▸</span>交互链：快照、流、收敛</h3>
+      <div class="flow">POST message → PENDING → poke SSE → snapshots<br/>COMPLETED + harness idle → server closes → refetch</div>
+
+      <h3><span class="arr">▸</span>验收链：人工需求与自动结果分离</h3>
+      <div class="flow">Requirements PUT → locked rows → Run request<br/>Worker read-only audit → result upsert → shared SSE</div>
+
+      <a class="deep-link" href="quantumbyte/quantumbyte-harness-contract.html">深度阅读 · 需求 Harness 与人工所有权</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">验证契约与边界</h2>
+      <p>Web 层专门用序列化器把 Prisma 枚举转换成稳定线格式：类型和严重度小写，结果字段采用 snake_case。这个小模块明确了数据库模型与前端契约的边界，测试也集中覆盖它 对应源码落点是 <code>src/lib/harness.ts:8</code>、<code>src/lib/harness.ts:10</code>、<code>src/lib/harness.ts:13</code>、<code>src/lib/harness.ts:15</code>、<code>src/lib/harness.ts:19</code>、<code>src/lib/harness.ts:23</code>、<code>src/lib/harness.ts:25</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>当前自动化测试最明确地覆盖 Harness 序列化：枚举大小写、locked 标记和结果字段映射都有断言。不过从仓库现状看，消息流、并发恢复和预览代理仍缺少同等级端到端测试 对应源码落点是 <code>src/lib/harness.test.ts:38</code>、<code>src/lib/harness.test.ts:39</code>、<code>src/lib/harness.test.ts:40</code>、<code>src/lib/harness.test.ts:44</code>、<code>src/lib/harness.test.ts:50</code>、<code>src/lib/harness.test.ts:51</code>、<code>src/lib/harness.test.ts:57</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/lib/harness.test.ts</span> · L38-73</span><span>TypeScript · Python</span></div>
+        <pre class="code">  38  describe(&#x27;serializeRequirement&#x27;, () =&gt; {
+  39    it(&#x27;lowercases type and severity and keeps the rest verbatim&#x27;, () =&gt; {
+  40      expect(serializeRequirement(requirement())).toEqual({
+  41        id: &#x27;req_1&#x27;,
+  42        excerpt: &#x27;must send a receipt email&#x27;,
+  43        description: &#x27;A receipt email is sent after checkout&#x27;,
+  44        type: &#x27;functional&#x27;,
+  45        severity: &#x27;blocker&#x27;,
+  46        locked: false,
+  47      });
+  48    });
+  49  
+  50    it(&#x27;preserves the locked flag&#x27;, () =&gt; {
+  51      expect(serializeRequirement(requirement({ locked: true })).locked).toBe(
+  52        true,
+  53      );
+  54    });
+  55  });
+  56  
+  57  describe(&#x27;serializeResult&#x27;, () =&gt; {
+  58    it(&#x27;maps camelCase fields to the snake_case wire format&#x27;, () =&gt; {
+  59      expect(serializeResult(result())).toEqual({
+  60        requirement_id: &#x27;req_1&#x27;,
+  61        result: &#x27;PASS&#x27;,
+  62        evidence: &#x27;checkout_test.ts asserts the email&#x27;,
+  63        run_status: &#x27;DONE&#x27;,
+  64        last_verified_sha: &#x27;abc123&#x27;,
+  65        watched_paths: [&#x27;src/checkout.ts&#x27;],
+  66        run_at: &#x27;2026-07-14T12:00:00.000Z&#x27;,
+  67        is_stale: false,
+  68      });
+  69    });
+  70  
+  71    it(&#x27;emits null run_at when runAt is null&#x27;, () =&gt; {
+  72      expect(serializeResult(result({ runAt: null })).run_at).toBeNull();
+  73    });</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>连接最长 5 分钟；长任务依靠关闭后的重新读取与再次开流延续。</li><li>预览把任何 HTTP 响应都视为 ready，编译错误页也会被展示。</li><li>附件只限制数量和体积，当前源码未显示内容安全扫描。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">值得借鉴的工程决策</h2>
+      <div class="g2"><div class="card"><div class="card-h">运行请求是持久标志</div><div class="card-d"><p>手动点击不会直接启动模型，而是写入 harnessRunRequested；重复点击在运行中保持幂等，Worker 之后领取该标志 对应源码落点是 <code>src/app/api/projects/[id]/harness/run/route.ts:9</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:13</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:14</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:18</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:22</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:23</code>、<code>src/app/api/projects/[id]/harness/run/route.ts:24</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/app/api/projects/[id]/harness/run/route.ts</span> · L9-30</span><span>TypeScript</span></div><pre class="code">   9  export async function POST(
+  10    _req: NextRequest,
+  11    { params }: { params: Promise&lt;{ id: string }&gt; }
+  12  ) {
+  13    const { id } = await params;
+  14    const project = await prisma.project.findUnique({
+  15      where: { id },
+  16      select: { id: true, harnessRunning: true },
+  17    });
+  18    if (!project) {
+  19      return NextResponse.json({ error: &#x27;project not found&#x27; }, { status: 404 });
+  20    }
+  21  
+  22    // Already running → nothing to request; the in-flight run will reflect current state.
+  23    if (!project.harnessRunning) {
+  24      await prisma.project.update({
+  25        where: { id },
+  26        data: { harnessRunRequested: true },
+  27      });
+  28    }
+  29  
+  30    return NextResponse.json({ status: &#x27;queued&#x27; }, { status: 202 });</pre></div></div></div><div class="card"><div class="card-h">附件退化为普通链接</div><div class="card-d"><p>文件先进入对象存储和 Asset 表，聊天只携带 URL，因此 Agent 主链无需维护二进制协议 对应源码落点是 <code>src/app/api/projects/[id]/attachments/route.ts:11</code>、<code>src/app/api/projects/[id]/attachments/route.ts:12</code>、<code>src/app/api/projects/[id]/attachments/route.ts:14</code>、<code>src/app/api/projects/[id]/attachments/route.ts:18</code>、<code>src/app/api/projects/[id]/attachments/route.ts:28</code>、<code>src/app/api/projects/[id]/attachments/route.ts:32</code>、<code>src/app/api/projects/[id]/attachments/route.ts:36</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/app/api/projects/[id]/attachments/route.ts</span> · L39-75</span><span>TypeScript</span></div><pre class="code">  39    for (const file of files) {
+  40      if (file.size &gt; MAX_FILE_BYTES) {
+  41        return NextResponse.json(
+  42          { error: `${file.name} exceeds the 10 MB limit` },
+  43          { status: 413 }
+  44        );
+  45      }
+  46    }
+  47  
+  48    const uploaded = [];
+  49    for (const file of files) {
+  50      const assetId = ulid();
+  51      const filename = `${assetId}-${safeName(file.name)}`;
+  52      const key = `attachments/${id}/${filename}`;
+  53      const mimeType = file.type || &#x27;application/octet-stream&#x27;;
+  54      const url = await uploadToS3(key, Buffer.from(await file.arrayBuffer()), mimeType);
+  55      const asset = await prisma.asset.create({
+  56        data: {
+  57          id: assetId,
+  58          projectId: id,
+  59          filename,
+  60          originalFilename: file.name,
+  61          url,
+  62          size: file.size,
+  63          mimeType,
+  64        },
+  65      });
+  66      uploaded.push({
+  67        id: asset.id,
+  68        url: asset.url,
+  69        filename: file.name,
+  70        mimeType,
+  71        size: file.size,
+  72      });
+  73    }
+  74  
+  75    return NextResponse.json({ attachments: uploaded }, { status: 201 });</pre></div></div></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>预览代理目前假设 Web 与 Worker 共享 localhost；源码注释已把迁移到真实主机列作后续方向。这意味着现阶段的部署拓扑不能直接水平扩展到隔离节点 对应源码落点是 <code>src/app/api/projects/[id]/preview/route.ts:4</code>、<code>src/app/api/projects/[id]/preview/route.ts:7</code>、<code>src/app/api/projects/[id]/preview/route.ts:9</code>、<code>src/app/api/projects/[id]/preview/route.ts:10</code>、<code>src/app/api/projects/[id]/preview/route.ts:11</code>、<code>src/app/api/projects/[id]/preview/route.ts:15</code>、<code>src/app/api/projects/[id]/preview/route.ts:30</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="g2"><div class="card"><div class="card-h">轮询成本</div><div class="card-d">每条活跃 SSE 每 400ms 重读多张表，项目规模上升后需要评估 LISTEN/NOTIFY 或事件层。</div></div><div class="card"><div class="card-h">安全边界</div><div class="card-d">附件 MIME、生成项目预览和 Agent 工具权限都需要部署侧沙箱与审计。</div></div><div class="card"><div class="card-h">成熟度</div><div class="card-d">项目创建仅一天，接口和数据库迁移仍可能快速变化。</div></div><div class="card"><div class="card-h">开源边界</div><div class="card-d">架构文档把托管、租户、计费与运维明确留给 Hosted Platform。</div></div><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第一处证据位于 <code>src/components/blueprint/use-project-stream.ts:10</code>、<code>src/components/blueprint/use-project-stream.ts:12</code>、<code>src/components/blueprint/use-project-stream.ts:14</code>，它界定了入口和基础状态。</p><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第二处证据位于 <code>src/components/blueprint/use-project-stream.ts:16</code>、<code>src/components/blueprint/use-project-stream.ts:18</code>、<code>src/components/blueprint/use-project-stream.ts:20</code>，它展示了处理分支与数据变换。</p><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第三处证据位于 <code>src/components/blueprint/use-project-stream.ts:22</code>、<code>src/components/blueprint/use-project-stream.ts:24</code>、<code>src/components/blueprint/use-project-stream.ts:26</code>，它说明了输出、失败和恢复边界。</p></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-07-15</span>
+      <span>Source · <a href="https://github.com/QuantumByteOSS/quantumbyte">QuantumByteOSS/quantumbyte</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../quantumbyte.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

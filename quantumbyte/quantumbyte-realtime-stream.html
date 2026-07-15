@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>实时状态流 · 深度解析 · quantumbyte</title>
+<meta name="description" content="quantumbyte SSE snapshot 子模块完整解析 — 数据库快照、连接生命周期与前端恢复机制" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #73d7ff;
+  --star-soft:  rgba(115,215,255,.15);
+  --star-deep:  #2789b5;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">quantumbyte<b>QB</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">quantumbyte<b>QB</b></div>
+      <div class="sub">SSE snapshot · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript · Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../quantumbyte.html">← 返回 quantumbyte 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">实时状态流 <em>深度解析</em></h1>
+      <p class="hero-desc">这条流不是 token 专线，而是项目一致性通道：消息、项目元数据、资产与 Harness 共享一个 JSON 快照。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>服务端用 400ms 轮询换取无 Broker 的简单一致性，并通过 15 秒保活和 5 分钟上限控制连接生命周期；只要消息或验证仍在运行，连接就继续 对应源码落点是 <code>src/app/api/projects/[id]/chat/stream/route.ts:8</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:9</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:10</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:15</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:18</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:19</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:21</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/api/projects/[id]/chat/stream/route.ts</span> · L30-50</span><span>TypeScript · Python</span></div>
+        <pre class="code">  30    const stream = new ReadableStream({
+  31      async start(controller) {
+  32        let closed = false;
+  33        const startedAt = Date.now();
+  34        let lastSnapshot = &#x27;&#x27;;
+  35        let lastKeepalive = Date.now();
+  36  
+  37        const send = (data: string) =&gt; {
+  38          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+  39        };
+  40  
+  41        const tick = async (): Promise&lt;boolean&gt; =&gt; {
+  42          // Also tail the Project (title/desc/logo) + its assets so product edits
+  43          // made by the worker&#x27;s qb-designer tools surface live — the worker bumps
+  44          // Project.updatedAt / inserts Asset rows, and this snapshot picks it up.
+  45          // Also tail the harness tables + harnessRunning flag so pass-3 verdicts and
+  46          // the running indicator stream over this same connection (browsers cap ~6
+  47          // per origin, so the harness UI shares the chat stream instead of opening
+  48          // its own). The worker runs the harness right after the turn settles, so
+  49          // the in-flight condition below also keys off harnessRunning to keep this
+  50          // connection open across that hand-off.</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>快照去重与运行态判定</h3>
+      <p>每次 tick 并行查四组数据，随后拼成一个字符串快照；只有字符串变化才发 data 帧。运行态同时检查 PENDING、PROCESSING 与 harnessRunning，覆盖 Agent 到验收的交接空隙 对应源码落点是 <code>src/app/api/projects/[id]/chat/stream/route.ts:51</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:56</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:67</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:71</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:77</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:85</code>、<code>src/app/api/projects/[id]/chat/stream/route.ts:86</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/api/projects/[id]/chat/stream/route.ts</span> · L51-100</span><span>TypeScript · Python</span></div>
+        <pre class="code">  51          const [messages, project, assets, requirements] = await Promise.all([
+  52            prisma.chatMessage.findMany({
+  53              where: { projectId: id },
+  54              orderBy: { createdAt: &#x27;asc&#x27; },
+  55            }),
+  56            prisma.project.findUnique({
+  57              where: { id },
+  58              select: {
+  59                title: true,
+  60                desc: true,
+  61                logo: true,
+  62                status: true,
+  63                updatedAt: true,
+  64                harnessRunning: true,
+  65              },
+  66            }),
+  67            prisma.asset.findMany({
+  68              where: { projectId: id },
+  69              orderBy: { createdAt: &#x27;asc&#x27; },
+  70            }),
+  71            prisma.harnessRequirement.findMany({
+  72              where: { projectId: id },
+  73              include: { result: true },
+  74              orderBy: { createdAt: &#x27;asc&#x27; },
+  75            }),
+  76          ]);
+  77          const harness = {
+  78            requirements: requirements.map(serializeRequirement),
+  79            results: requirements
+  80              .map((r) =&gt; r.result)
+  81              .filter((r) =&gt; r !== null)
+  82              .map(serializeResult),
+  83            is_running: project?.harnessRunning ?? false,
+  84          };
+  85          const payload = { messages, project, assets, harness };
+  86          const snapshot = JSON.stringify(payload);
+  87          if (snapshot !== lastSnapshot) {
+  88            lastSnapshot = snapshot;
+  89            send(snapshot);
+  90            lastKeepalive = Date.now();
+  91          } else if (Date.now() - lastKeepalive &gt; KEEPALIVE_MS) {
+  92            controller.enqueue(encoder.encode(&#x27;: keepalive\n\n&#x27;));
+  93            lastKeepalive = Date.now();
+  94          }
+  95  
+  96          const inFlight =
+  97            messages.some((m) =&gt; m.status === &#x27;PENDING&#x27; || m.status === &#x27;PROCESSING&#x27;) ||
+  98            (project?.harnessRunning ?? false);
+  99          return inFlight;
+ 100        };</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>客户端自己掌控读流</h3>
+      <p>前端使用 fetch reader 而不是 EventSource，以便在空闲时不自动重连；它自己拆分双换行事件、解析 data 行，并在流关闭后重新拉取最终快照 对应源码落点是 <code>src/components/blueprint/use-project-stream.ts:83</code>、<code>src/components/blueprint/use-project-stream.ts:88</code>、<code>src/components/blueprint/use-project-stream.ts:89</code>、<code>src/components/blueprint/use-project-stream.ts:93</code>、<code>src/components/blueprint/use-project-stream.ts:98</code>、<code>src/components/blueprint/use-project-stream.ts:101</code>、<code>src/components/blueprint/use-project-stream.ts:105</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/components/blueprint/use-project-stream.ts</span> · L83-128</span><span>TypeScript · Python</span></div>
+        <pre class="code">  83    /**
+  84     * Tail the SSE stream. Uses fetch + a reader (not EventSource) so we control the
+  85     * lifecycle — the server self-closes once neither a turn nor the harness is in
+  86     * flight, and we don&#x27;t auto-reconnect while idle.
+  87     */
+  88    const startStream = useCallback(async () =&gt; {
+  89      if (abortRef.current) return; // already tailing
+  90      const ac = new AbortController();
+  91      abortRef.current = ac;
+  92      try {
+  93        const res = await fetch(`/api/projects/${projectId}/chat/stream`, {
+  94          signal: ac.signal,
+  95          headers: { Accept: &#x27;text/event-stream&#x27; },
+  96        });
+  97        if (!res.ok || !res.body) return;
+  98        const reader = res.body.getReader();
+  99        const decoder = new TextDecoder();
+ 100        let buffer = &#x27;&#x27;;
+ 101        for (;;) {
+ 102          const { value, done } = await reader.read();
+ 103          if (done) break;
+ 104          buffer += decoder.decode(value, { stream: true });
+ 105          const events = buffer.split(&#x27;\n\n&#x27;);
+ 106          buffer = events.pop() ?? &#x27;&#x27;;
+ 107          for (const evt of events) {
+ 108            const line = evt.split(&#x27;\n&#x27;).find((l) =&gt; l.startsWith(&#x27;data:&#x27;));
+ 109            if (!line) continue;
+ 110            try {
+ 111              const payload = JSON.parse(line.slice(5).trim());
+ 112              if (payload.messages) setRows(payload.messages);
+ 113              if (payload.project) setProject(payload.project);
+ 114              if (payload.harness) setHarness(payload.harness);
+ 115            } catch {
+ 116              /* ignore partial/non-json */
+ 117            }
+ 118          }
+ 119        }
+ 120      } catch {
+ 121        /* aborted or network — ignore */
+ 122      } finally {
+ 123        if (abortRef.current === ac) abortRef.current = null;
+ 124        // Settle after the stream closes; if the harness kicked off (or is still
+ 125        // running) the effect below reopens the stream.
+ 126        refetch();
+ 127      }
+ 128    }, [projectId, refetch]);</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">mount → GET seeds → pending/running → fetch SSE<br/>snapshot changed → update slices → idle close → refetch</div>
+      <p>动作完成后 poke 会主动开流，两个 effect 分别负责首次快照和运行态重启，卸载时 abort。最终 hook 把 rows、映射后的 messages、project、harness 与恢复函数一次返回 对应源码落点是 <code>src/components/blueprint/use-project-stream.ts:130</code>、<code>src/components/blueprint/use-project-stream.ts:132</code>、<code>src/components/blueprint/use-project-stream.ts:136</code>、<code>src/components/blueprint/use-project-stream.ts:140</code>、<code>src/components/blueprint/use-project-stream.ts:143</code>、<code>src/components/blueprint/use-project-stream.ts:144</code>、<code>src/components/blueprint/use-project-stream.ts:147</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>解析失败被忽略，下一帧完整快照会自然修复。</li><li>连接超时后依靠 refetch 和运行态 effect 重新进入。</li><li>400ms 多表查询在高并发下可能成为数据库压力源。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><h3><span class="arr">▸</span>行映射与占位气泡</h3><div class="card"><div class="card-h">ChatRow → Message</div><div class="card-d">映射器把失败行变成错误气泡，把处理中的 Assistant 行变成流式消息，并保留工具活动时间线 对应源码落点是 <code>src/components/blueprint/chat/map-message.ts:19</code>、<code>src/components/blueprint/chat/map-message.ts:24</code>、<code>src/components/blueprint/chat/map-message.ts:31</code>、<code>src/components/blueprint/chat/map-message.ts:39</code>、<code>src/components/blueprint/chat/map-message.ts:51</code>、<code>src/components/blueprint/chat/map-message.ts:52</code>、<code>src/components/blueprint/chat/map-message.ts:60</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</div></div><div class="card"><div class="card-h">尚未有 Assistant 行</div><div class="card-d">当 Worker 尚未创建回复行时，前端合成 thinking 气泡，并区分“等待 Worker”和“排在前一轮之后”两种等待原因 对应源码落点是 <code>src/components/blueprint/chat/map-message.ts:67</code>、<code>src/components/blueprint/chat/map-message.ts:69</code>、<code>src/components/blueprint/chat/map-message.ts:70</code>、<code>src/components/blueprint/chat/map-message.ts:73</code>、<code>src/components/blueprint/chat/map-message.ts:76</code>、<code>src/components/blueprint/chat/map-message.ts:80</code>、<code>src/components/blueprint/chat/map-message.ts:83</code>。把这些相邻行放在同一条执行链里看，可以确认它不是文档里的愿景描述，而是已经落到请求、状态和界面反馈中的实现；同时也能辨认出失败时由哪一层收敛、下一次刷新从何处恢复，以及扩容后最先需要替换的边界。</div></div><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第一处证据位于 <code>src/components/blueprint/use-project-stream.ts:10</code>、<code>src/components/blueprint/use-project-stream.ts:12</code>、<code>src/components/blueprint/use-project-stream.ts:14</code>，它界定了入口和基础状态。</p><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第二处证据位于 <code>src/components/blueprint/use-project-stream.ts:16</code>、<code>src/components/blueprint/use-project-stream.ts:18</code>、<code>src/components/blueprint/use-project-stream.ts:20</code>，它展示了处理分支与数据变换。</p><p>这组实现把输入校验、持久状态、异步执行和界面恢复连接成可以逐段核对的契约。阅读时不仅要看正常返回，还要看空值、重复动作、连接关闭和下一轮恢复的分支；这些分支共同决定用户看到的是可靠进度还是永远旋转的等待状态。 第三处证据位于 <code>src/components/blueprint/use-project-stream.ts:22</code>、<code>src/components/blueprint/use-project-stream.ts:24</code>、<code>src/components/blueprint/use-project-stream.ts:26</code>，它说明了输出、失败和恢复边界。</p></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-15</span>
+      <span>Source · <a href="https://github.com/QuantumByteOSS/quantumbyte">QuantumByteOSS/quantumbyte</a></span>
+      <span><a href="../quantumbyte.html">↑ quantumbyte 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
