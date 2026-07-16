@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>grok-build · 工具注册表与权限面 · 深度阅读</title>
+<meta name="description" content="从 capability filter、ToolConfig、standard tool pack 看工具如何被发现、授权和 dispatch。" />
+<meta property="og:title" content="Grok Build · 源码观测台" />
+<meta property="og:description" content="从 capability filter、ToolConfig、standard tool pack 看工具如何被发现、授权和 dispatch。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star: #56c7ff; --star-soft: #8de3ff; --star-deep: #1a86b8; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Grok Build<b>▹</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">Grok Build<b>▹</b></div><div class="sub">源码级架构解析 · sources/</div></div>
+    <span class="nav-ver">Rust · terminal agent</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#capability"><span class="idx">00</span>能力过滤</a></li><li><a href="#registry"><span class="idx">01</span>Registry dispatch</a></li><li><a href="#packs"><span class="idx">02</span>标准工具包</a></li></ul></nav>
+    <div class="nav-foot"><div>Stars ★4414 · 2026-07-14</div><div><a href="https://github.com/xai-org/grok-build" target="_blank" rel="noopener">xai-org/grok-build</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main"><div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">Deep Dive · Grok Build</div><h1 class="hero-title">工具注册表与权限面</h1><p class="hero-desc">从 capability filter、ToolConfig、standard tool pack 看工具如何被发现、授权和 dispatch。</p></div><div><div class="flow">ToolKind
+  → capability mode
+  → filtered tools</div></div></div></div><section class="sec" id="capability"><div class="sec-no">§ <b>00</b> · DETAIL</div><h2 class="sec-title">能力过滤</h2><p>权限面从 CapabilityMode 开始。<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:6</code> 定义模式，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:33</code> 过滤工具集合，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:70</code> 放置 compile-time guard，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:116</code> 将 ToolKind 映射到读写执行类别。这是审计 destructive tools 的第一站。</p><h3><span class="arr">▸</span>模式偏序</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs</span>:6-68</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">6</span>/// Capability mode applied to a session&#x27;s toolset.
+<span class="ln">7</span>///
+<span class="ln">8</span>/// A partial order is defined via [`CapabilityMode::is_subset_of`]:
+<span class="ln">9</span>/// `ReadOnly &lt; ReadWrite &lt; All` and `ReadOnly &lt; Execute &lt; All`.
+<span class="ln">10</span>/// `ReadWrite` and `Execute` are *incomparable* (neither is a subset
+<span class="ln">11</span>/// of the other). `fork_session` enforces `child &lt;= parent`.
+<span class="ln">12</span>#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+<span class="ln">13</span>#[serde(rename_all = &quot;snake_case&quot;)]
+<span class="ln">14</span>pub enum CapabilityMode {
+<span class="ln">15</span>    /// Reading and searching only. No edits, no shell, no background tasks.
+<span class="ln">16</span>    ReadOnly,
+<span class="ln">17</span>    /// Read + edit. No shell execution.
+<span class="ln">18</span>    ReadWrite,
+<span class="ln">19</span>    /// Read + shell execution + background-task control. No edits.
+<span class="ln">20</span>    Execute,
+<span class="ln">21</span>    /// Every tool kind allowed.
+<span class="ln">22</span>    All,
+<span class="ln">23</span>}
+<span class="ln">24</span>
+<span class="ln">25</span>impl Default for CapabilityMode {
+<span class="ln">26</span>    /// Defaults to [`CapabilityMode::ReadWrite`] (subagent default;
+<span class="ln">27</span>    /// the main/root session is always `All`).
+<span class="ln">28</span>    fn default() -&gt; Self {
+<span class="ln">29</span>        Self::ReadWrite
+<span class="ln">30</span>    }
+<span class="ln">31</span>}
+<span class="ln">32</span>
+<span class="ln">33</span>impl CapabilityMode {
+<span class="ln">34</span>    /// Filter `config.tools` by capability mode, returning a copy with
+<span class="ln">35</span>    /// disallowed tools dropped.
+<span class="ln">36</span>    ///
+<span class="ln">37</span>    /// Tools whose `kind` is `None` (baseline, e.g. ad-hoc tools
+<span class="ln">38</span>    /// declared via `ToolConfig::simple`) are preserved across all
+<span class="ln">39</span>    /// modes. **MCP-origin** `kind: None` tools are NOT preserved by
+<span class="ln">40</span>    /// this method; see `resolve_session_toolset` for the asymmetric
+<span class="ln">41</span>    /// handling.
+<span class="ln">42</span>    pub fn filter(self, config: &amp;ToolServerConfig) -&gt; ToolServerConfig {
+<span class="ln">43</span>        let kept: Vec&lt;ToolConfig&gt; = config
+<span class="ln">44</span>            .tools
+<span class="ln">45</span>            .iter()
+<span class="ln">46</span>            .filter(|tool| match tool.kind {
+<span class="ln">47</span>                None =&gt; true,
+<span class="ln">48</span>                Some(kind) =&gt; kind_allowed(self, kind),
+<span class="ln">49</span>            })
+<span class="ln">50</span>            .cloned()
+<span class="ln">51</span>            .collect();
+<span class="ln">52</span>        ToolServerConfig {
+<span class="ln">53</span>            tools: kept,
+<span class="ln">54</span>            behavior_preset: config.behavior_preset.clone(),
+<span class="ln">55</span>        }
+<span class="ln">56</span>    }
+<span class="ln">57</span>
+<span class="ln">58</span>    /// Whether every kind allowed by `self` is also allowed by `other`.
+<span class="ln">59</span>    /// Used by `fork_session` to reject capability widening.
+<span class="ln">60</span>    pub fn is_subset_of(self, other: CapabilityMode) -&gt; bool {
+<span class="ln">61</span>        for kind in ALL_TOOL_KINDS {
+<span class="ln">62</span>            if kind_allowed(self, *kind) &amp;&amp; !kind_allowed(other, *kind) {
+<span class="ln">63</span>                return false;
+<span class="ln">64</span>            }
+<span class="ln">65</span>        }
+<span class="ln">66</span>        true
+<span class="ln">67</span>    }
+<span class="ln">68</span>}</pre>
+</div><h3><span class="arr">▸</span>工具分类</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs</span>:116-163</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">116</span>/// Maps `(CapabilityMode, ToolKind)` -&gt; kept-or-dropped.
+<span class="ln">117</span>///
+<span class="ln">118</span>/// This `match` is intentionally exhaustive: when `ToolKind` gains a
+<span class="ln">119</span>/// new variant the compiler errors here, forcing a triage decision.
+<span class="ln">120</span>pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -&gt; bool {
+<span class="ln">121</span>    use CapabilityMode as M;
+<span class="ln">122</span>    use ToolKind::*;
+<span class="ln">123</span>
+<span class="ln">124</span>    if matches!(mode, M::All) {
+<span class="ln">125</span>        return true;
+<span class="ln">126</span>    }
+<span class="ln">127</span>
+<span class="ln">128</span>    match kind {
+<span class="ln">129</span>        // Meta tools: always allowed.
+<span class="ln">130</span>        Plan | EnterPlan | ExitPlan | AskUser | Skill | SearchTool | GoalUpdate =&gt; true,
+<span class="ln">131</span>
+<span class="ln">132</span>        // Read class.
+<span class="ln">133</span>        Read | MemoryGet | MemorySearch =&gt; {
+<span class="ln">134</span>            matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
+<span class="ln">135</span>        }
+<span class="ln">136</span>
+<span class="ln">137</span>        // Search class.
+<span class="ln">138</span>        Search | WebSearch | WebFetch =&gt; {
+<span class="ln">139</span>            matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
+<span class="ln">140</span>        }
+<span class="ln">141</span>
+<span class="ln">142</span>        // Inspect class.
+<span class="ln">143</span>        Lsp | ListDir | List =&gt; matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
+<span class="ln">144</span>
+<span class="ln">145</span>        // Edit class.
+<span class="ln">146</span>        Edit | Write | Delete | Move | ImageGen | VideoGen | ImageToVideo | ReferenceToVideo
+<span class="ln">147</span>        | DeployApp =&gt; matches!(mode, M::ReadWrite),
+<span class="ln">148</span>
+<span class="ln">149</span>        // Bash / shell.
+<span class="ln">150</span>        Execute =&gt; matches!(mode, M::Execute),
+<span class="ln">151</span>
+<span class="ln">152</span>        // Process control (background tasks, monitors).
+<span class="ln">153</span>        BackgroundTaskAction | WaitTasksAction | KillTaskAction | Task | Monitor =&gt; {
+<span class="ln">154</span>            matches!(mode, M::Execute)
+<span class="ln">155</span>        }
+<span class="ln">156</span>
+<span class="ln">157</span>        // Integration dispatch.
+<span class="ln">158</span>        UseTool =&gt; matches!(mode, M::ReadWrite | M::Execute),
+<span class="ln">159</span>
+<span class="ln">160</span>        // Catch-all -- only `All` mode keeps it (early-return above).
+<span class="ln">161</span>        Other =&gt; false,
+<span class="ln">162</span>    }
+<span class="ln">163</span>}</pre>
+</div></section><section class="sec" id="registry"><div class="sec-no">§ <b>01</b> · DETAIL</div><h2 class="sec-title">Registry dispatch</h2><p>工具 registry 把工具定义、session context 和 dispatch 分开。<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:27</code> 说明 tool packs 是进程级注册，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:53</code> 是 ToolConfig 的核心元数据，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1375</code> 进入 call_raw，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1433</code> 分出同步和 streaming 调用。这个结构让后续工具添加不必改 prompt 编排器。</p><h3><span class="arr">▸</span>ToolConfig</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs</span>:27-92</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">27</span>/// Process-global registry of external &quot;tool packs&quot; — functions that
+<span class="ln">28</span>/// contribute additional tool registrations into every
+<span class="ln">29</span>/// [`ToolRegistryBuilder::new`].
+<span class="ln">30</span>///
+<span class="ln">31</span>/// This inverts the dependency for harness code that must live outside
+<span class="ln">32</span>/// this crate: instead of `xai-grok-tools` referencing an out-of-tree tool
+<span class="ln">33</span>/// pack, the pack calls
+<span class="ln">34</span>/// [`register_tool_pack`] at startup and registers itself here.
+<span class="ln">35</span>///
+<span class="ln">36</span>/// # Ordering contract
+<span class="ln">37</span>/// [`register_tool_pack`] MUST run before the FIRST `ToolRegistryBuilder::new()`
+<span class="ln">38</span>/// in the process. Packs registered after a builder
+<span class="ln">39</span>/// has been constructed do not retroactively apply to that builder.
+<span class="ln">40</span>/// A tool pack: a function that contributes registrations to a builder.
+<span class="ln">41</span>pub type ToolPack = fn(&amp;mut ToolRegistryBuilder);
+<span class="ln">42</span>static TOOL_PACKS: OnceLock&lt;Mutex&lt;Vec&lt;ToolPack&gt;&gt;&gt; = OnceLock::new();
+<span class="ln">43</span>fn tool_packs() -&gt; &amp;&#x27;static Mutex&lt;Vec&lt;ToolPack&gt;&gt; {
+<span class="ln">44</span>    TOOL_PACKS.get_or_init(|| Mutex::new(Vec::new()))
+<span class="ln">45</span>}
+<span class="ln">46</span>/// Register an out-of-tree tool pack. See [`TOOL_PACKS`] for the ordering
+<span class="ln">47</span>/// contract. Idempotency is the caller&#x27;s responsibility (a pack registered
+<span class="ln">48</span>/// twice registers its tools twice).
+<span class="ln">49</span>pub fn register_tool_pack(pack: ToolPack) {
+<span class="ln">50</span>    tool_packs().lock().push(pack);
+<span class="ln">51</span>}
+<span class="ln">52</span>#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+<span class="ln">53</span>pub struct ToolConfig {
+<span class="ln">54</span>    pub id: String,
+<span class="ln">55</span>    /// tool params, keyed by fully qualified name.
+<span class="ln">56</span>    pub params: Option&lt;serde_json::Map&lt;String, serde_json::Value&gt;&gt;,
+<span class="ln">57</span>    /// tool_id → client-facing name.
+<span class="ln">58</span>    pub name_override: Option&lt;String&gt;,
+<span class="ln">59</span>    /// { canonical param → client-facing param }.
+<span class="ln">60</span>    pub params_name_overrides: Option&lt;HashMap&lt;String, String&gt;&gt;,
+<span class="ln">61</span>    /// When `Some`, replaces the tool&#x27;s `description_template()` entirely.
+<span class="ln">62</span>    ///
+<span class="ln">63</span>    /// Use this when the same built-in tool needs a context-specific
+<span class="ln">64</span>    /// description — e.g. `run_terminal_cmd` in a container environment
+<span class="ln">65</span>    /// vs. the default host-shell description.
+<span class="ln">66</span>    #[serde(default, skip_serializing_if = &quot;Option::is_none&quot;)]
+<span class="ln">67</span>    pub description_override: Option&lt;String&gt;,
+<span class="ln">68</span>    /// Per-tool behavior version override. Wins over `ToolServerConfig::behavior_preset`.
+<span class="ln">69</span>    /// Only valid for version-managed tools (see `versions::MANAGED_TOOLS`).
+<span class="ln">70</span>    #[serde(default, skip_serializing_if = &quot;Option::is_none&quot;)]
+<span class="ln">71</span>    pub behavior_version: Option&lt;String&gt;,
+<span class="ln">72</span>    /// The tool&#x27;s capability category. Populated automatically by
+<span class="ln">73</span>    /// `for_tool::&lt;T&gt;()` / `From&lt;&amp;T: Tool&gt;` and used by capability-mode
+<span class="ln">74</span>    /// enforcement to filter tools without a hardcoded ID mapping.
+<span class="ln">75</span>    ///
+<span class="ln">76</span>    /// `None` means the tool&#x27;s kind is unknown (e.g. MCP/custom tools
+<span class="ln">77</span>    /// created via `ToolConfig::from_id()`). Capability-mode filtering
+<span class="ln">78</span>    /// preserves tools with `kind: None` — this is intentional to avoid
+<span class="ln">79</span>    /// breaking extensibility.
+<span class="ln">80</span>    ///
+<span class="ln">81</span>    /// `ToolKind` is `#[serde(other)]`, so an unknown deserialized `kind` becomes
+<span class="ln">82</span>    /// `Some(Other)` (dropped by restrictive modes) rather than an error — not a
+<span class="ln">83</span>    /// live path today since `kind` is auto-populated and `from_id` leaves it
+<span class="ln">84</span>    /// `None`. [`deserialize_config_kind`] warns on that sink so a config typo
+<span class="ln">85</span>    /// doesn&#x27;t silently demote the tool.
+<span class="ln">86</span>    #[serde(
+<span class="ln">87</span>        default,
+<span class="ln">88</span>        skip_serializing_if = &quot;Option::is_none&quot;,
+<span class="ln">89</span>        deserialize_with = &quot;deserialize_config_kind&quot;
+<span class="ln">90</span>    )]
+<span class="ln">91</span>    pub kind: Option&lt;ToolKind&gt;,
+<span class="ln">92</span>}</pre>
+</div><h3><span class="arr">▸</span>Dispatch</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs</span>:1375-1499</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1375</span>    /// Execute a tool, returning only its raw output.
+<span class="ln">1376</span>    ///
+<span class="ln">1377</span>    /// Unlike [`call()`], this skips reminders and persistence. Used by
+<span class="ln">1378</span>    /// `InnerDispatchForToolset` so that `use_tool`&#x27;s
+<span class="ln">1379</span>    /// dispatch to a target tool does not double-run post-processing: the
+<span class="ln">1380</span>    /// outer `call(&quot;use_tool&quot;)` does one round of post-processing over the
+<span class="ln">1381</span>    /// target&#x27;s output.
+<span class="ln">1382</span>    ///
+<span class="ln">1383</span>    /// Inner dispatch is intentionally **not** populated in the forwarded
+<span class="ln">1384</span>    /// context. MCP tools (the targets of `use_tool`) are passthrough
+<span class="ln">1385</span>    /// implementations that never call `use_tool` themselves, so they do
+<span class="ln">1386</span>    /// not need inner dispatch.
+<span class="ln">1387</span>    ///
+<span class="ln">1388</span>    /// The `parent_ctx` carries call-id, cwd, resources, etc. from the
+<span class="ln">1389</span>    /// outer call. A fresh child context is built from it — stripping
+<span class="ln">1390</span>    /// `InnerDispatch` to prevent recursion.
+<span class="ln">1391</span>    async fn call_raw(
+<span class="ln">1392</span>        &amp;self,
+<span class="ln">1393</span>        tool_name: &amp;str,
+<span class="ln">1394</span>        tool_args: serde_json::Value,
+<span class="ln">1395</span>        parent_ctx: xai_tool_runtime::ToolCallContext,
+<span class="ln">1396</span>    ) -&gt; Result&lt;crate::types::output::ToolOutput, xai_tool_runtime::ToolError&gt; {
+<span class="ln">1397</span>        let (registry_id, output_converter, reverse_params) = {
+<span class="ln">1398</span>            let tools = self.tools.read();
+<span class="ln">1399</span>            let entry = tools
+<span class="ln">1400</span>                .iter()
+<span class="ln">1401</span>                .find(|t| t.client_name == tool_name)
+<span class="ln">1402</span>                .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
+<span class="ln">1403</span>            (
+<span class="ln">1404</span>                entry.registry_id.clone(),
+<span class="ln">1405</span>                entry.output_converter.clone(),
+<span class="ln">1406</span>                entry.reverse_params.clone(),
+<span class="ln">1407</span>            )
+<span class="ln">1408</span>        };
+<span class="ln">1409</span>        let canonical_params = if reverse_params.is_empty() {
+<span class="ln">1410</span>            tool_args
+<span class="ln">1411</span>        } else {
+<span class="ln">1412</span>            remap_json_keys(tool_args, &amp;reverse_params)
+<span class="ln">1413</span>        };
+<span class="ln">1414</span>        let mut ctx = xai_tool_runtime::ToolCallContext::new(parent_ctx.call_id.clone());
+<span class="ln">1415</span>        ctx.extensions.insert(self.resources.clone());
+<span class="ln">1416</span>        ctx.extensions.insert_arc(Arc::clone(&amp;self.renderer));
+<span class="ln">1417</span>        if let Some(cwd) = parent_ctx.extensions.get::&lt;xai_tool_runtime::Cwd&gt;() {
+<span class="ln">1418</span>            ctx.extensions.insert((*cwd).clone());
+<span class="ln">1419</span>        }
+<span class="ln">1420</span>        let tool_id = xai_tool_protocol::ToolId::new(&amp;registry_id)
+<span class="ln">1421</span>            .unwrap_or_else(|_| xai_tool_protocol::ToolId::new(&quot;unknown&quot;).expect(&quot;valid&quot;));
+<span class="ln">1422</span>        let lr_handle = self.local_registry.find(&amp;tool_id).ok_or_else(|| {
+<span class="ln">1423</span>            xai_tool_runtime::ToolError::not_found(
+<span class="ln">1424</span>                tool_id,
+<span class="ln">1425</span>                format!(&quot;Tool not found in LocalRegistry: {registry_id}&quot;),
+<span class="ln">1426</span>            )
+<span class="ln">1427</span>        })?;
+<span class="ln">1428</span>        let stream = lr_handle.execute(ctx, canonical_params).await;
+<span class="ln">1429</span>        let value = drain_value_stream(stream).await?;
+<span class="ln">1430</span>        (output_converter)(value)
+<span class="ln">1431</span>            .map_err(|e| xai_tool_runtime::ToolError::custom(&quot;output_decoding&quot;, e.to_string()))
+<span class="ln">1432</span>    }
+<span class="ln">1433</span>    /// Dispatch a tool call by client-facing name with client-facing params.
+<span class="ln">1434</span>    ///
+<span class="ln">1435</span>    /// `cwd_override` — optional per-call working directory. When `Some`, tools
+<span class="ln">1436</span>    /// will use this instead of the session `Cwd` from Resources. This is
+<span class="ln">1437</span>    /// stack-local (not shared state), so concurrent calls with different
+<span class="ln">1438</span>    /// overrides don&#x27;t race.
+<span class="ln">1439</span>    pub async fn call(
+<span class="ln">1440</span>        self: &amp;Arc&lt;Self&gt;,
+<span class="ln">1441</span>        tool_name: &amp;str,
+<span class="ln">1442</span>        tool_args: serde_json::Value,
+<span class="ln">1443</span>        tool_call_id: &amp;str,
+<span class="ln">1444</span>        cwd_override: Option&lt;std::path::PathBuf&gt;,
+<span class="ln">1445</span>    ) -&gt; Result&lt;ToolRunResult, xai_tool_runtime::ToolError&gt; {
+<span class="ln">1446</span>        use futures::StreamExt;
+<span class="ln">1447</span>        let mut stream = self.call_streaming(tool_name, tool_args, tool_call_id, cwd_override);
+<span class="ln">1448</span>        while let Some(item) = stream.next().await {
+<span class="ln">1449</span>            match item {
+<span class="ln">1450</span>                xai_tool_runtime::ToolStreamItem::Progress(_) =&gt; continue,
+<span class="ln">1451</span>                xai_tool_runtime::ToolStreamItem::Terminal(result) =&gt; return result,
+<span class="ln">1452</span>            }
+<span class="ln">1453</span>        }
+<span class="ln">1454</span>        Err(stream_no_terminal_error())
+<span class="ln">1455</span>    }
+<span class="ln">1456</span>    /// Streaming sibling of [`call`].
+<span class="ln">1457</span>    ///
+<span class="ln">1458</span>    /// Forwards every inner [`ToolStreamItem::Progress`] unchanged, and when the
+<span class="ln">1459</span>    /// inner dispatch stream reaches its terminal, runs the shared
+<span class="ln">1460</span>    /// post-processing tail ([`finalize_output`]) on it and yields the resulting
+<span class="ln">1461</span>    /// [`ToolRunResult`] as the single terminal of the outer stream.
+<span class="ln">1462</span>    ///
+<span class="ln">1463</span>    /// This is a non-`async` inherent method: it synchronously builds and
+<span class="ln">1464</span>    /// returns a `&#x27;static` boxed stream. Because [`ToolStream`] is `&#x27;static`,
+<span class="ln">1465</span>    /// all `.await` and `Arc::clone(self)` happen *inside* the stream block so
+<span class="ln">1466</span>    /// nothing borrows `self` across the stream.
+<span class="ln">1467</span>    ///
+<span class="ln">1468</span>    /// [`ToolStream`]: xai_tool_runtime::ToolStream
+<span class="ln">1469</span>    /// [`ToolStreamItem::Progress`]: xai_tool_runtime::ToolStreamItem::Progress
+<span class="ln">1470</span>    pub fn call_streaming(
+<span class="ln">1471</span>        self: &amp;Arc&lt;Self&gt;,
+<span class="ln">1472</span>        tool_name: &amp;str,
+<span class="ln">1473</span>        tool_args: serde_json::Value,
+<span class="ln">1474</span>        tool_call_id: &amp;str,
+<span class="ln">1475</span>        cwd_override: Option&lt;std::path::PathBuf&gt;,
+<span class="ln">1476</span>    ) -&gt; xai_tool_runtime::ToolStream&lt;ToolRunResult&gt; {
+<span class="ln">1477</span>        use futures::StreamExt;
+<span class="ln">1478</span>        let this = Arc::clone(self);
+<span class="ln">1479</span>        let tool_name = tool_name.to_owned();
+<span class="ln">1480</span>        let tool_call_id = tool_call_id.to_owned();
+<span class="ln">1481</span>        Box::pin(async_stream::stream! {
+<span class="ln">1482</span>            let parts = match this.prepare_dispatch(&amp; tool_name, tool_args, &amp;
+<span class="ln">1483</span>            tool_call_id, cwd_override,) { Ok(parts) =&gt; parts, Err(e) =&gt; { yield
+<span class="ln">1484</span>            xai_tool_runtime::ToolStreamItem::Terminal(Err(e)); return; } }; let
+<span class="ln">1485</span>            DispatchParts { lr_handle, ctx, canonical_params, output_converter,
+<span class="ln">1486</span>            effective_tool_name, } = parts; let mut inner = lr_handle.execute(ctx,
+<span class="ln">1487</span>            canonical_params). await; while let Some(item) = inner.next(). await {
+<span class="ln">1488</span>            match item { xai_tool_runtime::ToolStreamItem::Progress(p) =&gt; { yield
+<span class="ln">1489</span>            xai_tool_runtime::ToolStreamItem::Progress(p); }
+<span class="ln">1490</span>            xai_tool_runtime::ToolStreamItem::Terminal(Err(e)) =&gt; { yield
+<span class="ln">1491</span>            xai_tool_runtime::ToolStreamItem::Terminal(Err(e)); return; }
+<span class="ln">1492</span>            xai_tool_runtime::ToolStreamItem::Terminal(Ok(typed)) =&gt; { let run_result
+<span class="ln">1493</span>            = this.finalize_output(typed.value, &amp; output_converter,
+<span class="ln">1494</span>            effective_tool_name). await; yield
+<span class="ln">1495</span>            xai_tool_runtime::ToolStreamItem::Terminal(run_result); return; } } }
+<span class="ln">1496</span>            yield
+<span class="ln">1497</span>            xai_tool_runtime::ToolStreamItem::Terminal(Err(stream_no_terminal_error()));
+<span class="ln">1498</span>        })
+<span class="ln">1499</span>    }</pre>
+</div><p>如果要审计工具链完整性，继续读 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:112</code>、<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:215</code>、<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1500</code>、<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1525</code>。这些行把 ToolConfig、SessionContext、dispatch 准备和调用边界连起来，能解释为什么新增工具必须先经过 registry，而不能绕过权限模型。</p><p>测试与元数据也有信号：<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:2170</code> 固定内建工具列表，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:2231</code> 验证按 ToolKind 查找，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:2255</code> 给工具元数据补充 x.ai/tool 标记；concise bash 的 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build_concise/bash.rs:189</code> 到 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build_concise/bash.rs:259</code> 则说明输出压缩策略有回归测试。</p></section><section class="sec" id="packs"><div class="sec-no">§ <b>02</b> · DETAIL</div><h2 class="sec-title">标准工具包</h2><p>标准工具包入口集中在 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build/mod.rs:1</code> 到 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build/mod.rs:67</code>，能看到 bash、grep、list dir、LSP、search replace、task、todo、goal、web、image/video 等工具边界。concise bash 在 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build_concise/bash.rs:117</code> 包装 BashTool 并覆盖 prompt 输出，是“同一工具不同展示策略”的例子。</p><h3><span class="arr">▸</span>工具包入口</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build/mod.rs</span>:1-67</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1</span>//! New-architecture tool implementations (NewTool trait).
+<span class="ln">2</span>//!
+<span class="ln">3</span>//! Each sub-module here contains a tool that implements `NewTool` instead
+<span class="ln">4</span>//! of the old `Tool` trait. During migration, old implementations live in
+<span class="ln">5</span>//! `implementations/&lt;tool&gt;/` and new implementations live in
+<span class="ln">6</span>//! `implementations/grok_build/&lt;tool&gt;/`.
+<span class="ln">7</span>//!
+<span class="ln">8</span>//! The [`register_all()`] function is the single entry-point for wiring up
+<span class="ln">9</span>//! the standard toolset. It inserts shared resources (`Terminal`,
+<span class="ln">10</span>//! `AvailableSkills`, `BashParams`) and registers every built-in tool.
+<span class="ln">11</span>pub mod ask_user_question;
+<span class="ln">12</span>pub mod bash;
+<span class="ln">13</span>#[path = &quot;deploy_app_stub.rs&quot;]
+<span class="ln">14</span>pub mod deploy_app;
+<span class="ln">15</span>pub mod enter_plan_mode;
+<span class="ln">16</span>pub mod exit_plan_mode;
+<span class="ln">17</span>pub mod grep;
+<span class="ln">18</span>pub mod image_edit;
+<span class="ln">19</span>pub mod image_gen;
+<span class="ln">20</span>pub mod kill_task;
+<span class="ln">21</span>pub mod list_dir;
+<span class="ln">22</span>pub mod lsp;
+<span class="ln">23</span>pub mod monitor;
+<span class="ln">24</span>pub mod read_file;
+<span class="ln">25</span>pub mod scheduler;
+<span class="ln">26</span>pub mod search_replace;
+<span class="ln">27</span>pub(crate) mod storage;
+<span class="ln">28</span>pub mod task;
+<span class="ln">29</span>pub mod task_output;
+<span class="ln">30</span>pub mod todo;
+<span class="ln">31</span>pub mod update_goal;
+<span class="ln">32</span>pub mod video_gen;
+<span class="ln">33</span>pub mod web_fetch;
+<span class="ln">34</span>pub mod web_search;
+<span class="ln">35</span>pub use ask_user_question::AskUserQuestionTool;
+<span class="ln">36</span>pub use bash::BashTool;
+<span class="ln">37</span>pub use deploy_app::{AppBuilderDeployerConfig, DEPLOY_APP_TOOL_NAME};
+<span class="ln">38</span>pub use enter_plan_mode::EnterPlanModeTool;
+<span class="ln">39</span>pub use exit_plan_mode::ExitPlanModeTool;
+<span class="ln">40</span>pub use grep::GrepTool;
+<span class="ln">41</span>pub use image_edit::{IMAGE_EDIT_TOOL_NAME, ImageEditTool};
+<span class="ln">42</span>pub use image_gen::{
+<span class="ln">43</span>    IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, ImageGenTool, imagine_instruction,
+<span class="ln">44</span>    imagine_usage_message,
+<span class="ln">45</span>};
+<span class="ln">46</span>pub use kill_task::{KillTaskTool, KillTerminalCommandTool};
+<span class="ln">47</span>pub use list_dir::ListDirTool;
+<span class="ln">48</span>pub use lsp::LspTool;
+<span class="ln">49</span>pub use monitor::tool::MonitorTool;
+<span class="ln">50</span>pub use read_file::ReadFileTool;
+<span class="ln">51</span>pub use scheduler::create::{
+<span class="ln">52</span>    SCHEDULER_CREATE_TOOL_NAME, SchedulerCreateTool, loop_schedule_instruction, loop_usage_message,
+<span class="ln">53</span>};
+<span class="ln">54</span>pub use scheduler::delete::{SCHEDULER_DELETE_TOOL_NAME, SchedulerDeleteTool};
+<span class="ln">55</span>pub use scheduler::list::SchedulerListTool;
+<span class="ln">56</span>pub use search_replace::SearchReplaceTool;
+<span class="ln">57</span>pub use task::TaskTool;
+<span class="ln">58</span>pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
+<span class="ln">59</span>pub use todo::TodoWriteTool;
+<span class="ln">60</span>pub use update_goal::{UPDATE_GOAL_TOOL_NAME, UpdateGoalTool};
+<span class="ln">61</span>pub use video_gen::{
+<span class="ln">62</span>    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, ImageToVideoTool,
+<span class="ln">63</span>    REFERENCE_TO_VIDEO_TOOL_NAME, ReferenceToVideoTool, imagine_video_instruction,
+<span class="ln">64</span>    imagine_video_usage_message,
+<span class="ln">65</span>};
+<span class="ln">66</span>pub use web_fetch::{WebFetchClient, WebFetchConfig, WebFetchParams, WebFetchTool};
+<span class="ln">67</span>pub use web_search::WebSearchTool;</pre>
+</div><h3><span class="arr">▸</span>Concise Bash</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build_concise/bash.rs</span>:117-165</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">117</span>impl xai_tool_runtime::Tool for BashConciseTool {
+<span class="ln">118</span>    type Args = BashToolInput;
+<span class="ln">119</span>    type Output = BashToolOutput;
+<span class="ln">120</span>
+<span class="ln">121</span>    fn id(&amp;self) -&gt; xai_tool_protocol::ToolId {
+<span class="ln">122</span>        xai_tool_protocol::ToolId::new(&quot;run_terminal_cmd&quot;).expect(&quot;valid tool id&quot;)
+<span class="ln">123</span>    }
+<span class="ln">124</span>
+<span class="ln">125</span>    fn description(
+<span class="ln">126</span>        &amp;self,
+<span class="ln">127</span>        _ctx: &amp;::xai_tool_runtime::ListToolsContext,
+<span class="ln">128</span>    ) -&gt; xai_tool_types::ToolDescription {
+<span class="ln">129</span>        xai_tool_types::ToolDescription::new(
+<span class="ln">130</span>            &quot;run_terminal_cmd&quot;,
+<span class="ln">131</span>            crate::types::tool_metadata::ToolMetadata::description_template(self),
+<span class="ln">132</span>        )
+<span class="ln">133</span>    }
+<span class="ln">134</span>
+<span class="ln">135</span>    fn capabilities(&amp;self) -&gt; xai_tool_protocol::ToolCapabilities {
+<span class="ln">136</span>        xai_tool_protocol::ToolCapabilities {
+<span class="ln">137</span>            is_read_only: false,
+<span class="ln">138</span>            tool_scope: Some(xai_tool_protocol::ToolScope::Write),
+<span class="ln">139</span>            ..Default::default()
+<span class="ln">140</span>        }
+<span class="ln">141</span>    }
+<span class="ln">142</span>
+<span class="ln">143</span>    #[tracing::instrument(name = &quot;tool.run_terminal_cmd_concise&quot;, skip_all)]
+<span class="ln">144</span>    async fn run(
+<span class="ln">145</span>        &amp;self,
+<span class="ln">146</span>        ctx: xai_tool_runtime::ToolCallContext,
+<span class="ln">147</span>        input: BashToolInput,
+<span class="ln">148</span>    ) -&gt; Result&lt;BashToolOutput, xai_tool_runtime::ToolError&gt; {
+<span class="ln">149</span>        let result = xai_tool_runtime::Tool::run(&amp;BashTool, ctx, input).await?;
+<span class="ln">150</span>
+<span class="ln">151</span>        match result {
+<span class="ln">152</span>            // TODO: Add different concise message for auto backgrounded terminal task
+<span class="ln">153</span>            BashToolOutput::Foreground(mut bash) =&gt; {
+<span class="ln">154</span>                let is_backgrounded = bash.signal.as_deref() == Some(&quot;backgrounded&quot;);
+<span class="ln">155</span>                bash.output_for_prompt = if is_backgrounded {
+<span class="ln">156</span>                    format_concise_background_prompt(&amp;bash)
+<span class="ln">157</span>                } else {
+<span class="ln">158</span>                    format_concise_foreground_prompt(&amp;bash)
+<span class="ln">159</span>                };
+<span class="ln">160</span>                Ok(BashToolOutput::Foreground(bash))
+<span class="ln">161</span>            }
+<span class="ln">162</span>            bg @ BashToolOutput::Background(_) =&gt; Ok(bg),
+<span class="ln">163</span>        }
+<span class="ln">164</span>    }
+<span class="ln">165</span>}</pre>
+</div></section>
+    <div class="foot"><span>Generated · 2026-07-16</span><span>xai-org/grok-build · source-level teardown</span></div>
+  </main>
+</div>
+<script>
+(function(){
+  const links=[...document.querySelectorAll('.nav-list a')], sections=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean), sel=document.getElementById('msel');
+  if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',()=>location.hash=sel.value);}
+  const io=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id));}})},{rootMargin:'-35% 0px -55%'});
+  sections.forEach(s=>io.observe(s));
+})();
+</script>
+</body>
+</html>

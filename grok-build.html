@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>grok-build · 终端原生 Coding Agent 运行时 · 源码观测台</title>
+<meta name="description" content="xai-org/grok-build 源码级深度解析：TUI 入口、ACP/MCP 协议、工具注册表、能力过滤和会话生命周期。" />
+<meta property="og:title" content="Grok Build · 源码观测台" />
+<meta property="og:description" content="xai-org/grok-build 源码级深度解析：TUI 入口、ACP/MCP 协议、工具注册表、能力过滤和会话生命周期。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star: #56c7ff; --star-soft: #8de3ff; --star-deep: #1a86b8; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">Grok Build<b>▹</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">Grok Build<b>▹</b></div><div class="sub">源码级架构解析 · sources/</div></div>
+    <span class="nav-ver">Rust · terminal agent</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#architecture"><span class="idx">01</span>架构</a></li><li><a href="#state"><span class="idx">02</span>状态</a></li><li><a href="#tools"><span class="idx">03</span>工具</a></li><li><a href="#protocol"><span class="idx">04</span>协议</a></li><li><a href="#validation"><span class="idx">05</span>验证</a></li><li><a href="#risks"><span class="idx">06</span>风险</a></li></ul></nav>
+    <div class="nav-foot"><div>Stars ★4414 · 2026-07-14</div><div><a href="https://github.com/xai-org/grok-build" target="_blank" rel="noopener">xai-org/grok-build</a></div><div><a href="index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">Grok Build <em>终端原生 Coding Agent 运行时</em></h1><p class="hero-desc">xAI 开源的 SpaceXAI coding-agent harness and TUI。源码显示它是一个 Rust workspace：TUI、headless 单轮、ACP 编辑器协议、MCP、插件和工具注册表共享同一批运行时边界。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 4414</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">2049</div><div class="stat-lbl">Codegen files</div></div><div class="stat"><div class="stat-num">Rust</div><div class="stat-lbl">Primary language</div></div><div class="stat"><div class="stat-num">Jul 15</div><div class="stat-lbl">Last commit</div></div></div></div><div><div class="flow">CLI / TUI / ACP
+  │
+main.rs 启动器
+  ├─ pager event loop
+  ├─ mvp_agent sessions
+  ├─ tool registry
+  └─ MCP / plugin / sandbox</div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">为什么它不是普通 CLI</h2><p>Grok Build 值得拆的地方不在“又一个终端 coding agent”，而在它把三种运行形态放进同一套 Rust 控制面：入口从 <code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1456</code> 初始化渲染和内存钩子，到 <code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1530</code> 完成参数解析，再在 <code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1777</code> 切到 headless 单轮执行。这个路径说明它不是 demo CLI，而是把 TUI、单轮 agent、编辑器协议都接在同一个启动器下。</p><p>主循环没有把所有状态塞进事件处理函数。<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs:97</code> 先构造重连计划，<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs:126</code> 再汇总恢复结果，<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs:195</code> 处理子进程暂停时的 TTY 恢复。这样做的价值是：TUI 可以断线重连、让 shell 子进程临时接管终端，同时仍然保持 actor 状态可恢复。</p><h3><span class="arr">▸</span>四个边界</h3><div class="g2"><div class="card"><div class="card-h">入口边界</div><div class="card-d">main.rs 负责渲染、权限、沙箱、命令分派和 headless 分支。</div></div><div class="card"><div class="card-h">状态边界</div><div class="card-d">pager/app/agent.rs 把队列、后台任务、kill 语义写成数据结构。</div></div><div class="card"><div class="card-h">工具边界</div><div class="card-d">workspace capability + tools registry 决定哪些工具能被调度。</div></div><div class="card"><div class="card-h">协议边界</div><div class="card-d">ACP 与 MCP 是运行时能力入口，而不是独立 demo。</div></div></div></section>
+<section class="sec" id="architecture"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">启动器到事件循环</h2><p>Agent 状态被拆成可序列化、可排队、可展示的数据结构。<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/agent.rs:17</code> 定义 AgentId 与队列类型，<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/agent.rs:43</code> 把 prompt、图像、skill 展示和 schedule 放进 QueuedPrompt，<code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/agent.rs:161</code> 则约束后台任务 stdout 上限和 kill 语义。它把 UI 展示和任务控制的边界写成普通数据，而不是散在 widgets 里。</p><p>工具能力边界不是靠提示词声明，而是有一层 capability filter。<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:6</code> 定义 ReadOnly、ReadWrite、Execute、All 的偏序，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:33</code> 把声明后的工具集过滤，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:116</code> 用 ToolKind 映射读写执行类别。这个设计是安全边界里最可复用的一块。</p><h3><span class="arr">▸</span>启动器的关键分派</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs</span>:1456-1488</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1456</span>fn main() {
+<span class="ln">1457</span>    xai_grok_pager_minimal::install();
+<span class="ln">1458</span>    #[cfg(all(feature = &quot;jemalloc&quot;, unix))]
+<span class="ln">1459</span>    xai_grok_pager::memory_release::install_release_hook(purge_jemalloc_retained_pages);
+<span class="ln">1460</span>    #[cfg(all(feature = &quot;jemalloc&quot;, unix))]
+<span class="ln">1461</span>    {
+<span class="ln">1462</span>        xai_grok_pager::memory_trace::install_allocator_stats_provider(jemalloc_allocator_stats);
+<span class="ln">1463</span>        xai_grok_pager::memory_trace::install_allocator_dump_provider(jemalloc_stats_dump);
+<span class="ln">1464</span>    }
+<span class="ln">1465</span>    #[cfg(all(feature = &quot;jemalloc&quot;, unix))]
+<span class="ln">1466</span>    install_heap_profile_hooks();
+<span class="ln">1467</span>    if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
+<span class="ln">1468</span>        std::process::exit(code);
+<span class="ln">1469</span>    }
+<span class="ln">1470</span>    xai_grok_pager::memory_trace::start(
+<span class="ln">1471</span>        xai_grok_shell::util::grok_home::grok_home().join(&quot;memtrace&quot;),
+<span class="ln">1472</span>    );
+<span class="ln">1473</span>    raise_fd_limit();
+<span class="ln">1474</span>    if let Err(e) = xai_grok_config::validate_requirements() {
+<span class="ln">1475</span>        eprintln!(&quot;Couldn&#x27;t start Grok: {e}&quot;);
+<span class="ln">1476</span>        eprintln!();
+<span class="ln">1477</span>        eprintln!(
+<span class="ln">1478</span>            &quot;Update Grok to a version the policy allows, or ask your administrator \
+<span class="ln">1479</span>             to fix the managed requirements.&quot;
+<span class="ln">1480</span>        );
+<span class="ln">1481</span>        std::process::exit(2);
+<span class="ln">1482</span>    }
+<span class="ln">1483</span>    let _sentry_guard = xai_grok_telemetry::sentry::init(xai_grok_telemetry::sentry::Config {
+<span class="ln">1484</span>        client: &quot;grok-pager&quot;,
+<span class="ln">1485</span>        client_version: PAGER_CLIENT_VERSION,
+<span class="ln">1486</span>        release: env!(&quot;VERSION_WITH_COMMIT&quot;),
+<span class="ln">1487</span>        disabled: xai_grok_shell::agent::config::is_error_reporting_disabled_sync(),
+<span class="ln">1488</span>    });</pre>
+</div><h3><span class="arr">▸</span>命令与 headless 分支</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs</span>:1777-1825</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1777</span>    let headless_prompt = xai_grok_pager::headless::HeadlessPrompt::from_args(
+<span class="ln">1778</span>        args.single.as_deref(),
+<span class="ln">1779</span>        args.prompt_json.as_deref(),
+<span class="ln">1780</span>        args.prompt_file.as_deref(),
+<span class="ln">1781</span>    )?;
+<span class="ln">1782</span>    if let Some(prompt) = headless_prompt {
+<span class="ln">1783</span>        init_tracing_simple(HEADLESS_ENTRYPOINT);
+<span class="ln">1784</span>        let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
+<span class="ln">1785</span>        enforce_minimum_version_or_exit(&amp;update_config).await;
+<span class="ln">1786</span>        let launch_yolo = xai_grok_shell::util::config::effective_yolo_for_launch(
+<span class="ln">1787</span>            args.yolo,
+<span class="ln">1788</span>            args.permission_mode_flag.as_deref(),
+<span class="ln">1789</span>            None,
+<span class="ln">1790</span>        );
+<span class="ln">1791</span>        if let Some(warning) = launch_yolo.blocked_warning {
+<span class="ln">1792</span>            eprintln!(&quot;grok: {warning}&quot;);
+<span class="ln">1793</span>        }
+<span class="ln">1794</span>        let json_schema = args
+<span class="ln">1795</span>            .json_schema
+<span class="ln">1796</span>            .as_deref()
+<span class="ln">1797</span>            .map(xai_grok_pager::headless::parse_json_schema)
+<span class="ln">1798</span>            .transpose()?;
+<span class="ln">1799</span>        if json_schema.is_some() {
+<span class="ln">1800</span>            if args.output_format == xai_grok_pager::headless::OutputFormat::Plain {
+<span class="ln">1801</span>                args.output_format = xai_grok_pager::headless::OutputFormat::Json;
+<span class="ln">1802</span>            }
+<span class="ln">1803</span>            if args.self_verify {
+<span class="ln">1804</span>                anyhow::bail!(
+<span class="ln">1805</span>                    &quot;--json-schema and --self-verify cannot be used together: \
+<span class="ln">1806</span>                     verification output would corrupt the structured response&quot;
+<span class="ln">1807</span>                );
+<span class="ln">1808</span>            }
+<span class="ln">1809</span>        }
+<span class="ln">1810</span>        return xai_grok_pager::headless::run_single_turn(
+<span class="ln">1811</span>            prompt,
+<span class="ln">1812</span>            args.verbatim,
+<span class="ln">1813</span>            xai_grok_pager::headless::HeadlessOptions {
+<span class="ln">1814</span>                session_id: args.session_id.clone(),
+<span class="ln">1815</span>                resume: args.resume_session.or(args.load_session),
+<span class="ln">1816</span>                cwd: args.cwd,
+<span class="ln">1817</span>                yolo: launch_yolo.yolo,
+<span class="ln">1818</span>                trust: args.trust,
+<span class="ln">1819</span>                output_format: args.output_format,
+<span class="ln">1820</span>                json_schema,
+<span class="ln">1821</span>                model: args.model,
+<span class="ln">1822</span>                rules: args.rules,
+<span class="ln">1823</span>                system_prompt_override: args.system_prompt_override.clone(),
+<span class="ln">1824</span>                continue_last_session: args.continue_last_session,
+<span class="ln">1825</span>                fork_session: args.fork_session,</pre>
+</div><h3><span class="arr">▸</span>TUI 重连计划</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs</span>:97-150</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">97</span>fn plan_reconnect_load(
+<span class="ln">98</span>    agent: &amp;super::agent_view::AgentView,
+<span class="ln">99</span>    fallback_cwd: &amp;std::path::Path,
+<span class="ln">100</span>) -&gt; Option&lt;ReconnectLoadPlan&gt; {
+<span class="ln">101</span>    let session_id = agent.session.session_id.clone()?;
+<span class="ln">102</span>    let cwd = if agent.session.cwd.as_os_str().is_empty() {
+<span class="ln">103</span>        fallback_cwd.to_path_buf()
+<span class="ln">104</span>    } else {
+<span class="ln">105</span>        agent.session.cwd.clone()
+<span class="ln">106</span>    };
+<span class="ln">107</span>    let yolo = agent.session.is_yolo();
+<span class="ln">108</span>    // Set BOTH yoloMode and autoMode explicitly. The leader&#x27;s capability injection
+<span class="ln">109</span>    // only fills ABSENT keys, so omitting autoMode here lets a stale launch-time
+<span class="ln">110</span>    // `ClientCapabilities.auto_mode` re-enable Auto after the user left it (e.g.
+<span class="ln">111</span>    // Shift+Tab to Ask). Auto is per-agent (symmetric with yolo) — derive it from
+<span class="ln">112</span>    // this agent&#x27;s own `auto_mode` so a background tab reconnects with ITS mode,
+<span class="ln">113</span>    // not the active tab&#x27;s global `current_ui` mirror.
+<span class="ln">114</span>    let auto = super::dispatch::effective_auto(yolo, agent.session.is_auto());
+<span class="ln">115</span>    let mut meta = serde_json::json!({ &quot;yoloMode&quot;: yolo, &quot;autoMode&quot;: auto });
+<span class="ln">116</span>    if let Some(ref cursor) = agent.last_seen_event_id {
+<span class="ln">117</span>        meta[&quot;cursor&quot;] = serde_json::Value::String(cursor.clone());
+<span class="ln">118</span>    }
+<span class="ln">119</span>    Some(ReconnectLoadPlan {
+<span class="ln">120</span>        session_id,
+<span class="ln">121</span>        cwd,
+<span class="ln">122</span>        meta,
+<span class="ln">123</span>    })
+<span class="ln">124</span>}
+<span class="ln">125</span>
+<span class="ln">126</span>/// Resolve the two post-reconnect restore outcomes from the per-agent
+<span class="ln">127</span>/// `session/load` results.
+<span class="ln">128</span>///
+<span class="ln">129</span>/// - `all_restored` (AND across every reloaded tab, plus `init_ok`) drives the
+<span class="ln">130</span>///   user-facing toast: it reports whether the WHOLE reconnect came back.
+<span class="ln">131</span>/// - `active_restored` is per-agent: the ACTIVE tab&#x27;s OWN reload succeeded. It
+<span class="ln">132</span>///   gates that tab&#x27;s post-reconnect queue drain. Gating the drain on
+<span class="ln">133</span>///   `all_restored` would let one failed background tab strand prompts queued
+<span class="ln">134</span>///   on a healthy active tab — the drain (`dispatch_drain_queue`) only ever
+<span class="ln">135</span>///   touches the active agent, so a background failure has no bearing on it.
+<span class="ln">136</span>///
+<span class="ln">137</span>/// `loads` maps each reloaded agent to `(success, running_prompt_id)`; an agent
+<span class="ln">138</span>/// in `pending_agent_ids` but absent from `loads` is treated as failed
+<span class="ln">139</span>/// (mirrors the `unwrap_or((false, _))` at the finalize site).
+<span class="ln">140</span>fn reconnect_restore_outcome(
+<span class="ln">141</span>    init_ok: bool,
+<span class="ln">142</span>    pending_agent_ids: &amp;[super::agent::AgentId],
+<span class="ln">143</span>    loads: &amp;std::collections::HashMap&lt;super::agent::AgentId, (bool, Option&lt;String&gt;)&gt;,
+<span class="ln">144</span>    active_agent_id: Option&lt;super::agent::AgentId&gt;,
+<span class="ln">145</span>) -&gt; (bool, bool) {
+<span class="ln">146</span>    let load_ok = |id: &amp;super::agent::AgentId| -&gt; bool { loads.get(id).is_some_and(|(ok, _)| *ok) };
+<span class="ln">147</span>    let all_restored = init_ok &amp;&amp; pending_agent_ids.iter().all(load_ok);
+<span class="ln">148</span>    let active_restored = init_ok
+<span class="ln">149</span>        &amp;&amp; active_agent_id.is_some_and(|aid| pending_agent_ids.contains(&amp;aid) &amp;&amp; load_ok(&amp;aid));
+<span class="ln">150</span>    (all_restored, active_restored)</pre>
+</div><a class="deep-link" href="grok-build/grok-build-runtime.html">深度阅读 · 运行时与 TUI 入口</a></section>
+<section class="sec" id="state"><div class="sec-no">§ <b>02</b> · STATE</div><h2 class="sec-title">Agent 状态模型</h2><p>ACP 编辑器模式不是旁路实现。<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:7</code> 直接实现 acp::Agent，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:25</code> 在 initialize 时清理与 bootstrap 权限，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:77</code> 读取客户端能力、code navigation 和 mcpApps。编辑器入口与终端入口共享信任、工具、MCP 这些底层抽象。</p><h3><span class="arr">▸</span>队列项与 Prompt</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager/src/app/agent.rs</span>:17-78</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">17</span>/// Unique local identifier for an agent.
+<span class="ln">18</span>#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+<span class="ln">19</span>pub struct AgentId(pub usize);
+<span class="ln">20</span>/// Whether a queue entry is a regular prompt or a slash command.
+<span class="ln">21</span>#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+<span class="ln">22</span>pub enum QueueEntryKind {
+<span class="ln">23</span>    /// Regular user prompt — sent via `PromptRequest`.
+<span class="ln">24</span>    Prompt,
+<span class="ln">25</span>    /// Slash command (e.g., `/compact`) — dispatched as `ExtRequest` or local action.
+<span class="ln">26</span>    Command,
+<span class="ln">27</span>    /// Direct bash command — bypasses agent loop, executed by shell directly.
+<span class="ln">28</span>    BashCommand,
+<span class="ln">29</span>    /// Scheduled (cron) prompt -- injected by the scheduler via ACP notification.
+<span class="ln">30</span>    Cron,
+<span class="ln">31</span>}
+<span class="ln">32</span>impl QueueEntryKind {
+<span class="ln">33</span>    /// Short, stable label for telemetry / profiling logs.
+<span class="ln">34</span>    pub fn as_label(&amp;self) -&gt; &amp;&#x27;static str {
+<span class="ln">35</span>        match self {
+<span class="ln">36</span>            Self::Prompt =&gt; &quot;prompt&quot;,
+<span class="ln">37</span>            Self::Command =&gt; &quot;command&quot;,
+<span class="ln">38</span>            Self::BashCommand =&gt; &quot;bash_command&quot;,
+<span class="ln">39</span>            Self::Cron =&gt; &quot;cron&quot;,
+<span class="ln">40</span>        }
+<span class="ln">41</span>    }
+<span class="ln">42</span>}
+<span class="ln">43</span>/// An entry waiting in the queue to be sent to the agent.
+<span class="ln">44</span>///
+<span class="ln">45</span>/// Each entry gets a monotonically increasing `id` for stable tracking
+<span class="ln">46</span>/// (e.g., when editing a queued prompt whose positional index shifts as
+<span class="ln">47</span>/// earlier prompts drain). The user-facing display uses the 1-based
+<span class="ln">48</span>/// positional index (`#1`, `#2`, …), never the internal `id`.
+<span class="ln">49</span>#[derive(Debug, Clone)]
+<span class="ln">50</span>pub struct QueuedPrompt {
+<span class="ln">51</span>    /// Monotonic ID, unique within this agent&#x27;s session. Never reused.
+<span class="ln">52</span>    pub id: u64,
+<span class="ln">53</span>    /// The prompt text (or command text, e.g. &quot;/compact&quot;).
+<span class="ln">54</span>    pub text: String,
+<span class="ln">55</span>    /// Whether this is a prompt or a slash command.
+<span class="ln">56</span>    pub kind: QueueEntryKind,
+<span class="ln">57</span>    /// Optional separate payload for the wire. When `Some`, this is sent
+<span class="ln">58</span>    /// instead of `text`. Used for skill injection where the display
+<span class="ln">59</span>    /// shows `/commit args` but the wire carries the skill XML content.
+<span class="ln">60</span>    pub wire_blocks: Option&lt;Vec&lt;acp::ContentBlock&gt;&gt;,
+<span class="ln">61</span>    /// Images attached to this prompt. Drained from `PromptWidget` at
+<span class="ln">62</span>    /// submission time. Preserved across queue text edits.
+<span class="ln">63</span>    pub images: Vec&lt;crate::prompt_images::PastedImage&gt;,
+<span class="ln">64</span>    /// Whether this prompt should display as a skill invocation (teal accent).
+<span class="ln">65</span>    /// Only meaningful when `wire_blocks` is `Some`.
+<span class="ln">66</span>    pub display_as_skill: bool,
+<span class="ln">67</span>    /// Recognized slash-token byte ranges into `text`, captured from the
+<span class="ln">68</span>    /// composer at submit time; empty = no token styling.
+<span class="ln">69</span>    pub skill_token_ranges: Vec&lt;std::ops::Range&lt;usize&gt;&gt;,
+<span class="ln">70</span>    /// Scheduler task ID for cron prompts. Used for per-task dedup.
+<span class="ln">71</span>    pub task_id: Option&lt;String&gt;,
+<span class="ln">72</span>    /// Human-readable schedule (e.g. &quot;every 5 minutes&quot;) for cron prompts.
+<span class="ln">73</span>    /// Threaded into the system-reminder framing sent to the model.
+<span class="ln">74</span>    pub human_schedule: Option&lt;String&gt;,
+<span class="ln">75</span>    /// All chip elements captured from the textarea at send time.
+<span class="ln">76</span>    /// Threaded into `InFlightPrompt` so rewind restores collapsed chips.
+<span class="ln">77</span>    pub chip_elements: Vec&lt;ChipElement&gt;,
+<span class="ln">78</span>}</pre>
+</div><h3><span class="arr">▸</span>后台任务输出上限</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager/src/app/agent.rs</span>:161-222</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">161</span>/// Maximum in-memory stdout per background task (10 MB).
+<span class="ln">162</span>pub const BG_TASK_MAX_STDOUT: usize = 10 * 1024 * 1024;
+<span class="ln">163</span>/// How long to wait for a kill response before auto-clearing `pending_kill`
+<span class="ln">164</span>/// so the user can retry. Applied to both bg tasks and subagents.
+<span class="ln">165</span>pub const PENDING_KILL_TIMEOUT_SECS: u64 = 10;
+<span class="ln">166</span>/// Status of a background task.
+<span class="ln">167</span>#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+<span class="ln">168</span>pub enum BgTaskStatus {
+<span class="ln">169</span>    /// Currently running.
+<span class="ln">170</span>    Running,
+<span class="ln">171</span>    /// Completed successfully (exit 0).
+<span class="ln">172</span>    Done,
+<span class="ln">173</span>    /// Failed (non-zero exit, signal, timeout, OOM, etc.).
+<span class="ln">174</span>    Failed,
+<span class="ln">175</span>}
+<span class="ln">176</span>/// Central state for a single background task.
+<span class="ln">177</span>///
+<span class="ln">178</span>/// Stored in `AgentSession::bg_tasks` keyed by `task_id`.
+<span class="ln">179</span>/// Both the scrollback `BgTaskBlock` and the bg task pane read from this.
+<span class="ln">180</span>#[derive(Debug, Clone)]
+<span class="ln">181</span>pub struct BgTaskState {
+<span class="ln">182</span>    pub task_id: String,
+<span class="ln">183</span>    pub tool_call_id: String,
+<span class="ln">184</span>    pub command: String,
+<span class="ln">185</span>    pub description: Option&lt;String&gt;,
+<span class="ln">186</span>    pub cwd: String,
+<span class="ln">187</span>    pub output_file: String,
+<span class="ln">188</span>    pub status: BgTaskStatus,
+<span class="ln">189</span>    pub start_time: SystemTime,
+<span class="ln">190</span>    pub end_time: Option&lt;SystemTime&gt;,
+<span class="ln">191</span>    pub exit_code: Option&lt;i32&gt;,
+<span class="ln">192</span>    pub signal: Option&lt;String&gt;,
+<span class="ln">193</span>    /// Accumulated stdout (full cumulative buffer from shell, max BG_TASK_MAX_STDOUT).
+<span class="ln">194</span>    ///
+<span class="ln">195</span>    /// Mutate via [`BgTaskState::set_stdout`] / [`BgTaskState::append_stdout`]
+<span class="ln">196</span>    /// so `stdout_line_count` and `truncated` stay in sync.
+<span class="ln">197</span>    pub stdout: String,
+<span class="ln">198</span>    /// Cached `stdout.lines().count()`. Kept in sync by [`Self::set_stdout`]
+<span class="ln">199</span>    /// and [`Self::append_stdout`] so the tasks-pane overlay doesn&#x27;t have to
+<span class="ln">200</span>    /// memchr-scan up to `BG_TASK_MAX_STDOUT` bytes per visible task per
+<span class="ln">201</span>    /// render frame.
+<span class="ln">202</span>    pub stdout_line_count: usize,
+<span class="ln">203</span>    /// Whether the rolling buffer has dropped data. Either the shell-side
+<span class="ln">204</span>    /// `BashOutput.truncated` flag was set when the chunk arrived, or the
+<span class="ln">205</span>    /// TUI itself trimmed the buffer to stay under `BG_TASK_MAX_STDOUT` (in
+<span class="ln">206</span>    /// `set_stdout` / `append_stdout`). Once `true`, stays `true` — the
+<span class="ln">207</span>    /// real line count is at least `stdout_line_count`, hence the `(N+)`
+<span class="ln">208</span>    /// badge.
+<span class="ln">209</span>    pub truncated: bool,
+<span class="ln">210</span>    /// Kill request sent, awaiting task_completed.
+<span class="ln">211</span>    pub pending_kill: bool,
+<span class="ln">212</span>    /// When the kill request was sent. Used to auto-clear `pending_kill`
+<span class="ln">213</span>    /// after a timeout so the user can retry if the response is lost.
+<span class="ln">214</span>    pub kill_requested_at: Option&lt;Instant&gt;,
+<span class="ln">215</span>    /// Scrollback entry ID for the &quot;Task started&quot; block (for finish_running).
+<span class="ln">216</span>    pub scrollback_entry_id: Option&lt;crate::scrollback::entry::EntryId&gt;,
+<span class="ln">217</span>    /// True when this background task is a monitor (the `monitor` tool). The
+<span class="ln">218</span>    /// tasks pane renders monitors with a blue &quot;Monitor&quot; tag + neutral text
+<span class="ln">219</span>    /// (mirroring scheduled `/loop` rows) instead of bash-highlighting the
+<span class="ln">220</span>    /// command. Set from the `monitor_description` field of the
+<span class="ln">221</span>    /// `TaskBackgrounded` notification.
+<span class="ln">222</span>    pub is_monitor: bool,</pre>
+</div><h3><span class="arr">▸</span>TTY 暂停交接</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs</span>:195-260</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">195</span>/// Suspend the inline TUI, run a blocking child that takes over the tty
+<span class="ln">196</span>/// (`$EDITOR`, `$PAGER`, …), then restore. Shared by the editor and transcript
+<span class="ln">197</span>/// suspend paths so the subtle reader-park + raw-mode + alt-screen handoff lives
+<span class="ln">198</span>/// in one place.
+<span class="ln">199</span>///
+<span class="ln">200</span>/// The reader thread is parked first so the child (which inherits this tty)
+<span class="ln">201</span>/// keeps every keystroke instead of racing the reader; on return, buffered
+<span class="ln">202</span>/// terminal query replies and any pre-park keystroke are drained before the
+<span class="ln">203</span>/// reader resumes.
+<span class="ln">204</span>///
+<span class="ln">205</span>/// The frame **writer** thread is then drained (bounded) before the child
+<span class="ln">206</span>/// starts: frames are written to the tty asynchronously, and the frame that
+<span class="ln">207</span>/// armed this suspend (e.g. minimal&#x27;s final `/transcript` pump slice) is
+<span class="ln">208</span>/// typically queued microseconds before we get here. Un-drained, those bytes
+<span class="ln">209</span>/// race the child&#x27;s own output — they can land on the child&#x27;s alternate
+<span class="ln">210</span>/// screen (so the main screen never receives them; on an inline viewport a
+<span class="ln">211</span>/// commit&#x27;s scroll then leaves every following row off by its height) or tear
+<span class="ln">212</span>/// around the alt-screen switch, printing escape fragments (`[`…) that the
+<span class="ln">213</span>/// renderer&#x27;s diff can&#x27;t see and thus never repairs.
+<span class="ln">214</span>///
+<span class="ln">215</span>/// In minimal mode the physical cursor is probed (`ESC[6n`) right before the
+<span class="ln">216</span>/// child runs and right after it exits — while the reader thread is still
+<span class="ln">217</span>/// parked, so the replies can&#x27;t be stolen. The returned &quot;cursor after the
+<span class="ln">218</span>/// child, iff it moved&quot; tells the caller whether the child *printed to the
+<span class="ln">219</span>/// main screen* (cat-style pager: cursor left below its output) or *restored
+<span class="ln">220</span>/// it* (less-style alt-screen pager: `rmcup` puts the cursor back exactly
+<span class="ln">221</span>/// where it was): the caller re-anchors the live region below the new output
+<span class="ln">222</span>/// in the first case and repaints in place in the second.
+<span class="ln">223</span>fn suspend_for_child(
+<span class="ln">224</span>    screen_mode: crate::app::ScreenMode,
+<span class="ln">225</span>    writer_sync: &amp;crate::render::draw::WriterSync,
+<span class="ln">226</span>    input_paused: &amp;std::sync::atomic::AtomicBool,
+<span class="ln">227</span>    reader_parked: &amp;std::sync::atomic::AtomicBool,
+<span class="ln">228</span>    input_rx: &amp;mut tokio::sync::mpsc::UnboundedReceiver&lt;crossterm::event::Event&gt;,
+<span class="ln">229</span>    run_child: impl FnOnce(),
+<span class="ln">230</span>) -&gt; Option&lt;(u16, u16)&gt; {
+<span class="ln">231</span>    use std::sync::atomic::Ordering;
+<span class="ln">232</span>    // Pause the reader thread, then wait for a FRESH park (reader provably out of
+<span class="ln">233</span>    // crossterm) so the main thread is the sole poll/read caller; bounded so a
+<span class="ln">234</span>    // dead reader can&#x27;t hang us.
+<span class="ln">235</span>    input_paused.store(true, Ordering::Release);
+<span class="ln">236</span>    reader_parked.store(false, Ordering::Release);
+<span class="ln">237</span>    let park_deadline = std::time::Instant::now() + Duration::from_millis(500);
+<span class="ln">238</span>    while !reader_parked.load(Ordering::Acquire) &amp;&amp; std::time::Instant::now() &lt; park_deadline {
+<span class="ln">239</span>        std::thread::sleep(Duration::from_millis(5));
+<span class="ln">240</span>    }
+<span class="ln">241</span>    // Every queued frame must be ON the tty before the child takes it (and, in
+<span class="ln">242</span>    // fullscreen, before LeaveAlternateScreen below — mirroring teardown&#x27;s
+<span class="ln">243</span>    // &quot;no late frame after LeaveAlternateScreen&quot; drain). Bounded like the
+<span class="ln">244</span>    // reader park so a wedged pty can&#x27;t hang the suspend.
+<span class="ln">245</span>    if !writer_sync.wait_drained(Duration::from_millis(750)) {
+<span class="ln">246</span>        tracing::warn!(&quot;suspend: frame writer not drained within 750ms; proceeding&quot;);
+<span class="ln">247</span>    }
+<span class="ln">248</span>    // Pre-child cursor probe (minimal only — minimal&#x27;s startup already proved
+<span class="ln">249</span>    // this terminal answers CPR). Reader is parked, so the reply is ours.
+<span class="ln">250</span>    let pre_cursor = screen_mode
+<span class="ln">251</span>        .is_minimal()
+<span class="ln">252</span>        .then(|| crossterm::cursor::position().ok())
+<span class="ln">253</span>        .flatten();
+<span class="ln">254</span>    if screen_mode.is_fullscreen() {
+<span class="ln">255</span>        xai_grok_shell::util::with_locked_stderr(|stderr| {
+<span class="ln">256</span>            let _ = crossterm::execute!(stderr, crossterm::terminal::LeaveAlternateScreen);
+<span class="ln">257</span>        });
+<span class="ln">258</span>    }
+<span class="ln">259</span>    let _ = crossterm::terminal::disable_raw_mode();
+<span class="ln">260</span>    run_child();</pre>
+</div></section>
+<section class="sec" id="tools"><div class="sec-no">§ <b>03</b> · TOOLS</div><h2 class="sec-title">工具注册与能力过滤</h2><p>MCP 与插件延迟加载被放在 agent ops，而不是初始化阻塞路径。<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:101</code> 判定 managed MCP 是否可用，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:174</code> 异步刷新 gateway catalog，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:240</code> 把 launch MCP setup 迁出 initialize 关键路径。这让启动时延和外部目录服务失败不会直接拖垮主会话。</p><p>工具注册表是另一个核心控制点。<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:27</code> 定义 process-global tool packs，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:53</code> 记录 ToolConfig 元数据，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1375</code> 才进入原始 dispatch。也就是说，工具不是函数名硬编码，而是注册、元数据、session context、dispatch 四段组成的受控面。</p><h3><span class="arr">▸</span>Capability 偏序</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs</span>:6-68</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">6</span>/// Capability mode applied to a session&#x27;s toolset.
+<span class="ln">7</span>///
+<span class="ln">8</span>/// A partial order is defined via [`CapabilityMode::is_subset_of`]:
+<span class="ln">9</span>/// `ReadOnly &lt; ReadWrite &lt; All` and `ReadOnly &lt; Execute &lt; All`.
+<span class="ln">10</span>/// `ReadWrite` and `Execute` are *incomparable* (neither is a subset
+<span class="ln">11</span>/// of the other). `fork_session` enforces `child &lt;= parent`.
+<span class="ln">12</span>#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+<span class="ln">13</span>#[serde(rename_all = &quot;snake_case&quot;)]
+<span class="ln">14</span>pub enum CapabilityMode {
+<span class="ln">15</span>    /// Reading and searching only. No edits, no shell, no background tasks.
+<span class="ln">16</span>    ReadOnly,
+<span class="ln">17</span>    /// Read + edit. No shell execution.
+<span class="ln">18</span>    ReadWrite,
+<span class="ln">19</span>    /// Read + shell execution + background-task control. No edits.
+<span class="ln">20</span>    Execute,
+<span class="ln">21</span>    /// Every tool kind allowed.
+<span class="ln">22</span>    All,
+<span class="ln">23</span>}
+<span class="ln">24</span>
+<span class="ln">25</span>impl Default for CapabilityMode {
+<span class="ln">26</span>    /// Defaults to [`CapabilityMode::ReadWrite`] (subagent default;
+<span class="ln">27</span>    /// the main/root session is always `All`).
+<span class="ln">28</span>    fn default() -&gt; Self {
+<span class="ln">29</span>        Self::ReadWrite
+<span class="ln">30</span>    }
+<span class="ln">31</span>}
+<span class="ln">32</span>
+<span class="ln">33</span>impl CapabilityMode {
+<span class="ln">34</span>    /// Filter `config.tools` by capability mode, returning a copy with
+<span class="ln">35</span>    /// disallowed tools dropped.
+<span class="ln">36</span>    ///
+<span class="ln">37</span>    /// Tools whose `kind` is `None` (baseline, e.g. ad-hoc tools
+<span class="ln">38</span>    /// declared via `ToolConfig::simple`) are preserved across all
+<span class="ln">39</span>    /// modes. **MCP-origin** `kind: None` tools are NOT preserved by
+<span class="ln">40</span>    /// this method; see `resolve_session_toolset` for the asymmetric
+<span class="ln">41</span>    /// handling.
+<span class="ln">42</span>    pub fn filter(self, config: &amp;ToolServerConfig) -&gt; ToolServerConfig {
+<span class="ln">43</span>        let kept: Vec&lt;ToolConfig&gt; = config
+<span class="ln">44</span>            .tools
+<span class="ln">45</span>            .iter()
+<span class="ln">46</span>            .filter(|tool| match tool.kind {
+<span class="ln">47</span>                None =&gt; true,
+<span class="ln">48</span>                Some(kind) =&gt; kind_allowed(self, kind),
+<span class="ln">49</span>            })
+<span class="ln">50</span>            .cloned()
+<span class="ln">51</span>            .collect();
+<span class="ln">52</span>        ToolServerConfig {
+<span class="ln">53</span>            tools: kept,
+<span class="ln">54</span>            behavior_preset: config.behavior_preset.clone(),
+<span class="ln">55</span>        }
+<span class="ln">56</span>    }
+<span class="ln">57</span>
+<span class="ln">58</span>    /// Whether every kind allowed by `self` is also allowed by `other`.
+<span class="ln">59</span>    /// Used by `fork_session` to reject capability widening.
+<span class="ln">60</span>    pub fn is_subset_of(self, other: CapabilityMode) -&gt; bool {
+<span class="ln">61</span>        for kind in ALL_TOOL_KINDS {
+<span class="ln">62</span>            if kind_allowed(self, *kind) &amp;&amp; !kind_allowed(other, *kind) {
+<span class="ln">63</span>                return false;
+<span class="ln">64</span>            }
+<span class="ln">65</span>        }
+<span class="ln">66</span>        true
+<span class="ln">67</span>    }
+<span class="ln">68</span>}</pre>
+</div><h3><span class="arr">▸</span>标准工具包入口</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/implementations/grok_build/mod.rs</span>:1-67</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1</span>//! New-architecture tool implementations (NewTool trait).
+<span class="ln">2</span>//!
+<span class="ln">3</span>//! Each sub-module here contains a tool that implements `NewTool` instead
+<span class="ln">4</span>//! of the old `Tool` trait. During migration, old implementations live in
+<span class="ln">5</span>//! `implementations/&lt;tool&gt;/` and new implementations live in
+<span class="ln">6</span>//! `implementations/grok_build/&lt;tool&gt;/`.
+<span class="ln">7</span>//!
+<span class="ln">8</span>//! The [`register_all()`] function is the single entry-point for wiring up
+<span class="ln">9</span>//! the standard toolset. It inserts shared resources (`Terminal`,
+<span class="ln">10</span>//! `AvailableSkills`, `BashParams`) and registers every built-in tool.
+<span class="ln">11</span>pub mod ask_user_question;
+<span class="ln">12</span>pub mod bash;
+<span class="ln">13</span>#[path = &quot;deploy_app_stub.rs&quot;]
+<span class="ln">14</span>pub mod deploy_app;
+<span class="ln">15</span>pub mod enter_plan_mode;
+<span class="ln">16</span>pub mod exit_plan_mode;
+<span class="ln">17</span>pub mod grep;
+<span class="ln">18</span>pub mod image_edit;
+<span class="ln">19</span>pub mod image_gen;
+<span class="ln">20</span>pub mod kill_task;
+<span class="ln">21</span>pub mod list_dir;
+<span class="ln">22</span>pub mod lsp;
+<span class="ln">23</span>pub mod monitor;
+<span class="ln">24</span>pub mod read_file;
+<span class="ln">25</span>pub mod scheduler;
+<span class="ln">26</span>pub mod search_replace;
+<span class="ln">27</span>pub(crate) mod storage;
+<span class="ln">28</span>pub mod task;
+<span class="ln">29</span>pub mod task_output;
+<span class="ln">30</span>pub mod todo;
+<span class="ln">31</span>pub mod update_goal;
+<span class="ln">32</span>pub mod video_gen;
+<span class="ln">33</span>pub mod web_fetch;
+<span class="ln">34</span>pub mod web_search;
+<span class="ln">35</span>pub use ask_user_question::AskUserQuestionTool;
+<span class="ln">36</span>pub use bash::BashTool;
+<span class="ln">37</span>pub use deploy_app::{AppBuilderDeployerConfig, DEPLOY_APP_TOOL_NAME};
+<span class="ln">38</span>pub use enter_plan_mode::EnterPlanModeTool;
+<span class="ln">39</span>pub use exit_plan_mode::ExitPlanModeTool;
+<span class="ln">40</span>pub use grep::GrepTool;
+<span class="ln">41</span>pub use image_edit::{IMAGE_EDIT_TOOL_NAME, ImageEditTool};
+<span class="ln">42</span>pub use image_gen::{
+<span class="ln">43</span>    IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, ImageGenTool, imagine_instruction,
+<span class="ln">44</span>    imagine_usage_message,
+<span class="ln">45</span>};
+<span class="ln">46</span>pub use kill_task::{KillTaskTool, KillTerminalCommandTool};
+<span class="ln">47</span>pub use list_dir::ListDirTool;
+<span class="ln">48</span>pub use lsp::LspTool;
+<span class="ln">49</span>pub use monitor::tool::MonitorTool;
+<span class="ln">50</span>pub use read_file::ReadFileTool;
+<span class="ln">51</span>pub use scheduler::create::{
+<span class="ln">52</span>    SCHEDULER_CREATE_TOOL_NAME, SchedulerCreateTool, loop_schedule_instruction, loop_usage_message,
+<span class="ln">53</span>};
+<span class="ln">54</span>pub use scheduler::delete::{SCHEDULER_DELETE_TOOL_NAME, SchedulerDeleteTool};
+<span class="ln">55</span>pub use scheduler::list::SchedulerListTool;
+<span class="ln">56</span>pub use search_replace::SearchReplaceTool;
+<span class="ln">57</span>pub use task::TaskTool;
+<span class="ln">58</span>pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
+<span class="ln">59</span>pub use todo::TodoWriteTool;
+<span class="ln">60</span>pub use update_goal::{UPDATE_GOAL_TOOL_NAME, UpdateGoalTool};
+<span class="ln">61</span>pub use video_gen::{
+<span class="ln">62</span>    IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, ImageToVideoTool,
+<span class="ln">63</span>    REFERENCE_TO_VIDEO_TOOL_NAME, ReferenceToVideoTool, imagine_video_instruction,
+<span class="ln">64</span>    imagine_video_usage_message,
+<span class="ln">65</span>};
+<span class="ln">66</span>pub use web_fetch::{WebFetchClient, WebFetchConfig, WebFetchParams, WebFetchTool};
+<span class="ln">67</span>pub use web_search::WebSearchTool;</pre>
+</div><h3><span class="arr">▸</span>Registry Dispatch</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs</span>:1375-1432</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1375</span>    /// Execute a tool, returning only its raw output.
+<span class="ln">1376</span>    ///
+<span class="ln">1377</span>    /// Unlike [`call()`], this skips reminders and persistence. Used by
+<span class="ln">1378</span>    /// `InnerDispatchForToolset` so that `use_tool`&#x27;s
+<span class="ln">1379</span>    /// dispatch to a target tool does not double-run post-processing: the
+<span class="ln">1380</span>    /// outer `call(&quot;use_tool&quot;)` does one round of post-processing over the
+<span class="ln">1381</span>    /// target&#x27;s output.
+<span class="ln">1382</span>    ///
+<span class="ln">1383</span>    /// Inner dispatch is intentionally **not** populated in the forwarded
+<span class="ln">1384</span>    /// context. MCP tools (the targets of `use_tool`) are passthrough
+<span class="ln">1385</span>    /// implementations that never call `use_tool` themselves, so they do
+<span class="ln">1386</span>    /// not need inner dispatch.
+<span class="ln">1387</span>    ///
+<span class="ln">1388</span>    /// The `parent_ctx` carries call-id, cwd, resources, etc. from the
+<span class="ln">1389</span>    /// outer call. A fresh child context is built from it — stripping
+<span class="ln">1390</span>    /// `InnerDispatch` to prevent recursion.
+<span class="ln">1391</span>    async fn call_raw(
+<span class="ln">1392</span>        &amp;self,
+<span class="ln">1393</span>        tool_name: &amp;str,
+<span class="ln">1394</span>        tool_args: serde_json::Value,
+<span class="ln">1395</span>        parent_ctx: xai_tool_runtime::ToolCallContext,
+<span class="ln">1396</span>    ) -&gt; Result&lt;crate::types::output::ToolOutput, xai_tool_runtime::ToolError&gt; {
+<span class="ln">1397</span>        let (registry_id, output_converter, reverse_params) = {
+<span class="ln">1398</span>            let tools = self.tools.read();
+<span class="ln">1399</span>            let entry = tools
+<span class="ln">1400</span>                .iter()
+<span class="ln">1401</span>                .find(|t| t.client_name == tool_name)
+<span class="ln">1402</span>                .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
+<span class="ln">1403</span>            (
+<span class="ln">1404</span>                entry.registry_id.clone(),
+<span class="ln">1405</span>                entry.output_converter.clone(),
+<span class="ln">1406</span>                entry.reverse_params.clone(),
+<span class="ln">1407</span>            )
+<span class="ln">1408</span>        };
+<span class="ln">1409</span>        let canonical_params = if reverse_params.is_empty() {
+<span class="ln">1410</span>            tool_args
+<span class="ln">1411</span>        } else {
+<span class="ln">1412</span>            remap_json_keys(tool_args, &amp;reverse_params)
+<span class="ln">1413</span>        };
+<span class="ln">1414</span>        let mut ctx = xai_tool_runtime::ToolCallContext::new(parent_ctx.call_id.clone());
+<span class="ln">1415</span>        ctx.extensions.insert(self.resources.clone());
+<span class="ln">1416</span>        ctx.extensions.insert_arc(Arc::clone(&amp;self.renderer));
+<span class="ln">1417</span>        if let Some(cwd) = parent_ctx.extensions.get::&lt;xai_tool_runtime::Cwd&gt;() {
+<span class="ln">1418</span>            ctx.extensions.insert((*cwd).clone());
+<span class="ln">1419</span>        }
+<span class="ln">1420</span>        let tool_id = xai_tool_protocol::ToolId::new(&amp;registry_id)
+<span class="ln">1421</span>            .unwrap_or_else(|_| xai_tool_protocol::ToolId::new(&quot;unknown&quot;).expect(&quot;valid&quot;));
+<span class="ln">1422</span>        let lr_handle = self.local_registry.find(&amp;tool_id).ok_or_else(|| {
+<span class="ln">1423</span>            xai_tool_runtime::ToolError::not_found(
+<span class="ln">1424</span>                tool_id,
+<span class="ln">1425</span>                format!(&quot;Tool not found in LocalRegistry: {registry_id}&quot;),
+<span class="ln">1426</span>            )
+<span class="ln">1427</span>        })?;
+<span class="ln">1428</span>        let stream = lr_handle.execute(ctx, canonical_params).await;
+<span class="ln">1429</span>        let value = drain_value_stream(stream).await?;
+<span class="ln">1430</span>        (output_converter)(value)
+<span class="ln">1431</span>            .map_err(|e| xai_tool_runtime::ToolError::custom(&quot;output_decoding&quot;, e.to_string()))
+<span class="ln">1432</span>    }</pre>
+</div><a class="deep-link" href="grok-build/grok-build-tools.html">深度阅读 · 工具注册表与权限面</a></section>
+<section class="sec" id="protocol"><div class="sec-no">§ <b>04</b> · PROTOCOL</div><h2 class="sec-title">ACP、MCP 和插件延迟加载</h2><p>生命周期清理也有独立模块。<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/session_lifecycle.rs:6</code> 写明 shutdown 与 replica finalize 合约，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/session_lifecycle.rs:78</code> 广播 roster 变化，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/session_lifecycle.rs:254</code> 清理 terminal session。对 agent 产品来说，这类“退出时谁负责收尸”的代码往往比模型调用更决定稳定性。</p><h3><span class="arr">▸</span>ACP initialize 契约</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs</span>:7-50</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">7</span>impl acp::Agent for MvpAgent {
+<span class="ln">8</span>    /// In the meta, we provide
+<span class="ln">9</span>    ///   - model_state: the model state, useful for the client to display available models and the default model.
+<span class="ln">10</span>    ///
+<span class="ln">11</span>    /// SINGLE-CALL INVARIANT: this method is the sole writer of
+<span class="ln">12</span>    /// `self.auth_method_id` during initialization. It is called exactly once
+<span class="ln">13</span>    /// per agent process by the ACP server before any session-creating
+<span class="ln">14</span>    /// requests, while `auth_method_id` is still `None` (initialized at
+<span class="ln">15</span>    /// `MvpAgent::new`). The auth-method block below relies on that
+<span class="ln">16</span>    /// invariant when it unconditionally writes the default id returned by
+<span class="ln">17</span>    /// `auth_method::build_auth_methods`. If you ever need to call
+<span class="ln">18</span>    /// `initialize()` more than once, restore an `is_none()` guard around
+<span class="ln">19</span>    /// the `auth_method_id` write at the call site so a re-init doesn&#x27;t
+<span class="ln">20</span>    /// silently downgrade an api-key user to a session-token user.
+<span class="ln">21</span>    async fn initialize(
+<span class="ln">22</span>        &amp;self,
+<span class="ln">23</span>        arguments: acp::InitializeRequest,
+<span class="ln">24</span>    ) -&gt; Result&lt;acp::InitializeResponse, acp::Error&gt; {
+<span class="ln">25</span>        tracing::debug!(target : &quot;sampling_log&quot;, &quot;Received initialize request&quot;);
+<span class="ln">26</span>        xai_grok_telemetry::unified_log::info(&quot;agent initialized&quot;, None, None);
+<span class="ln">27</span>        self.start_subagent_coordinator();
+<span class="ln">28</span>        tokio::task::spawn_blocking(|| {
+<span class="ln">29</span>            crate::session::worktree_pool::cleanup_stale_pool_worktrees(None);
+<span class="ln">30</span>        });
+<span class="ln">31</span>        tokio::task::spawn_blocking(|| {
+<span class="ln">32</span>            crate::session::persistence::cleanup_stale_sessions(None);
+<span class="ln">33</span>        });
+<span class="ln">34</span>        {
+<span class="ln">35</span>            let root = crate::util::grok_home::grok_home();
+<span class="ln">36</span>            crate::session::storage::search::SEARCH_INDEX_MANAGER.bootstrap_once(root);
+<span class="ln">37</span>        }
+<span class="ln">38</span>        const PERMISSION_CLEANUP_TTL_DAYS: u64 = 30;
+<span class="ln">39</span>        static CLEANUP_PERMISSIONS_ONCE: std::sync::Once = std::sync::Once::new();
+<span class="ln">40</span>        CLEANUP_PERMISSIONS_ONCE
+<span class="ln">41</span>            .call_once(|| {
+<span class="ln">42</span>                tokio::task::spawn(
+<span class="ln">43</span>                    xai_grok_workspace::permission::cleanup_stale_permission_state(
+<span class="ln">44</span>                        std::time::Duration::from_secs(
+<span class="ln">45</span>                            PERMISSION_CLEANUP_TTL_DAYS * 24 * 60 * 60,
+<span class="ln">46</span>                        ),
+<span class="ln">47</span>                    ),
+<span class="ln">48</span>                );
+<span class="ln">49</span>            });
+<span class="ln">50</span>        xai_grok_workspace::trust::migrate_legacy_hook_trust();</pre>
+</div><h3><span class="arr">▸</span>Managed MCP 刷新</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs</span>:101-151</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">101</span>    fn has_managed_mcp_auth(&amp;self) -&gt; bool {
+<span class="ln">102</span>        self.auth_manager
+<span class="ln">103</span>            .current_or_expired()
+<span class="ln">104</span>            .is_some_and(|a| a.is_managed_mcp_eligible())
+<span class="ln">105</span>    }
+<span class="ln">106</span>    /// Requires feature flag AND xAI authentication (OIDC or legacy WebLogin).
+<span class="ln">107</span>    pub(super) fn can_fetch_managed_mcps(&amp;self) -&gt; bool {
+<span class="ln">108</span>        let cfg = self.cfg.borrow();
+<span class="ln">109</span>        cfg.managed_mcps_enabled &amp;&amp; !cfg.managed_mcp_gateway_tools_enabled
+<span class="ln">110</span>            &amp;&amp; self.has_managed_mcp_auth()
+<span class="ln">111</span>    }
+<span class="ln">112</span>    fn can_fetch_managed_mcp_gateway_tools(&amp;self) -&gt; bool {
+<span class="ln">113</span>        self.cfg.borrow().managed_mcp_gateway_tools_enabled
+<span class="ln">114</span>            &amp;&amp; self.has_managed_mcp_auth()
+<span class="ln">115</span>    }
+<span class="ln">116</span>    pub async fn get_managed_mcp_configs(
+<span class="ln">117</span>        &amp;self,
+<span class="ln">118</span>    ) -&gt; Vec&lt;crate::session::managed_mcp::ManagedMcpConfig&gt; {
+<span class="ln">119</span>        if !self.can_fetch_managed_mcps() {
+<span class="ln">120</span>            return vec![];
+<span class="ln">121</span>        }
+<span class="ln">122</span>        let proxy_url = self.cfg.borrow().endpoints.proxy_url();
+<span class="ln">123</span>        crate::session::managed_mcp::fetch_managed_mcp_configs(
+<span class="ln">124</span>                &amp;self.managed_mcp_cache,
+<span class="ln">125</span>                &amp;proxy_url,
+<span class="ln">126</span>                &amp;self.auth_manager,
+<span class="ln">127</span>            )
+<span class="ln">128</span>            .await
+<span class="ln">129</span>    }
+<span class="ln">130</span>    pub async fn get_managed_mcp_gateway_tool_catalog(
+<span class="ln">131</span>        &amp;self,
+<span class="ln">132</span>    ) -&gt; Option&lt;crate::session::managed_mcp::GatewayToolCatalog&gt; {
+<span class="ln">133</span>        if !self.can_fetch_managed_mcp_gateway_tools() {
+<span class="ln">134</span>            self.managed_mcp_cache.lock().await.disable_gateway_tools();
+<span class="ln">135</span>            return None;
+<span class="ln">136</span>        }
+<span class="ln">137</span>        self.managed_mcp_cache.lock().await.enable_gateway_tools();
+<span class="ln">138</span>        let proxy_url = self.cfg.borrow().endpoints.proxy_url();
+<span class="ln">139</span>        let auth_key = self
+<span class="ln">140</span>            .auth_manager
+<span class="ln">141</span>            .get_valid_token()
+<span class="ln">142</span>            .await
+<span class="ln">143</span>            .ok()
+<span class="ln">144</span>            .or_else(|| self.auth_manager.current_or_expired().map(|a| a.key));
+<span class="ln">145</span>        crate::session::managed_mcp::get_or_fetch_gateway_tool_catalog(
+<span class="ln">146</span>                &amp;self.managed_mcp_cache,
+<span class="ln">147</span>                &amp;proxy_url,
+<span class="ln">148</span>                auth_key.as_deref(),
+<span class="ln">149</span>            )
+<span class="ln">150</span>            .await
+<span class="ln">151</span>    }</pre>
+</div><h3><span class="arr">▸</span>MCP over ACP wire key</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-mcp/src/wire.rs</span>:1-27</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">1</span>//! Single source of truth for the `x.ai/mcp/*` ACP wire strings.
+<span class="ln">2</span>//!
+<span class="ln">3</span>//! These method/`_meta` keys are part of the cross-language MCP-over-ACP
+<span class="ln">4</span>//! protocol the SDK speaks (mirrors the SDK&#x27;s `_mcp_wire.py` / `mcpWire.ts`).
+<span class="ln">5</span>//! Reference these constants instead of re-typing the literals so the agent and
+<span class="ln">6</span>//! SDK can&#x27;t drift apart.
+<span class="ln">7</span>
+<span class="ln">8</span>/// Forward tool-invocation method (client -&gt; agent): `x.ai/mcp/call`.
+<span class="ln">9</span>///
+<span class="ln">10</span>/// The pager/client asks the agent to invoke an MCP tool on a server the agent is
+<span class="ln">11</span>/// connected to, outside the LLM loop. See `extensions::mcp::handle_call`.
+<span class="ln">12</span>pub const MCP_CALL: &amp;str = &quot;x.ai/mcp/call&quot;;
+<span class="ln">13</span>
+<span class="ln">14</span>/// Reverse zero-IPC tool-invocation method (agent -&gt; client): `x.ai/mcp/sdk_call`.
+<span class="ln">15</span>///
+<span class="ln">16</span>/// The agent invokes a tool that lives in the SDK&#x27;s in-process MCP server by sending
+<span class="ln">17</span>/// the MCP JSON-RPC message back to the client over the ACP reverse channel. Distinct
+<span class="ln">18</span>/// from [`MCP_CALL`] so the two disjoint schemas don&#x27;t share a method string for
+<span class="ln">19</span>/// metrics/tracing. See the agent-side ACP invoker that handles this method.
+<span class="ln">20</span>pub const MCP_SDK_CALL: &amp;str = &quot;x.ai/mcp/sdk_call&quot;;
+<span class="ln">21</span>
+<span class="ln">22</span>/// `session/new` `_meta` key listing in-process SDK MCP servers: `x.ai/mcp/servers`.
+<span class="ln">23</span>pub const MCP_SERVERS: &amp;str = &quot;x.ai/mcp/servers&quot;;
+<span class="ln">24</span>
+<span class="ln">25</span>/// `initialize` `_meta` capability flag advertising in-process SDK MCP support
+<span class="ln">26</span>/// (enables the SDK&#x27;s `transport=&quot;acp&quot;`): `x.ai/mcp/sdk`.
+<span class="ln">27</span>pub const MCP_SDK: &amp;str = &quot;x.ai/mcp/sdk&quot;;</pre>
+</div><a class="deep-link" href="grok-build/grok-build-lifecycle.html">深度阅读 · 会话生命周期与 MCP 稳定性</a></section>
+<section class="sec" id="validation"><div class="sec-no">§ <b>05</b> · VALIDATION</div><h2 class="sec-title">测试覆盖看到的稳定性重点</h2><p>仓库里最有价值的测试不是 happy path，而是 MCP SSE flood 复现：<code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:1</code> 明确测试重连风暴，<code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:110</code> 复现零 backoff，<code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:137</code> 断言节流客户端控制请求量。另一个验证面在 <code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:182</code>，它通过 exhaustive 测试守住 ToolKind 分类。</p><h3><span class="arr">▸</span>SSE flood 复现</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs</span>:110-170</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">110</span>/// The flood: body death on the standing GET -&gt; zero-backoff reconnect loop,
+<span class="ln">111</span>/// one WARN per GET (set RUST_LOG=rmcp=warn to see them).
+<span class="ln">112</span>#[tokio::test(flavor = &quot;multi_thread&quot;)]
+<span class="ln">113</span>async fn repro_zero_backoff_reconnect_flood() {
+<span class="ln">114</span>    let (url, gets) = spawn_fake_server(GetBehavior::AbnormalBodyDeath).await;
+<span class="ln">115</span>    let transport = StreamableHttpClientTransport::from_uri(url.as_str());
+<span class="ln">116</span>    let client = ().serve(transport).await.expect(&quot;handshake against fake server should succeed&quot;);
+<span class="ln">117</span>
+<span class="ln">118</span>    const OBSERVE: Duration = Duration::from_secs(3);
+<span class="ln">119</span>    tokio::time::sleep(OBSERVE).await;
+<span class="ln">120</span>    let n = gets.load(Ordering::Relaxed);
+<span class="ln">121</span>    let _ = client.cancel().await;
+<span class="ln">122</span>
+<span class="ln">123</span>    eprintln!(
+<span class="ln">124</span>        &quot;[repro] {n} standing-GET reconnect attempts (= WARN log lines) in {OBSERVE:?} \
+<span class="ln">125</span>         = {:.0}/sec&quot;,
+<span class="ln">126</span>        n as f64 / OBSERVE.as_secs_f64()
+<span class="ln">127</span>    );
+<span class="ln">128</span>    // A backoff-respecting client would attempt ~3-5 in 3s; the bug produces
+<span class="ln">129</span>    // hundreds-to-thousands.
+<span class="ln">130</span>    assert!(
+<span class="ln">131</span>        n &gt; 20,
+<span class="ln">132</span>        &quot;expected a zero-backoff reconnect flood (&gt;20 GETs in {OBSERVE:?}), got {n}; \
+<span class="ln">133</span>         if this FAILS with a small n, the rmcp loop got fixed - delete mcp_http_client.rs&quot;
+<span class="ln">134</span>    );
+<span class="ln">135</span>}
+<span class="ln">136</span>
+<span class="ln">137</span>/// The fix: same body-killing server, client wrapped in `McpHttpClient` —
+<span class="ln">138</span>/// the backoff schedule allows only a handful of reconnects.
+<span class="ln">139</span>#[tokio::test(flavor = &quot;multi_thread&quot;)]
+<span class="ln">140</span>async fn throttled_client_bounds_the_flood() {
+<span class="ln">141</span>    let (url, gets) = spawn_fake_server(GetBehavior::AbnormalBodyDeath).await;
+<span class="ln">142</span>    let throttled = McpHttpClient::new(
+<span class="ln">143</span>        reqwest::Client::default(),
+<span class="ln">144</span>        &quot;fake-server&quot;,
+<span class="ln">145</span>        WarnBudget::default(),
+<span class="ln">146</span>    );
+<span class="ln">147</span>    let transport = StreamableHttpClientTransport::with_client(
+<span class="ln">148</span>        throttled,
+<span class="ln">149</span>        StreamableHttpClientTransportConfig::with_uri(url.as_str()),
+<span class="ln">150</span>    );
+<span class="ln">151</span>    let client = ().serve(transport).await.expect(&quot;handshake against fake server should succeed&quot;);
+<span class="ln">152</span>
+<span class="ln">153</span>    // Checkpoint: backoff must engage early (instant, instant, 0.5s =&gt; 3-4
+<span class="ln">154</span>    // GETs by 1.2s; an unthrottled client would be in the hundreds).
+<span class="ln">155</span>    tokio::time::sleep(Duration::from_millis(1200)).await;
+<span class="ln">156</span>    let early = gets.load(Ordering::Relaxed);
+<span class="ln">157</span>    assert!(
+<span class="ln">158</span>        early &lt;= 4,
+<span class="ln">159</span>        &quot;backoff must engage early; got {early} GETs by 1.2s&quot;
+<span class="ln">160</span>    );
+<span class="ln">161</span>
+<span class="ln">162</span>    const OBSERVE: Duration = Duration::from_secs(4);
+<span class="ln">163</span>    tokio::time::sleep(OBSERVE - Duration::from_millis(1200)).await;
+<span class="ln">164</span>    let n = gets.load(Ordering::Relaxed);
+<span class="ln">165</span>    let _ = client.cancel().await;
+<span class="ln">166</span>
+<span class="ln">167</span>    eprintln!(&quot;[repro] {n} throttled reconnect attempts in {OBSERVE:?} (schedule allows ~5-6)&quot;);
+<span class="ln">168</span>    assert!(
+<span class="ln">169</span>        (3..=8).contains(&amp;n),
+<span class="ln">170</span>        &quot;throttled reconnects should follow the backoff schedule (~5-6 in {OBSERVE:?}), got {n}&quot;</pre>
+</div><h3><span class="arr">▸</span>Capability 测试</h3><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs</span>:182-245</span><span>Rust</span></div>
+  <pre class="code"><span class="ln">182</span>    #[test]
+<span class="ln">183</span>    fn capability_mode_filter_table_is_exhaustive_per_kind() {
+<span class="ln">184</span>        for &amp;mode in &amp;[
+<span class="ln">185</span>            CapabilityMode::ReadOnly,
+<span class="ln">186</span>            CapabilityMode::ReadWrite,
+<span class="ln">187</span>            CapabilityMode::Execute,
+<span class="ln">188</span>            CapabilityMode::All,
+<span class="ln">189</span>        ] {
+<span class="ln">190</span>            for &amp;kind in ALL_TOOL_KINDS {
+<span class="ln">191</span>                let id = format!(&quot;kind_{kind:?}&quot;);
+<span class="ln">192</span>                let cfg = make_cfg(vec![test_support::tc(&amp;id, Some(kind))]);
+<span class="ln">193</span>                let out = mode.filter(&amp;cfg);
+<span class="ln">194</span>                let expected_present = kind_allowed(mode, kind);
+<span class="ln">195</span>                let actually_present = out.tools.iter().any(|t| t.id == id);
+<span class="ln">196</span>                assert_eq!(
+<span class="ln">197</span>                    actually_present, expected_present,
+<span class="ln">198</span>                    &quot;({mode:?}, {kind:?}): expected present={expected_present}, got {actually_present}&quot;
+<span class="ln">199</span>                );
+<span class="ln">200</span>            }
+<span class="ln">201</span>        }
+<span class="ln">202</span>    }
+<span class="ln">203</span>
+<span class="ln">204</span>    #[test]
+<span class="ln">205</span>    fn capability_mode_filter_anchored_membership() {
+<span class="ln">206</span>        let cfg = make_cfg(vec![
+<span class="ln">207</span>            test_support::tc(&quot;read&quot;, Some(ToolKind::Read)),
+<span class="ln">208</span>            test_support::tc(&quot;search&quot;, Some(ToolKind::Search)),
+<span class="ln">209</span>            test_support::tc(&quot;inspect&quot;, Some(ToolKind::Lsp)),
+<span class="ln">210</span>            test_support::tc(&quot;edit&quot;, Some(ToolKind::Edit)),
+<span class="ln">211</span>            test_support::tc(&quot;write&quot;, Some(ToolKind::Write)),
+<span class="ln">212</span>            test_support::tc(&quot;bash&quot;, Some(ToolKind::Execute)),
+<span class="ln">213</span>            test_support::tc(&quot;bg&quot;, Some(ToolKind::BackgroundTaskAction)),
+<span class="ln">214</span>            test_support::tc(&quot;plan&quot;, Some(ToolKind::Plan)),
+<span class="ln">215</span>            test_support::tc(&quot;ask&quot;, Some(ToolKind::AskUser)),
+<span class="ln">216</span>            test_support::tc(&quot;other&quot;, Some(ToolKind::Other)),
+<span class="ln">217</span>        ]);
+<span class="ln">218</span>
+<span class="ln">219</span>        let names = |c: &amp;ToolServerConfig| -&gt; Vec&lt;String&gt; {
+<span class="ln">220</span>            c.tools.iter().map(|t| t.id.clone()).collect()
+<span class="ln">221</span>        };
+<span class="ln">222</span>
+<span class="ln">223</span>        let ro = CapabilityMode::ReadOnly.filter(&amp;cfg);
+<span class="ln">224</span>        assert_eq!(names(&amp;ro), vec![&quot;read&quot;, &quot;search&quot;, &quot;inspect&quot;, &quot;plan&quot;, &quot;ask&quot;]);
+<span class="ln">225</span>
+<span class="ln">226</span>        let rw = CapabilityMode::ReadWrite.filter(&amp;cfg);
+<span class="ln">227</span>        assert_eq!(
+<span class="ln">228</span>            names(&amp;rw),
+<span class="ln">229</span>            vec![&quot;read&quot;, &quot;search&quot;, &quot;inspect&quot;, &quot;edit&quot;, &quot;write&quot;, &quot;plan&quot;, &quot;ask&quot;]
+<span class="ln">230</span>        );
+<span class="ln">231</span>
+<span class="ln">232</span>        let ex = CapabilityMode::Execute.filter(&amp;cfg);
+<span class="ln">233</span>        assert_eq!(
+<span class="ln">234</span>            names(&amp;ex),
+<span class="ln">235</span>            vec![&quot;read&quot;, &quot;search&quot;, &quot;inspect&quot;, &quot;bash&quot;, &quot;bg&quot;, &quot;plan&quot;, &quot;ask&quot;]
+<span class="ln">236</span>        );
+<span class="ln">237</span>
+<span class="ln">238</span>        let all = CapabilityMode::All.filter(&amp;cfg);
+<span class="ln">239</span>        assert_eq!(
+<span class="ln">240</span>            names(&amp;all),
+<span class="ln">241</span>            vec![
+<span class="ln">242</span>                &quot;read&quot;, &quot;search&quot;, &quot;inspect&quot;, &quot;edit&quot;, &quot;write&quot;, &quot;bash&quot;, &quot;bg&quot;, &quot;plan&quot;, &quot;ask&quot;, &quot;other&quot;
+<span class="ln">243</span>            ]
+<span class="ln">244</span>        );
+<span class="ln">245</span>    }</pre>
+</div></section>
+<section class="sec" id="risks"><div class="sec-no">§ <b>06</b> · RISKS</div><h2 class="sec-title">亮点之外的风险</h2><p>第一个风险是仓库由 monorepo 同步而来，README 说明这不是唯一真实开发源；源码路径如 <code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1456</code> 和 <code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:27</code> 能读到设计，但 issue/PR 上下文可能不完整。第二个风险是权限面很强但复杂，<code>sources/grok-build/crates/codegen/xai-grok-workspace/src/capability.rs:116</code>、<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs:189</code>、<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs:303</code> 都是安全审计需要长期盯住的点。</p><p>补充追踪启动路径时，<code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1598</code> 到 <code>sources/grok-build/crates/codegen/xai-grok-pager-bin/src/main.rs:1775</code> 覆盖 Version、Agent、MCP、Plugin、Models、Workspace、Sessions 等命令分派；结合 <code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs:260</code> 和 <code>sources/grok-build/crates/codegen/xai-grok-pager/src/app/event_loop.rs:411</code>，可以看到命令模式与全屏 TUI 是同一个二进制下的两条运行路径。</p><p>工具层还有两处值得跟读：<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:1500</code> 准备 dispatch 上下文，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:2170</code> 用测试固定内建工具清单，<code>sources/grok-build/crates/codegen/xai-grok-tools/src/registry/types.rs:2231</code> 验证工具按 ToolKind 解析。MCP 侧则可以从 <code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:31</code>、<code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:47</code>、<code>sources/grok-build/crates/codegen/xai-grok-mcp/tests/repro_sse_flood.rs:90</code> 看出假服务如何制造重连压力。</p><p>最后，<code>sources/grok-build/crates/codegen/xai-grok-shell/src/agent/mvp_agent/session_lifecycle.rs:316</code> 说明 session supervisor 会独立启动，这是判断后台 actor 是否可长期运行的补充证据。</p><h3><span class="arr">▸</span>审计建议</h3><div class="g2"><div class="card"><div class="card-h">优先读启动器</div><div class="card-d">main.rs 告诉你真实运行形态和参数面。</div></div><div class="card"><div class="card-h">优先测工具权限</div><div class="card-d">capability.rs 与 registry/types.rs 是安全回归入口。</div></div><div class="card"><div class="card-h">关注 MCP 重连</div><div class="card-d">SSE flood 测试体现外部服务不稳定时的风险。</div></div><div class="card"><div class="card-h">关注会话清理</div><div class="card-d">session_lifecycle.rs 决定后台 actor 是否泄漏。</div></div></div></section>
+
+    <div class="foot"><span>Generated · 2026-07-16</span><span>xai-org/grok-build · source-level teardown</span></div>
+  </main>
+</div>
+<script>
+(function(){
+  const links=[...document.querySelectorAll('.nav-list a')], sections=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean), sel=document.getElementById('msel');
+  if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',()=>location.hash=sel.value);}
+  const io=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id));}})},{rootMargin:'-35% 0px -55%'});
+  sections.forEach(s=>io.observe(s));
+})();
+</script>
+</body>
+</html>
