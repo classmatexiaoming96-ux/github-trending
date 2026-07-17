@@ -1,0 +1,483 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>deja-vu MCP 与自动回忆深度解析</title><meta name="description" content="vshulcz/deja-vu 源码级深度解析"><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#6fd3ff;--star-soft:#9ee5ff;--star-deep:#3596c9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">deja<b>vu</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">deja<b>vu</b></div><div class="sub">源码级架构解析 · memory/</div></div><span class="nav-ver">Go · zero-dep binary</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>索引管线</a></li><li><a href="#section-2"><span class="idx">02</span>检索与 MCP</a></li><li><a href="#section-3"><span class="idx">03</span>脱敏与同步</a></li><li><a href="#section-4"><span class="idx">04</span>测试与边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★304 · 2026-07-14</div><div><a href="https://github.com/vshulcz/deja-vu" target="_blank">vshulcz/deja-vu</a></div><div><a href="../deja-vu.html">← 返回 deja-vu 主页面</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">MCP 与自动回忆 <em>深度解析</em></h1><p class="hero-desc">这一页拆 stdio MCP server、recall 工具、recall_context digest，以及 Codex/opencode 自动注入上下文的实现边界。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">MCP 入口</h2><p>MCP server 由 CLI 的 <code>cmd/deja/main.go:108</code> 进入，具体实现从 <code>cmd/deja/mcp.go:27</code> 开始。它用 line-delimited JSON 读取请求，<code>cmd/deja/mcp.go:29</code> 扩大 scanner buffer，<code>cmd/deja/mcp.go:46</code> 把请求交给 handleMCP，保持 stdio server 足够小。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/mcp.go</span> · L27-64</span><span>Go</span></div><pre class="code"><span class="ln">27</span>func serveMCP(r io.Reader, w io.Writer) error {
+<span class="ln">28</span>	s := bufio.NewScanner(r)
+<span class="ln">29</span>	// MCP messages are line-delimited JSON here. Allow large, but bounded, client lines.
+<span class="ln">30</span>	s.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+<span class="ln">31</span>	enc := json.NewEncoder(w)
+<span class="ln">32</span>	for s.Scan() {
+<span class="ln">33</span>		line := strings.TrimSpace(s.Text())
+<span class="ln">34</span>		if line == &quot;&quot; {
+<span class="ln">35</span>			continue
+<span class="ln">36</span>		}
+<span class="ln">37</span>		var req rpcRequest
+<span class="ln">38</span>		if err := json.Unmarshal([]byte(line), &amp;req); err != nil {
+<span class="ln">39</span>			writeRPCError(enc, nil, -32700, &quot;parse error&quot;)
+<span class="ln">40</span>			continue
+<span class="ln">41</span>		}
+<span class="ln">42</span>		if req.ID == nil {
+<span class="ln">43</span>			// Notification. Do not reply.
+<span class="ln">44</span>			continue
+<span class="ln">45</span>		}
+<span class="ln">46</span>		result, code, msg := handleMCP(req)
+<span class="ln">47</span>		if code != 0 {
+<span class="ln">48</span>			writeRPCError(enc, req.ID, code, msg)
+<span class="ln">49</span>			continue
+<span class="ln">50</span>		}
+<span class="ln">51</span>		if err := enc.Encode(map[string]any{&quot;jsonrpc&quot;: &quot;2.0&quot;, &quot;id&quot;: req.ID, &quot;result&quot;: result}); err != nil {
+<span class="ln">52</span>			return err
+<span class="ln">53</span>		}
+<span class="ln">54</span>	}
+<span class="ln">55</span>	if err := s.Err(); err != nil {
+<span class="ln">56</span>		// Oversized or malformed client frames are reported as JSON-RPC parse errors,
+<span class="ln">57</span>		// then the stdio server exits gracefully instead of silently hard-stopping.
+<span class="ln">58</span>		writeRPCError(enc, nil, -32700, &quot;parse error&quot;)
+<span class="ln">59</span>		if os.Getenv(&quot;DEJA_DEBUG&quot;) == &quot;1&quot; {
+<span class="ln">60</span>			fmt.Fprintf(os.Stderr, &quot;deja mcp scanner error: %v\n&quot;, err)
+<span class="ln">61</span>		}
+<span class="ln">62</span>	}
+<span class="ln">63</span>	return nil
+<span class="ln">64</span>}</pre></div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · TOOLS</div><h2 class="sec-title">工具注册与调用</h2><h3><span class="arr">▸</span>tools/list</h3><p><code>cmd/deja/mcp.go:74</code> 返回工具清单，<code>cmd/deja/mcp.go:77</code> 暴露 recall，<code>cmd/deja/mcp.go:82</code> 暴露 recall_context。描述明确要求 Agent 在 debug 或重新实现前先查旧 session，这让记忆成为工作流里的默认动作，而不是用户手动 grep。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/mcp.go</span> · L66-99</span><span>Go</span></div><pre class="code"><span class="ln">66</span>func handleMCP(req rpcRequest) (any, int, string) {
+<span class="ln">67</span>	switch req.Method {
+<span class="ln">68</span>	case &quot;initialize&quot;:
+<span class="ln">69</span>		return map[string]any{
+<span class="ln">70</span>			&quot;protocolVersion&quot;: mcpProtocolVersion,
+<span class="ln">71</span>			&quot;capabilities&quot;:    map[string]any{&quot;tools&quot;: map[string]any{}},
+<span class="ln">72</span>			&quot;serverInfo&quot;:      map[string]any{&quot;name&quot;: &quot;deja&quot;, &quot;version&quot;: version},
+<span class="ln">73</span>		}, 0, &quot;&quot;
+<span class="ln">74</span>	case &quot;tools/list&quot;:
+<span class="ln">75</span>		return map[string]any{&quot;tools&quot;: []map[string]any{
+<span class="ln">76</span>			{
+<span class="ln">77</span>				&quot;name&quot;:        &quot;recall&quot;,
+<span class="ln">78</span>				&quot;description&quot;: &quot;Search past coding-agent sessions (Claude Code, Codex, opencode, aider, Gemini CLI, Cursor, Antigravity, Grok Build) indexed on this machine and return the best matches as dense text under ~4KB. Use before debugging or re-implementing something: prior sessions often contain the exact fix, error message, or command. Query works best with specific tokens — an error string, function name, or flag.&quot;,
+<span class="ln">79</span>				&quot;inputSchema&quot;: map[string]any{&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: map[string]any{&quot;query&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Search terms; specific tokens (error strings, function names, flags) match best. Multiple words are ANDed.&quot;}, &quot;harness&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Optional filter: claude, codex, opencode, aider, gemini, cursor, antigravity or grok.&quot;}, &quot;limit&quot;: map[string]any{&quot;type&quot;: &quot;number&quot;, &quot;description&quot;: &quot;Max sessions to return (default 5).&quot;}}, &quot;required&quot;: []string{&quot;query&quot;}},
+<span class="ln">80</span>			},
+<span class="ln">81</span>			{
+<span class="ln">82</span>				&quot;name&quot;:        &quot;recall_context&quot;,
+<span class="ln">83</span>				&quot;description&quot;: &quot;Return a markdown digest (~8KB) of the single best-matching prior session — the full problem/solution arc, not just snippets. Use after recall points at a session and more detail is needed.&quot;,
+<span class="ln">84</span>				&quot;inputSchema&quot;: map[string]any{&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: map[string]any{&quot;query&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Search terms identifying the session to digest.&quot;}}, &quot;required&quot;: []string{&quot;query&quot;}},
+<span class="ln">85</span>			},
+<span class="ln">86</span>		}}, 0, &quot;&quot;
+<span class="ln">87</span>	case &quot;tools/call&quot;:
+<span class="ln">88</span>		var p struct {
+<span class="ln">89</span>			Name      string          `json:&quot;name&quot;`
+<span class="ln">90</span>			Arguments json.RawMessage `json:&quot;arguments&quot;`
+<span class="ln">91</span>		}
+<span class="ln">92</span>		if err := json.Unmarshal(req.Params, &amp;p); err != nil {
+<span class="ln">93</span>			return nil, -32602, &quot;invalid params&quot;
+<span class="ln">94</span>		}
+<span class="ln">95</span>		text, err := callMCPTool(p.Name, p.Arguments)
+<span class="ln">96</span>		if err != nil {
+<span class="ln">97</span>			return nil, -32602, err.Error()
+<span class="ln">98</span>		}
+<span class="ln">99</span>		return toolText(text), 0, &quot;&quot;</pre></div><h3><span class="arr">▸</span>tools/call</h3><p>调用分发在 <code>cmd/deja/mcp.go:113</code>，recall 分支在 <code>cmd/deja/mcp.go:115</code> 校验 query，在 <code>cmd/deja/mcp.go:127</code> 限制输出预算；recall_context 分支在 <code>cmd/deja/mcp.go:132</code> 只返回最佳 session 的 digest。两者区分“找候选”和“读完整上下文”。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/mcp.go</span> · L113-150</span><span>Go</span></div><pre class="code"><span class="ln">113</span>func callMCPTool(name string, raw json.RawMessage) (string, error) {
+<span class="ln">114</span>	switch name {
+<span class="ln">115</span>	case &quot;recall&quot;:
+<span class="ln">116</span>		var a struct {
+<span class="ln">117</span>			Query   string `json:&quot;query&quot;`
+<span class="ln">118</span>			Harness string `json:&quot;harness&quot;`
+<span class="ln">119</span>			Limit   int    `json:&quot;limit&quot;`
+<span class="ln">120</span>		}
+<span class="ln">121</span>		if err := json.Unmarshal(raw, &amp;a); err != nil {
+<span class="ln">122</span>			return &quot;&quot;, err
+<span class="ln">123</span>		}
+<span class="ln">124</span>		if strings.TrimSpace(a.Query) == &quot;&quot; {
+<span class="ln">125</span>			return &quot;&quot;, fmt.Errorf(&quot;query required&quot;)
+<span class="ln">126</span>		}
+<span class="ln">127</span>		text, err := recallText(a.Query, a.Harness, a.Limit, 4096)
+<span class="ln">128</span>		if err == nil {
+<span class="ln">129</span>			usage.Record(index.DefaultDir(), usage.KindRecall, len(text))
+<span class="ln">130</span>		}
+<span class="ln">131</span>		return text, err
+<span class="ln">132</span>	case &quot;recall_context&quot;:
+<span class="ln">133</span>		var a struct {
+<span class="ln">134</span>			Query string `json:&quot;query&quot;`
+<span class="ln">135</span>		}
+<span class="ln">136</span>		if err := json.Unmarshal(raw, &amp;a); err != nil {
+<span class="ln">137</span>			return &quot;&quot;, err
+<span class="ln">138</span>		}
+<span class="ln">139</span>		if strings.TrimSpace(a.Query) == &quot;&quot; {
+<span class="ln">140</span>			return &quot;&quot;, fmt.Errorf(&quot;query required&quot;)
+<span class="ln">141</span>		}
+<span class="ln">142</span>		text, err := recallContext(a.Query)
+<span class="ln">143</span>		if err == nil {
+<span class="ln">144</span>			usage.Record(index.DefaultDir(), usage.KindContext, len(text))
+<span class="ln">145</span>		}
+<span class="ln">146</span>		return text, err
+<span class="ln">147</span>	default:
+<span class="ln">148</span>		return &quot;&quot;, fmt.Errorf(&quot;unknown tool %q&quot;, name)
+<span class="ln">149</span>	}
+<span class="ln">150</span>}</pre></div><h3><span class="arr">▸</span>预算裁剪</h3><p>recallText 在 <code>cmd/deja/mcp.go:152</code> 设默认 limit，<code>cmd/deja/mcp.go:160</code> 复用 SearchWithRecovery，<code>cmd/deja/mcp.go:174</code> 逐条写摘要，<code>cmd/deja/mcp.go:190</code> 用 trimUTF8 控制输出不破坏字符边界。这个细节让 MCP 工具对上下文预算友好。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/mcp.go</span> · L152-194</span><span>Go</span></div><pre class="code"><span class="ln">152</span>func recallText(q, harness string, limit, budget int) (string, error) {
+<span class="ln">153</span>	if limit &lt;= 0 {
+<span class="ln">154</span>		limit = 5
+<span class="ln">155</span>	}
+<span class="ln">156</span>	o := search.Options{Query: q, Harness: harness, All: true}
+<span class="ln">157</span>	if err := index.EnsureForSearch(index.DefaultDir(), o, false, mcpProgress()); err != nil {
+<span class="ln">158</span>		return &quot;&quot;, err
+<span class="ln">159</span>	}
+<span class="ln">160</span>	ss, err := index.SearchWithRecovery(index.DefaultDir(), o, mcpProgress())
+<span class="ln">161</span>	if err != nil {
+<span class="ln">162</span>		return &quot;&quot;, err
+<span class="ln">163</span>	}
+<span class="ln">164</span>	hits, err := search.Run(ss, o)
+<span class="ln">165</span>	if err != nil {
+<span class="ln">166</span>		return &quot;&quot;, err
+<span class="ln">167</span>	}
+<span class="ln">168</span>	if len(hits) == 0 {
+<span class="ln">169</span>		return fmt.Sprintf(&quot;No prior deja sessions matched %q.&quot;, q), nil
+<span class="ln">170</span>	}
+<span class="ln">171</span>	if len(hits) &gt; limit {
+<span class="ln">172</span>		hits = hits[:limit]
+<span class="ln">173</span>	}
+<span class="ln">174</span>	var b strings.Builder
+<span class="ln">175</span>	fmt.Fprintf(&amp;b, &quot;deja recall for %q (%d match(es))\n&quot;, q, len(hits))
+<span class="ln">176</span>	for i, h := range hits {
+<span class="ln">177</span>		fmt.Fprintf(&amp;b, &quot;\n%d. [%s] %s · %s · %d matches&quot;, i+1, h.Session.Harness, h.Session.Project, h.Session.ID, h.Count)
+<span class="ln">178</span>		if !h.Session.Updated.IsZero() {
+<span class="ln">179</span>			fmt.Fprintf(&amp;b, &quot; · updated %s&quot;, h.Session.Updated.Format(&quot;2006-01-02&quot;))
+<span class="ln">180</span>		}
+<span class="ln">181</span>		fmt.Fprintln(&amp;b)
+<span class="ln">182</span>		for _, sn := range h.Snippets {
+<span class="ln">183</span>			fmt.Fprintf(&amp;b, &quot;- %s\n&quot;, sn)
+<span class="ln">184</span>		}
+<span class="ln">185</span>		if b.Len() &gt;= budget {
+<span class="ln">186</span>			break
+<span class="ln">187</span>		}
+<span class="ln">188</span>	}
+<span class="ln">189</span>	out := b.String()
+<span class="ln">190</span>	if len(out) &gt; budget {
+<span class="ln">191</span>		out = trimUTF8(out, budget)
+<span class="ln">192</span>	}
+<span class="ln">193</span>	return out, nil
+<span class="ln">194</span>}</pre></div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · AUTO</div><h2 class="sec-title">自动注入上下文</h2><div class="flow">SessionStart hook -> deja hook-context -> recent project memory -> system prompt / plugin context</div><p>Codex hook 安装在 <code>cmd/deja/install_auto.go:15</code>，它读取 <code>cmd/deja/install_auto.go:17</code> 的 hooks.json，保留现有 hooks，并在 <code>cmd/deja/install_auto.go:45</code> 到 <code>cmd/deja/install_auto.go:48</code> 合并 SessionStart command。opencode 没有同类 hook，所以 <code>cmd/deja/install_auto.go:81</code> 生成插件，在 <code>cmd/deja/install_auto.go:105</code> 的 system transform 阶段注入。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/install_auto.go</span> · L11-65</span><span>Go</span></div><pre class="code"><span class="ln">11</span>// Codex (v0.114+) ships lifecycle hooks with the same JSON contract as
+<span class="ln">12</span>// Claude Code, so the existing `deja hook-context` output works unchanged.
+<span class="ln">13</span>// We merge one SessionStart entry into ~/.codex/hooks.json and leave
+<span class="ln">14</span>// everything else in the file alone.
+<span class="ln">15</span>func installCodexHooks(exe string, uninstall bool) (installResult, error) {
+<span class="ln">16</span>	h, _ := os.UserHomeDir()
+<span class="ln">17</span>	path := filepath.Join(h, &quot;.codex&quot;, &quot;hooks.json&quot;)
+<span class="ln">18</span>	old, _ := os.ReadFile(path)
+<span class="ln">19</span>	var root map[string]any
+<span class="ln">20</span>	if len(bytes.TrimSpace(old)) == 0 {
+<span class="ln">21</span>		root = map[string]any{}
+<span class="ln">22</span>	} else if err := json.Unmarshal(old, &amp;root); err != nil {
+<span class="ln">23</span>		return installResult{}, err
+<span class="ln">24</span>	}
+<span class="ln">25</span>	cmd := exe + &quot; hook-context&quot;
+<span class="ln">26</span>	hooks, _ := root[&quot;hooks&quot;].(map[string]any)
+<span class="ln">27</span>	if hooks == nil {
+<span class="ln">28</span>		hooks = map[string]any{}
+<span class="ln">29</span>		root[&quot;hooks&quot;] = hooks
+<span class="ln">30</span>	}
+<span class="ln">31</span>	entries, _ := hooks[&quot;SessionStart&quot;].([]any)
+<span class="ln">32</span>	var kept []any
+<span class="ln">33</span>	found := false
+<span class="ln">34</span>	for _, entryAny := range entries {
+<span class="ln">35</span>		entry, _ := entryAny.(map[string]any)
+<span class="ln">36</span>		if entry != nil &amp;&amp; entryHasCommand(entry, cmd) {
+<span class="ln">37</span>			found = true
+<span class="ln">38</span>			if uninstall {
+<span class="ln">39</span>				continue
+<span class="ln">40</span>			}
+<span class="ln">41</span>		}
+<span class="ln">42</span>		kept = append(kept, entryAny)
+<span class="ln">43</span>	}
+<span class="ln">44</span>	if !uninstall &amp;&amp; !found {
+<span class="ln">45</span>		kept = append(kept, map[string]any{
+<span class="ln">46</span>			&quot;matcher&quot;: &quot;startup|resume&quot;,
+<span class="ln">47</span>			&quot;hooks&quot;:   []any{map[string]any{&quot;type&quot;: &quot;command&quot;, &quot;command&quot;: cmd, &quot;timeout&quot;: 10}},
+<span class="ln">48</span>		})
+<span class="ln">49</span>	}
+<span class="ln">50</span>	if len(kept) == 0 {
+<span class="ln">51</span>		delete(hooks, &quot;SessionStart&quot;)
+<span class="ln">52</span>	} else {
+<span class="ln">53</span>		hooks[&quot;SessionStart&quot;] = kept
+<span class="ln">54</span>	}
+<span class="ln">55</span>	if len(hooks) == 0 {
+<span class="ln">56</span>		delete(root, &quot;hooks&quot;)
+<span class="ln">57</span>	}
+<span class="ln">58</span>	next, err := json.MarshalIndent(root, &quot;&quot;, &quot;  &quot;)
+<span class="ln">59</span>	if err != nil {
+<span class="ln">60</span>		return installResult{}, err
+<span class="ln">61</span>	}
+<span class="ln">62</span>	next = append(next, &#x27;\n&#x27;)
+<span class="ln">63</span>	a, err := writeIfChanged(path, old, next)
+<span class="ln">64</span>	return installResult{Path: path, Action: a}, err
+<span class="ln">65</span>}</pre></div></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE</div><h2 class="sec-title">边界</h2><ul><li><code>cmd/deja/mcp.go:124</code> 要求 query 非空，避免 Agent 发起无约束 recall。</li><li><code>cmd/deja/mcp.go:227</code> 只有 DEJA_DEBUG 才输出进度，默认不污染 MCP stdout。</li><li><code>cmd/deja/install_auto.go:113</code> 的 opencode 插件把 memory 当可选上下文，失败时不阻断会话。</li></ul></section><div class="foot"><span>Generated · 2026-07-17</span><span>Source · <a href="https://github.com/vshulcz/deja-vu">vshulcz/deja-vu</a></span><span><a href="../deja-vu.html">← 返回 deja-vu 主页面</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.005}));function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9ee5ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)}tick()}})();</script></body></html>

@@ -1,0 +1,663 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>deja-vu · agent memory layer · 源码观测台</title><meta name="description" content="vshulcz/deja-vu 源码级深度解析"><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#6fd3ff;--star-soft:#9ee5ff;--star-deep:#3596c9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">deja<b>vu</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">deja<b>vu</b></div><div class="sub">源码级架构解析 · memory/</div></div><span class="nav-ver">Go · zero-dep binary</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>索引管线</a></li><li><a href="#section-2"><span class="idx">02</span>检索与 MCP</a></li><li><a href="#section-3"><span class="idx">03</span>脱敏与同步</a></li><li><a href="#section-4"><span class="idx">04</span>测试与边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★304 · 2026-07-14</div><div><a href="https://github.com/vshulcz/deja-vu" target="_blank">vshulcz/deja-vu</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">deja-vu <em>agent memory layer</em></h1><p class="hero-desc">deja-vu 不是另一个向量数据库，而是一个零依赖 Go 二进制：它直接读取 Claude Code、Codex、opencode、Cursor、Gemini CLI、Grok Build 等本地会话日志，构建本地倒排索引，并通过 CLI/MCP/auto-recall 让 Agent 在重新调试前先检索过去的解法。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★304</div><div class="stat-lbl">Stars</div></div><div class="stat"><div class="stat-num">8</div><div class="stat-lbl">Harnesses</div></div><div class="stat"><div class="stat-num">Go</div><div class="stat-lbl">Core</div></div><div class="stat"><div class="stat-num">7ms</div><div class="stat-lbl">Warm search</div></div></div></div><div class="callout"><strong>定位</strong> — 它把已经存在的 agent session log 变成可搜索、可脱敏、可同步、可通过 MCP 调用的本地记忆层。</div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2><p>源码的核心分工很清楚：CLI 路由集中在 <code>cmd/deja/main.go:64</code>，多 harness 加载从 <code>cmd/deja/main.go:27</code> 到 <code>cmd/deja/main.go:53</code> 串起 Claude、Codex、opencode、aider、Gemini、Cursor、Antigravity 和 Grok；真正索引入口在 <code>internal/index/index.go:135</code> 与 <code>internal/index/index.go:152</code>，查询再落到 <code>internal/index/index.go:179</code>。这说明 deja-vu 的架构不是把所有逻辑塞进一个 CLI，而是把“发现源、构建缓存、检索排序、输出上下文”分层拆开。</p><p>项目最有价值的地方在于它选择了确定性本地索引，而不是先上 embedding。<code>internal/index/index.go:195</code> 到 <code>internal/index/index.go:225</code> 使用 postings 交集、子串 fallback 和 record scan 三段检索路径；<code>internal/search/search.go:41</code> 到 <code>internal/search/search.go:107</code> 负责二次过滤、计数、排序和截断。这让它能在隐私敏感的 agent 日志上保持零网络路径，同时给 MCP recall 提供稳定低成本结果。</p><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">本地日志解析器 + crash-safe 倒排索引 + CLI/MCP 双入口。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">Session、Message、Record、Manifest、SyncRecord 五个结构串起历史、索引和同步。</div></div><div class="card"><div class="card-h">安全策略</div><div class="card-d">索引写入、share、sync export 都重新跑 redaction。</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">Claude Code / Codex / opencode / Cursor 等 agent harness 的本地 transcript。</div></div></div><h3><span class="arr">▸</span>为什么不是普通 grep</h3><p>普通 grep 每次都要扫原始日志，且很难把同一 session 的多条消息合并成可复用上下文；deja-vu 在 <code>internal/index/index.go:356</code> 重建索引时写入 <code>records.bin</code>，在 <code>internal/index/index.go:381</code> 并行产出 token postings，并在 <code>internal/index/index.go:404</code> 到 <code>internal/index/index.go:418</code> 对每条消息做去重、截断、脱敏和 token 推送。这个设计让查询阶段读缓存而不是反复解析所有 harness 文件。</p><a class="deep-link" href="deja-vu/deja-vu-index-search.html">深度阅读 · 索引与检索</a></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · INDEX PIPELINE</div><h2 class="sec-title">索引管线：从多源日志到倒排桶</h2><p>索引入口先检查 manifest 是否新鲜：<code>internal/index/index.go:144</code> 收集 current files，<code>internal/index/index.go:145</code> 读取 manifest，<code>internal/index/index.go:146</code> 同时校验文件状态和 <code>records.bin</code> 完整性。搜索专用入口 <code>internal/index/index.go:152</code> 还会在 <code>internal/index/index.go:167</code> 判断版本、scope 或 records 尾部是否损坏，必要时走 rebuild。这种缓存失效策略比“有文件就相信”更稳。</p><h3><span class="arr">▸</span>多 harness 加载器</h3><p>加载器列表写死在 <code>internal/index/index.go:487</code> 到 <code>internal/index/index.go:499</code>，好处是新增 harness 的影响面非常明确。Codex 解析器从 <code>internal/sources/codex.go:12</code> 开始走 sessions 和 history 两条路径，Claude 解析器则在 <code>internal/sources/claude.go:29</code> 默认跳过 subagent transcript，避免父子会话重复污染索引。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/index.go</span> · L487-521</span><span>Go</span></div><pre class="code"><span class="ln">487</span>var harnessLoaders = []struct {
+<span class="ln">488</span>	name string
+<span class="ln">489</span>	load func() []model.Session
+<span class="ln">490</span>}{
+<span class="ln">491</span>	{&quot;claude&quot;, sources.LoadClaude},
+<span class="ln">492</span>	{&quot;codex&quot;, sources.LoadCodex},
+<span class="ln">493</span>	{&quot;opencode&quot;, sources.LoadOpencode},
+<span class="ln">494</span>	{&quot;aider&quot;, sources.LoadAider},
+<span class="ln">495</span>	{&quot;gemini&quot;, sources.LoadGemini},
+<span class="ln">496</span>	{&quot;cursor&quot;, sources.LoadCursor},
+<span class="ln">497</span>	{&quot;antigravity&quot;, sources.LoadAntigravity},
+<span class="ln">498</span>	{&quot;grok&quot;, sources.LoadGrok},
+<span class="ln">499</span>}
+<span class="ln">500</span>
+<span class="ln">501</span>func load(h string) []model.Session { return loadProgress(h, nil) }
+<span class="ln">502</span>
+<span class="ln">503</span>// loadProgress narrates a full rebuild per harness: a cold pass over a large
+<span class="ln">504</span>// corpus takes seconds and used to look hung.
+<span class="ln">505</span>func loadProgress(h string, progress io.Writer) []model.Session {
+<span class="ln">506</span>	var ss []model.Session
+<span class="ln">507</span>	for _, hl := range harnessLoaders {
+<span class="ln">508</span>		if h != &quot;&quot; &amp;&amp; h != hl.name {
+<span class="ln">509</span>			continue
+<span class="ln">510</span>		}
+<span class="ln">511</span>		got := hl.load()
+<span class="ln">512</span>		ss = append(ss, got...)
+<span class="ln">513</span>		if progress != nil &amp;&amp; len(got) &gt; 0 {
+<span class="ln">514</span>			msgs := 0
+<span class="ln">515</span>			for _, s := range got {
+<span class="ln">516</span>				msgs += len(s.Messages)
+<span class="ln">517</span>			}
+<span class="ln">518</span>			fmt.Fprintf(progress, &quot;deja: %s: %d sessions, %d messages\n&quot;, hl.name, len(got), msgs)
+<span class="ln">519</span>		}
+<span class="ln">520</span>	}
+<span class="ln">521</span>	return ss</pre></div><h3><span class="arr">▸</span>增量与 crash-safe</h3><p><code>internal/index/index.go:228</code> 到 <code>internal/index/index.go:243</code> 的 SearchWithRecovery 是很实用的失败处理：桶文件被 crash 截断时，它不会把错误丢给用户，而是触发一次强制 rebuild 后再查。重建时 <code>internal/index/index.go:430</code> 先写桶，<code>internal/index/index.go:434</code> 写 manifest，最后 <code>internal/index/index.go:437</code> 删除旧目录并 <code>internal/index/index.go:438</code> rename 临时目录，尽量把中间态限制在 tmp。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/index.go</span> · L356-443</span><span>Go</span></div><pre class="code"><span class="ln">356</span>func rebuild(dir string, harness string, scope string, files map[string]FileState, progress io.Writer) error {
+<span class="ln">357</span>	lastIngestFiles = len(files)
+<span class="ln">358</span>	initialBuild := !HasManifest(dir)
+<span class="ln">359</span>	writtenMessages := 0
+<span class="ln">360</span>	imported := importedSessions(dir)
+<span class="ln">361</span>	tmp := dir + &quot;.tmp&quot;
+<span class="ln">362</span>	_ = os.RemoveAll(tmp)
+<span class="ln">363</span>	if err := os.MkdirAll(filepath.Join(tmp, &quot;buckets&quot;), 0o755); err != nil {
+<span class="ln">364</span>		return err
+<span class="ln">365</span>	}
+<span class="ln">366</span>	ss := loadProgress(harness, progress)
+<span class="ln">367</span>	ss = append(ss, imported.sessions...)
+<span class="ln">368</span>	m := Manifest{Version: version, Files: files, Sessions: map[string]SessionMeta{}, BuiltAt: time.Now(), Scope: scope,
+<span class="ln">369</span>		ExportWatermarks: imported.watermarks, ImportedRecords: imported.dedupe}
+<span class="ln">370</span>	recPath := filepath.Join(tmp, &quot;records.bin&quot;)
+<span class="ln">371</span>	rf, err := os.Create(recPath)
+<span class="ln">372</span>	if err != nil {
+<span class="ln">373</span>		return err
+<span class="ln">374</span>	}
+<span class="ln">375</span>	rw, err := newRecordWriter(rf)
+<span class="ln">376</span>	if err != nil {
+<span class="ln">377</span>		_ = rf.Close()
+<span class="ln">378</span>		return err
+<span class="ln">379</span>	}
+<span class="ln">380</span>	seenMsgs := msgSeen{}
+<span class="ln">381</span>	buckets, err := indexTextParallel(func(push func(tokenJob)) error {
+<span class="ln">382</span>		for _, s := range ss {
+<span class="ln">383</span>			key := s.Harness + &quot;:&quot; + s.ID
+<span class="ln">384</span>			ord := uint32(0)
+<span class="ln">385</span>			if old, ok := m.Sessions[key]; ok {
+<span class="ln">386</span>				ord = old.Ord
+<span class="ln">387</span>				if s.Started.IsZero() || (!old.Started.IsZero() &amp;&amp; old.Started.Before(s.Started)) {
+<span class="ln">388</span>					s.Started = old.Started
+<span class="ln">389</span>				}
+<span class="ln">390</span>				if old.Updated.After(s.Updated) {
+<span class="ln">391</span>					s.Updated = old.Updated
+<span class="ln">392</span>				}
+<span class="ln">393</span>				if s.Project == &quot;history&quot; &amp;&amp; old.Project != &quot;&quot; &amp;&amp; old.Project != &quot;history&quot; {
+<span class="ln">394</span>					s.Project = old.Project
+<span class="ln">395</span>				}
+<span class="ln">396</span>				if s.Title == &quot;&quot; {
+<span class="ln">397</span>					s.Title = old.Title
+<span class="ln">398</span>				}
+<span class="ln">399</span>			}
+<span class="ln">400</span>			if ord == 0 {
+<span class="ln">401</span>				ord = nextSessionOrd(m.Sessions)
+<span class="ln">402</span>			}
+<span class="ln">403</span>			m.Sessions[key] = metaWithOrd(metaForSession(s), ord)
+<span class="ln">404</span>			for _, msg := range s.Messages {
+<span class="ln">405</span>				if seenMsgs.dup(key, msg.Role, msg.Time, msg.Text) {
+<span class="ln">406</span>					continue
+<span class="ln">407</span>				}
+<span class="ln">408</span>				text := msg.Text
+<span class="ln">409</span>				if len(text) &gt; maxIndexedText {
+<span class="ln">410</span>					text = text[:maxIndexedText]
+<span class="ln">411</span>				}
+<span class="ln">412</span>				text = redactForIngest(&amp;m, s.Path, text)
+<span class="ln">413</span>				off, err := rw.write(Record{Key: key, SourcePath: s.Path, Role: msg.Role, Text: text, Time: msg.Time})
+<span class="ln">414</span>				if err != nil {
+<span class="ln">415</span>					return err
+<span class="ln">416</span>				}
+<span class="ln">417</span>				writtenMessages++
+<span class="ln">418</span>				push(tokenJob{text: text, offset: off, sid: m.Sessions[key].Ord})
+<span class="ln">419</span>			}
+<span class="ln">420</span>		}
+<span class="ln">421</span>		return nil
+<span class="ln">422</span>	})
+<span class="ln">423</span>	if err != nil {
+<span class="ln">424</span>		_ = rw.Close()
+<span class="ln">425</span>		return err
+<span class="ln">426</span>	}
+<span class="ln">427</span>	if err := rw.Close(); err != nil {
+<span class="ln">428</span>		return err
+<span class="ln">429</span>	}
+<span class="ln">430</span>	if err := writeBucketsConcurrent(filepath.Join(tmp, &quot;buckets&quot;), buckets); err != nil {
+<span class="ln">431</span>		return err
+<span class="ln">432</span>	}
+<span class="ln">433</span>	setOpencodeLastUpdated(m.Files, m.Sessions)
+<span class="ln">434</span>	if err := writeManifest(tmp, m); err != nil {
+<span class="ln">435</span>		return err
+<span class="ln">436</span>	}
+<span class="ln">437</span>	_ = os.RemoveAll(dir)
+<span class="ln">438</span>	if err := os.Rename(tmp, dir); err != nil {
+<span class="ln">439</span>		return err
+<span class="ln">440</span>	}
+<span class="ln">441</span>	summarizeBuild(initialBuild, len(m.Sessions), writtenMessages, ss)
+<span class="ln">442</span>	return nil
+<span class="ln">443</span>}</pre></div><a class="deep-link" href="deja-vu/deja-vu-index-search.html">深度阅读 · 索引与检索</a></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · SEARCH & MCP</div><h2 class="sec-title">检索和 MCP：给 Agent 的廉价 recall</h2><p>CLI 查询走 <code>cmd/deja/main.go:214</code> 解析搜索参数，再通过 <code>cmd/deja/main.go:218</code> 确保索引，<code>cmd/deja/main.go:221</code> 执行 SearchWithRecovery，最后交给 <code>internal/search/search.go:41</code> 评分。MCP 路径则从 <code>cmd/deja/mcp.go:27</code> 建立 line-delimited JSON server，在 <code>cmd/deja/mcp.go:74</code> 暴露工具列表，在 <code>cmd/deja/mcp.go:113</code> 分发 tool call。</p><h3><span class="arr">▸</span>查询排序</h3><p>搜索实现不是只返回第一处命中：<code>internal/search/search.go:68</code> 遍历消息，<code>internal/search/search.go:85</code> 累加命中，<code>internal/search/search.go:93</code> 用命中数和更新时间计算 score，<code>internal/search/search.go:98</code> 排序，<code>internal/search/search.go:104</code> 限制默认返回数量。这能把最近且相关的 session 推到前面。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/search/search.go</span> · L41-107</span><span>Go</span></div><pre class="code"><span class="ln">41</span>func Run(ss []model.Session, o Options) ([]Hit, error) {
+<span class="ln">42</span>	var re *regexp.Regexp
+<span class="ln">43</span>	qlow := strings.ToLower(o.Query)
+<span class="ln">44</span>	qtoks := queryTokens(o.Query)
+<span class="ln">45</span>	if o.Regex {
+<span class="ln">46</span>		var err error
+<span class="ln">47</span>		re, err = regexp.Compile(&quot;(?i)&quot; + o.Query)
+<span class="ln">48</span>		if err != nil {
+<span class="ln">49</span>			return nil, err
+<span class="ln">50</span>		}
+<span class="ln">51</span>	}
+<span class="ln">52</span>	cut := time.Time{}
+<span class="ln">53</span>	if o.Since &gt; 0 {
+<span class="ln">54</span>		cut = time.Now().Add(-o.Since)
+<span class="ln">55</span>	}
+<span class="ln">56</span>	var hits []Hit
+<span class="ln">57</span>	for _, s := range mergeSessions(ss) {
+<span class="ln">58</span>		if o.Harness != &quot;&quot; &amp;&amp; s.Harness != o.Harness {
+<span class="ln">59</span>			continue
+<span class="ln">60</span>		}
+<span class="ln">61</span>		if o.Project != &quot;&quot; &amp;&amp; !strings.Contains(strings.ToLower(s.Project), strings.ToLower(o.Project)) {
+<span class="ln">62</span>			continue
+<span class="ln">63</span>		}
+<span class="ln">64</span>		if !cut.IsZero() &amp;&amp; s.Updated.Before(cut) {
+<span class="ln">65</span>			continue
+<span class="ln">66</span>		}
+<span class="ln">67</span>		h := Hit{Session: s}
+<span class="ln">68</span>		for _, m := range s.Messages {
+<span class="ln">69</span>			if o.Role != &quot;&quot; &amp;&amp; m.Role != o.Role {
+<span class="ln">70</span>				continue
+<span class="ln">71</span>			}
+<span class="ln">72</span>			c := 0
+<span class="ln">73</span>			if re != nil {
+<span class="ln">74</span>				c = len(re.FindAllStringIndex(m.Text, -1))
+<span class="ln">75</span>			} else {
+<span class="ln">76</span>				low := strings.ToLower(m.Text)
+<span class="ln">77</span>				if len(qtoks) &lt;= 1 {
+<span class="ln">78</span>					if strings.Contains(low, qlow) {
+<span class="ln">79</span>						c = strings.Count(low, qlow)
+<span class="ln">80</span>					}
+<span class="ln">81</span>				} else {
+<span class="ln">82</span>					c = countAllTokens(low, qtoks)
+<span class="ln">83</span>				}
+<span class="ln">84</span>			}
+<span class="ln">85</span>			if c &gt; 0 {
+<span class="ln">86</span>				h.Count += c
+<span class="ln">87</span>				if len(h.Snippets) &lt; 3 {
+<span class="ln">88</span>					h.Snippets = append(h.Snippets, snippet(m.Text, o.Query, re))
+<span class="ln">89</span>				}
+<span class="ln">90</span>			}
+<span class="ln">91</span>		}
+<span class="ln">92</span>		if h.Count &gt; 0 {
+<span class="ln">93</span>			age := time.Since(s.Updated).Hours() / 24
+<span class="ln">94</span>			h.Score = float64(h.Count) * 1000 / (1 + age)
+<span class="ln">95</span>			hits = append(hits, h)
+<span class="ln">96</span>		}
+<span class="ln">97</span>	}
+<span class="ln">98</span>	sort.Slice(hits, func(i, j int) bool {
+<span class="ln">99</span>		if hits[i].Score == hits[j].Score {
+<span class="ln">100</span>			return hits[i].Session.Updated.After(hits[j].Session.Updated)
+<span class="ln">101</span>		}
+<span class="ln">102</span>		return hits[i].Score &gt; hits[j].Score
+<span class="ln">103</span>	})
+<span class="ln">104</span>	if !o.All &amp;&amp; len(hits) &gt; 15 {
+<span class="ln">105</span>		hits = hits[:15]
+<span class="ln">106</span>	}
+<span class="ln">107</span>	return hits, nil</pre></div><h3><span class="arr">▸</span>MCP recall 的上下文预算</h3><p>MCP recall 在 <code>cmd/deja/mcp.go:152</code> 设定默认 limit，<code>cmd/deja/mcp.go:156</code> 构造搜索选项，<code>cmd/deja/mcp.go:171</code> 截取最多 limit 条，<code>cmd/deja/mcp.go:190</code> 按预算裁剪 UTF-8 输出。recall_context 则在 <code>cmd/deja/mcp.go:206</code> 走单个最佳 session 的 digest，适合 Agent 确认“之前怎么修的”。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/mcp.go</span> · L66-99</span><span>Go</span></div><pre class="code"><span class="ln">66</span>func handleMCP(req rpcRequest) (any, int, string) {
+<span class="ln">67</span>	switch req.Method {
+<span class="ln">68</span>	case &quot;initialize&quot;:
+<span class="ln">69</span>		return map[string]any{
+<span class="ln">70</span>			&quot;protocolVersion&quot;: mcpProtocolVersion,
+<span class="ln">71</span>			&quot;capabilities&quot;:    map[string]any{&quot;tools&quot;: map[string]any{}},
+<span class="ln">72</span>			&quot;serverInfo&quot;:      map[string]any{&quot;name&quot;: &quot;deja&quot;, &quot;version&quot;: version},
+<span class="ln">73</span>		}, 0, &quot;&quot;
+<span class="ln">74</span>	case &quot;tools/list&quot;:
+<span class="ln">75</span>		return map[string]any{&quot;tools&quot;: []map[string]any{
+<span class="ln">76</span>			{
+<span class="ln">77</span>				&quot;name&quot;:        &quot;recall&quot;,
+<span class="ln">78</span>				&quot;description&quot;: &quot;Search past coding-agent sessions (Claude Code, Codex, opencode, aider, Gemini CLI, Cursor, Antigravity, Grok Build) indexed on this machine and return the best matches as dense text under ~4KB. Use before debugging or re-implementing something: prior sessions often contain the exact fix, error message, or command. Query works best with specific tokens — an error string, function name, or flag.&quot;,
+<span class="ln">79</span>				&quot;inputSchema&quot;: map[string]any{&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: map[string]any{&quot;query&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Search terms; specific tokens (error strings, function names, flags) match best. Multiple words are ANDed.&quot;}, &quot;harness&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Optional filter: claude, codex, opencode, aider, gemini, cursor, antigravity or grok.&quot;}, &quot;limit&quot;: map[string]any{&quot;type&quot;: &quot;number&quot;, &quot;description&quot;: &quot;Max sessions to return (default 5).&quot;}}, &quot;required&quot;: []string{&quot;query&quot;}},
+<span class="ln">80</span>			},
+<span class="ln">81</span>			{
+<span class="ln">82</span>				&quot;name&quot;:        &quot;recall_context&quot;,
+<span class="ln">83</span>				&quot;description&quot;: &quot;Return a markdown digest (~8KB) of the single best-matching prior session — the full problem/solution arc, not just snippets. Use after recall points at a session and more detail is needed.&quot;,
+<span class="ln">84</span>				&quot;inputSchema&quot;: map[string]any{&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: map[string]any{&quot;query&quot;: map[string]any{&quot;type&quot;: &quot;string&quot;, &quot;description&quot;: &quot;Search terms identifying the session to digest.&quot;}}, &quot;required&quot;: []string{&quot;query&quot;}},
+<span class="ln">85</span>			},
+<span class="ln">86</span>		}}, 0, &quot;&quot;
+<span class="ln">87</span>	case &quot;tools/call&quot;:
+<span class="ln">88</span>		var p struct {
+<span class="ln">89</span>			Name      string          `json:&quot;name&quot;`
+<span class="ln">90</span>			Arguments json.RawMessage `json:&quot;arguments&quot;`
+<span class="ln">91</span>		}
+<span class="ln">92</span>		if err := json.Unmarshal(req.Params, &amp;p); err != nil {
+<span class="ln">93</span>			return nil, -32602, &quot;invalid params&quot;
+<span class="ln">94</span>		}
+<span class="ln">95</span>		text, err := callMCPTool(p.Name, p.Arguments)
+<span class="ln">96</span>		if err != nil {
+<span class="ln">97</span>			return nil, -32602, err.Error()
+<span class="ln">98</span>		}
+<span class="ln">99</span>		return toolText(text), 0, &quot;&quot;</pre></div><a class="deep-link" href="deja-vu/deja-vu-mcp-auto.html">深度阅读 · MCP 与自动回忆</a></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · REDACTION & SYNC</div><h2 class="sec-title">脱敏与同步：记忆能流动，但不能裸奔</h2><p>安全边界在这个项目里不是文档口号。索引写入时 <code>internal/index/index.go:412</code> 调用 redaction，share 输出在 <code>cmd/deja/share.go:82</code> 到 <code>cmd/deja/share.go:86</code> 对整篇 digest 再脱敏，sync export 在 <code>internal/index/sync.go:80</code> 对每条记录再次 redact。三处重复处理会牺牲一点性能，但换来更强的默认安全。</p><h3><span class="arr">▸</span>凭证识别</h3><p>脱敏规则覆盖 AWS、通用 key/value、Bearer、PEM、provider token、JWT 和 URL credential：正则集中在 <code>internal/redact/redact.go:25</code> 到 <code>internal/redact/redact.go:42</code>，执行流程在 <code>internal/redact/redact.go:64</code> 到 <code>internal/redact/redact.go:102</code>。它还用 <code>internal/redact/redact.go:50</code> 和 <code>internal/redact/redact.go:53</code> 的 hints 先过滤大多数无密钥文本，降低正则成本。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/redact/redact.go</span> · L25-103</span><span>Go</span></div><pre class="code"><span class="ln">25</span>var (
+<span class="ln">26</span>	awsAccessKeyRE = regexp.MustCompile(`A(?:KIA|SIA)[0-9A-Z]{16}`)
+<span class="ln">27</span>	awsSecretRE    = regexp.MustCompile(`(?i)\b(aws[_-]?secret[_-]?access[_-]?key)(\s*[&#x27;&quot;]?\s*[:=]\s*)([&#x27;&quot;]?)([A-Za-z0-9/+=_-]{32,})([&#x27;&quot;]?)`)
+<span class="ln">28</span>	// The key may be embedded in a larger identifier (ANTHROPIC_API_KEY,
+<span class="ln">29</span>	// x-api-key) and, in JSON, a closing quote can sit between the key and the
+<span class="ln">30</span>	// delimiter (&quot;api_key&quot;: &quot;...&quot;). Tolerate both so env-var and JSON forms are
+<span class="ln">31</span>	// caught, not just a bare `api_key=`.
+<span class="ln">32</span>	genericKVRE  = regexp.MustCompile(`(?i)\b([\w.-]{0,64}?(?:api[_-]?key|secret|token|passwd|password|authorization))(\s*[&#x27;&quot;]?\s*[:=]\s*)([&#x27;&quot;]?)([A-Za-z0-9/+=._-]{16,})([&#x27;&quot;]?)`)
+<span class="ln">33</span>	bearerRE     = regexp.MustCompile(`(?i)\b(Bearer)(\s+)([A-Za-z0-9._~+/=-]{16,})`)
+<span class="ln">34</span>	pemPrivateRE = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`)
+<span class="ln">35</span>	// Provider prefixes. sk- allows internal hyphens/underscores so modern
+<span class="ln">36</span>	// hyphenated formats (sk-ant-…, sk-proj-…) are covered, not just legacy
+<span class="ln">37</span>	// sk-&lt;alnum&gt; keys.
+<span class="ln">38</span>	providerRE = regexp.MustCompile(`\b(gh[opsur]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9-]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{30,}|xox[bpcs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b`)
+<span class="ln">39</span>	jwtRE      = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b`)
+<span class="ln">40</span>	// Password is greedy so a password containing &#x27;@&#x27; (user:p@ss@host) splits on
+<span class="ln">41</span>	// the last &#x27;@&#x27; and is redacted whole, not just up to the first &#x27;@&#x27;.
+<span class="ln">42</span>	connURLRE = regexp.MustCompile(`\b([A-Za-z][A-Za-z0-9+.-]*://)([^\s/@:]+):([^\s]+)@([^\s]+)`) // scheme://user:pass@host
+<span class="ln">43</span>)
+<span class="ln">44</span>
+<span class="ln">45</span>func Disabled() bool { return os.Getenv(&quot;DEJA_NO_REDACT&quot;) == &quot;1&quot; }
+<span class="ln">46</span>
+<span class="ln">47</span>// kvHints are the substrings genericKVRE can anchor on; providerHints the
+<span class="ln">48</span>// literal prefixes of providerRE. Checking them first keeps the regexes off
+<span class="ln">49</span>// the vast majority of messages, which contain no credentials at all.
+<span class="ln">50</span>var kvHints = []string{&quot;key&quot;, &quot;secret&quot;, &quot;token&quot;, &quot;passw&quot;, &quot;authorization&quot;}
+<span class="ln">51</span>
+<span class="ln">52</span>// &quot;github_pat_&quot; is listed on its own: &quot;gh&quot; is not a substring of &quot;github&quot;.
+<span class="ln">53</span>var providerHints = []string{&quot;gh&quot;, &quot;github_pat_&quot;, &quot;glpat-&quot;, &quot;sk_&quot;, &quot;rk_&quot;, &quot;sk-&quot;, &quot;gsk_&quot;, &quot;xai-&quot;, &quot;hf_&quot;, &quot;npm_&quot;, &quot;xox&quot;, &quot;AIza&quot;}
+<span class="ln">54</span>
+<span class="ln">55</span>func containsAnyFold(s string, hints []string) bool {
+<span class="ln">56</span>	for _, h := range hints {
+<span class="ln">57</span>		if strings.Contains(s, h) {
+<span class="ln">58</span>			return true
+<span class="ln">59</span>		}
+<span class="ln">60</span>	}
+<span class="ln">61</span>	return false
+<span class="ln">62</span>}
+<span class="ln">63</span>
+<span class="ln">64</span>func Text(s string) (string, Counts) {
+<span class="ln">65</span>	counts := Counts{}
+<span class="ln">66</span>	if Disabled() || s == &quot;&quot; {
+<span class="ln">67</span>		return s, counts
+<span class="ln">68</span>	}
+<span class="ln">69</span>	lower := strings.ToLower(s)
+<span class="ln">70</span>	if strings.Contains(s, &quot;-----BEGIN&quot;) {
+<span class="ln">71</span>		s = replaceWhole(s, pemPrivateRE, &quot;private-key&quot;, counts)
+<span class="ln">72</span>	}
+<span class="ln">73</span>	if strings.Contains(s, &quot;://&quot;) {
+<span class="ln">74</span>		s = replaceSubmatch(s, connURLRE, &quot;url-credentials&quot;, counts, func(m []string) string {
+<span class="ln">75</span>			return m[1] + m[2] + &quot;:[redacted:url-credentials]@&quot; + m[4]
+<span class="ln">76</span>		})
+<span class="ln">77</span>	}
+<span class="ln">78</span>	if strings.Contains(lower, &quot;aws&quot;) {
+<span class="ln">79</span>		s = replaceSubmatch(s, awsSecretRE, &quot;aws-secret&quot;, counts, func(m []string) string {
+<span class="ln">80</span>			return m[1] + m[2] + m[3] + &quot;[redacted:aws-secret]&quot; + closingQuote(m[3], m[5])
+<span class="ln">81</span>		})
+<span class="ln">82</span>	}
+<span class="ln">83</span>	if strings.Contains(s, &quot;AKIA&quot;) || strings.Contains(s, &quot;ASIA&quot;) {
+<span class="ln">84</span>		s = replaceWhole(s, awsAccessKeyRE, &quot;aws-access-key&quot;, counts)
+<span class="ln">85</span>	}
+<span class="ln">86</span>	if strings.Contains(lower, &quot;bearer&quot;) {
+<span class="ln">87</span>		s = replaceSubmatch(s, bearerRE, &quot;bearer-token&quot;, counts, func(m []string) string {
+<span class="ln">88</span>			return m[1] + m[2] + &quot;[redacted:bearer-token]&quot;
+<span class="ln">89</span>		})
+<span class="ln">90</span>	}
+<span class="ln">91</span>	if strings.Contains(s, &quot;eyJ&quot;) {
+<span class="ln">92</span>		s = replaceWhole(s, jwtRE, &quot;jwt&quot;, counts)
+<span class="ln">93</span>	}
+<span class="ln">94</span>	if containsAnyFold(lower, kvHints) {
+<span class="ln">95</span>		s = replaceSubmatch(s, genericKVRE, &quot;credential&quot;, counts, func(m []string) string {
+<span class="ln">96</span>			return m[1] + m[2] + m[3] + &quot;[redacted:credential]&quot; + closingQuote(m[3], m[5])
+<span class="ln">97</span>		})
+<span class="ln">98</span>	}
+<span class="ln">99</span>	if containsAnyFold(s, providerHints) {
+<span class="ln">100</span>		s = replaceProvider(s, counts)
+<span class="ln">101</span>	}
+<span class="ln">102</span>	return s, counts
+<span class="ln">103</span>}</pre></div><h3><span class="arr">▸</span>同步模型</h3><p>同步命令入口在 <code>cmd/deja/sync.go:11</code> 到 <code>cmd/deja/sync.go:56</code>，导出前会在 <code>cmd/deja/sync.go:32</code> 确保索引可搜索；底层 <code>internal/index/sync.go:41</code> 使用 source watermark 产出 append-only JSONL，导入端在 <code>internal/index/sync.go:160</code> 到 <code>internal/index/sync.go:183</code> 用 legacy key 加 text hash 去重，避免同时间戳消息被误判。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/sync.go</span> · L41-119</span><span>Go</span></div><pre class="code"><span class="ln">41</span>func exportRecords(dir, outDir string, full bool) (int, error) {
+<span class="ln">42</span>	if dir == &quot;&quot; {
+<span class="ln">43</span>		dir = DefaultDir()
+<span class="ln">44</span>	}
+<span class="ln">45</span>	unlock, err := lockDir(dir)
+<span class="ln">46</span>	if err != nil {
+<span class="ln">47</span>		return 0, err
+<span class="ln">48</span>	}
+<span class="ln">49</span>	defer unlock()
+<span class="ln">50</span>	m, err := readManifest(dir)
+<span class="ln">51</span>	if err != nil {
+<span class="ln">52</span>		return 0, err
+<span class="ln">53</span>	}
+<span class="ln">54</span>	if err := os.MkdirAll(outDir, 0o755); err != nil {
+<span class="ln">55</span>		return 0, err
+<span class="ln">56</span>	}
+<span class="ln">57</span>	if m.ExportWatermarks == nil {
+<span class="ln">58</span>		m.ExportWatermarks = map[string]int64{}
+<span class="ln">59</span>	}
+<span class="ln">60</span>	bySource := map[string][]SyncRecord{}
+<span class="ln">61</span>	nextWatermarks := map[string]int64{}
+<span class="ln">62</span>	for k, v := range m.ExportWatermarks {
+<span class="ln">63</span>		nextWatermarks[k] = v
+<span class="ln">64</span>	}
+<span class="ln">65</span>	err = eachRecord(filepath.Join(dir, &quot;records.bin&quot;), func(r Record) {
+<span class="ln">66</span>		if r.SourcePath == syncImportPath {
+<span class="ln">67</span>			return
+<span class="ln">68</span>		}
+<span class="ln">69</span>		source := r.SourcePath
+<span class="ln">70</span>		if source == &quot;&quot; {
+<span class="ln">71</span>			source = r.Key
+<span class="ln">72</span>		}
+<span class="ln">73</span>		if !full &amp;&amp; !r.Time.IsZero() &amp;&amp; r.Time.UnixNano() &lt;= m.ExportWatermarks[source] {
+<span class="ln">74</span>			return
+<span class="ln">75</span>		}
+<span class="ln">76</span>		meta, ok := m.Sessions[r.Key]
+<span class="ln">77</span>		if !ok {
+<span class="ln">78</span>			return
+<span class="ln">79</span>		}
+<span class="ln">80</span>		text, _ := redact.Text(r.Text)
+<span class="ln">81</span>		rec := SyncRecord{Harness: meta.Harness, SessionID: meta.ID, Project: meta.Project, Role: r.Role, Text: text, Time: r.Time}
+<span class="ln">82</span>		bySource[source] = append(bySource[source], rec)
+<span class="ln">83</span>		if r.Time.UnixNano() &gt; nextWatermarks[source] {
+<span class="ln">84</span>			nextWatermarks[source] = r.Time.UnixNano()
+<span class="ln">85</span>		}
+<span class="ln">86</span>	})
+<span class="ln">87</span>	if err != nil {
+<span class="ln">88</span>		return 0, err
+<span class="ln">89</span>	}
+<span class="ln">90</span>	total := 0
+<span class="ln">91</span>	for source, recs := range bySource {
+<span class="ln">92</span>		if len(recs) == 0 {
+<span class="ln">93</span>			continue
+<span class="ln">94</span>		}
+<span class="ln">95</span>		name := fmt.Sprintf(&quot;deja-sync-%s-%d.jsonl&quot;, shortHash(source), time.Now().UnixNano())
+<span class="ln">96</span>		f, err := os.Create(filepath.Join(outDir, name))
+<span class="ln">97</span>		if err != nil {
+<span class="ln">98</span>			return total, err
+<span class="ln">99</span>		}
+<span class="ln">100</span>		enc := json.NewEncoder(f)
+<span class="ln">101</span>		for _, rec := range recs {
+<span class="ln">102</span>			if err := enc.Encode(rec); err != nil {
+<span class="ln">103</span>				_ = f.Close()
+<span class="ln">104</span>				return total, err
+<span class="ln">105</span>			}
+<span class="ln">106</span>			total++
+<span class="ln">107</span>		}
+<span class="ln">108</span>		if err := f.Close(); err != nil {
+<span class="ln">109</span>			return total, err
+<span class="ln">110</span>		}
+<span class="ln">111</span>	}
+<span class="ln">112</span>	for source, wm := range nextWatermarks {
+<span class="ln">113</span>		m.ExportWatermarks[source] = wm
+<span class="ln">114</span>	}
+<span class="ln">115</span>	if err := writeManifest(dir, m); err != nil {
+<span class="ln">116</span>		return total, err
+<span class="ln">117</span>	}
+<span class="ln">118</span>	return total, nil
+<span class="ln">119</span>}</pre></div><a class="deep-link" href="deja-vu/deja-vu-sync-security.html">深度阅读 · 同步与安全</a></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · TESTS & RISKS</div><h2 class="sec-title">测试覆盖与风险边界</h2><h3><span class="arr">▸</span>覆盖面</h3><p>仓库测试覆盖到 parser、index crash recovery、dedupe、sync persistence、redaction、MCP、auto install 和 SSH sync。比如 <code>internal/sources/util.go:91</code> 的 JSONL offset scanner、<code>internal/sources/util.go:133</code> 的并发 parseFiles、<code>cmd/deja/install_auto.go:15</code> 的 Codex hooks 合并、<code>cmd/deja/sync_ssh.go:48</code> 的 ssh push 都有对应测试文件。</p><h3><span class="arr">▸</span>风险</h3><ul><li>纯 lexical 检索对同义表达不敏感，<code>internal/index/index.go:205</code> 的子串 fallback 能缓解“code/opencode”类问题，但不能替代语义检索。</li><li>索引只脱敏缓存和导出，不会修改原始 harness 日志；这一点由 README 说明，源码上也能从 <code>internal/redact/redact.go:45</code> 的 opt-out 看出使用者仍需管理原始数据。</li><li>同步依赖用户选择的目录或 SSH hop，<code>cmd/deja/sync_ssh.go:70</code> 到 <code>cmd/deja/sync_ssh.go:81</code> 会创建远端临时目录并 scp，运维失败模式需要用户理解。</li></ul><h3><span class="arr">▸</span>结论</h3><p>deja-vu 的强项是“低摩擦、零服务、本地优先”。它不是最大而全的 memory platform，而是把 agent 已经写到磁盘上的历史变成一个可靠 recall primitive：<code>cmd/deja/main.go:108</code> 给 MCP，<code>cmd/deja/main.go:148</code> 给 ctx，<code>cmd/deja/main.go:139</code> 给 share，<code>cmd/deja/main.go:145</code> 给 sync。这个边界小但清晰，所以适合作为个人或团队 agent 工作流的第一层记忆。</p></section>
+<div class="foot"><span>Generated · 2026-07-17</span><span>Source · <a href="https://github.com/vshulcz/deja-vu">vshulcz/deja-vu</a></span><span><a href="index.html">← 全部分析</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.005}));function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9ee5ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)}tick()}})();</script></body></html>

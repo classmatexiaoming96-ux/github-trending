@@ -1,0 +1,476 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>deja-vu 索引与检索深度解析</title><meta name="description" content="vshulcz/deja-vu 源码级深度解析"><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#6fd3ff;--star-soft:#9ee5ff;--star-deep:#3596c9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">deja<b>vu</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">deja<b>vu</b></div><div class="sub">源码级架构解析 · memory/</div></div><span class="nav-ver">Go · zero-dep binary</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>索引管线</a></li><li><a href="#section-2"><span class="idx">02</span>检索与 MCP</a></li><li><a href="#section-3"><span class="idx">03</span>脱敏与同步</a></li><li><a href="#section-4"><span class="idx">04</span>测试与边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★304 · 2026-07-14</div><div><a href="https://github.com/vshulcz/deja-vu" target="_blank">vshulcz/deja-vu</a></div><div><a href="../deja-vu.html">← 返回 deja-vu 主页面</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">索引与检索 <em>深度解析</em></h1><p class="hero-desc">这一页拆 deja-vu 如何把多 harness 会话变成本地倒排索引，并在查询时用 postings、substring fallback 和 record scan 控制性能与准确性。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">入口契约</h2><p>搜索路径从 CLI 的 <code>cmd/deja/main.go:214</code> 开始，先解析 Options，再由 <code>cmd/deja/main.go:218</code> 触发 EnsureForSearch；索引侧 <code>internal/index/index.go:152</code> 会检查 manifest freshness，查询侧 <code>internal/index/index.go:179</code> 则读取 records 与 postings。这个链条说明搜索不是直接扫源日志，而是先把日志转成缓存结构。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">cmd/deja/main.go</span> · L214-225</span><span>Go</span></div><pre class="code"><span class="ln">214</span>	o, err := parseSearch(filtered)
+<span class="ln">215</span>	if err != nil {
+<span class="ln">216</span>		return err
+<span class="ln">217</span>	}
+<span class="ln">218</span>	if err := index.EnsureForSearch(index.DefaultDir(), o, force, os.Stderr); err != nil {
+<span class="ln">219</span>		return fmt.Errorf(&quot;ensure: %w&quot;, err)
+<span class="ln">220</span>	}
+<span class="ln">221</span>	maybeFirstIndexGreeting()
+<span class="ln">222</span>	ss, err := index.SearchWithRecovery(index.DefaultDir(), o, os.Stderr)
+<span class="ln">223</span>	if err != nil {
+<span class="ln">224</span>		return fmt.Errorf(&quot;search: %w&quot;, err)
+<span class="ln">225</span>	}</pre></div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE</div><h2 class="sec-title">缓存失效与自愈</h2><h3><span class="arr">▸</span>freshness 判断</h3><p><code>internal/index/index.go:161</code> 收集源文件状态，<code>internal/index/index.go:163</code> 读取 manifest，<code>internal/index/index.go:164</code> 同时判断 manifestFresh 和 recordsIntact。只要版本、scope 或 records 尾部异常，<code>internal/index/index.go:167</code> 会切换到 rebuildForSearch，避免用坏缓存返回假结果。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/index.go</span> · L152-177</span><span>Go</span></div><pre class="code"><span class="ln">152</span>func EnsureForSearch(dir string, o search.Options, force bool, progress io.Writer) error {
+<span class="ln">153</span>	if dir == &quot;&quot; {
+<span class="ln">154</span>		dir = DefaultDir()
+<span class="ln">155</span>	}
+<span class="ln">156</span>	unlock, err := lockDir(dir)
+<span class="ln">157</span>	if err != nil {
+<span class="ln">158</span>		return err
+<span class="ln">159</span>	}
+<span class="ln">160</span>	defer unlock()
+<span class="ln">161</span>	want := currentFiles(&quot;&quot;)
+<span class="ln">162</span>	scope := &quot;&quot;
+<span class="ln">163</span>	m, err := readManifest(dir)
+<span class="ln">164</span>	if !force &amp;&amp; err == nil &amp;&amp; manifestFresh(m, want, scope) &amp;&amp; recordsIntact(dir, m) {
+<span class="ln">165</span>		return nil
+<span class="ln">166</span>	}
+<span class="ln">167</span>	if force || err != nil || m.Version != version || m.Scope != scope || !recordsIntact(dir, m) {
+<span class="ln">168</span>		if progress != nil {
+<span class="ln">169</span>			fmt.Fprintf(progress, &quot;deja: indexing sessions into %s ...\n&quot;, dir)
+<span class="ln">170</span>		}
+<span class="ln">171</span>		return rebuildForSearch(dir, o, scope, want, progress)
+<span class="ln">172</span>	}
+<span class="ln">173</span>	if err := updateIndex(dir, o.Harness, scope, want, force, progress); err != nil {
+<span class="ln">174</span>		return fmt.Errorf(&quot;update: %w&quot;, err)
+<span class="ln">175</span>	}
+<span class="ln">176</span>	return nil
+<span class="ln">177</span>}</pre></div><h3><span class="arr">▸</span>postings 优先</h3><p>查询时 <code>internal/index/index.go:197</code> 跳过 regex 的 postings 优化，<code>internal/index/index.go:198</code> 先把 query 转 key，<code>internal/index/index.go:200</code> 做 postings 交集；如果完全没结果，<code>internal/index/index.go:208</code> 用 substring postings 做 grep-like fallback。只有 regex 或无 postings 场景才回到 <code>internal/index/index.go:219</code> 的 scanRecords。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/index.go</span> · L179-226</span><span>Go</span></div><pre class="code"><span class="ln">179</span>func Search(dir string, o search.Options) ([]model.Session, error) {
+<span class="ln">180</span>	if dir == &quot;&quot; {
+<span class="ln">181</span>		dir = DefaultDir()
+<span class="ln">182</span>	}
+<span class="ln">183</span>	unlock, err := lockDir(dir)
+<span class="ln">184</span>	if err != nil {
+<span class="ln">185</span>		return nil, err
+<span class="ln">186</span>	}
+<span class="ln">187</span>	defer unlock()
+<span class="ln">188</span>	m, err := readManifest(dir)
+<span class="ln">189</span>	if err != nil {
+<span class="ln">190</span>		return nil, fmt.Errorf(&quot;manifest: %w&quot;, err)
+<span class="ln">191</span>	}
+<span class="ln">192</span>	if !recordsIntact(dir, m) {
+<span class="ln">193</span>		return nil, fmt.Errorf(&quot;%w: records.bin truncated&quot;, errCorruptIndex)
+<span class="ln">194</span>	}
+<span class="ln">195</span>	var posts []posting
+<span class="ln">196</span>	usedPostings := false
+<span class="ln">197</span>	if !o.Regex {
+<span class="ln">198</span>		if keys := queryKeys(o.Query); len(keys) &gt; 0 {
+<span class="ln">199</span>			usedPostings = true
+<span class="ln">200</span>			posts, err = intersectPostings(dir, retrievalKeys(keys))
+<span class="ln">201</span>			if err != nil {
+<span class="ln">202</span>				return nil, fmt.Errorf(&quot;postings: %w&quot;, err)
+<span class="ln">203</span>			}
+<span class="ln">204</span>			if len(posts) == 0 {
+<span class="ln">205</span>				// grep expectation: &quot;code&quot; should find &quot;opencode&quot;. Expand each query
+<span class="ln">206</span>				// token to all indexed tokens containing it (bucket directories only,
+<span class="ln">207</span>				// no record scan), then intersect.
+<span class="ln">208</span>				posts, err = intersectSubstringPostings(dir, tokens(o.Query))
+<span class="ln">209</span>				if err != nil {
+<span class="ln">210</span>					return nil, fmt.Errorf(&quot;substr postings: %w&quot;, err)
+<span class="ln">211</span>				}
+<span class="ln">212</span>			}
+<span class="ln">213</span>		}
+<span class="ln">214</span>	}
+<span class="ln">215</span>	if len(posts) == 0 {
+<span class="ln">216</span>		if usedPostings {
+<span class="ln">217</span>			return nil, nil
+<span class="ln">218</span>		}
+<span class="ln">219</span>		return scanRecords(dir, m, o, nil)
+<span class="ln">220</span>	}
+<span class="ln">221</span>	posts = cutPostingsBySession(posts, m, o)
+<span class="ln">222</span>	if len(posts) == 0 {
+<span class="ln">223</span>		return nil, nil
+<span class="ln">224</span>	}
+<span class="ln">225</span>	return scanRecords(dir, m, o, postingOffsets(posts))
+<span class="ln">226</span>}</pre></div><h3><span class="arr">▸</span>重建写入</h3><p>重建管线在 <code>internal/index/index.go:356</code> 开始，<code>internal/index/index.go:366</code> 加载 harness，<code>internal/index/index.go:380</code> 准备消息去重，<code>internal/index/index.go:412</code> 写入前脱敏，<code>internal/index/index.go:430</code> 并发落 bucket。这个流程将隐私、安全和性能放在同一个 ingest 点。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/index/index.go</span> · L380-443</span><span>Go</span></div><pre class="code"><span class="ln">380</span>	seenMsgs := msgSeen{}
+<span class="ln">381</span>	buckets, err := indexTextParallel(func(push func(tokenJob)) error {
+<span class="ln">382</span>		for _, s := range ss {
+<span class="ln">383</span>			key := s.Harness + &quot;:&quot; + s.ID
+<span class="ln">384</span>			ord := uint32(0)
+<span class="ln">385</span>			if old, ok := m.Sessions[key]; ok {
+<span class="ln">386</span>				ord = old.Ord
+<span class="ln">387</span>				if s.Started.IsZero() || (!old.Started.IsZero() &amp;&amp; old.Started.Before(s.Started)) {
+<span class="ln">388</span>					s.Started = old.Started
+<span class="ln">389</span>				}
+<span class="ln">390</span>				if old.Updated.After(s.Updated) {
+<span class="ln">391</span>					s.Updated = old.Updated
+<span class="ln">392</span>				}
+<span class="ln">393</span>				if s.Project == &quot;history&quot; &amp;&amp; old.Project != &quot;&quot; &amp;&amp; old.Project != &quot;history&quot; {
+<span class="ln">394</span>					s.Project = old.Project
+<span class="ln">395</span>				}
+<span class="ln">396</span>				if s.Title == &quot;&quot; {
+<span class="ln">397</span>					s.Title = old.Title
+<span class="ln">398</span>				}
+<span class="ln">399</span>			}
+<span class="ln">400</span>			if ord == 0 {
+<span class="ln">401</span>				ord = nextSessionOrd(m.Sessions)
+<span class="ln">402</span>			}
+<span class="ln">403</span>			m.Sessions[key] = metaWithOrd(metaForSession(s), ord)
+<span class="ln">404</span>			for _, msg := range s.Messages {
+<span class="ln">405</span>				if seenMsgs.dup(key, msg.Role, msg.Time, msg.Text) {
+<span class="ln">406</span>					continue
+<span class="ln">407</span>				}
+<span class="ln">408</span>				text := msg.Text
+<span class="ln">409</span>				if len(text) &gt; maxIndexedText {
+<span class="ln">410</span>					text = text[:maxIndexedText]
+<span class="ln">411</span>				}
+<span class="ln">412</span>				text = redactForIngest(&amp;m, s.Path, text)
+<span class="ln">413</span>				off, err := rw.write(Record{Key: key, SourcePath: s.Path, Role: msg.Role, Text: text, Time: msg.Time})
+<span class="ln">414</span>				if err != nil {
+<span class="ln">415</span>					return err
+<span class="ln">416</span>				}
+<span class="ln">417</span>				writtenMessages++
+<span class="ln">418</span>				push(tokenJob{text: text, offset: off, sid: m.Sessions[key].Ord})
+<span class="ln">419</span>			}
+<span class="ln">420</span>		}
+<span class="ln">421</span>		return nil
+<span class="ln">422</span>	})
+<span class="ln">423</span>	if err != nil {
+<span class="ln">424</span>		_ = rw.Close()
+<span class="ln">425</span>		return err
+<span class="ln">426</span>	}
+<span class="ln">427</span>	if err := rw.Close(); err != nil {
+<span class="ln">428</span>		return err
+<span class="ln">429</span>	}
+<span class="ln">430</span>	if err := writeBucketsConcurrent(filepath.Join(tmp, &quot;buckets&quot;), buckets); err != nil {
+<span class="ln">431</span>		return err
+<span class="ln">432</span>	}
+<span class="ln">433</span>	setOpencodeLastUpdated(m.Files, m.Sessions)
+<span class="ln">434</span>	if err := writeManifest(tmp, m); err != nil {
+<span class="ln">435</span>		return err
+<span class="ln">436</span>	}
+<span class="ln">437</span>	_ = os.RemoveAll(dir)
+<span class="ln">438</span>	if err := os.Rename(tmp, dir); err != nil {
+<span class="ln">439</span>		return err
+<span class="ln">440</span>	}
+<span class="ln">441</span>	summarizeBuild(initialBuild, len(m.Sessions), writtenMessages, ss)
+<span class="ln">442</span>	return nil
+<span class="ln">443</span>}</pre></div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · FLOW</div><h2 class="sec-title">关键流程</h2><div class="flow">CLI query -> EnsureForSearch -> currentFiles/manifestFresh -> rebuild/update -> Search -> postings intersection -> search.Run scoring -> Print</div><p>排序发生在 search 包：<code>internal/search/search.go:57</code> 合并 session，<code>internal/search/search.go:68</code> 逐消息计数，<code>internal/search/search.go:93</code> 用 age 衰减 score，<code>internal/search/search.go:98</code> 进行排序，最终 <code>internal/search/search.go:104</code> 截断默认结果。检索和展示分离，便于 MCP 和 CLI 共用同一层。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">internal/search/search.go</span> · L57-107</span><span>Go</span></div><pre class="code"><span class="ln">57</span>	for _, s := range mergeSessions(ss) {
+<span class="ln">58</span>		if o.Harness != &quot;&quot; &amp;&amp; s.Harness != o.Harness {
+<span class="ln">59</span>			continue
+<span class="ln">60</span>		}
+<span class="ln">61</span>		if o.Project != &quot;&quot; &amp;&amp; !strings.Contains(strings.ToLower(s.Project), strings.ToLower(o.Project)) {
+<span class="ln">62</span>			continue
+<span class="ln">63</span>		}
+<span class="ln">64</span>		if !cut.IsZero() &amp;&amp; s.Updated.Before(cut) {
+<span class="ln">65</span>			continue
+<span class="ln">66</span>		}
+<span class="ln">67</span>		h := Hit{Session: s}
+<span class="ln">68</span>		for _, m := range s.Messages {
+<span class="ln">69</span>			if o.Role != &quot;&quot; &amp;&amp; m.Role != o.Role {
+<span class="ln">70</span>				continue
+<span class="ln">71</span>			}
+<span class="ln">72</span>			c := 0
+<span class="ln">73</span>			if re != nil {
+<span class="ln">74</span>				c = len(re.FindAllStringIndex(m.Text, -1))
+<span class="ln">75</span>			} else {
+<span class="ln">76</span>				low := strings.ToLower(m.Text)
+<span class="ln">77</span>				if len(qtoks) &lt;= 1 {
+<span class="ln">78</span>					if strings.Contains(low, qlow) {
+<span class="ln">79</span>						c = strings.Count(low, qlow)
+<span class="ln">80</span>					}
+<span class="ln">81</span>				} else {
+<span class="ln">82</span>					c = countAllTokens(low, qtoks)
+<span class="ln">83</span>				}
+<span class="ln">84</span>			}
+<span class="ln">85</span>			if c &gt; 0 {
+<span class="ln">86</span>				h.Count += c
+<span class="ln">87</span>				if len(h.Snippets) &lt; 3 {
+<span class="ln">88</span>					h.Snippets = append(h.Snippets, snippet(m.Text, o.Query, re))
+<span class="ln">89</span>				}
+<span class="ln">90</span>			}
+<span class="ln">91</span>		}
+<span class="ln">92</span>		if h.Count &gt; 0 {
+<span class="ln">93</span>			age := time.Since(s.Updated).Hours() / 24
+<span class="ln">94</span>			h.Score = float64(h.Count) * 1000 / (1 + age)
+<span class="ln">95</span>			hits = append(hits, h)
+<span class="ln">96</span>		}
+<span class="ln">97</span>	}
+<span class="ln">98</span>	sort.Slice(hits, func(i, j int) bool {
+<span class="ln">99</span>		if hits[i].Score == hits[j].Score {
+<span class="ln">100</span>			return hits[i].Session.Updated.After(hits[j].Session.Updated)
+<span class="ln">101</span>		}
+<span class="ln">102</span>		return hits[i].Score &gt; hits[j].Score
+<span class="ln">103</span>	})
+<span class="ln">104</span>	if !o.All &amp;&amp; len(hits) &gt; 15 {
+<span class="ln">105</span>		hits = hits[:15]
+<span class="ln">106</span>	}
+<span class="ln">107</span>	return hits, nil</pre></div></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE</div><h2 class="sec-title">边界</h2><ul><li><code>internal/index/index.go:228</code> 的 SearchWithRecovery 能处理 bucket corruption，但如果原始日志本身包含错误内容，索引不会纠正语义。</li><li><code>internal/index/index.go:409</code> 的 maxIndexedText 截断保护索引体积，超长消息会损失尾部上下文。</li><li><code>internal/search/search.go:77</code> 的单词查询与 <code>internal/search/search.go:82</code> 的多词 AND 更偏精确检索，不是 embedding 语义召回。</li></ul></section><div class="foot"><span>Generated · 2026-07-17</span><span>Source · <a href="https://github.com/vshulcz/deja-vu">vshulcz/deja-vu</a></span><span><a href="../deja-vu.html">← 返回 deja-vu 主页面</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),s:Math.random()*.02+.005}));function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9ee5ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)}tick()}})();</script></body></html>
