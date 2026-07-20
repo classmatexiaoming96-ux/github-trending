@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>泄漏扫描与 Git guardrails 的闭环 · 深度解析 · agentsmith</title>
+<meta name="description" content="agentsmith 安全 hooks 子模块完整解析 — PromptPartner/agentsmith 源码级深度解析：安装装配、验证门禁、泄漏扫描与 git hook 安全网" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #64d3c2;
+  --star-soft:  #9ee7dc;
+  --star-deep:  #2f9f91;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">agentsmith<b>Smith</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agentsmith<b>Smith</b></div>
+      <div class="sub">安全 hooks · 深度解析</div>
+    </div>
+    <span class="nav-ver">Shell / Markdown</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../agentsmith.html">← 返回 agentsmith 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">泄漏扫描与 Git guardrails 的闭环 <em>深度解析</em></h1>
+      <p class="hero-desc">这个子页面拆安全面：secret-scan 看凭据形状，leak-gate 看人员和环境泄漏，install-git-hooks 把它们挂到 Git 生命周期。它们不是形式化安全证明，但能把最常见的公开仓库事故挡在提交前。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>安全规则在 core 里写得很硬：<code>core/20-principle-rules.md:54</code>、<code>core/20-principle-rules.md:60</code>、<code>core/20-principle-rules.md:64</code> 规定 live secret 不进入 tracked file。脚本层用 <code>scripts/secret-scan.sh:21</code>、<code>scripts/leak-gate.sh:97</code>、<code>scripts/install-git-hooks.sh:56</code> 把这个规则落成扫描和 hook；这也呼应 <code>core/20-principle-rules.md:65</code>、<code>core/20-principle-rules.md:66</code> 的态度：发现 secret 要修复和清史，而不是用 allowlist 糊过去。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/scripts/secret-scan.sh</span> · L20-39</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">20</span># Generic high-signal secret patterns (shapes, not values).
+<span class="ln">21</span>PATTERNS=(
+<span class="ln">22</span>  'BEGIN [A-Z ]*PRIVATE KEY'                            # PEM private keys (RSA/OPENSSH/EC/bare/ENCRYPTED)
+<span class="ln">23</span>  'AKIA[0-9A-Z]{16}'                                    # AWS access key id
+<span class="ln">24</span>  'ASIA[0-9A-Z]{16}'                                    # AWS temp key id
+<span class="ln">25</span>  'gh[pousr]_[A-Za-z0-9]{20,}'                          # GitHub tokens
+<span class="ln">26</span>  'xox[baprs]-[A-Za-z0-9-]{10,}'                        # Slack tokens
+<span class="ln">27</span>  'sk-[A-Za-z0-9]{20,}'                                 # OpenAI-style keys
+<span class="ln">28</span>  'sk-ant-[A-Za-z0-9_-]{20,}'                           # Anthropic-style keys
+<span class="ln">29</span>  'AIza[0-9A-Za-z_-]{35}'                               # Google API key
+<span class="ln">30</span>  '(password|passwd|pwd|secret|token|api[_-]?key)["'"'"' ]*[:=][[:space:]]*["'"'"'][^"'"'"' ]{8,}'  # assigned secret literal
+<span class="ln">31</span>)
+<span class="ln">32</span>
+<span class="ln">33</span># Patterns go to a temp file so the whole scan is ONE grep pass (-f ORs every line of the file).
+<span class="ln">34</span># Matching per-line in a shell loop costs a subprocess per line per pattern — imperceptible on
+<span class="ln">35</span># Linux (~1ms spawns), minutes on Windows/Git Bash (~30ms). This script runs as a pre-commit
+<span class="ln">36</span># hook, and a hook slow enough to be disabled is a guardrail that isn't there (R8).
+<span class="ln">37</span>PATTERN_FILE="$(mktemp)"
+<span class="ln">38</span>trap 'rm -f "$PATTERN_FILE"' EXIT
+<span class="ln">39</span>printf '%s\n' "${PATTERNS[@]}" &gt; "$PATTERN_FILE"</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Secret scanner 的单 grep 策略</h3>
+      <p>`secret-scan` 先把所有高信号 pattern 写进临时文件，再做一次 grep。<code>scripts/secret-scan.sh:21</code>、<code>scripts/secret-scan.sh:37</code>、<code>scripts/secret-scan.sh:41</code>、<code>scripts/secret-scan.sh:65</code>、<code>scripts/secret-scan.sh:77</code> 说明它为 pre-commit 性能做过取舍：一次扫描比逐行逐 pattern spawn 更适合 hooks。它不是单独存在的工具，而是在执行 <code>core/20-principle-rules.md:54</code>、<code>core/20-principle-rules.md:56</code>、<code>core/20-principle-rules.md:57</code> 的 no-secrets 规则。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/scripts/secret-scan.sh</span> · L41-85</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">41</span>input_lines() {
+<span class="ln">42</span>  if [ "${1:-}" = "--all" ]; then
+<span class="ln">43</span>    # -n 64 batches files per shell instead of -I{} spawning one shell PER FILE. The trailing
+<span class="ln">44</span>    # newline keeps a file that lacks one from welding its last line onto the next file's first.
+<span class="ln">45</span>    git -C "$ROOT_DIR" ls-files -z \
+<span class="ln">46</span>      | xargs -0 -n 64 sh -c 'for f in "$@"; do cat -- "$f"; printf "\n"; done' _ 2&gt;/dev/null
+<span class="ln">47</span>  elif [ "${1:-}" = "-" ]; then
+<span class="ln">48</span>    cat
+<span class="ln">49</span>  elif [ $# -gt 0 ]; then
+<span class="ln">50</span>    cat "$@"
+<span class="ln">51</span>  else
+<span class="ln">52</span>    # staged diff: only ADDED lines (strip the leading +). The `|| true` keeps an empty or
+<span class="ln">53</span>    # deletion-only staged diff from tripping `set -o pipefail` (grep exits 1 on no match),
+<span class="ln">54</span>    # which previously produced a false BLOCKED when there was nothing to scan.
+<span class="ln">55</span>    { git -C "$ROOT_DIR" diff --cached --no-color -U0 2&gt;/dev/null | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//'; } || true
+<span class="ln">56</span>  fi
+<span class="ln">57</span>}
+<span class="ln">58</span>
+<span class="ln">59</span># Drop allowlisted lines. Skipped entirely when the allowlist is absent or empty, so an empty
+<span class="ln">60</span># file can't turn into "match nothing / invert / drop everything" on a stricter grep.
+<span class="ln">61</span>allow_filter() {
+<span class="ln">62</span>  if [ -s "$ALLOW" ]; then grep -Evf "$ALLOW"; else cat; fi
+<span class="ln">63</span>}
+<span class="ln">64</span>
+<span class="ln">65</span>scan() {
+<span class="ln">66</span>  local hits line
+<span class="ln">67</span>  # Blank lines out, allowlisted lines out, then every pattern matched in a single pass.
+<span class="ln">68</span>  # `|| true` absorbs grep's exit-1-on-no-match, which pipefail would otherwise treat as failure.
+<span class="ln">69</span>  hits="$(grep -Ev '^[[:space:]]*$' | allow_filter | grep -E -f "$PATTERN_FILE" || true)"
+<span class="ln">70</span>  [ -n "$hits" ] || return 0
+<span class="ln">71</span>  while IFS= read -r line; do
+<span class="ln">72</span>    echo "  ✗ possible secret: $(echo "$line" | cut -c1-100)"
+<span class="ln">73</span>  done &lt;&lt;&lt;"$hits"
+<span class="ln">74</span>  return 1
+<span class="ln">75</span>}
+<span class="ln">76</span>
+<span class="ln">77</span>if input_lines "$@" | scan; then
+<span class="ln">78</span>  echo "secret-scan: clean."
+<span class="ln">79</span>  exit 0
+<span class="ln">80</span>else
+<span class="ln">81</span>  echo
+<span class="ln">82</span>  echo "secret-scan: BLOCKED — a line looks like a live secret (Rule 8)."
+<span class="ln">83</span>  echo "Move it to env/secret-manager, or (only for a genuine test fixture) add a regex to .harness/secret-scan.allow."
+<span class="ln">84</span>  exit 1
+<span class="ln">85</span>fi</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Leak gate 为什么单独存在</h3>
+      <p>`leak-gate` 补的是 secret shape 之外的环境泄漏。<code>scripts/leak-gate.sh:31</code>、<code>scripts/leak-gate.sh:63</code>、<code>scripts/leak-gate.sh:73</code>、<code>scripts/leak-gate.sh:104</code>、<code>scripts/leak-gate.sh:110</code>、<code>scripts/leak-gate.sh:116</code> 显示它显式处理姓名、IP、邮箱和 home path，同时拒绝把内部 hostname denylist 写进公开仓库。它还承担 <code>core/20-principle-rules.md:68</code>、<code>core/20-principle-rules.md:72</code> 的 research durability 约束：公开 surface 应该可分享，私有材料不能混进发布物。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/scripts/leak-gate.sh</span> · L73-129</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">73</span># check &lt;label&gt; &lt;extended-regex&gt; &lt;exempt-regex|""&gt; &lt;hint&gt;
+<span class="ln">74</span># Findings print as file:line:match, so &lt;exempt-regex&gt; can anchor on the match with $.
+<span class="ln">75</span>check() {
+<span class="ln">76</span>  local label="$1" ere="$2" exempt="$3" hint="$4" hits line
+<span class="ln">77</span>  # -I skips binaries; -o prints just the match so exemptions test the match, not the whole
+<span class="ln">78</span>  # line (a line holding both a safe and an unsafe value must still fail).
+<span class="ln">79</span>  # `|| true` absorbs grep's exit-1-on-no-match, which pipefail would treat as a hard error.
+<span class="ln">80</span>  hits="$(git grep -noIiE -- "$ere" -- . "${SCOPE[@]+"${SCOPE[@]}"}" 2&gt;/dev/null || true)"
+<span class="ln">81</span>  [ -n "$hits" ] || return 0
+<span class="ln">82</span>  if [ -n "$exempt" ]; then
+<span class="ln">83</span>    hits="$(printf '%s\n' "$hits" | grep -Evi "$exempt" || true)"
+<span class="ln">84</span>    [ -n "$hits" ] || return 0
+<span class="ln">85</span>  fi
+<span class="ln">86</span>  hits="$(printf '%s\n' "$hits" | allow_filter || true)"
+<span class="ln">87</span>  [ -n "$hits" ] || return 0
+<span class="ln">88</span>  echo "  ✗ $label — $hint"
+<span class="ln">89</span>  while IFS= read -r line; do
+<span class="ln">90</span>    echo "      $line"
+<span class="ln">91</span>  done &lt;&lt;&lt;"$hits"
+<span class="ln">92</span>  fail=1
+<span class="ln">93</span>}
+<span class="ln">94</span>
+<span class="ln">95</span># 1. The operator's identity. The evidenced failure: --operator-name "&lt;author&gt;" sat in the
+<span class="ln">96</span>#    --help of both setup scripts, so every open-source user read a stranger's name.
+<span class="ln">97</span>check "operator identity" \
+<span class="ln">98</span>      "\\b(${TERMS})\\b" \
+<span class="ln">99</span>      "" \
+<span class="ln">100</span>      "a specific person's name — use the repo's placeholder convention (\"Your Name\", \"You\", \"you/...\")"
+<span class="ln">101</span>
+<span class="ln">102</span># 2. Routable IPv4. Loopback/private/link-local/broadcast and the RFC 5737 documentation
+<span class="ln">103</span>#    ranges are legitimate in docs and examples, so only a real, routable address fails.
+<span class="ln">104</span>check "public IP address" \
+<span class="ln">105</span>      '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' \
+<span class="ln">106</span>      ':(0\.0\.0\.0|127\.[0-9.]+|10\.[0-9.]+|192\.168\.[0-9.]+|169\.254\.[0-9.]+|172\.(1[6-9]|2[0-9]|3[01])\.[0-9.]+|255\.255\.[0-9.]+|192\.0\.2\.[0-9]+|198\.51\.100\.[0-9]+|203\.0\.113\.[0-9]+)$' \
+<span class="ln">107</span>      "a routable IP pins this to one environment — use a private/documentation range (192.0.2.x)"
+<span class="ln">108</span>
+<span class="ln">109</span># 3. Real email addresses. example.com/.org/.net are the reserved documentation domains.
+<span class="ln">110</span>check "email address" \
+<span class="ln">111</span>      '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b' \
+<span class="ln">112</span>      ':(noreply@|[A-Za-z0-9._%+-]+@(example\.(com|org|net)|host|localhost|domain\.com))' \
+<span class="ln">113</span>      "a real address — use user@example.com"
+<span class="ln">114</span>
+<span class="ln">115</span># 4. Absolute home directories. These pin a path to one machine and one username.
+<span class="ln">116</span>check "absolute home path" \
+<span class="ln">117</span>      '([A-Za-z]:\\Users\\[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|/Users/[A-Za-z0-9._-]+)' \
+<span class="ln">118</span>      ':([A-Za-z]:\\Users\\(you|your-name|username|user|name)|/(home|Users)/(you|your-name|username|user|me|name))$' \
+<span class="ln">119</span>      "a machine-specific path — use \$HOME or ~/"
+<span class="ln">120</span>
+<span class="ln">121</span>echo
+<span class="ln">122</span>if [ "$fail" -eq 0 ]; then
+<span class="ln">123</span>  echo "leak-gate: clean — the shipped surface names no operator and no environment."
+<span class="ln">124</span>  exit 0
+<span class="ln">125</span>fi
+<span class="ln">126</span>echo "leak-gate: BLOCKED — the shipped surface leaks something specific to one operator/environment."
+<span class="ln">127</span>echo "Replace it with the placeholder convention this repo already uses, or (only for a genuine"
+<span class="ln">128</span>echo "false positive) add a regex to .harness/leak-gate.allow."
+<span class="ln">129</span>exit 1</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <h3><span class="arr">▸</span>Hook 写入如何避免覆盖用户脚本</h3>
+      <div class="flow">staged diff / tracked tree → secret-scan patterns → leak-gate identity/env checks → install-git-hooks writes pre-commit/commit-msg/pre-push → verify can be wired into pre-push</div>
+      <p>hook writer 的关键在 <code>scripts/install-git-hooks.sh:35</code>、<code>scripts/install-git-hooks.sh:45</code>、<code>scripts/install-git-hooks.sh:56</code>、<code>scripts/install-git-hooks.sh:64</code>、<code>scripts/install-git-hooks.sh:67</code>：它备份 foreign hook，只写带 marker 的 managed hook，并按 flag 控制 pre-commit、commit-msg 和 pre-push。这个选择也符合 <code>core/20-principle-rules.md:8</code>、<code>core/20-principle-rules.md:31</code>、<code>core/20-principle-rules.md:78</code>：先理解已有东西、保持原子改动、控制工具表面积。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>scripts/secret-scan.sh:30</code> 的 assigned-secret 正则高信号但不可能覆盖所有语言和配置格式。</li>
+<li><code>scripts/leak-gate.sh:36</code> 解释了为什么不能把客户名清单提交进公开扫描器。</li>
+<li><code>scripts/install-git-hooks.sh:13</code> 允许 `--no-verify` 单次绕过，所以团队仍需要 code review 和 CI。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">测试覆盖</div><div class="card-d"><code>scripts/test-leak-gate.sh:64</code> 之后分别证明检测会失败、占位符不会误报。</div></div><div class="card"><div class="card-h">原则规则</div><div class="card-d"><code>core/20-principle-rules.md:54</code> 到 <code>core/20-principle-rules.md:66</code> 是脚本背后的治理依据。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-20</span>
+      <span>Source · <a href="https://github.com/PromptPartner/agentsmith">PromptPartner/agentsmith</a></span>
+      <span><a href="../agentsmith.html">↑ agentsmith 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

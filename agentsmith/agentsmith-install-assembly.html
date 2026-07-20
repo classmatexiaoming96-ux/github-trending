@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>安装器如何把规则装进项目 · 深度解析 · agentsmith</title>
+<meta name="description" content="agentsmith 安装装配 子模块完整解析 — PromptPartner/agentsmith 源码级深度解析：安装装配、验证门禁、泄漏扫描与 git hook 安全网" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #64d3c2;
+  --star-soft:  #9ee7dc;
+  --star-deep:  #2f9f91;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">agentsmith<b>Smith</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agentsmith<b>Smith</b></div>
+      <div class="sub">安装装配 · 深度解析</div>
+    </div>
+    <span class="nav-ver">Shell / Markdown</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../agentsmith.html">← 返回 agentsmith 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">安装器如何把规则装进项目 <em>深度解析</em></h1>
+      <p class="hero-desc">这个子页面聚焦 Agentsmith 的装配模型：wizard 或 flag path 最终都要生成 managed block，再把 profile、脚本、hook 和模板铺到项目里。核心证据横跨 setup.sh 的参数解析、core/profile 规则和 assemble 测试。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>安装装配流不是“复制一个 CLAUDE.md”这么简单。它要判断项目类型、恢复已有 operator 字段、填充 placeholders，并且只替换自己管理的 block。这里用 <code>core/10-operating-model.md:9</code>、<code>core/20-principle-rules.md:31</code>、<code>profiles/software-dev.md:46</code> 作为规则端证据，再用 <code>scripts/test-assemble.sh:45</code> 到 <code>scripts/test-assemble.sh:80</code> 观察它如何防止半渲染输出进入 agent。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/core/10-operating-model.md</span> · L4-17</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">4</span>**Unit of work:** one tracked item (an issue, a ticket, a task, a deliverable) per session by
+<span class="ln">5</span>default. Its description is the contract. Two or three closely-related items on the same branch
+<span class="ln">6</span>or workspace is fine when they share scope naturally. For an obvious small fix, a one-line
+<span class="ln">7</span>description instead of a formal ticket is acceptable.
+<span class="ln">8</span>
+<span class="ln">9</span>**Autonomy:** proceed through **plan → do → verify → finalize → hand off** without asking for
+<span class="ln">10</span>approval between steps. Decide routing and scope calls yourself, explain the WHY in the
+<span class="ln">11</span>commit/PR/summary, and move on. The autonomy is in the *quantity of un-gated steps*, never in
+<span class="ln">12</span>the *quality bar* — the principle rules and the profile's gates still apply to every step.
+<span class="ln">13</span>
+<span class="ln">14</span>**When the item is ambiguous:** research the right answer (official docs, reputable sources,
+<span class="ln">15</span>the codebase/asset itself) and pick the researched path. **Do not default to "most
+<span class="ln">16</span>conservative" or pick at random.** Note what you researched in the commit/PR/summary so the
+<span class="ln">17</span>choice is auditable later.</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Profile 与通用规则的分层契约</h3>
+      <p>装配的结果必须让 agent 明白一个 session 的运行协议。<code>core/10-operating-model.md:4</code>、<code>core/10-operating-model.md:9</code>、<code>core/10-operating-model.md:14</code>、<code>core/10-operating-model.md:23</code> 把任务单位、自主推进、模糊需求研究和按风险调 rigor 写成核心规则；这也是 setup.sh 最终写入 managed block 的意义。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/core/10-operating-model.md</span> · L23-47</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">23</span>**Match your rigor to the stakes.** Work sits on a spectrum from quick-and-loose (a throwaway
+<span class="ln">24</span>draft, a scratch experiment — "does it seem to work?") to fully disciplined (production systems,
+<span class="ln">25</span>anything irreversible or outward-facing — verified at every stage). The skill is picking the
+<span class="ln">26</span>right point per task: don't ceremony-wrap a five-minute scratch task, and don't "seem-to-work"
+<span class="ln">27</span>something that ships to real users or touches real money. The profile sets the floor; raise it
+<span class="ln">28</span>when the stakes are high. The single thing that separates disciplined work from guessing is
+<span class="ln">29</span>**how the output gets verified** — see the principle rules.
+<span class="ln">30</span>
+<span class="ln">31</span>**Mind the last 20%.** You can produce the easy 80% of almost anything fast; the remaining 20% —
+<span class="ln">32</span>the edge cases, the error handling, the integration seams, the subtle correctness — is where the
+<span class="ln">33</span>real work is and where "looks right, even passes a quick check" hides the bugs. Spend your
+<span class="ln">34</span>attention there, on the ambiguous and the hard-to-verify, not on re-admiring the easy part.
+<span class="ln">35</span>
+<span class="ln">36</span>**Conductor vs orchestrator — pick the altitude.** Some work wants *conductor* mode: hands-on,
+<span class="ln">37</span>step-by-step, you watching each change (debugging, exploring unfamiliar ground, high-stakes
+<span class="ln">38</span>edits). Other work wants *orchestrator* mode: define the goal, delegate to subagents, review
+<span class="ln">39</span>outcomes rather than keystrokes (well-specified features, migrations, parallelizable sweeps).
+<span class="ln">40</span>Neither is "more advanced" — choose by the task, and drop to conductor the moment something gets
+<span class="ln">41</span>surprising.
+<span class="ln">42</span>
+<span class="ln">43</span>**Budget — a self-check, not a hard stop.** Keep work atomic (one concern per commit/change)
+<span class="ln">44</span>and deliverables small. If you find yourself with 5+ unrelated changes stacked up, either split
+<span class="ln">45</span>them or stop and hand off cleanly. Don't pause for elapsed time or time-of-day — momentum is
+<span class="ln">46</span>fine as long as the quality bar holds. If you'd overshoot a natural stopping point, finish the
+<span class="ln">47</span>current unit cleanly and write the handoff (see `50-git-and-handoff`).</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>装配测试如何抓半渲染规则</h3>
+      <p>如果 core/profile 装配失败，agent 不会崩溃，只会读到错误规则，所以测试重点放在“输出是否可用”。<code>scripts/test-assemble.sh:49</code>、<code>scripts/test-assemble.sh:63</code>、<code>scripts/test-assemble.sh:72</code>、<code>scripts/test-assemble.sh:83</code>、<code>scripts/test-assemble.sh:90</code> 检查每个 profile、flag-driven placeholder 和 stacked profile。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/scripts/test-assemble.sh</span> · L45-80</span><span>Shell / Markdown</span></div>
+        <pre class="code"><span class="ln">45</span>for p in "${profiles[@]}"; do
+<span class="ln">46</span>  name="$(basename "$p" .md)"
+<span class="ln">47</span>  out="$WORK/$name"
+<span class="ln">48</span>  mkdir -p "$out"
+<span class="ln">49</span>  if ! bash "$SETUP" --profile "$name" --assemble-only --target "$out" \
+<span class="ln">50</span>        --operator-name "Test" --tracker "Linear" &gt;/dev/null 2&gt;&amp;1; then
+<span class="ln">51</span>    bad "$name: assembly failed outright"
+<span class="ln">52</span>    continue
+<span class="ln">53</span>  fi
+<span class="ln">54</span>  f="$out/CLAUDE.md"
+<span class="ln">55</span>  if [ ! -s "$f" ]; then
+<span class="ln">56</span>    bad "$name: produced no CLAUDE.md"
+<span class="ln">57</span>    continue
+<span class="ln">58</span>  fi
+<span class="ln">59</span>
+<span class="ln">60</span>  errs=""
+<span class="ln">61</span>  # An unrendered token means the agent reads a literal "{{TRACKER}}" as if it were the rule.
+<span class="ln">62</span>  # Never acceptable, in any profile.
+<span class="ln">63</span>  leaked="$(grep -oE '\{\{[A-Z_]+\}\}' "$f" 2&gt;/dev/null | sort -u | tr '\n' ' ')"
+<span class="ln">64</span>  [ -n "$leaked" ] &amp;&amp; errs="$errs unrendered:[$leaked]"
+<span class="ln">65</span>  # [TODO: set X] means "the assembler had no value for X". Two very different cases:
+<span class="ln">66</span>  #   - X is flag-driven (below) → setup COULD have filled it and didn't. That's a bug: the agent
+<span class="ln">67</span>  #     gets a blank where a rule should be. This is the regression that would fire if a
+<span class="ln">68</span>  #     placeholder were renamed in core/ but not in fill_placeholders().
+<span class="ln">69</span>  #   - X has no flag (BRAND_PALETTE, BRAND_FONT) → the TODO IS the product. It's the documented
+<span class="ln">70</span>  #     handoff to the human (INSTALL.md's placeholder table; setup's own "resolve any [TODO]"
+<span class="ln">71</span>  #     next-step). Flagging it would make this suite red by design and train people to ignore it.
+<span class="ln">72</span>  for tok in OPERATOR_NAME OPERATOR_ROLE OPERATOR_BIO TRACKER TRACKER_POLICY; do
+<span class="ln">73</span>    grep -qF "[TODO: set $tok]" "$f" 2&gt;/dev/null &amp;&amp; errs="$errs unfilled-flag-token:[$tok]"
+<span class="ln">74</span>  done
+<span class="ln">75</span>
+<span class="ln">76</span>  if [ -n "$errs" ]; then
+<span class="ln">77</span>    bad "$name: assembled with leaks —$errs"
+<span class="ln">78</span>  else
+<span class="ln">79</span>    ok "$name: assembles clean (no unrendered tokens, no TODO blanks)"
+<span class="ln">80</span>  fi</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <h3><span class="arr">▸</span>从规则材料到项目文件</h3>
+      <div class="flow">wizard/flags → core/profile selection → managed block → placeholder fill → test-assemble checks every profile → project agent reads clean CLAUDE.md</div>
+      <p>关键路径的风险点在于写文件前后的身份恢复与占位符填充。<code>core/20-principle-rules.md:47</code>、<code>core/20-principle-rules.md:54</code>、<code>profiles/software-dev.md:32</code>、<code>scripts/test-assemble.sh:61</code> 共同说明：规则文件本身是生产物，必须像代码一样测试。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>scripts/test-assemble.sh:27</code> 使用临时目录，避免测试污染真实全局 CLAUDE.md。</li>
+<li><code>scripts/test-assemble.sh:63</code> 会找未渲染 token，防止 agent 把 `{{TRACKER}}` 当成真实规则。</li>
+<li><code>core/10-operating-model.md:57</code> 强调外部系统首写要授权，安装器推荐 tracker 时不能等同授权。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">验证门禁</div><div class="card-d"><code>scripts/verify.sh:58</code> 读取 phase 表，是装配后真正证明项目可交付的入口。</div></div><div class="card"><div class="card-h">安全 hooks</div><div class="card-d"><code>scripts/install-git-hooks.sh:56</code> 把 secret scan 放进 pre-commit，承接装配出的规则。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-20</span>
+      <span>Source · <a href="https://github.com/PromptPartner/agentsmith">PromptPartner/agentsmith</a></span>
+      <span><a href="../agentsmith.html">↑ agentsmith 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
