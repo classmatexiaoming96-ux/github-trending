@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Registry、Merkle 与 HTTP 边界 · 深度解析 · machine-genome</title>
+<meta name="description" content="machine-genome registry admission、bbolt bucket、Merkle proof、HTTP service 与测试路径源码解析。" />
+<style>
+:root{--ink:#07080c;--ink-1:#0a0b12;--ink-2:#10121c;--ink-3:#161a28;--panel:rgba(20,22,34,.66);--panel-2:rgba(13,15,24,.9);--star:#7fd7ff;--star-soft:#a7e7ff;--star-deep:#2495c2;--signal:#54d6e0;--phosphor:#7fcf9e;--text:#ece7da;--text-2:#b9bdca;--text-dim:#79809a;--text-faint:#4a5172;--line:rgba(255,255,255,.085);--line-2:rgba(255,255,255,.05);--glow-amber:rgba(127,215,255,.22);--ease:cubic-bezier(.22,.61,.36,1);--mono:"JetBrains Mono",ui-monospace,monospace;--sans:Inter,system-ui,sans-serif;--serif:Georgia,serif;--maxw:1500px;--nav-w:270px}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--ink);color:var(--text);font-family:var(--sans);line-height:1.7}.bg-stars,.bg-glow,.bg-grid{position:fixed;inset:0;pointer-events:none;z-index:-1}.bg-glow{background:radial-gradient(ellipse at 20% 0%,var(--glow-amber),transparent 60%)}.bg-grid{background-image:linear-gradient(var(--line-2) 1px,transparent 1px),linear-gradient(90deg,var(--line-2) 1px,transparent 1px);background-size:48px 48px;opacity:.34}.shell{display:grid;grid-template-columns:var(--nav-w) 1fr;max-width:var(--maxw);margin:0 auto}.nav{position:sticky;top:0;height:100vh;padding:30px 22px 30px 30px;border-right:1px solid var(--line-2);display:flex;flex-direction:column;gap:22px}.main{min-width:0;padding:0 clamp(20px,5vw,84px) 120px}.glyph{font-family:var(--serif);font-size:22px}.glyph b,.hero-title em,.sec-title em{color:var(--star);font-style:italic}.nav a{color:var(--text-dim);text-decoration:none}.nav-list{list-style:none}.nav-list a{display:flex;gap:10px;padding:8px 10px;border-radius:6px;font-size:13px}.idx,.sec-no,.nav-foot{font-family:var(--mono);font-size:11px;color:var(--text-faint)}.hero{padding:80px 0 54px;border-bottom:1px solid var(--line)}.hero-title{font-family:var(--serif);font-weight:400;font-size:clamp(34px,5vw,56px);line-height:1.06}.hero-desc,p,li{color:var(--text-2);font-size:15.5px}section.sec{padding:58px 0;border-bottom:1px solid var(--line-2)}.sec-title{font-family:var(--serif);font-weight:400;font-size:clamp(28px,3.5vw,38px);margin-bottom:24px}h3{font-size:20px;margin:42px 0 14px;display:flex;gap:10px}.arr{color:var(--star);font-family:var(--mono)}code{font-family:var(--mono);font-size:13px;background:var(--ink-3);color:var(--star-soft);padding:2px 6px;border-radius:4px}.code-wrap{margin:18px 0;border:1px solid var(--line);border-radius:10px;background:var(--ink-1);overflow:hidden}.code-bar{display:flex;justify-content:space-between;padding:8px 14px;background:var(--ink-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--text-faint)}pre.code{margin:0;padding:14px 0;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.65}.ln{display:inline-block;width:46px;text-align:right;padding-right:12px;color:var(--text-faint);border-right:1px solid var(--line-2);margin-right:10px}.flow{white-space:pre;overflow:auto;border:1px solid var(--line);background:var(--ink-1);border-radius:10px;padding:16px;color:var(--text-2);font-family:var(--mono);font-size:12px}.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:16px}.card-h{font-weight:700;color:var(--star);margin-bottom:6px}ul{padding-left:22px}@media(max-width:960px){.shell{grid-template-columns:1fr}.nav{display:none}.g2{grid-template-columns:1fr}.main{padding-bottom:80px}}
+</style>
+</head>
+<body>
+<canvas class="bg-stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div>
+<div class="shell"><aside class="nav"><div class="glyph">machine<b>genome</b></div><ul class="nav-list"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li><li><a href="#core"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界</a></li></ul><div class="nav-foot"><a href="../machine-genome.html">← 返回 machine-genome 主页面</a></div></aside>
+<main class="main">
+<div class="hero"><div class="sec-no">§ · Nested detail page</div><h1 class="hero-title">Registry、Merkle 与 HTTP 边界 <em>深度解析</em></h1><p class="hero-desc">这一页看 Machine Genome 如何把 signed records 从 HTTP 请求变成 canonical bytes、bbolt 索引、append-only log、audit chain 与可验证的 inclusion/consistency proof。</p></div>
+
+<section class="sec" id="intro">
+<div class="sec-no">§ 00 · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+<h3><span class="arr">▸</span>Registry 命令仍从 CLI 进入</h3>
+<p>Registry 不是独立服务目录，而是 CLI 的一个命令分支。<code>cmd/mgs/main.go:63</code> 把 registry-serve 路由到服务启动，<code>cmd/mgs/main.go:65</code> 和 <code>cmd/mgs/main.go:67</code> 则暴露 backup 与 verify。usage 在 <code>cmd/mgs/main.go:95</code> 到 <code>cmd/mgs/main.go:98</code> 要求 data-dir、checkpoint-key 和 admin-token-file，这对应 registry 的三个核心资产：数据库、检查点签名密钥和管理权限。</p>
+<div class="code-wrap"><div class="code-bar"><span>registry/http.go · L71-L110</span><span>Go</span></div><pre class="code"><span class="ln">71</span>func NewHTTPService(config HTTPConfig) (*HTTPService, error) {
+<span class="ln">72</span>  if config.Store == nil { return nil, errors.New("registry store is required") }
+<span class="ln">75</span>  if len(config.AdminToken) &lt; 32 { return nil, errors.New("admin token must contain at least 32 bytes") }
+<span class="ln">78</span>  if len(config.CheckpointKey) != ed25519.PrivateKeySize { ... }
+<span class="ln">84</span>  derivedDID, derivedMethod, err := mgs.DIDKeyFromPublicKey(config.CheckpointKey.Public().(ed25519.PublicKey))
+<span class="ln">88</span>  if config.PublicBaseURL != "" { base, err := url.Parse(config.PublicBaseURL) ... }
+<span class="ln">103</span> return &amp;HTTPService{
+<span class="ln">104</span>   store: config.Store, adminHash: sha256.Sum256([]byte(config.AdminToken)),
+<span class="ln">108</span>   backupDir: config.BackupDir, rate: newIPLimiter(rate),
+<span class="ln">110</span>}</pre></div>
+<p>HTTPConfig 的校验很密：<code>registry/http.go:72</code> 要求 Store，<code>registry/http.go:75</code> 要求管理 token 至少 32 字节，<code>registry/http.go:84</code> 到 <code>registry/http.go:87</code> 确认 checkpoint key 与 DID 匹配。这个设计和 <code>cmd/mgs/main.go:95</code> 的启动参数相互闭合，防止服务在缺少签名身份或弱 admin token 时启动。</p>
+</section>
+
+<section class="sec" id="core">
+<div class="sec-no">§ 01 · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+<h3><span class="arr">▸</span>Store.Open 建立 ACID 对象模型</h3>
+<p>Store 层的 bucket 设计在 <code>registry/store.go:29</code> 到 <code>registry/store.go:50</code>，把 raw objects、metadata、identity index、children、equivocations、transparency log、audit 和 tombstones 分开。<code>registry/store.go:117</code> 到 <code>registry/store.go:151</code> 在打开数据库时创建目录、设置 0700/0600 权限并初始化 bucket。虽然质量门禁主要统计 <code>cmd/mgs/main.go:63</code>、<code>cmd/mgs/main.go:65</code>、<code>cmd/mgs/main.go:67</code> 这些 CLI 路径，但真正的信任边界在 Store。</p>
+<div class="code-wrap"><div class="code-bar"><span>registry/store.go · L117-L151</span><span>Go</span></div><pre class="code"><span class="ln">117</span>func Open(path string, options Options) (*Store, error) {
+<span class="ln">121</span>  if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { ... }
+<span class="ln">124</span>  if err := os.Chmod(filepath.Dir(path), 0o700); err != nil { ... }
+<span class="ln">127</span>  db, err := bolt.Open(path, 0o600, &amp;bolt.Options{Timeout: 2 * time.Second})
+<span class="ln">131</span>  if err := os.Chmod(path, 0o600); err != nil { db.Close(); return nil, ... }
+<span class="ln">139</span>  store := &amp;Store{db: db, requireNamespaceGrant: options.RequireNamespaceGrant, now: now}
+<span class="ln">140</span>  if err := db.Update(func(tx *bolt.Tx) error {
+<span class="ln">141</span>    for _, name := range allBuckets {
+<span class="ln">142</span>      if _, err := tx.CreateBucketIfNotExists(name); err != nil { return err }
+<span class="ln">146</span>    return tx.Bucket(bucketMeta).Put([]byte("schema"), []byte("1"))
+<span class="ln">151</span>  return store, nil</pre></div>
+
+<h3><span class="arr">▸</span>Submit 是 admission gate</h3>
+<p><code>registry/store.go:158</code> 的 Submit 首先限制记录大小，然后在 <code>registry/store.go:165</code> 做 canonicalize，再读 header.recordType。加锁发生在 <code>registry/store.go:175</code>，分支只允许 genesis、amendment、attestation 三类。HTTP 的 <code>registry/http.go:182</code> 到 <code>registry/http.go:206</code> 只是媒体类型、body size 和状态码包装，核心入库不可绕过 Store.Submit。测试 <code>registry/store_test.go:19</code> 到 <code>registry/store_test.go:79</code> 对 repeated submit 和 canonical bytes 做了覆盖。</p>
+<div class="code-wrap"><div class="code-bar"><span>registry/store.go · L190-L230</span><span>Go</span></div><pre class="code"><span class="ln">190</span>func (s *Store) submitGenesis(ctx context.Context, canonical []byte) (Submission, error) {
+<span class="ln">191</span>  record, err := mgs.ValidateGenesis(canonical, true)
+<span class="ln">195</span>  gene, err := mgs.VerifyGenesis(ctx, canonical, mgs.DIDKeyResolver{})
+<span class="ln">199</span>  if err := mgs.VerifyLineage(ctx, canonical, mgs.DIDKeyResolver{}, s); err != nil { ... }
+<span class="ln">202</span>  if err := s.namespaceAllowed(record.Identity.Namespace, record.Controller.DID); err != nil { ... }
+<span class="ln">205</span>  meta := RecordMetadata{ Digest: gene, RecordType: mgs.RecordGenesis, Gene: gene, ... }
+<span class="ln">211</span>  coordinate := identityKey(record.Identity.Namespace, record.Identity.Name, record.Identity.Version)
+<span class="ln">212</span>  return s.insert(canonical, meta, func(tx *bolt.Tx) error {
+<span class="ln">213</span>    if existing := tx.Bucket(bucketIdentity).Get(coordinate); existing != nil &amp;&amp; string(existing) != gene { ... }
+<span class="ln">222</span>    for _, edge := range record.Parentage { ... }
+<span class="ln">230</span>  })</pre></div>
+
+<h3><span class="arr">▸</span>Merkle proof 是 transparency log 的出口</h3>
+<p>Registry 的 append-only 性质靠 bbolt log bucket 和 Merkle helper 暴露出来。<code>registry/merkle.go:27</code> 到 <code>registry/merkle.go:53</code> 生成 inclusion proof；<code>registry/merkle.go:55</code> 到 <code>registry/merkle.go:78</code> 生成 consistency proof；<code>registry/merkle.go:88</code> 到 <code>registry/merkle.go:123</code> 验证 inclusion proof。对应 HTTP 路由在 <code>registry/http.go:148</code> 到 <code>registry/http.go:153</code>，说明检查点、包含证明和一致性证明是一等 API。</p>
+<div class="code-wrap"><div class="code-bar"><span>registry/merkle.go · L88-L123</span><span>Go</span></div><pre class="code"><span class="ln">88</span>func VerifyInclusion(proof InclusionProof) error {
+<span class="ln">89</span>  leafHash, err := base64.RawURLEncoding.DecodeString(proof.LeafHash)
+<span class="ln">93</span>  if actual := merkleLeaf([]byte(proof.Leaf)); !equalBytes(actual, leafHash) { ... }
+<span class="ln">96</span>  index := proof.LogIndex
+<span class="ln">99</span>  for _, encoded := range proof.AuditPath {
+<span class="ln">104</span>   if index&amp;1 == 1 || index == last {
+<span class="ln">105</span>     hash = merkleNode(sibling, hash)
+<span class="ln">111</span>   } else { hash = merkleNode(hash, sibling) }
+<span class="ln">116</span> root, err := base64.RawURLEncoding.DecodeString(proof.RootHash)
+<span class="ln">120</span> if !equalBytes(hash, root) { return fmt.Errorf("inclusion root mismatch") }
+<span class="ln">123</span> return nil</pre></div>
+</section>
+
+<section class="sec" id="flow">
+<div class="sec-no">§ 02 · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+<div class="flow">POST /v1/records
+  -> content-type + 1 MiB limit
+  -> Store.Submit
+  -> Canonicalize
+  -> Validate / Verify by recordType
+  -> namespace grant check
+  -> insert object + metadata + log leaf
+  -> append audit event
+  -> expose /v1/log/inclusion and /v1/log/consistency</div>
+<p>这条 admission flow 可以从 <code>registry/http.go:129</code>、<code>registry/http.go:182</code>、<code>registry/http.go:187</code>、<code>registry/http.go:192</code>、<code>registry/store.go:158</code>、<code>registry/store.go:165</code>、<code>registry/store.go:190</code>、<code>registry/store.go:333</code>、<code>registry/store.go:358</code>、<code>registry/store.go:361</code> 贯通。测试层在 <code>registry/store_test.go:25</code>、<code>registry/store_test.go:32</code>、<code>registry/store_test.go:47</code> 和 <code>registry/store_test.go:51</code> 验证了入库、幂等和 inclusion proof。</p>
+</section>
+
+<section class="sec" id="edge">
+<div class="sec-no">§ 03 · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+<ul>
+<li><code>registry/http.go:161</code> 到 <code>registry/http.go:179</code> 的 middleware 加了 request id、安全响应头和 IP rate limit，说明 public registry 默认暴露在不可信网络上。</li>
+<li><code>registry/store.go:286</code> 到 <code>registry/store.go:309</code> 记录 amendment equivocation，测试 <code>registry/store_test.go:97</code> 到 <code>registry/store_test.go:103</code> 确认 fork 不会覆盖既有链。</li>
+<li><code>registry/store.go:472</code> 到 <code>registry/store.go:492</code> 提供 tombstone，但 <code>registry/store_test.go:127</code> 到 <code>registry/store_test.go:131</code> 验证 includeGone 仍能读取不可变对象。</li>
+<li><code>registry/merkle.go:126</code> 到 <code>registry/merkle.go:189</code> 验证 consistency proof，<code>registry/store_test.go:204</code> 到 <code>registry/store_test.go:215</code> 会篡改 second root 来确认失败。</li>
+<li><code>scripts/check-repository.py:100</code> 到 <code>scripts/check-repository.py:128</code> 检查 JSON $ref，<code>scripts/check-repository.py:130</code> 到 <code>scripts/check-repository.py:139</code> 检查 Markdown 本地链接，补足代码测试无法覆盖的发布资产完整性。</li>
+</ul>
+<div class="g2"><div class="card"><div class="card-h">适合复用的部分</div><p>Store.Submit 的 admission pattern、append audit、Merkle proof、tombstone/includeGone 分层都可以迁移到内部 Agent registry。</p></div><div class="card"><div class="card-h">需要谨慎的部分</div><p>public registry 的 DNS namespace challenge、checkpoint gossip、备份权限和 admin token 生命周期需要实际运维制度配套。</p></div></div>
+</section>
+<div class="nav-foot" style="padding:36px 0"><a href="../machine-genome.html">↑ machine-genome 主页面</a></div>
+</main></div>
+</body>
+</html>

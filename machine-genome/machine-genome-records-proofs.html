@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>记录、签名与血缘授权 · 深度解析 · machine-genome</title>
+<meta name="description" content="machine-genome 记录模型、Data Integrity proof 和 lineage authorization 的源码级拆解。" />
+<style>
+:root{--ink:#07080c;--ink-1:#0a0b12;--ink-2:#10121c;--ink-3:#161a28;--panel:rgba(20,22,34,.66);--panel-2:rgba(13,15,24,.9);--star:#7fd7ff;--star-soft:#a7e7ff;--star-deep:#2495c2;--signal:#54d6e0;--phosphor:#7fcf9e;--text:#ece7da;--text-2:#b9bdca;--text-dim:#79809a;--text-faint:#4a5172;--line:rgba(255,255,255,.085);--line-2:rgba(255,255,255,.05);--glow-amber:rgba(127,215,255,.22);--ease:cubic-bezier(.22,.61,.36,1);--mono:"JetBrains Mono",ui-monospace,monospace;--sans:Inter,system-ui,sans-serif;--serif:Georgia,serif;--maxw:1500px;--nav-w:270px}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--ink);color:var(--text);font-family:var(--sans);line-height:1.7}.bg-stars,.bg-glow,.bg-grid{position:fixed;inset:0;pointer-events:none;z-index:-1}.bg-glow{background:radial-gradient(ellipse at 20% 0%,var(--glow-amber),transparent 60%)}.bg-grid{background-image:linear-gradient(var(--line-2) 1px,transparent 1px),linear-gradient(90deg,var(--line-2) 1px,transparent 1px);background-size:48px 48px;opacity:.34}.shell{display:grid;grid-template-columns:var(--nav-w) 1fr;max-width:var(--maxw);margin:0 auto}.nav{position:sticky;top:0;height:100vh;padding:30px 22px 30px 30px;border-right:1px solid var(--line-2);display:flex;flex-direction:column;gap:22px}.main{min-width:0;padding:0 clamp(20px,5vw,84px) 120px}.glyph{font-family:var(--serif);font-size:22px}.glyph b,.hero-title em,.sec-title em{color:var(--star);font-style:italic}.nav a{color:var(--text-dim);text-decoration:none}.nav-list{list-style:none}.nav-list a{display:flex;gap:10px;padding:8px 10px;border-radius:6px;font-size:13px}.idx,.sec-no,.nav-foot{font-family:var(--mono);font-size:11px;color:var(--text-faint)}.hero{padding:80px 0 54px;border-bottom:1px solid var(--line)}.hero-title{font-family:var(--serif);font-weight:400;font-size:clamp(34px,5vw,56px);line-height:1.06}.hero-desc,p,li{color:var(--text-2);font-size:15.5px}section.sec{padding:58px 0;border-bottom:1px solid var(--line-2)}.sec-title{font-family:var(--serif);font-weight:400;font-size:clamp(28px,3.5vw,38px);margin-bottom:24px}h3{font-size:20px;margin:42px 0 14px;display:flex;gap:10px}.arr{color:var(--star);font-family:var(--mono)}code{font-family:var(--mono);font-size:13px;background:var(--ink-3);color:var(--star-soft);padding:2px 6px;border-radius:4px}.code-wrap{margin:18px 0;border:1px solid var(--line);border-radius:10px;background:var(--ink-1);overflow:hidden}.code-bar{display:flex;justify-content:space-between;padding:8px 14px;background:var(--ink-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--text-faint)}pre.code{margin:0;padding:14px 0;overflow:auto;font-family:var(--mono);font-size:12.5px;line-height:1.65}.ln{display:inline-block;width:46px;text-align:right;padding-right:12px;color:var(--text-faint);border-right:1px solid var(--line-2);margin-right:10px}.flow{white-space:pre;overflow:auto;border:1px solid var(--line);background:var(--ink-1);border-radius:10px;padding:16px;color:var(--text-2);font-family:var(--mono);font-size:12px}.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:16px}.card-h{font-weight:700;color:var(--star);margin-bottom:6px}ul{padding-left:22px}@media(max-width:960px){.shell{grid-template-columns:1fr}.nav{display:none}.g2{grid-template-columns:1fr}.main{padding-bottom:80px}}
+</style>
+</head>
+<body>
+<canvas class="bg-stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div>
+<div class="shell"><aside class="nav"><div class="glyph">machine<b>genome</b></div><ul class="nav-list"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li><li><a href="#core"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界</a></li></ul><div class="nav-foot"><a href="../machine-genome.html">← 返回 machine-genome 主页面</a></div></aside>
+<main class="main">
+<div class="hero"><div class="sec-no">§ · Nested detail page</div><h1 class="hero-title">记录、签名与血缘授权 <em>深度解析</em></h1><p class="hero-desc">这一页聚焦 MGS 如何从 CLI 输入生成 unsigned genesis，如何把 Data Integrity proof 加到 canonical JSON 上，以及如何让 parent 对 child lineage 做不循环的授权。</p></div>
+
+<section class="sec" id="intro">
+<div class="sec-no">§ 00 · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+<h3><span class="arr">▸</span>CLI 是协议对象的最短入口</h3>
+<p>入口 <code>cmd/mgs/main.go:37</code> 把所有命令统一分发，<code>cmd/mgs/main.go:43</code>、<code>cmd/mgs/main.go:45</code>、<code>cmd/mgs/main.go:47</code>、<code>cmd/mgs/main.go:49</code>、<code>cmd/mgs/main.go:51</code> 和 <code>cmd/mgs/main.go:57</code> 分别暴露 keygen、init-genesis、sign、authorize-edge、gene 和 verify。这个分发层看似普通，但它规定了用户能进入协议的路径：先生成 key，再构造 genesis，再签名，再验证或登记。后续 record/proof 逻辑都不直接依赖 HTTP，因此 CLI 和 registry 可以共享同一组库函数。</p>
+<div class="code-wrap"><div class="code-bar"><span>cmd/mgs/main.go · L37-L78</span><span>Go</span></div><pre class="code"><span class="ln">37</span>func run(args []string, stdout, stderr io.Writer) error {
+<span class="ln">38</span>  if len(args) == 0 { usage(stderr); return errors.New("a command is required") }
+<span class="ln">42</span>  switch args[0] {
+<span class="ln">43</span>  case "keygen": return runKeygen(args[1:], stdout, stderr)
+<span class="ln">45</span>  case "init-genesis": return runInitGenesis(args[1:], stdout, stderr)
+<span class="ln">47</span>  case "sign": return runSign(args[1:], stdout, stderr)
+<span class="ln">49</span>  case "authorize-edge": return runAuthorize(args[1:], stdout, stderr)
+<span class="ln">57</span>  case "verify": return runVerify(args[1:], stdout, stderr)
+<span class="ln">63</span>  case "registry-serve": return runRegistryServe(args[1:], stdout, stderr)
+<span class="ln">74</span>  default: usage(stderr); return fmt.Errorf("unknown command %q", args[0])
+<span class="ln">78</span>}</pre></div>
+<p>从测试看，作者没有只测 parser。<code>cmd/mgs/main_test.go:33</code> 开始的 round trip 会创建 key、生成 genesis、签名、verify，再输出 Gene；<code>cmd/mgs/main_test.go:47</code> 还明确检查私钥文件权限。这个测试和 <code>cmd/mgs/main.go:123</code> 的 init-genesis 合在一起，说明协议入口对“字节”和“密钥文件”都严肃处理。</p>
+</section>
+
+<section class="sec" id="core">
+<div class="sec-no">§ 01 · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+<h3><span class="arr">▸</span>Genesis 校验先拒绝不合格语义</h3>
+<p><code>mgs/record.go:80</code> 是 genesis 的主入口。它先要求版本和 recordType 对齐，然后校验 identity、controller 和 artifact commitments。特别是 <code>mgs/record.go:105</code> 到 <code>mgs/record.go:108</code> 要求 genesisKeyId 的 controller 等于 controller.did；<code>mgs/record.go:123</code> 到 <code>mgs/record.go:138</code> 则把 resolved、unresolved、authorized 三种 parentage 状态拆开。CLI 里的 <code>cmd/mgs/main.go:151</code> 到 <code>cmd/mgs/main.go:165</code> 会构造最小 GenesisRecord，再由 <code>cmd/mgs/main.go:172</code> 立刻走 ValidateGenesis。</p>
+<div class="code-wrap"><div class="code-bar"><span>mgs/record.go · L80-L149</span><span>Go</span></div><pre class="code"><span class="ln">80</span>func ValidateGenesis(raw []byte, requireProof bool) (*GenesisRecord, error) {
+<span class="ln">85</span>  if record.MGS != Version { return nil, fmt.Errorf(...) }
+<span class="ln">91</span>  if record.Identity.Name == "" || record.Identity.Namespace == "" || record.Identity.Version == "" { ... }
+<span class="ln">99</span>  if !subjectTypes[record.Identity.SubjectType] { return nil, fmt.Errorf(...) }
+<span class="ln">102</span> if record.Controller.DID == "" || record.Controller.GenesisKeyID == "" { ... }
+<span class="ln">109</span> if err := validateTimestamp(record.Genesis.Timestamp); err != nil { ... }
+<span class="ln">123</span> for index, edge := range record.Parentage {
+<span class="ln">127</span>   if edge.Unresolved { ... continue }
+<span class="ln">136</span>   if edge.Authorized != (edge.AuthorizationProof != nil) { ... }
+<span class="ln">140</span> if requireProof &amp;&amp; record.Proof == nil { return nil, errors.New(...) }
+<span class="ln">149</span> return &amp;record, nil</pre></div>
+
+<h3><span class="arr">▸</span>签名覆盖 canonical document 与 proof config</h3>
+<p><code>mgs/proof.go:78</code> 的 SignDocument 会拒绝已经包含 proof 的文档，避免二次签名覆盖语义。签名前它在 <code>mgs/proof.go:101</code> 调用 proofHashData；proofHashData 在 <code>mgs/proof.go:194</code> 到 <code>mgs/proof.go:222</code> 分别 canonicalize document 和 proof options，然后拼接两个 SHA-256。验签在 <code>mgs/proof.go:171</code> 解码 proofValue，在 <code>mgs/proof.go:184</code> resolve public key，在 <code>mgs/proof.go:188</code> 做 Ed25519 verify。这个流程让 <code>cmd/mgs/main.go:47</code> 的 sign 命令不会变成简单 JSON append。</p>
+<div class="code-wrap"><div class="code-bar"><span>mgs/proof.go · L194-L222</span><span>Go</span></div><pre class="code"><span class="ln">194</span>func proofHashData(unsecured []byte, options ProofOptions) ([]byte, error) {
+<span class="ln">195</span>  documentCanonical, err := Canonicalize(unsecured)
+<span class="ln">199</span>  optionsObject := map[string]any{
+<span class="ln">200</span>    "type": options.Type,
+<span class="ln">201</span>    "cryptosuite": options.Cryptosuite,
+<span class="ln">203</span>    "verificationMethod": options.VerificationMethod,
+<span class="ln">217</span>  proofConfigHash := sha256.Sum256(optionsCanonical)
+<span class="ln">218</span>  transformedDocumentHash := sha256.Sum256(documentCanonical)
+<span class="ln">220</span>  hashData = append(hashData, proofConfigHash[:]...)
+<span class="ln">221</span>  hashData = append(hashData, transformedDocumentHash[:]...)
+<span class="ln">222</span>  return hashData, nil</pre></div>
+
+<h3><span class="arr">▸</span>Lineage authorization 拆掉循环依赖</h3>
+<p>如果 child genesis 里要包含 parent 的授权 proof，parent 签名时不能把这个 proof 自己也算进去。<code>mgs/lineage.go:24</code> 到 <code>mgs/lineage.go:53</code> 的 ChildCommitment 删除顶层 proof 和所有 authorizationProof，再做 canonical digest。<code>mgs/lineage.go:56</code> 到 <code>mgs/lineage.go:85</code> 构造 parent 要签的 deterministic authorization document；<code>mgs/lineage.go:90</code> 到 <code>mgs/lineage.go:121</code> 只把 proof map 放回指定 edge。这个设计让 <code>cmd/mgs/main.go:49</code> 的 authorize-edge 可以安全地运行在 child record 仍未最终 signed 的阶段。</p>
+<div class="code-wrap"><div class="code-bar"><span>mgs/lineage.go · L24-L53</span><span>Go</span></div><pre class="code"><span class="ln">24</span>// ChildCommitment hashes the genesis with the top-level proof and every
+<span class="ln">25</span>// authorizationProof removed.
+<span class="ln">27</span>func ChildCommitment(genesis []byte) (string, error) {
+<span class="ln">35</span>  delete(object, "proof")
+<span class="ln">36</span>  if parentage, exists := object["parentage"]; exists {
+<span class="ln">41</span>    for index, rawEdge := range edges {
+<span class="ln">46</span>      delete(edge, "authorizationProof")
+<span class="ln">49</span>  canonical, err := encodeObject(object)
+<span class="ln">53</span>  return Digest(canonical)
+<span class="ln">54</span>}</pre></div>
+</section>
+
+<section class="sec" id="flow">
+<div class="sec-no">§ 02 · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+<div class="flow">run init-genesis
+  -> load controller key
+  -> build GenesisRecord
+  -> ValidateGenesis(requireProof=false)
+  -> sign
+  -> SignRecord checks recordType
+  -> SignDocument adds eddsa-jcs-2022 proof
+  -> VerifyGenesis recomputes canonical hash
+  -> Gene returns content-addressed identity</div>
+<p>这条流程可以从 <code>cmd/mgs/main.go:123</code>、<code>cmd/mgs/main.go:140</code>、<code>cmd/mgs/main.go:151</code>、<code>cmd/mgs/main.go:172</code>、<code>mgs/record.go:171</code>、<code>mgs/proof.go:78</code>、<code>mgs/record.go:152</code> 和 <code>mgs/record.go:168</code> 连起来看。测试 <code>cmd/mgs/main_test.go:50</code> 到 <code>cmd/mgs/main_test.go:75</code> 对应这条路径，确保真实命令能产出以 zQm 开头的 Gene。</p>
+</section>
+
+<section class="sec" id="edge">
+<div class="sec-no">§ 03 · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+<ul>
+<li><code>mgs/record.go:127</code> 对 unresolved parentage 有严格组合约束，防止一个 edge 同时声明 unresolved 又夹带 parentGene 或 authorizationProof。</li>
+<li><code>mgs/proof.go:90</code> 会拒绝已经带 proof 的文档，避免签名对象被重复包装。</li>
+<li><code>mgs/proof.go:145</code> 到 <code>mgs/proof.go:151</code> 要求 proof @context 与 document @context 一致，减少上下文偷换。</li>
+<li><code>mgs/lineage.go:176</code> 到 <code>mgs/lineage.go:185</code> 要求授权 proof signer 是 parent controller 且使用 parent genesis key。</li>
+<li><code>cmd/mgs/main_test.go:79</code> 到 <code>cmd/mgs/main_test.go:86</code> 还测试未知命令必须失败并输出 usage，避免 CLI 静默吞错。</li>
+</ul>
+<div class="g2"><div class="card"><div class="card-h">读者应该带走的点</div><p>Machine Genome 的 proof 不是“签一个 JSON 文件”这么简单，而是把 canonicalization、proof config、DID method 和 record-specific controller 关系绑在一起。</p></div><div class="card"><div class="card-h">仍需补齐的点</div><p>当前 profile 偏向 did:key 和 genesis key，跨组织 key rotation 与更多 DID method 支持还需要后续治理和 resolver 扩展。</p></div></div>
+</section>
+<div class="nav-foot" style="padding:36px 0"><a href="../machine-genome.html">↑ machine-genome 主页面</a></div>
+</main></div>
+</body>
+</html>
