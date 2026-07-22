@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Engine 扫描调度链路 · 深度解析 · open-kritt</title>
+<meta name="description" content="open-kritt engine-flow 子模块完整解析 — Kritt-ai/open-kritt 源码级深度解析：扫描队列、模型 harness、post-processing 和人工复核界面如何组成漏洞发现平台。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #ff6b7a;
+  --star-soft:  #ff9ca8;
+  --star-deep:  #d94d5d;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">open-kritt<b>Kritt</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open-kritt<b>Kritt</b></div>
+      <div class="sub">engine-flow · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python / JavaScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../open-kritt.html">← 返回 open-kritt 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Engine 扫描调度链路 <em>深度解析</em></h1>
+      <p class="hero-desc">从 scan 创建、pending job 生成、workspace 准备到 harness prompt 拼接，open-kritt 的执行链是一个保守的状态机，而不是一次性脚本。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>这页专看 scan 如何从后端创建变成 engine job。入口合同来自 <code>backend/src/routes/scans.js:296</code> 和 <code>backend/src/routes/scans.js:430</code>，界面用 <code>frontend/src/pages/ScanDetail.jsx:28</code> 的 action gate 控制用户操作，engine 则把 workflow depth 转成 pending jobs。<code>backend/src/routes/scans.js:451</code> 写下初始状态后，<code>frontend/src/pages/ScanDetail.jsx:1174</code> 负责把运行中指标展示出来。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/worker.py</span> · L821-910</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">821</span>    def process_scan(self, scan: dict[str, Any], worker_id: int = 1) -&gt; bool:
+<span class="ln">822</span>        scan_id = int(scan[&quot;id&quot;])
+<span class="ln">823</span>        did_work = False
+<span class="ln">824</span>        with self.db.connect() as conn:
+<span class="ln">825</span>            workflow = self.db.load_workflow(conn, int(scan[&quot;workflow_id&quot;]))
+<span class="ln">826</span>
+<span class="ln">827</span>        while True:
+<span class="ln">828</span>            with self.db.connect() as conn:
+<span class="ln">829</span>                current = self.db.load_scan(conn, scan_id)
+<span class="ln">830</span>                if not current or current[&quot;status&quot;] in NON_RUNNABLE_SCAN_STATUSES:
+<span class="ln">831</span>                    return did_work
+<span class="ln">832</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">833</span>                    return did_work
+<span class="ln">834</span>                if current[&quot;status&quot;] == PREWARMING_SCAN_STATUS:
+<span class="ln">835</span>                    conn.commit()
+<span class="ln">836</span>                    jobs = None
+<span class="ln">837</span>                    completed = claimed = set()
+<span class="ln">838</span>                elif current[&quot;status&quot;] == &quot;post_processing&quot;:
+<span class="ln">839</span>                    conn.commit()
+<span class="ln">840</span>                    jobs = None
+<span class="ln">841</span>                    completed = claimed = set()
+<span class="ln">842</span>                else:
+<span class="ln">843</span>                    completed = self.db.load_completed_metadata(conn, scan_id)
+<span class="ln">844</span>                    claimed = self.db.load_claimed_metadata(conn, scan_id)
+<span class="ln">845</span>                    step_results = self.db.load_step_results(conn, scan_id)
+<span class="ln">846</span>                    jobs = build_pending_jobs(
+<span class="ln">847</span>                        scan=current,
+<span class="ln">848</span>                        workflow=workflow,
+<span class="ln">849</span>                        completed=completed,
+<span class="ln">850</span>                        claimed=claimed,
+<span class="ln">851</span>                        step_results=step_results,
+<span class="ln">852</span>                    )
+<span class="ln">853</span>                    conn.commit()
+<span class="ln">854</span>
+<span class="ln">855</span>            needs_new_container = current[&quot;status&quot;] == &quot;post_processing&quot; or bool(jobs)
+<span class="ln">856</span>            if needs_new_container and not self._new_scan_container_allowed(scan_id):
+<span class="ln">857</span>                return did_work
+<span class="ln">858</span>
+<span class="ln">859</span>            harness = harness_for(
+<span class="ln">860</span>                normalize_harness_name(current[&quot;harness&quot;]),
+<span class="ln">861</span>                timeout_seconds=self.runtime_harness_timeout_seconds(),
+<span class="ln">862</span>                model_provider=scan_model_provider(current),
+<span class="ln">863</span>                codex_model_provider=getattr(self.config, &quot;codex_model_provider&quot;, None),
+<span class="ln">864</span>                codex_cli_gate=self.codex_cli_gate,
+<span class="ln">865</span>            )
+<span class="ln">866</span>
+<span class="ln">867</span>            if current[&quot;status&quot;] == PREWARMING_SCAN_STATUS:
+<span class="ln">868</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;running&quot;):
+<span class="ln">869</span>                    did_work = True
+<span class="ln">870</span>                    continue
+<span class="ln">871</span>
+<span class="ln">872</span>            if current[&quot;status&quot;] != &quot;post_processing&quot; and jobs:
+<span class="ln">873</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;running&quot;):
+<span class="ln">874</span>                    did_work = True
+<span class="ln">875</span>                    continue
+<span class="ln">876</span>
+<span class="ln">877</span>            if current[&quot;status&quot;] == &quot;post_processing&quot;:
+<span class="ln">878</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;post_processing&quot;):
+<span class="ln">879</span>                    did_work = True
+<span class="ln">880</span>                    continue
+<span class="ln">881</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">882</span>                    return did_work
+<span class="ln">883</span>                did_post_work = self.post_processor.process_once(current, harness)
+<span class="ln">884</span>                if did_post_work:
+<span class="ln">885</span>                    return True
+<span class="ln">886</span>                return did_work
+<span class="ln">887</span>
+<span class="ln">888</span>            if not jobs:
+<span class="ln">889</span>                if claimed != completed:
+<span class="ln">890</span>                    return did_work
+<span class="ln">891</span>                with self.db.connect() as conn:
+<span class="ln">892</span>                    transitioned = self.db.set_scan_status_if_current(conn, scan_id, &quot;running&quot;, &quot;post_processing&quot;)
+<span class="ln">893</span>                    conn.commit()
+<span class="ln">894</span>                if not transitioned:
+<span class="ln">895</span>                    return did_work
+<span class="ln">896</span>                LOGGER.info(&quot;scan %s workflow completed; starting post-processing&quot;, scan_id)
+<span class="ln">897</span>                did_work = True
+<span class="ln">898</span>                continue
+<span class="ln">899</span>
+<span class="ln">900</span>            did_claim = False
+<span class="ln">901</span>            for job in jobs:
+<span class="ln">902</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">903</span>                    return did_work
+<span class="ln">904</span>                did_claim = self.execute_job(
+<span class="ln">905</span>                    scan=current,
+<span class="ln">906</span>                    workflow_id=workflow.id,
+<span class="ln">907</span>                    job=job,
+<span class="ln">908</span>                    harness=harness,
+<span class="ln">909</span>                )
+<span class="ln">910</span>                if did_claim:</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>pending job 如何避免半批次执行</h3>
+      <p>queue 的关键是 consume-all depth 不会在上一层未完成时提前启动。<code>frontend/src/pages/WorkflowBuilder.jsx:62</code> 到 <code>frontend/src/pages/WorkflowBuilder.jsx:69</code> 说明 batch 变量源自 depth，<code>backend/src/routes/scans.js:405</code> 说明后端也会从 workflow 推导 prompt extra；两者共同保证进入 engine 的 workflow 有明确上下文。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/queue.py</span> · L91-129</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">91</span>    for depth in workflow.depths:
+<span class="ln">92</span>        steps = workflow.steps_at_depth(depth)
+<span class="ln">93</span>        next_states: list[State] = []
+<span class="ln">94</span>        depth_complete = previous_depth_complete
+<span class="ln">95</span>
+<span class="ln">96</span>        if _depth_consumes_all(steps, depth):
+<span class="ln">97</span>            # Do not start a batch until every branch in the previous depth has
+<span class="ln">98</span>            # completed. Otherwise a concurrent worker could run it over a
+<span class="ln">99</span>            # partial result set.
+<span class="ln">100</span>            input_states = [_batch_state(scan, states, depth - 1)] if previous_depth_complete and states else []
+<span class="ln">101</span>        else:
+<span class="ln">102</span>            input_states = states
+<span class="ln">103</span>
+<span class="ln">104</span>        for state in input_states:
+<span class="ln">105</span>            for step in steps:
+<span class="ln">106</span>                task_complete = True
+<span class="ln">107</span>                task_next_states: list[State] = []
+<span class="ln">108</span>                for repeat_run in range(1, runs + 1):
+<span class="ln">109</span>                    repeated_state = _state_for_repeat(state, repeat_run)
+<span class="ln">110</span>                    key = metadata_key(step.id, repeated_state)
+<span class="ln">111</span>                    if key not in completed:
+<span class="ln">112</span>                        task_complete = False
+<span class="ln">113</span>                        depth_complete = False
+<span class="ln">114</span>                        if key not in claimed:
+<span class="ln">115</span>                            pending.append(Job(step=step, state=repeated_state))
+<span class="ln">116</span>                        # The next repeat needs the output from this one, and the
+<span class="ln">117</span>                        # next depth needs the complete accumulated task output.
+<span class="ln">118</span>                        break
+<span class="ln">119</span>                    task_next_states.extend(_next_states(step, repeated_state, step_results))
+<span class="ln">120</span>                if task_complete:
+<span class="ln">121</span>                    next_states.extend(task_next_states)
+<span class="ln">122</span>
+<span class="ln">123</span>        states = next_states
+<span class="ln">124</span>        previous_depth_complete = depth_complete
+<span class="ln">125</span>
+<span class="ln">126</span>    return sorted(
+<span class="ln">127</span>        pending,
+<span class="ln">128</span>        key=lambda job: (-job.depth, job.state.repeat_run, job.step.order, job.state.prev_id),
+<span class="ln">129</span>    )</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>workspace 与 prompt 如何拼接</h3>
+      <p>worker 在执行 job 前先 claim metadata，再准备 workspace、渲染 prompt、追加 schema。这个路径和 API 的 <code>backend/src/routes/scans.js:423</code> dependenciesDetail 对应，也和前端 <code>frontend/src/pages/ScanDetail.jsx:253</code> 展示 repo kind/commit 对应，用户看到的是同一个 revision。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/worker.py</span> · L915-997</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">915</span>    def execute_job(self, *, scan, workflow_id, job, harness):
+<span class="ln">916</span>        step = job.step
+<span class="ln">917</span>        state = job.state
+<span class="ln">918</span>        metadata_id = None
+<span class="ln">919</span>        checked_out_commit = None
+<span class="ln">920</span>        prompt_filled = &quot;&quot;
+<span class="ln">921</span>        prepared = None
+<span class="ln">922</span>        try:
+<span class="ln">923</span>            schema = output_schema(step.output_format, step.multi_output)
+<span class="ln">924</span>            thinking_effort = scan.get(&quot;thinking_effort&quot;) or &quot;medium&quot;
+<span class="ln">925</span>            harness_name = normalize_harness_name(scan[&quot;harness&quot;])
+<span class="ln">926</span>            model_provider = scan_model_provider(scan)
+<span class="ln">927</span>            with self.workspace_setup_slots:
+<span class="ln">928</span>                started = now_utc()
+<span class="ln">929</span>                with self.db.connect() as conn:
+<span class="ln">930</span>                    current_scan = self.db.load_scan(conn, int(scan[&quot;id&quot;]))
+<span class="ln">931</span>                    if not current_scan or current_scan[&quot;status&quot;] in NON_RUNNABLE_SCAN_STATUSES:
+<span class="ln">932</span>                        conn.commit()
+<span class="ln">933</span>                        return False
+<span class="ln">934</span>                    metadata_id = self.db.claim_step_metadata(
+<span class="ln">935</span>                        conn,
+<span class="ln">936</span>                        scan_id=int(scan[&quot;id&quot;]),
+<span class="ln">937</span>                        workflow_id=workflow_id,
+<span class="ln">938</span>                        step_id=step.id,
+<span class="ln">939</span>                        prev_id=state.prev_id,
+<span class="ln">940</span>                        prev_table=state.prev_table,
+<span class="ln">941</span>                        repeat_run=state.repeat_run,
+<span class="ln">942</span>                        prompt_template=step.content,
+<span class="ln">943</span>                        prompt_filled=&quot;&quot;,
+<span class="ln">944</span>                        checked_out_commit=None,
+<span class="ln">945</span>                        run_started_at=started,
+<span class="ln">946</span>                        model=scan[&quot;model&quot;],
+<span class="ln">947</span>                        harness=harness_name,
+<span class="ln">948</span>                        thinking_effort=thinking_effort,
+<span class="ln">949</span>                        model_provider=model_provider,
+<span class="ln">950</span>                    )
+<span class="ln">951</span>                    agent_skills = (
+<span class="ln">952</span>                        self.db.load_agent_skills(conn, current_scan) if hasattr(self.db, &quot;load_agent_skills&quot;) else []
+<span class="ln">953</span>                    )
+<span class="ln">954</span>                    load_prior_results = getattr(self.db, &quot;load_prior_repeat_results&quot;, None)
+<span class="ln">955</span>                    prior_repeat_results = (
+<span class="ln">956</span>                        load_prior_results(
+<span class="ln">957</span>                            conn,
+<span class="ln">958</span>                            scan_id=int(scan[&quot;id&quot;]),
+<span class="ln">959</span>                            step_id=step.id,
+<span class="ln">960</span>                            prev_id=state.prev_id,
+<span class="ln">961</span>                            prev_table=state.prev_table,
+<span class="ln">962</span>                            repeat_run=state.repeat_run,
+<span class="ln">963</span>                        )
+<span class="ln">964</span>                        if state.repeat_run &gt; 1 and callable(load_prior_results)
+<span class="ln">965</span>                        else []
+<span class="ln">966</span>                    )
+<span class="ln">967</span>                    conn.commit()
+<span class="ln">968</span>
+<span class="ln">969</span>                if metadata_id is None:
+<span class="ln">970</span>                    return False
+<span class="ln">971</span>
+<span class="ln">972</span>                try:
+<span class="ln">973</span>                    prepared = prepare_dependency_workspace(
+<span class="ln">974</span>                        data_dir=self.config.data_dir,
+<span class="ln">975</span>                        checkout_cache_dir=getattr(self.config, &quot;checkout_cache_dir&quot;, None),
+<span class="ln">976</span>                        metadata_id=metadata_id,
+<span class="ln">977</span>                        scan=scan,
+<span class="ln">978</span>                        github_token=self.config.github_token,
+<span class="ln">979</span>                        agent_skills=agent_skills,
+<span class="ln">980</span>                        harness_name=harness_name,
+<span class="ln">981</span>                        model_provider=model_provider,
+<span class="ln">982</span>                    )
+<span class="ln">983</span>                    checked_out_commit = prepared.checked_out_commit
+<span class="ln">984</span>                    context = {**state.context, **workspace_context(prepared)}
+<span class="ln">985</span>                    rendered_prompt = render_prompt(step.content, context)
+<span class="ln">986</span>                    prompt_parts = [
+<span class="ln">987</span>                        native_agent_skills_prompt(agent_skills, harness_name),
+<span class="ln">988</span>                        workspace_prompt_context(prepared.layout, prepared.manifest_json),
+<span class="ln">989</span>                        rendered_prompt,
+<span class="ln">990</span>                        repeat_append_prompt(state.repeat_run, prior_repeat_results),
+<span class="ln">991</span>                    ]
+<span class="ln">992</span>                    prompt_filled = harness_prompt(
+<span class="ln">993</span>                        &quot;\n\n&quot;.join(part for part in prompt_parts if part),
+<span class="ln">994</span>                        multi_output=step.multi_output,
+<span class="ln">995</span>                        schema=schema,
+<span class="ln">996</span>                    )
+<span class="ln">997</span>                    with self.db.connect() as conn:</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">POST /api/scans -> Scan row -> build_pending_jobs -> claim metadata -> prepare workspace -> render prompt -> harness.run -> validate payload -> write step result</div>
+      <p>流程中的关键转折是没有 pending jobs 且 claimed==completed 时才进入 post_processing；这避免了并发 worker 把未完成分支当作完整结果。<code>backend/src/routes/scans.js:204</code> 暴露列表状态，<code>backend/src/routes/scans.js:468</code> 允许合法状态更新，<code>frontend/src/pages/ScanDetail.jsx:103</code> 触发状态变更，<code>frontend/src/pages/ScanDetail.jsx:116</code> 保存运行设置。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>backend/src/routes/scans.js:300</code> 会根据活跃扫描要求用户选择 queue，避免默认并发冲突。</li><li><code>frontend/src/pages/ScanDetail.jsx:31</code> 到 <code>frontend/src/pages/ScanDetail.jsx:38</code> 只在合适状态开放 pause/resume/stop/delete。</li><li><code>backend/test/validation.test.js:97</code> 覆盖不同 thinking effort 的模型选择，降低 harness 参数漂移。</li></ul>
+    </section>
+
+    <h3><span class="arr">▸</span>调度证据补充</h3><p>这条链路还可以从前后端交界验证：<code>backend/src/routes/scans.js:204</code> 提供 scan 列表状态，<code>backend/src/routes/scans.js:468</code> 接受运行时 PATCH，<code>frontend/src/pages/ScanDetail.jsx:103</code> 发起状态变更，<code>frontend/src/pages/ScanDetail.jsx:116</code> 保存模型与 harness 设置。它们共同说明 engine 不是孤立进程，而是受 API 状态机和 UI 操作约束。</p>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">创建 scan</div><div class="card-d">看 <code>backend/src/routes/scans.js:296</code> 到 <code>backend/src/routes/scans.js:465</code>，理解配置锁和 extra 校验。</div></div><div class="card"><div class="card-h">展示状态</div><div class="card-d">看 <code>frontend/src/pages/ScanDetail.jsx:1174</code> 到 <code>frontend/src/pages/ScanDetail.jsx:1230</code>，理解长任务指标如何露出。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-22</span>
+      <span>Source · <a href="https://github.com/Kritt-ai/open-kritt">Kritt-ai/open-kritt</a></span>
+      <span><a href="../open-kritt.html">↑ open-kritt 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>open-kritt · 漏洞扫描 Agent 控制面 · 源码观测台</title>
+<meta name="description" content="Kritt-ai/open-kritt 源码级深度解析 — Kritt-ai/open-kritt 源码级深度解析：扫描队列、模型 harness、post-processing 和人工复核界面如何组成漏洞发现平台。" />
+<meta property="og:title" content="open-kritt · 源码观测台" />
+<meta property="og:description" content="Kritt-ai/open-kritt 源码级深度解析：扫描队列、模型 harness、post-processing 和人工复核界面如何组成漏洞发现平台。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #ff6b7a;
+  --star-soft:  #ff9ca8;
+  --star-deep:  #d94d5d;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">open-kritt<b>Kritt</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open-kritt<b>Kritt</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python / JavaScript · Python engine + Express + React</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>三层控制面如何把漏洞扫描跑稳</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>扫描队列、workspace 与 harness 的核心模块</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从创建 scan 到 post-processing 的关键流</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>哪些测试在守住工作流边界</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>真正值得借鉴的工程亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与改进空间</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★259 · 2026-07-20</div>
+      <div><a href="https://github.com/Kritt-ai/open-kritt" target="_blank">Kritt-ai/open-kritt</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">open-kritt <em>漏洞扫描 Agent 控制面</em></h1>
+          <p class="hero-desc">open-kritt 是一个开源代码漏洞发现平台：前端创建 scan，后端锁定 workflow/post-script/agent skill 配置，Python engine 把仓库复制到隔离 workspace，再通过 Codex、Claude Code、Cursor 等 harness 执行多步扫描和后处理。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 259</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">52.2K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">183</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">8h ago</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>open-kritt 最值得拆的点不是“让模型找漏洞”这句口号，而是它把扫描生命周期拆成可审计的状态机。入口侧的 <code>backend/src/routes/scans.js:296</code> 先验证模型、workflow、post-script 和 agent skill；运行侧的 <code>backend/src/routes/scans.js:430</code> 创建 scan 后交给 engine；界面侧的 <code>frontend/src/pages/ScanDetail.jsx:66</code> 和 <code>frontend/src/pages/ScanDetail.jsx:74</code> 持续轮询 scan 与 findings，形成用户能观察的闭环。</p>
+      <p>源码里更有价值的是约束边界。<code>backend/src/routes/scans.js:356</code> 用事务锁定配置资源，<code>backend/src/routes/scans.js:405</code> 从 workflow 与 post-script 推导必填 extra，<code>frontend/src/pages/ScanDetail.jsx:137</code> 到 <code>frontend/src/pages/ScanDetail.jsx:160</code> 用 per-record mutation queue 处理快速复核点击；这些设计说明它在做漏洞平台，而不是一次性 prompt demo。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">前端 scan 控制台 + Express API + Python engine worker + 模型 harness + post-processing triage。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">Scan、Workflow、Step metadata、DependencyWorkspace、HarnessResult、Vulnerability。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">源码没有公布扫描吞吐基准；工程重点放在 worker cap、rate-limit retry、workspace cache 和 post-processing batch。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">依赖 GitHub checkout、Prisma/Postgres、Codex/Claude/Cursor/OpenRouter、React scan UI。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">三层控制面如何把漏洞扫描跑稳</h2>
+      <p>系统拓扑可以从三个入口看：后端创建 scan，engine 消费 scan，前端展示 scan。<code>backend/src/routes/scans.js:296</code> 是创建入口，<code>backend/src/routes/scans.js:468</code> 是运行时状态修改入口，<code>frontend/src/pages/ScanDetail.jsx:103</code> 和 <code>frontend/src/pages/ScanDetail.jsx:116</code> 把这些能力映射成暂停、恢复、保存运行设置。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">[CreateScan UI]
+  -> POST /api/scans
+  -> lock workflow/post-scripts/agent-skills
+  -> Scan(status=pending|queued)
+  -> Worker.process_scan
+  -> prepare workspace + render prompt
+  -> model harness run
+  -> validate structured output
+  -> post-processing: dedupe -> rank -> post-script
+  -> ScanDetail polling + human review</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>四个模块最关键：API 层负责参数和资源锁，queue 层根据 workflow depth 生成 pending jobs，workspace 层复制隔离仓库和依赖，post-processing 层把模型输出变成可复核漏洞清单。<code>backend/src/routes/scans.js:103</code>、<code>backend/src/routes/scans.js:120</code>、<code>frontend/src/lib/scanPresentation.js:29</code> 分别说明配置锁、运行时更新和复核摘要不是 UI 附属品。</p>
+      <div class="g3"><div class="card"><div class="card-h">API 控制面</div><div class="card-d">创建、暂停、恢复 scan，并在事务里锁定 workflow/post-script/agent skill。</div></div><div class="card"><div class="card-h">Engine Worker</div><div class="card-d">消费 scan 状态，生成 pending jobs，处理 rate limit 和 post-processing。</div></div><div class="card"><div class="card-h">Review UI</div><div class="card-d">轮询 scan 与 vulnerability，使用 mutation queue 避免快速复核覆盖。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/queue.py</span> · L76-129</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">76</span>def build_pending_jobs(
+<span class="ln">77</span>    *,
+<span class="ln">78</span>    scan: dict[str, Any],
+<span class="ln">79</span>    workflow: Workflow,
+<span class="ln">80</span>    completed: set[tuple[int, int, str | None, int]],
+<span class="ln">81</span>    step_results: dict[tuple[int, int, str | None, int], list[StepResultRow]],
+<span class="ln">82</span>    claimed: set[tuple[int, int, str | None, int]] | None = None,
+<span class="ln">83</span>) -&gt; list[Job]:
+<span class="ln">84</span>    pending: list[Job] = []
+<span class="ln">85</span>    if claimed is None:
+<span class="ln">86</span>        claimed = completed
+<span class="ln">87</span>    runs = repeat_runs(scan)
+<span class="ln">88</span>    states = [State(prev_id=0, prev_table=None, repeat_run=1, context=scan_context(scan))]
+<span class="ln">89</span>    previous_depth_complete = True
+<span class="ln">90</span>
+<span class="ln">91</span>    for depth in workflow.depths:
+<span class="ln">92</span>        steps = workflow.steps_at_depth(depth)
+<span class="ln">93</span>        next_states: list[State] = []
+<span class="ln">94</span>        depth_complete = previous_depth_complete
+<span class="ln">95</span>
+<span class="ln">96</span>        if _depth_consumes_all(steps, depth):
+<span class="ln">97</span>            # Do not start a batch until every branch in the previous depth has
+<span class="ln">98</span>            # completed. Otherwise a concurrent worker could run it over a
+<span class="ln">99</span>            # partial result set.
+<span class="ln">100</span>            input_states = [_batch_state(scan, states, depth - 1)] if previous_depth_complete and states else []
+<span class="ln">101</span>        else:
+<span class="ln">102</span>            input_states = states
+<span class="ln">103</span>
+<span class="ln">104</span>        for state in input_states:
+<span class="ln">105</span>            for step in steps:
+<span class="ln">106</span>                task_complete = True
+<span class="ln">107</span>                task_next_states: list[State] = []
+<span class="ln">108</span>                for repeat_run in range(1, runs + 1):
+<span class="ln">109</span>                    repeated_state = _state_for_repeat(state, repeat_run)
+<span class="ln">110</span>                    key = metadata_key(step.id, repeated_state)
+<span class="ln">111</span>                    if key not in completed:
+<span class="ln">112</span>                        task_complete = False
+<span class="ln">113</span>                        depth_complete = False
+<span class="ln">114</span>                        if key not in claimed:
+<span class="ln">115</span>                            pending.append(Job(step=step, state=repeated_state))
+<span class="ln">116</span>                        # The next repeat needs the output from this one, and the
+<span class="ln">117</span>                        # next depth needs the complete accumulated task output.
+<span class="ln">118</span>                        break
+<span class="ln">119</span>                    task_next_states.extend(_next_states(step, repeated_state, step_results))
+<span class="ln">120</span>                if task_complete:
+<span class="ln">121</span>                    next_states.extend(task_next_states)
+<span class="ln">122</span>
+<span class="ln">123</span>        states = next_states
+<span class="ln">124</span>        previous_depth_complete = depth_complete
+<span class="ln">125</span>
+<span class="ln">126</span>    return sorted(
+<span class="ln">127</span>        pending,
+<span class="ln">128</span>        key=lambda job: (-job.depth, job.state.repeat_run, job.step.order, job.state.prev_id),
+<span class="ln">129</span>    )</pre>
+      </div>
+
+      <a class="deep-link" href="open-kritt/open-kritt-engine-flow.html">深度阅读 · Engine 扫描调度与 workspace 准备</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">扫描队列、workspace 与 harness 的核心模块</h2>
+
+      <h3><span class="arr">▸</span>扫描创建路径：先锁配置，再落库</h3>
+      <p>后端创建 scan 时不是直接 insert。<code>backend/src/routes/scans.js:296</code> 做入参验证，<code>backend/src/routes/scans.js:356</code> 开启事务，<code>backend/src/routes/scans.js:397</code> 到 <code>backend/src/routes/scans.js:421</code> 从 workflow/post-script 反推 extra 必填项，最后 <code>backend/src/routes/scans.js:430</code> 才创建 scan。这个顺序能避免扫描启动后才发现 prompt 变量缺失。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/../backend/src/routes/scans.js</span> · L296-365</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">296</span>router.post(&#x27;/&#x27;, async (req, res, next) =&gt; {
+<span class="ln">297</span>  try {
+<span class="ln">298</span>    const valid = validateScan(req.body, { localNames: localRepoNames() });
+<span class="ln">299</span>    await assertModelSelectionAvailable(valid);
+<span class="ln">300</span>    const activeScanCount = await prisma.scan.count({ where: { status: { in: ACTIVE_SCAN_STATUSES } } });
+<span class="ln">301</span>    const launchDecision = scanLaunchDecision(req.body, activeScanCount);
+<span class="ln">302</span>    if (launchDecision.kind === &#x27;choice-required&#x27;) {
+<span class="ln">303</span>      return res.status(409).json({
+<span class="ln">304</span>        error: &#x27;Another scan is running. Choose whether to start immediately or queue this scan.&#x27;,
+<span class="ln">305</span>        code: &#x27;scan_launch_policy_required&#x27;,
+<span class="ln">306</span>        errors: [
+<span class="ln">307</span>          {
+<span class="ln">308</span>            field: &#x27;launchPolicy&#x27;,
+<span class="ln">309</span>            message: &#x27;Choose whether to start immediately or queue this scan.&#x27;,
+<span class="ln">310</span>          },
+<span class="ln">311</span>        ],
+<span class="ln">312</span>      });
+<span class="ln">313</span>    }
+<span class="ln">314</span>
+<span class="ln">315</span>    const configurationObject =
+<span class="ln">316</span>      valid.configuration &amp;&amp; typeof valid.configuration === &#x27;object&#x27; &amp;&amp; !Array.isArray(valid.configuration)
+<span class="ln">317</span>        ? valid.configuration
+<span class="ln">318</span>        : {};
+<span class="ln">319</span>    const configuredPostScriptIds = [
+<span class="ln">320</span>      ...new Set(
+<span class="ln">321</span>        [
+<span class="ln">322</span>          `${valid.postScriptId}`,
+<span class="ln">323</span>          ...(Array.isArray(configurationObject.post_script_ids)
+<span class="ln">324</span>            ? configurationObject.post_script_ids
+<span class="ln">325</span>            : Array.isArray(configurationObject.post_scripts)
+<span class="ln">326</span>              ? configurationObject.post_scripts
+<span class="ln">327</span>              : []
+<span class="ln">328</span>          ).map((id) =&gt; `${id}`),
+<span class="ln">329</span>        ].filter((id) =&gt; id.trim() !== &#x27;&#x27;)
+<span class="ln">330</span>      ),
+<span class="ln">331</span>    ];
+<span class="ln">332</span>    const invalidPostScriptIds = configuredPostScriptIds.filter((id) =&gt; !/^\d+$/.test(id));
+<span class="ln">333</span>    const queryPostScriptIds = configuredPostScriptIds.filter((id) =&gt; /^\d+$/.test(id));
+<span class="ln">334</span>    const requestedAgentSkills =
+<span class="ln">335</span>      req.body?.agentSkillIds ??
+<span class="ln">336</span>      req.body?.agent_skill_ids ??
+<span class="ln">337</span>      configurationObject.agent_skill_ids ??
+<span class="ln">338</span>      configurationObject.agent_skills ??
+<span class="ln">339</span>      [];
+<span class="ln">340</span>    const configuredAgentSkillIds = [
+<span class="ln">341</span>      ...new Set(
+<span class="ln">342</span>        (Array.isArray(requestedAgentSkills)
+<span class="ln">343</span>          ? requestedAgentSkills
+<span class="ln">344</span>          : typeof requestedAgentSkills === &#x27;string&#x27;
+<span class="ln">345</span>            ? requestedAgentSkills.split(&#x27;,&#x27;)
+<span class="ln">346</span>            : []
+<span class="ln">347</span>        )
+<span class="ln">348</span>          .map((item) =&gt; (item &amp;&amp; typeof item === &#x27;object&#x27; ? item.id : item))
+<span class="ln">349</span>          .map((id) =&gt; `${id}`.trim())
+<span class="ln">350</span>          .filter(Boolean)
+<span class="ln">351</span>      ),
+<span class="ln">352</span>    ];
+<span class="ln">353</span>    const invalidAgentSkillIds = configuredAgentSkillIds.filter((id) =&gt; !/^\d+$/.test(id));
+<span class="ln">354</span>    const queryAgentSkillIds = configuredAgentSkillIds.filter((id) =&gt; /^\d+$/.test(id));
+<span class="ln">355</span>
+<span class="ln">356</span>    const created = await prisma.$transaction(async (tx) =&gt; {
+<span class="ln">357</span>      await lockScanConfigurationResources(tx, {
+<span class="ln">358</span>        workflowId: BigInt(valid.workflowId),
+<span class="ln">359</span>        postScriptIds: queryPostScriptIds.map((id) =&gt; BigInt(id)),
+<span class="ln">360</span>        agentSkillIds: queryAgentSkillIds.map((id) =&gt; BigInt(id)),
+<span class="ln">361</span>      });
+<span class="ln">362</span>      const [workflow, postScripts, agentSkills] = await Promise.all([
+<span class="ln">363</span>        tx.workflow.findUnique({ where: { id: BigInt(valid.workflowId) } }),
+<span class="ln">364</span>        tx.postScript.findMany({ where: { id: { in: queryPostScriptIds.map((id) =&gt; BigInt(id)) } } }),
+<span class="ln">365</span>        tx.agentSkill.findMany({ where: { id: { in: queryAgentSkillIds.map((id) =&gt; BigInt(id)) } } }),</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>运行路径：pending job 与 harness 隔离执行</h3>
+      <p>engine 在 <code>backend/src/routes/scans.js:451</code> 写入 pending 或 queued 后接管。运行时先用 workflow depth 生成 job，再用 workspace 和 harness 执行；前端 <code>frontend/src/pages/ScanDetail.jsx:1174</code> 到 <code>frontend/src/pages/ScanDetail.jsx:1230</code> 把 active jobs、attempts、failed attempts 展示给用户，避免长任务黑盒化。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/worker.py</span> · L821-910</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">821</span>    def process_scan(self, scan: dict[str, Any], worker_id: int = 1) -&gt; bool:
+<span class="ln">822</span>        scan_id = int(scan[&quot;id&quot;])
+<span class="ln">823</span>        did_work = False
+<span class="ln">824</span>        with self.db.connect() as conn:
+<span class="ln">825</span>            workflow = self.db.load_workflow(conn, int(scan[&quot;workflow_id&quot;]))
+<span class="ln">826</span>
+<span class="ln">827</span>        while True:
+<span class="ln">828</span>            with self.db.connect() as conn:
+<span class="ln">829</span>                current = self.db.load_scan(conn, scan_id)
+<span class="ln">830</span>                if not current or current[&quot;status&quot;] in NON_RUNNABLE_SCAN_STATUSES:
+<span class="ln">831</span>                    return did_work
+<span class="ln">832</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">833</span>                    return did_work
+<span class="ln">834</span>                if current[&quot;status&quot;] == PREWARMING_SCAN_STATUS:
+<span class="ln">835</span>                    conn.commit()
+<span class="ln">836</span>                    jobs = None
+<span class="ln">837</span>                    completed = claimed = set()
+<span class="ln">838</span>                elif current[&quot;status&quot;] == &quot;post_processing&quot;:
+<span class="ln">839</span>                    conn.commit()
+<span class="ln">840</span>                    jobs = None
+<span class="ln">841</span>                    completed = claimed = set()
+<span class="ln">842</span>                else:
+<span class="ln">843</span>                    completed = self.db.load_completed_metadata(conn, scan_id)
+<span class="ln">844</span>                    claimed = self.db.load_claimed_metadata(conn, scan_id)
+<span class="ln">845</span>                    step_results = self.db.load_step_results(conn, scan_id)
+<span class="ln">846</span>                    jobs = build_pending_jobs(
+<span class="ln">847</span>                        scan=current,
+<span class="ln">848</span>                        workflow=workflow,
+<span class="ln">849</span>                        completed=completed,
+<span class="ln">850</span>                        claimed=claimed,
+<span class="ln">851</span>                        step_results=step_results,
+<span class="ln">852</span>                    )
+<span class="ln">853</span>                    conn.commit()
+<span class="ln">854</span>
+<span class="ln">855</span>            needs_new_container = current[&quot;status&quot;] == &quot;post_processing&quot; or bool(jobs)
+<span class="ln">856</span>            if needs_new_container and not self._new_scan_container_allowed(scan_id):
+<span class="ln">857</span>                return did_work
+<span class="ln">858</span>
+<span class="ln">859</span>            harness = harness_for(
+<span class="ln">860</span>                normalize_harness_name(current[&quot;harness&quot;]),
+<span class="ln">861</span>                timeout_seconds=self.runtime_harness_timeout_seconds(),
+<span class="ln">862</span>                model_provider=scan_model_provider(current),
+<span class="ln">863</span>                codex_model_provider=getattr(self.config, &quot;codex_model_provider&quot;, None),
+<span class="ln">864</span>                codex_cli_gate=self.codex_cli_gate,
+<span class="ln">865</span>            )
+<span class="ln">866</span>
+<span class="ln">867</span>            if current[&quot;status&quot;] == PREWARMING_SCAN_STATUS:
+<span class="ln">868</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;running&quot;):
+<span class="ln">869</span>                    did_work = True
+<span class="ln">870</span>                    continue
+<span class="ln">871</span>
+<span class="ln">872</span>            if current[&quot;status&quot;] != &quot;post_processing&quot; and jobs:
+<span class="ln">873</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;running&quot;):
+<span class="ln">874</span>                    did_work = True
+<span class="ln">875</span>                    continue
+<span class="ln">876</span>
+<span class="ln">877</span>            if current[&quot;status&quot;] == &quot;post_processing&quot;:
+<span class="ln">878</span>                if self._ensure_scan_cache_prewarmed(current, restore_status=&quot;post_processing&quot;):
+<span class="ln">879</span>                    did_work = True
+<span class="ln">880</span>                    continue
+<span class="ln">881</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">882</span>                    return did_work
+<span class="ln">883</span>                did_post_work = self.post_processor.process_once(current, harness)
+<span class="ln">884</span>                if did_post_work:
+<span class="ln">885</span>                    return True
+<span class="ln">886</span>                return did_work
+<span class="ln">887</span>
+<span class="ln">888</span>            if not jobs:
+<span class="ln">889</span>                if claimed != completed:
+<span class="ln">890</span>                    return did_work
+<span class="ln">891</span>                with self.db.connect() as conn:
+<span class="ln">892</span>                    transitioned = self.db.set_scan_status_if_current(conn, scan_id, &quot;running&quot;, &quot;post_processing&quot;)
+<span class="ln">893</span>                    conn.commit()
+<span class="ln">894</span>                if not transitioned:
+<span class="ln">895</span>                    return did_work
+<span class="ln">896</span>                LOGGER.info(&quot;scan %s workflow completed; starting post-processing&quot;, scan_id)
+<span class="ln">897</span>                did_work = True
+<span class="ln">898</span>                continue
+<span class="ln">899</span>
+<span class="ln">900</span>            did_claim = False
+<span class="ln">901</span>            for job in jobs:
+<span class="ln">902</span>                if not self._worker_can_pick_job(worker_id):
+<span class="ln">903</span>                    return did_work
+<span class="ln">904</span>                did_claim = self.execute_job(
+<span class="ln">905</span>                    scan=current,
+<span class="ln">906</span>                    workflow_id=workflow.id,
+<span class="ln">907</span>                    job=job,
+<span class="ln">908</span>                    harness=harness,
+<span class="ln">909</span>                )
+<span class="ln">910</span>                if did_claim:</pre>
+      </div>
+
+      <a class="deep-link" href="open-kritt/open-kritt-review-pipeline.html">深度阅读 · 后处理、去重排序与人工复核</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从创建 scan 到 post-processing 的关键流</h2>
+      <p>关键流里有两个容易被忽视的边界：scan 何时从 running 进入 post_processing，以及用户复核如何在轮询中保持最新写入。前者由 engine 的 job 完成情况驱动，后者由 <code>frontend/src/pages/ScanDetail.jsx:137</code>、<code>frontend/src/pages/ScanDetail.jsx:145</code>、<code>frontend/src/pages/ScanDetail.jsx:150</code> 到 <code>frontend/src/pages/ScanDetail.jsx:160</code> 的 mutation queue 覆盖处理。</p>
+
+      <h3><span class="arr">▸</span>扫描生命周期状态机</h3>
+      <div class="flow">queued/pending
+  -> prewarming_cache
+  -> running
+  -> post_processing
+  -> completed
+     | paused/stopped/failed
+rate_limited -> scheduled retry -> pending</div>
+
+      <h3><span class="arr">▸</span>复核与后处理流水线</h3>
+      <div class="flow">raw vulnerabilities
+  -> semantic dedupe batches
+  -> bounty ranker batches
+  -> post-script enrichments
+  -> API serialize
+  -> ScanDetail optimistic review</div>
+
+      <a class="deep-link" href="open-kritt/open-kritt-engine-flow.html">深度阅读 · 执行链逐行展开</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">哪些测试在守住工作流边界</h2>
+      <p>测试覆盖能看出作者关注的是边界条件，而不是只测 happy path。<code>backend/test/validation.test.js:46</code> 统一 generation 与 scan 的模型选择规范，<code>backend/test/validation.test.js:125</code> 拒绝非字符串 CLI 参数，<code>frontend/src/pages/WorkflowBuilder.test.js:78</code> 和 <code>frontend/src/pages/WorkflowBuilder.test.js:155</code> 专门测 batch depth 引用重编号。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>这些测试覆盖模型选择、workflow output schema、批处理变量迁移和 scan presentation，能防止 Agent workflow 编辑器生成看似可保存、实际运行时变量错位的配置。<code>frontend/src/pages/WorkflowBuilder.jsx:64</code> 与 <code>frontend/src/pages/WorkflowBuilder.jsx:78</code> 对应插入深度时的变量迁移，<code>frontend/src/pages/WorkflowBuilder.jsx:117</code> 对应删除步骤时的迁移。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/validation.test.js</span> · L46-123</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">46</span>test(&#x27;generation and scan model selections share normalization rules&#x27;, () =&gt; {
+<span class="ln">47</span>  const selection = validateModelSelection({
+<span class="ln">48</span>    model: &#x27; gpt-5.6 &#x27;,
+<span class="ln">49</span>    model_provider: &#x27;CODEX&#x27;,
+<span class="ln">50</span>    harness: &#x27;codex-cli&#x27;,
+<span class="ln">51</span>    thinking_effort: &#x27;high&#x27;,
+<span class="ln">52</span>  });
+<span class="ln">53</span>  assert.deepEqual(selection, {
+<span class="ln">54</span>    model: &#x27;gpt-5.6&#x27;,
+<span class="ln">55</span>    modelProvider: &#x27;codex&#x27;,
+<span class="ln">56</span>    harness: &#x27;codex&#x27;,
+<span class="ln">57</span>    thinkingEffort: &#x27;high&#x27;,
+<span class="ln">58</span>  });
+<span class="ln">59</span>  assert.deepEqual(
+<span class="ln">60</span>    validateGeneration({
+<span class="ln">61</span>      kind: &#x27;post_script&#x27;,
+<span class="ln">62</span>      request: &#x27;  Generate a triage summary. &#x27;,
+<span class="ln">63</span>      model: &#x27;gpt-5.6&#x27;,
+<span class="ln">64</span>      model_provider: &#x27;codex&#x27;,
+<span class="ln">65</span>      harness: &#x27;codex&#x27;,
+<span class="ln">66</span>      thinking_effort: &#x27;high&#x27;,
+<span class="ln">67</span>    }),
+<span class="ln">68</span>    {
+<span class="ln">69</span>      kind: &#x27;post_script&#x27;,
+<span class="ln">70</span>      request: &#x27;Generate a triage summary.&#x27;,
+<span class="ln">71</span>      ...selection,
+<span class="ln">72</span>    }
+<span class="ln">73</span>  );
+<span class="ln">74</span>
+<span class="ln">75</span>  assert.throws(
+<span class="ln">76</span>    () =&gt; validateGeneration({ kind: &#x27;unknown&#x27;, request: &#x27;&#x27;, model: &#x27;&#x27;, harness: &#x27;&#x27; }),
+<span class="ln">77</span>    (error) =&gt;
+<span class="ln">78</span>      error instanceof ValidationError &amp;&amp;
+<span class="ln">79</span>      [&#x27;kind&#x27;, &#x27;request&#x27;, &#x27;model&#x27;, &#x27;harness&#x27;].every((field) =&gt; error.errors.some((item) =&gt; item.field === field))
+<span class="ln">80</span>  );
+<span class="ln">81</span>
+<span class="ln">82</span>  assert.throws(
+<span class="ln">83</span>    () =&gt;
+<span class="ln">84</span>      validateGeneration({
+<span class="ln">85</span>        kind: &#x27;workflow&#x27;,
+<span class="ln">86</span>        request: &#x27;x&#x27;.repeat(20_001),
+<span class="ln">87</span>        model: &#x27;gpt-5.6&#x27;,
+<span class="ln">88</span>        model_provider: &#x27;codex&#x27;,
+<span class="ln">89</span>        harness: &#x27;codex&#x27;,
+<span class="ln">90</span>      }),
+<span class="ln">91</span>    (error) =&gt;
+<span class="ln">92</span>      error instanceof ValidationError &amp;&amp;
+<span class="ln">93</span>      error.errors.some((item) =&gt; item.field === &#x27;request&#x27; &amp;&amp; item.message.includes(&#x27;20,000&#x27;))
+<span class="ln">94</span>  );
+<span class="ln">95</span>});
+<span class="ln">96</span>
+<span class="ln">97</span>test(&#x27;model selection accepts the provider effort union&#x27;, () =&gt; {
+<span class="ln">98</span>  for (const thinkingEffort of [&#x27;default&#x27;, &#x27;low&#x27;, &#x27;medium&#x27;, &#x27;high&#x27;, &#x27;xhigh&#x27;, &#x27;max&#x27;, &#x27;ultra&#x27;]) {
+<span class="ln">99</span>    assert.equal(
+<span class="ln">100</span>      validateModelSelection({
+<span class="ln">101</span>        model: &#x27;custom-model&#x27;,
+<span class="ln">102</span>        model_provider: &#x27;codex&#x27;,
+<span class="ln">103</span>        harness: &#x27;codex&#x27;,
+<span class="ln">104</span>        thinking_effort: thinkingEffort,
+<span class="ln">105</span>      }).thinkingEffort,
+<span class="ln">106</span>      thinkingEffort
+<span class="ln">107</span>    );
+<span class="ln">108</span>  }
+<span class="ln">109</span>  assert.throws(
+<span class="ln">110</span>    () =&gt;
+<span class="ln">111</span>      validateModelSelection({
+<span class="ln">112</span>        model: &#x27;claude-fable-5&#x27;,
+<span class="ln">113</span>        model_provider: &#x27;claude&#x27;,
+<span class="ln">114</span>        harness: &#x27;claude-code&#x27;,
+<span class="ln">115</span>        thinking_effort: &#x27;ultra&#x27;,
+<span class="ln">116</span>      }),
+<span class="ln">117</span>    (error) =&gt;
+<span class="ln">118</span>      error instanceof ValidationError &amp;&amp;
+<span class="ln">119</span>      error.errors.some(
+<span class="ln">120</span>        (item) =&gt; item.field === &#x27;thinking_effort&#x27; &amp;&amp; item.message.includes(&#x27;not supported by harness &quot;claude-code&quot;&#x27;)
+<span class="ln">121</span>      )
+<span class="ln">122</span>  );
+<span class="ln">123</span>});</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>并发 scan：<code>backend/src/routes/scans.js:300</code> 根据 active scan 数决定立即启动或要求用户选择 queue。</li><li>配置漂移：<code>backend/src/routes/scans.js:103</code> 在事务内锁住 workflow/post-script/agent skill，降低扫描中途配置被改的风险。</li><li>快速复核点击：<code>frontend/src/pages/ScanDetail.jsx:145</code> 按 vulnerability id 入队，后台轮询不会直接覆盖 pending overlay。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">真正值得借鉴的工程亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">事务化 scan 创建</div><div class="card-d"><p>scan 创建从 <code>backend/src/routes/scans.js:296</code> 开始，到 <code>backend/src/routes/scans.js:356</code> 进入事务，再通过 <code>backend/src/routes/scans.js:397</code>、<code>backend/src/routes/scans.js:405</code>、<code>backend/src/routes/scans.js:430</code> 串起配置锁、extra 校验和落库。这段设计的重点是把不可变运行配置一次性固化。</p></div></div><div class="card"><div class="card-h">可观察复核 UI</div><div class="card-d"><p>前端在 <code>frontend/src/pages/ScanDetail.jsx:66</code> 与 <code>frontend/src/pages/ScanDetail.jsx:74</code> 双轮询 scan 和 findings，<code>frontend/src/pages/ScanDetail.jsx:101</code> 分页，<code>frontend/src/lib/scanPresentation.js:29</code> 提炼 post-script 摘要，让长时扫描有即时反馈。</p></div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">src/frontend/src/lib/scanPresentation.js</span> · L18-46</span><span>JavaScript</span></div><pre class="code"><span class="ln">18</span>function resultSources(vulnerability) {
+<span class="ln">19</span>  const sources = [];
+<span class="ln">20</span>  const primary = vulnerability?.postScriptAnswer;
+<span class="ln">21</span>  if (primary &amp;&amp; typeof primary === &#x27;object&#x27; &amp;&amp; Object.keys(primary).length) sources.push(primary);
+<span class="ln">22</span>  for (const enrichment of vulnerability?.enrichments || []) {
+<span class="ln">23</span>    const result = enrichment?.result;
+<span class="ln">24</span>    if (result &amp;&amp; typeof result === &#x27;object&#x27; &amp;&amp; Object.keys(result).length) sources.push(result);
+<span class="ln">25</span>  }
+<span class="ln">26</span>  return sources;
+<span class="ln">27</span>}
+<span class="ln">28</span>
+<span class="ln">29</span>export function postOutputSummary(vulnerability) {
+<span class="ln">30</span>  const sources = resultSources(vulnerability);
+<span class="ln">31</span>  const preferred = [&#x27;severity&#x27;, &#x27;ease_of_exploitability&#x27;, &#x27;patched&#x27;, &#x27;resource_exhaustion&#x27;];
+<span class="ln">32</span>  for (const key of preferred) {
+<span class="ln">33</span>    for (const result of sources) {
+<span class="ln">34</span>      const value = result[key];
+<span class="ln">35</span>      if ([&#x27;string&#x27;, &#x27;number&#x27;, &#x27;boolean&#x27;].includes(typeof value)) return { label: key, value: String(value) };
+<span class="ln">36</span>    }
+<span class="ln">37</span>  }
+<span class="ln">38</span>  for (const result of sources) {
+<span class="ln">39</span>    for (const [key, value] of Object.entries(result)) {
+<span class="ln">40</span>      if (key.startsWith(&#x27;_reserved_&#x27;) || key.startsWith(&#x27;_chip_&#x27;)) continue;
+<span class="ln">41</span>      if ([&#x27;string&#x27;, &#x27;number&#x27;, &#x27;boolean&#x27;].includes(typeof value)) return { label: key, value: String(value) };
+<span class="ln">42</span>    }
+<span class="ln">43</span>  }
+<span class="ln">44</span>  return sources.length
+<span class="ln">45</span>    ? { label: &#x27;post-script&#x27;, value: `${sources.length} output${sources.length === 1 ? &#x27;&#x27; : &#x27;s&#x27;}` }
+<span class="ln">46</span>    : null;</pre></div><p>这段展示层逻辑把 post-script 和 enrichment 输出合并成单个摘要，<code>frontend/src/lib/scanPresentation.js:18</code> 收集来源，<code>frontend/src/lib/scanPresentation.js:31</code> 优先 severity/ease/patched 等字段，<code>frontend/src/lib/scanPresentation.js:39</code> 再回退到任意可显示字段。对安全扫描平台来说，这是把模型附加判断变成可扫读 UI 的关键小抽象。</p></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>open-kritt 的风险主要来自三处：模型 harness 是外部进程，workspace 会复制用户仓库，post-processing 又会继续调用模型做去重和排序。<code>backend/src/routes/vulnerabilities.js:34</code> 的人工复核接口很克制，但 engine 的运行成本、凭据隔离和错误恢复仍是上线时要重点压测的部分。</p>
+      <div class="g2"><div class="card"><div class="card-h">凭据与 workspace 隔离成本</div><div class="card-d"><p>workspace 准备会创建 job home、复制凭据、设置 HOME/CODEX_HOME/CLAUDE_HOME。虽然 <code>backend/src/routes/scans.js:423</code> 记录 dependenciesDetail，<code>frontend/src/pages/ScanDetail.jsx:253</code> 展示 commit，但真正的安全边界在 engine 侧，需要部署者认真配置容器和 token 权限。</p></div></div><div class="card"><div class="card-h">后处理仍会消耗模型额度</div><div class="card-d"><p>post-processing 不是免费整理，它会继续做 dedupe、ranker、post-script。前端 <code>frontend/src/pages/ScanDetail.jsx:206</code> 展示 rate limit，<code>frontend/src/pages/ScanDetail.jsx:1176</code> 标记 rate_limited，但团队仍需要设置 worker cap 和重试策略。</p></div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">src/frontend/src/pages/WorkflowBuilder.jsx</span> · L64-107</span><span>JavaScript</span></div><pre class="code"><span class="ln">64</span>function shiftBatchDepthReferences(content, depthMap) {
+<span class="ln">65</span>  if (typeof content !== &#x27;string&#x27; || depthMap.size === 0) return content;
+<span class="ln">66</span>  return content.replace(BATCH_DEPTH_REFERENCE, (reference, opening, rawDepth, closing) =&gt; {
+<span class="ln">67</span>    const nextDepth = depthMap.get(Number(rawDepth));
+<span class="ln">68</span>    return nextDepth === undefined ? reference : `${opening}${multiOutputDepthKey(nextDepth)}${closing}`;
+<span class="ln">69</span>  });
+<span class="ln">70</span>}
+<span class="ln">71</span>
+<span class="ln">72</span>/**
+<span class="ln">73</span> * Insert a blank workflow level immediately before an existing depth. Existing
+<span class="ln">74</span> * levels at and below that point move down together. Batch variables contain
+<span class="ln">75</span> * their source depth in the key, so valid references to moved batch boundaries
+<span class="ln">76</span> * are renumbered at the same time.
+<span class="ln">77</span> */
+<span class="ln">78</span>export function insertWorkflowDepthBefore(builder, depth, newStepId) {
+<span class="ln">79</span>  if (!builder || !Array.isArray(builder.levels)) throw new TypeError(&#x27;A workflow builder is required.&#x27;);
+<span class="ln">80</span>  if (!Number.isInteger(depth) || !builder.levels.some((level) =&gt; level.depth === depth)) {
+<span class="ln">81</span>    throw new RangeError(&#x27;Choose an existing workflow depth.&#x27;);
+<span class="ln">82</span>  }
+<span class="ln">83</span>  if (!newStepId) throw new TypeError(&#x27;A new step id is required.&#x27;);
+<span class="ln">84</span>
+<span class="ln">85</span>  const next = JSON.parse(JSON.stringify(builder));
+<span class="ln">86</span>  const batchDepthMap = new Map(
+<span class="ln">87</span>    next.levels
+<span class="ln">88</span>      .filter((level) =&gt; level.depth &gt; 0 &amp;&amp; level.consumesAll &amp;&amp; level.depth &gt;= depth)
+<span class="ln">89</span>      .map((level) =&gt; [level.depth - 1, level.depth])
+<span class="ln">90</span>  );
+<span class="ln">91</span>
+<span class="ln">92</span>  next.levels.forEach((level) =&gt; {
+<span class="ln">93</span>    level.steps.forEach((step) =&gt; {
+<span class="ln">94</span>      step.content = shiftBatchDepthReferences(step.content, batchDepthMap);
+<span class="ln">95</span>    });
+<span class="ln">96</span>    if (level.depth &gt;= depth) level.depth += 1;
+<span class="ln">97</span>  });
+<span class="ln">98</span>  next.levels.push({
+<span class="ln">99</span>    depth,
+<span class="ln">100</span>    multiOutput: true,
+<span class="ln">101</span>    consumesAll: false,
+<span class="ln">102</span>    schema: [],
+<span class="ln">103</span>    steps: [{ id: newStepId, name: &#x27;New step&#x27;, content: &#x27;&#x27; }],
+<span class="ln">104</span>  });
+<span class="ln">105</span>  next.levels.sort((left, right) =&gt; left.depth - right.depth);
+<span class="ln">106</span>  next.selStepId = newStepId;
+<span class="ln">107</span>  return next;</pre></div><p>WorkflowBuilder 的批处理变量迁移说明作者知道 workflow 是可编辑图，而不是静态 prompt。<code>frontend/src/pages/WorkflowBuilder.jsx:64</code> 只在 depth map 存在时替换，<code>frontend/src/pages/WorkflowBuilder.jsx:78</code> 插入新层，<code>frontend/src/pages/WorkflowBuilder.jsx:92</code> 遍历每个 step 内容，<code>frontend/src/pages/WorkflowBuilder.jsx:98</code> 再插入新 step；这个路径仍需要更多端到端测试覆盖真实复杂 workflow。</p></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    
+<section class="sec" id="evidence-extra"><div class="sec-no">§ <b>07</b> · EVIDENCE</div><h2 class="sec-title">源码证据，<em>串起来</em>看</h2>
+<h3><span class="arr">▸</span>API 到 UI 的证据链</h3>
+<p>从接口到界面是一条连续链：<code>backend/src/routes/scans.js:204</code> 列表 API 提供 runningCount，<code>backend/src/routes/scans.js:243</code> 读取单个 scan，<code>backend/src/routes/scans.js:254</code> 拉取 ranked findings，<code>frontend/src/pages/ScanDetail.jsx:66</code> 和 <code>frontend/src/pages/ScanDetail.jsx:74</code> 持续轮询，<code>frontend/src/pages/ScanDetail.jsx:101</code> 做 findings 分页，<code>frontend/src/pages/ScanDetail.jsx:121</code> 负责删除确认。它说明 open-kritt 把长任务的进度、结果和人工复核都放在同一个可观察页面。</p>
+<p>运行设置也不是前端随便拼 JSON：<code>frontend/src/pages/ScanDetail.jsx:1070</code> 生成 draft，<code>frontend/src/pages/ScanDetail.jsx:1086</code> 合并 patch，<code>frontend/src/pages/ScanDetail.jsx:1103</code> 只提交变化字段，后端 <code>backend/src/routes/scans.js:120</code> 重新验证运行时设置，<code>backend/src/routes/scans.js:143</code> 上锁后 patch scan。这个设计让用户能修改模型和 harness，但不会绕过服务端可用性检查。</p>
+<p>人工复核的最小写接口也很清晰：<code>backend/src/routes/vulnerabilities.js:34</code> 接收 PATCH，<code>backend/src/routes/vulnerabilities.js:42</code> 校验 interesting 只能是 1、0 或 null，<code>backend/src/routes/vulnerabilities.js:51</code> 处理 comments，<code>backend/src/routes/vulnerabilities.js:58</code> 只返回被允许的字段。前端 <code>frontend/src/pages/ScanDetail.jsx:139</code> 到 <code>frontend/src/pages/ScanDetail.jsx:160</code> 负责乐观更新和失败回滚。</p>
+<div class="code-wrap"><div class="code-bar"><span><span class="src">src/backend/src/routes/vulnerabilities.js</span> · L32-68</span><span>JavaScript</span></div><pre class="code"><span class="ln">32</span>// PATCH /api/vulnerabilities/:id — user review: interesting flag and/or comments.
+<span class="ln">33</span>// interesting: 1 (interesting), 0 (not interesting), or null (unmarked).
+<span class="ln">34</span>router.patch(&#x27;/:id&#x27;, async (req, res, next) =&gt; {
+<span class="ln">35</span>  try {
+<span class="ln">36</span>    const id = BigInt(req.params.id);
+<span class="ln">37</span>    const existing = await prisma.vulnerability.findUnique({ where: { id }, select: { id: true } });
+<span class="ln">38</span>    if (!existing) return res.status(404).json({ error: &#x27;Vulnerability not found.&#x27; });
+<span class="ln">39</span>
+<span class="ln">40</span>    const body = req.body || {};
+<span class="ln">41</span>    const data = {};
+<span class="ln">42</span>    if (&#x27;interesting&#x27; in body) {
+<span class="ln">43</span>      const val = body.interesting;
+<span class="ln">44</span>      if (val === null) data.interesting = null;
+<span class="ln">45</span>      else if (val === 0 || val === 1 || val === &#x27;0&#x27; || val === &#x27;1&#x27;) data.interesting = BigInt(Number(val));
+<span class="ln">46</span>      else
+<span class="ln">47</span>        return res
+<span class="ln">48</span>          .status(422)
+<span class="ln">49</span>          .json({ errors: [{ field: &#x27;interesting&#x27;, message: &#x27;interesting must be 0, 1, or null.&#x27; }] });
+<span class="ln">50</span>    }
+<span class="ln">51</span>    if (&#x27;comments&#x27; in body) {
+<span class="ln">52</span>      data.comments = body.comments === null || body.comments === &#x27;&#x27; ? null : String(body.comments);
+<span class="ln">53</span>    }
+<span class="ln">54</span>    if (Object.keys(data).length === 0) {
+<span class="ln">55</span>      return res.status(422).json({ errors: [{ field: &#x27;body&#x27;, message: &#x27;Provide interesting and/or comments.&#x27; }] });
+<span class="ln">56</span>    }
+<span class="ln">57</span>
+<span class="ln">58</span>    const updated = await prisma.vulnerability.update({
+<span class="ln">59</span>      where: { id },
+<span class="ln">60</span>      data,
+<span class="ln">61</span>      select: { id: true, interesting: true, comments: true },
+<span class="ln">62</span>    });
+<span class="ln">63</span>    res.json({
+<span class="ln">64</span>      id: updated.id.toString(),
+<span class="ln">65</span>      interesting:
+<span class="ln">66</span>        updated.interesting === null || updated.interesting === undefined ? null : Number(updated.interesting),
+<span class="ln">67</span>      comments: updated.comments ?? null,
+<span class="ln">68</span>    });</pre></div>
+<h3><span class="arr">▸</span>工作流编辑器的变量安全</h3>
+<p>workflow 编辑器要守住 batch depth 变量，否则模型输入会在深层 workflow 中错位。实现里 <code>frontend/src/pages/WorkflowBuilder.jsx:62</code> 定义 batch 引用正则，<code>frontend/src/pages/WorkflowBuilder.jsx:64</code> 迁移引用，<code>frontend/src/pages/WorkflowBuilder.jsx:117</code> 删除 step，<code>frontend/src/pages/WorkflowBuilder.jsx:131</code> 判断是否删除整层，<code>frontend/src/pages/WorkflowBuilder.jsx:132</code> 到 <code>frontend/src/pages/WorkflowBuilder.jsx:139</code> 重建 depth map。对应测试 <code>frontend/src/pages/WorkflowBuilder.test.js:78</code> 和 <code>frontend/src/pages/WorkflowBuilder.test.js:155</code> 覆盖插入和删除两条路径。</p>
+<p>这些证据也暴露一个限制：<code>backend/test/validation.test.js:173</code> 验证 terminal vulnerability 字段，<code>backend/test/validation.test.js:177</code> 枚举非法类型，<code>backend/test/validation.test.js:46</code> 确认 generation 与 scan 共享模型选择规范；但 engine 级别的真实 harness 失败、workspace 权限和 post-processing retry 更依赖集成测试。</p>
+</section>
+    <div class="foot">
+      <span>Generated · 2026-07-22</span>
+      <span>Source · <a href="https://github.com/Kritt-ai/open-kritt">Kritt-ai/open-kritt</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../open-kritt.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

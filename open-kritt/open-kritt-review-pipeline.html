@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>后处理与人工复核流水线 · 深度解析 · open-kritt</title>
+<meta name="description" content="open-kritt review-pipeline 子模块完整解析 — Kritt-ai/open-kritt 源码级深度解析：扫描队列、模型 harness、post-processing 和人工复核界面如何组成漏洞发现平台。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #ff6b7a;
+  --star-soft:  #ff9ca8;
+  --star-deep:  #d94d5d;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">open-kritt<b>Kritt</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open-kritt<b>Kritt</b></div>
+      <div class="sub">review-pipeline · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python / JavaScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../open-kritt.html">← 返回 open-kritt 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">后处理与人工复核流水线 <em>深度解析</em></h1>
+      <p class="hero-desc">从 semantic dedupe、bounty ranker 到 post-script enrichment，open-kritt 把模型输出转成可排序、可评论、可回查的漏洞清单。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>这页专看漏洞结果如何从模型输出进入可复核列表。API 的 <code>backend/src/routes/scans.js:254</code> 拉取 scan vulnerabilities，单条复核由 <code>backend/src/routes/vulnerabilities.js:34</code> 处理，前端摘要由 <code>frontend/src/lib/scanPresentation.js:29</code> 生成，快速点击则通过 <code>frontend/src/pages/ScanDetail.jsx:145</code> 的 mutation queue 串行化。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/post_processing.py</span> · L486-579</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">486</span>    def _run_harness_with_retries(
+<span class="ln">487</span>        self,
+<span class="ln">488</span>        *,
+<span class="ln">489</span>        metadata_id: int,
+<span class="ln">490</span>        scan: dict[str, Any],
+<span class="ln">491</span>        harness,
+<span class="ln">492</span>        prompt: str,
+<span class="ln">493</span>        schema: dict[str, Any],
+<span class="ln">494</span>        validator,
+<span class="ln">495</span>        prompt_template: str | None = None,
+<span class="ln">496</span>        prompt_context: dict[str, Any] | None = None,
+<span class="ln">497</span>        multi_output: bool = False,
+<span class="ln">498</span>        kind: str = &quot;post_process&quot;,
+<span class="ln">499</span>    ) -&gt; tuple[dict[str, Any], dict[str, Any] | None, str | None, str]:
+<span class="ln">500</span>        prepared = None
+<span class="ln">501</span>        try:
+<span class="ln">502</span>            agent_skills = self._agent_skills(scan)
+<span class="ln">503</span>            prepared = self._prepare_workspace(metadata_id, scan, agent_skills=agent_skills)
+<span class="ln">504</span>            checked_out_commit = prepared.checked_out_commit
+<span class="ln">505</span>            if prompt_template is not None:
+<span class="ln">506</span>                context = {**(prompt_context or {}), **workspace_context(prepared)}
+<span class="ln">507</span>                if &quot;{{patched_since_history}}&quot; in prompt_template:
+<span class="ln">508</span>                    context[&quot;patched_since_history&quot;] = patched_since_workspace_history_context(
+<span class="ln">509</span>                        prepared.repo_dir,
+<span class="ln">510</span>                        prepared.manifest,
+<span class="ln">511</span>                        scan,
+<span class="ln">512</span>                        context.get(&quot;file_path&quot;),
+<span class="ln">513</span>                    )
+<span class="ln">514</span>                rendered = render_prompt(prompt_template, context)
+<span class="ln">515</span>                prompt_body = harness_prompt(rendered, multi_output=multi_output, schema=schema)
+<span class="ln">516</span>            else:
+<span class="ln">517</span>                prompt_body = append_schema_prompt(prompt, schema)
+<span class="ln">518</span>            prompt_parts = [
+<span class="ln">519</span>                native_agent_skills_prompt(agent_skills, normalize_harness_name(scan[&quot;harness&quot;])),
+<span class="ln">520</span>                workspace_prompt_context(prepared.layout, prepared.manifest_json),
+<span class="ln">521</span>                prompt_body,
+<span class="ln">522</span>            ]
+<span class="ln">523</span>            final_prompt = &quot;\n\n&quot;.join(part for part in prompt_parts if part)
+<span class="ln">524</span>            thinking_effort = scan.get(&quot;thinking_effort&quot;) or &quot;medium&quot;
+<span class="ln">525</span>            with self.db.connect() as conn:
+<span class="ln">526</span>                self.db.update_post_process_metadata(
+<span class="ln">527</span>                    conn,
+<span class="ln">528</span>                    metadata_id,
+<span class="ln">529</span>                    status=&quot;running&quot;,
+<span class="ln">530</span>                    error=None,
+<span class="ln">531</span>                    run_time_ms=0,
+<span class="ln">532</span>                    raw_token_usage=None,
+<span class="ln">533</span>                    checked_out_commit=checked_out_commit,
+<span class="ln">534</span>                    prompt_filled=final_prompt,
+<span class="ln">535</span>                    phase=&quot;running_harness&quot;,
+<span class="ln">536</span>                    codex_source_home=getattr(prepared.workspace, &quot;codex_source_home&quot;, None),
+<span class="ln">537</span>                    codex_account_id=getattr(prepared.workspace, &quot;codex_account_id&quot;, None),
+<span class="ln">538</span>                    codex_account_email=getattr(prepared.workspace, &quot;codex_account_email&quot;, None),
+<span class="ln">539</span>                )
+<span class="ln">540</span>                conn.commit()
+<span class="ln">541</span>
+<span class="ln">542</span>            last_error = None
+<span class="ln">543</span>            last_exception: Exception | None = None
+<span class="ln">544</span>            attempt_errors: list[str] = []
+<span class="ln">545</span>            for attempt in range(1, self._retry_count() + 2):
+<span class="ln">546</span>                started = now_utc()
+<span class="ln">547</span>                usage = None
+<span class="ln">548</span>                codex_session_id = None
+<span class="ln">549</span>                result = None
+<span class="ln">550</span>                try:
+<span class="ln">551</span>                    result = harness.run(
+<span class="ln">552</span>                        prompt=final_prompt,
+<span class="ln">553</span>                        schema=schema,
+<span class="ln">554</span>                        repo_dir=prepared.repo_dir,
+<span class="ln">555</span>                        model=scan[&quot;model&quot;],
+<span class="ln">556</span>                        thinking_effort=thinking_effort,
+<span class="ln">557</span>                        env=prepared.workspace.env,
+<span class="ln">558</span>                    )
+<span class="ln">559</span>                    mark_provider_account_available(
+<span class="ln">560</span>                        getattr(prepared.workspace, &quot;provider_account_provider&quot;, None),
+<span class="ln">561</span>                        getattr(prepared.workspace, &quot;provider_account_home&quot;, None),
+<span class="ln">562</span>                    )
+<span class="ln">563</span>                    usage = result.usage
+<span class="ln">564</span>                    codex_session_id = result.codex_session_id
+<span class="ln">565</span>                    validator(result.payload)
+<span class="ln">566</span>                    run_time_ms = int((now_utc() - started).total_seconds() * 1000)
+<span class="ln">567</span>                    with self.db.connect() as conn:
+<span class="ln">568</span>                        self.db.update_post_process_metadata(
+<span class="ln">569</span>                            conn,
+<span class="ln">570</span>                            metadata_id,
+<span class="ln">571</span>                            status=&quot;running&quot;,
+<span class="ln">572</span>                            error=None,
+<span class="ln">573</span>                            run_time_ms=run_time_ms,
+<span class="ln">574</span>                            raw_token_usage=usage,
+<span class="ln">575</span>                            codex_session_id=codex_session_id,
+<span class="ln">576</span>                            phase=&quot;writing_db&quot;,
+<span class="ln">577</span>                        )
+<span class="ln">578</span>                        conn.commit()
+<span class="ln">579</span>                    return result.payload, usage, codex_session_id, checked_out_commit</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>post-processing 三段式</h3>
+      <p>post-processing 先 dedupe，再 rank，再执行 post-script 或完成 scan。它依赖 <code>backend/src/routes/scans.js:254</code> 输出的 ranked findings，也依赖 <code>frontend/src/lib/scanPresentation.js:18</code> 合并 enrichment 来源，最终让用户看到的是去重后的 canonical finding。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/engine/open_kritt_engine/post_processing.py</span> · L433-452</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">433</span>    def process_once(self, scan: dict[str, Any], harness) -&gt; bool:
+<span class="ln">434</span>        scan_id = _int(scan[&quot;id&quot;])
+<span class="ln">435</span>        with self.db.connect() as conn:
+<span class="ln">436</span>            current = self.db.load_scan(conn, scan_id)
+<span class="ln">437</span>            if not current or current[&quot;status&quot;] in {&quot;paused&quot;, &quot;stopped&quot;, &quot;failed&quot;, &quot;completed&quot;}:
+<span class="ln">438</span>                return False
+<span class="ln">439</span>            vulnerabilities = self.db.load_vulnerabilities(conn, scan_id)
+<span class="ln">440</span>            if not vulnerabilities:
+<span class="ln">441</span>                self.db.set_scan_status_if_current(conn, scan_id, &quot;post_processing&quot;, &quot;completed&quot;)
+<span class="ln">442</span>                conn.commit()
+<span class="ln">443</span>                return True
+<span class="ln">444</span>            conn.commit()
+<span class="ln">445</span>
+<span class="ln">446</span>        if any(row.get(&quot;dedupe_is_canonical&quot;) is None for row in vulnerabilities):
+<span class="ln">447</span>            return self._run_next_dedupe_batch(scan, harness)
+<span class="ln">448</span>
+<span class="ln">449</span>        if any(row.get(&quot;dedupe_is_canonical&quot;) is True and row.get(&quot;bounty_rank&quot;) is None for row in vulnerabilities):
+<span class="ln">450</span>            return self._run_next_ranker_batch(scan, harness)
+<span class="ln">451</span>
+<span class="ln">452</span>        return self._run_next_post_script_or_complete(scan, harness)</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>复核写入的窄接口</h3>
+      <p>人工复核只允许 interesting 和 comments 两类字段。<code>frontend/src/pages/ScanDetail.jsx:139</code> 把 patch 入队，<code>backend/src/routes/vulnerabilities.js:42</code> 验证 interesting，<code>backend/src/routes/vulnerabilities.js:58</code> 更新后只返回最小字段集。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/backend/src/routes/vulnerabilities.js</span> · L32-68</span><span>Python / JavaScript</span></div>
+        <pre class="code"><span class="ln">32</span>// PATCH /api/vulnerabilities/:id — user review: interesting flag and/or comments.
+<span class="ln">33</span>// interesting: 1 (interesting), 0 (not interesting), or null (unmarked).
+<span class="ln">34</span>router.patch(&#x27;/:id&#x27;, async (req, res, next) =&gt; {
+<span class="ln">35</span>  try {
+<span class="ln">36</span>    const id = BigInt(req.params.id);
+<span class="ln">37</span>    const existing = await prisma.vulnerability.findUnique({ where: { id }, select: { id: true } });
+<span class="ln">38</span>    if (!existing) return res.status(404).json({ error: &#x27;Vulnerability not found.&#x27; });
+<span class="ln">39</span>
+<span class="ln">40</span>    const body = req.body || {};
+<span class="ln">41</span>    const data = {};
+<span class="ln">42</span>    if (&#x27;interesting&#x27; in body) {
+<span class="ln">43</span>      const val = body.interesting;
+<span class="ln">44</span>      if (val === null) data.interesting = null;
+<span class="ln">45</span>      else if (val === 0 || val === 1 || val === &#x27;0&#x27; || val === &#x27;1&#x27;) data.interesting = BigInt(Number(val));
+<span class="ln">46</span>      else
+<span class="ln">47</span>        return res
+<span class="ln">48</span>          .status(422)
+<span class="ln">49</span>          .json({ errors: [{ field: &#x27;interesting&#x27;, message: &#x27;interesting must be 0, 1, or null.&#x27; }] });
+<span class="ln">50</span>    }
+<span class="ln">51</span>    if (&#x27;comments&#x27; in body) {
+<span class="ln">52</span>      data.comments = body.comments === null || body.comments === &#x27;&#x27; ? null : String(body.comments);
+<span class="ln">53</span>    }
+<span class="ln">54</span>    if (Object.keys(data).length === 0) {
+<span class="ln">55</span>      return res.status(422).json({ errors: [{ field: &#x27;body&#x27;, message: &#x27;Provide interesting and/or comments.&#x27; }] });
+<span class="ln">56</span>    }
+<span class="ln">57</span>
+<span class="ln">58</span>    const updated = await prisma.vulnerability.update({
+<span class="ln">59</span>      where: { id },
+<span class="ln">60</span>      data,
+<span class="ln">61</span>      select: { id: true, interesting: true, comments: true },
+<span class="ln">62</span>    });
+<span class="ln">63</span>    res.json({
+<span class="ln">64</span>      id: updated.id.toString(),
+<span class="ln">65</span>      interesting:
+<span class="ln">66</span>        updated.interesting === null || updated.interesting === undefined ? null : Number(updated.interesting),
+<span class="ln">67</span>      comments: updated.comments ?? null,
+<span class="ln">68</span>    });</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">raw findings -> dedupe_batch -> ranker_batch -> post-script enrichments -> serialize -> ScanDetail optimistic review</div>
+      <p>这条链路的关键不是多一次模型调用，而是把模型输出变成可复核对象。<code>backend/src/routes/vulnerabilities.js:8</code> 读取单条 finding 与 duplicates，<code>backend/src/routes/vulnerabilities.js:21</code> serialize 输出，<code>frontend/src/lib/scanPresentation.js:39</code> 提供摘要回退，<code>frontend/src/pages/ScanDetail.jsx:163</code> 让 interesting 在 null/1/0 间循环。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>frontend/src/lib/scanPresentation.js:31</code> 优先显示 severity/ease/patched 等安全语义字段，避免 UI 随机取值。</li><li><code>backend/src/routes/vulnerabilities.js:54</code> 拒绝空 PATCH，减少无意义审计日志。</li><li><code>frontend/src/pages/ScanDetail.jsx:156</code> 失败时 reload findings，避免乐观更新长时间污染界面。</li></ul>
+    </section>
+
+    <h3><span class="arr">▸</span>复核证据补充</h3><p>复核页的端到端证据是：<code>backend/src/routes/scans.js:254</code> 返回 scan findings，<code>backend/src/routes/vulnerabilities.js:8</code> 返回单条 finding 与 duplicates，<code>frontend/src/lib/scanPresentation.js:31</code> 选择摘要字段，<code>frontend/src/pages/ScanDetail.jsx:139</code> 发起乐观更新，<code>frontend/src/pages/ScanDetail.jsx:156</code> 在失败时回滚重载。这个路径让模型后处理结果保持可人工校正。</p>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">摘要选择</div><div class="card-d"><code>frontend/src/lib/scanPresentation.js:29</code> 说明结果摘要按安全字段优先级选择。</div></div><div class="card"><div class="card-h">乐观复核</div><div class="card-d"><code>frontend/src/pages/ScanDetail.jsx:137</code> 到 <code>frontend/src/pages/ScanDetail.jsx:160</code> 是复核点击的并发控制。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-22</span>
+      <span>Source · <a href="https://github.com/Kritt-ai/open-kritt">Kritt-ai/open-kritt</a></span>
+      <span><a href="../open-kritt.html">↑ open-kritt 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
