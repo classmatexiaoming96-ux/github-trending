@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MCP 与浏览器桥 · 深度解析 · pireel</title>
+<meta name="description" content="pireel MCP Bridge 子模块完整解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#6ee7b7; --star-soft:#a7f3d0; --star-deep:#10b981; }
+.flow{font-family:var(--mono);white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;color:var(--text-2);line-height:1.7}
+.note{border:1px solid var(--line-cyan);background:rgba(84,214,224,.06);border-radius:10px;padding:16px;margin:18px 0}
+.pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.pillrow span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--text-dim)}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">pireel<b>MCP Bridge</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+<aside class="nav"><div class="nav-brand"><div class="glyph">pireel<b>MCP Bridge</b></div><div class="sub">源码级架构解析 · TypeScript</div></div><span class="nav-ver">TypeScript · pnpm monorepo</span><nav><ul class="nav-list" id="navlist">
+<li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+<li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+<li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界失败</a></li>
+<li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+</ul></nav><div class="nav-foot"><div>Stars ★464 · 2026-07-20</div><div><a href="https://github.com/pireel/pireel" target="_blank">pireel/pireel</a></div><div><a href="../pireel.html">← 返回 pireel 主页面</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">MCP 与浏览器桥 <em>深度解析</em></h1><p class="hero-desc">这一页拆解 Pireel 如何把外部 agent 的 JSON-RPC 请求路由到真实浏览器 tab，并用截图和状态快照形成闭环。</p></div>
+<section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>在 <code>packages/studio-engine/src/mcp.ts:1</code>，MCP server core 声明自身无 I/O。 在 <code>packages/studio-engine/src/mcp.ts:9</code>，工具表复用内部 STUDIO_TOOLS。 在 <code>packages/studio-engine/src/mcp.ts:51</code>，McpDeps 注入所有边界依赖。 在 <code>packages/studio-engine/src/mcp.ts:85</code>，服务端直答工具集合先分流。 在 <code>packages/studio-engine/src/mcp.ts:92</code>，额外 bridge tools 是 MCP 专属。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-engine/src/mcp.ts</span> · L85-107</span><span>TypeScript</span></div><pre class="code"><span class="ln">85</span>/** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
+<span class="ln">86</span>export const MCP_SERVER_TOOL_IDS = new Set([&#39;read_editing_guide&#39;, &#39;read_frame&#39;, &#39;list_frames&#39;, &#39;get_icons&#39;, &#39;import_media&#39;, &#39;create_browser_handoff&#39;, &#39;create_project&#39;, &#39;list_projects&#39;, &#39;switch_project&#39;, &#39;rename_project&#39;]);
+<span class="ln">87</span>
+<span class="ln">88</span>/** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
+<span class="ln">89</span> *  get_state=state snapshot; apply_block/submit_plan=the validate-and-place surface for BYO generation output;
+<span class="ln">90</span> *  capture_frame=visual verification (returns a captured frame as image content so the agent can &quot;see&quot; its own edits).
+<span class="ln">91</span> *  compose_block_brief/plan_brief are &quot;bridge-fetch context + server-assemble&quot; composite tools, dispatched separately. */
+<span class="ln">92</span>export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set([&#39;get_state&#39;, &#39;apply_block&#39;, &#39;submit_plan&#39;, &#39;capture_frame&#39;, &#39;visual_brief&#39;, &#39;submit_visual&#39;]);
+<span class="ln">93</span>
+<span class="ln">94</span>/** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
+<span class="ln">95</span>export const MCP_BRIEF_TOOLS: Record&lt;string, string&gt; = {
+<span class="ln">96</span>  compose_block_brief: &#39;compose_context&#39;,
+<span class="ln">97</span>  plan_brief: &#39;plan_context&#39;,
+<span class="ln">98</span>};
+<span class="ln">99</span>
+<span class="ln">100</span>/** Bridge timeout for slow tools (generation/analysis in the browser, minutes-scale); instant ops get 60s. */
+<span class="ln">101</span>const CARD_TIMEOUT_MS = 600_000;
+<span class="ln">102</span>const BADGE_TIMEOUT_MS = 60_000;
+<span class="ln">103</span>
+<span class="ln">104</span>export function bridgeTimeoutMs(toolId: string): number {
+<span class="ln">105</span>  if (toolId === &#39;visual_brief&#39;) return CARD_TIMEOUT_MS; // runs the free geometry pass inside (minutes-scale); don&#39;t cap it at extra&#39;s 60s
+<span class="ln">106</span>  return STUDIO_TOOL_MAP[toolId]?.kind === &#39;card&#39; ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;
+<span class="ln">107</span>}</pre></div></section>
+<section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>MCP Bridge 的第一层约束</h3><p>在 <code>packages/studio-engine/src/mcp.ts:118</code>，buildMcpTools 产出完整工具列表。 在 <code>packages/studio-engine/src/mcp.ts:143</code>，get_state 描述要求拿当前 composition。 在 <code>packages/studio-engine/src/mcp.ts:156</code>，compose_block_brief 取上下文给外部模型。 在 <code>packages/studio-engine/src/mcp.ts:170</code>，apply_block 验证并放置外部生成结果。 在 <code>packages/studio-engine/src/mcp.ts:187</code>，plan_brief 生成 narration plan 契约。 在 <code>packages/studio-engine/src/mcp.ts:265</code>，capture_frame 是视觉验证工具。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-engine/src/mcp.ts</span> · L154-184</span><span>TypeScript</span></div><pre class="code"><span class="ln">154</span>    /* ---------- BYO-brain generation surface: brief → you generate → apply validates and places (no Pireel credits burned) ---------- */
+<span class="ln">155</span>    {
+<span class="ln">156</span>      name: &#39;compose_block_brief&#39;,
+<span class="ln">157</span>      description:
+<span class="ln">158</span>        &quot;Get the FULL generation contract {system, prompt} for one overlay block, assembled from the live composition (theme tokens, frame design language, box size, on-screen beats, neighbor roster). YOU then generate the response with your own model, following the contract exactly (one short note, then ```html fence, then ```js timeline fence), and submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (its design spec becomes the instruction — omit `instruction`); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec` (defaults to playhead). This is the default way to create/edit block content — it does NOT charge Pireel credits.&quot;,
+<span class="ln">159</span>      inputSchema: {
+<span class="ln">160</span>        type: &#39;object&#39;,
+<span class="ln">161</span>        additionalProperties: false,
+<span class="ln">162</span>        properties: {
+<span class="ln">163</span>          blockId: { type: &#39;string&#39;, description: &#39;Target block id (placeholder to fill, or existing block to rewrite). Omit for a new element.&#39; },
+<span class="ln">164</span>          atSec: { type: &#39;number&#39;, description: &#39;New element only: timeline start seconds (defaults to playhead).&#39; },
+<span class="ln">165</span>          instruction: { type: &#39;string&#39;, description: &#39;What to build/change. Required unless targeting a placeholder.&#39; },
+<span class="ln">166</span>        },
+<span class="ln">167</span>      },
+<span class="ln">168</span>    },
+<span class="ln">169</span>    {
+<span class="ln">170</span>      name: &#39;apply_block&#39;,
+<span class="ln">171</span>      description:
+<span class="ln">172</span>        &quot;Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text (note + ```html + ```js fences; fences are parsed out). The block is linted (scoped CSS, no scripts, deterministic animation); on lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites its content; neither → inserts a new element (optional durationSec, default 3s; optional label).&quot;,
+<span class="ln">173</span>      inputSchema: {
+<span class="ln">174</span>        type: &#39;object&#39;,
+<span class="ln">175</span>        additionalProperties: false,
+<span class="ln">176</span>        properties: {
+<span class="ln">177</span>          blockId: { type: &#39;string&#39; },
+<span class="ln">178</span>          atSec: { type: &#39;number&#39; },
+<span class="ln">179</span>          durationSec: { type: &#39;number&#39;, description: &#39;New element only: seconds on screen (default 3).&#39; },
+<span class="ln">180</span>          label: { type: &#39;string&#39;, description: &#39;New element only: short timeline label.&#39; },
+<span class="ln">181</span>          raw: { type: &#39;string&#39;, description: &#39;Your full generated text: note, then ```html fence, then ```js fence.&#39; },
+<span class="ln">182</span>        },
+<span class="ln">183</span>        required: [&#39;raw&#39;],
+<span class="ln">184</span>      },</pre></div><h3><span class="arr">▸</span>MCP Bridge 的第二层约束</h3><p>在 <code>packages/studio-engine/src/mcp.ts:275</code>，browser handoff 必须用可观察浏览器打开。 在 <code>packages/studio-engine/src/mcp.ts:346</code>，协议版本固定。 在 <code>packages/studio-engine/src/mcp.ts:393</code>，initialize 返回 capabilities 与 instructions。 在 <code>packages/studio-engine/src/mcp.ts:407</code>，tools/call 是主要 dispatch。 在 <code>packages/studio-engine/src/mcp.ts:436</code>，brief 工具先桥取上下文再组装 prompt。 在 <code>packages/studio-engine/src/mcp.ts:448</code>，未知工具直接 JSON-RPC 错误。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-ui/src/use-agent-bridge.ts</span> · L31-84</span><span>TypeScript</span></div><pre class="code"><span class="ln">31</span>  useEffect(() =&gt; {
+<span class="ln">32</span>    let ws: WebSocket | null = null;
+<span class="ln">33</span>    let alive = true;
+<span class="ln">34</span>    let retries = 0;
+<span class="ln">35</span>    let everConnected = false;
+<span class="ln">36</span>    let queue: Promise&lt;void&gt; = Promise.resolve();
+<span class="ln">37</span>
+<span class="ln">38</span>    const connect = () =&gt; {
+<span class="ln">39</span>      if (!alive) return;
+<span class="ln">40</span>      const url = new URL(&#39;/api/studio/bridge&#39;, location.href);
+<span class="ln">41</span>      url.protocol = url.protocol === &#39;https:&#39; ? &#39;wss:&#39; : &#39;ws:&#39;;
+<span class="ln">42</span>      let sock: WebSocket;
+<span class="ln">43</span>      try {
+<span class="ln">44</span>        sock = new WebSocket(url);
+<span class="ln">45</span>      } catch {
+<span class="ln">46</span>        return; // environment unsupported, give up
+<span class="ln">47</span>      }
+<span class="ln">48</span>      ws = sock;
+<span class="ln">49</span>      sock.onopen = () =&gt; {
+<span class="ln">50</span>        everConnected = true;
+<span class="ln">51</span>        retries = 0;
+<span class="ln">52</span>      };
+<span class="ln">53</span>      sock.onmessage = (ev) =&gt; {
+<span class="ln">54</span>        if (typeof ev.data !== &#39;string&#39; || ev.data === &#39;pong&#39;) return;
+<span class="ln">55</span>        let m: { id?: string; tool?: string; input?: Record&lt;string, unknown&gt; };
+<span class="ln">56</span>        try {
+<span class="ln">57</span>          m = JSON.parse(ev.data) as typeof m;
+<span class="ln">58</span>        } catch {
+<span class="ln">59</span>          return;
+<span class="ln">60</span>        }
+<span class="ln">61</span>        if (!m.id || !m.tool) return;
+<span class="ln">62</span>        const { id, tool, input } = m as { id: string; tool: string; input?: Record&lt;string, unknown&gt; };
+<span class="ln">63</span>        queue = queue.then(async () =&gt; {
+<span class="ln">64</span>          let out: StudioToolResult &amp; { state?: string };
+<span class="ln">65</span>          try {
+<span class="ln">66</span>            out = tool === &#39;get_state&#39; ? { ok: true, state: optsRef.current.getState() } : await optsRef.current.runTool(tool, input ?? {});
+<span class="ln">67</span>          } catch (e) {
+<span class="ln">68</span>            out = { ok: false, error: e instanceof Error ? e.message : String(e) };
+<span class="ln">69</span>          }
+<span class="ln">70</span>          try {
+<span class="ln">71</span>            sock.send(JSON.stringify({ id, ...out }));
+<span class="ln">72</span>          } catch {
+<span class="ln">73</span>            /* socket already dead, DO side will time out / fail */
+<span class="ln">74</span>          }
+<span class="ln">75</span>          optsRef.current.onExternalCall?.(tool, out);
+<span class="ln">76</span>        });
+<span class="ln">77</span>      };
+<span class="ln">78</span>      sock.onclose = (ev) =&gt; {
+<span class="ln">79</span>        if (ws === sock) ws = null;
+<span class="ln">80</span>        if (!alive) return;
+<span class="ln">81</span>        if (ev.code === 4000) return; // kicked by a new tab: this page exits the bridge, don&#39;t fight for it
+<span class="ln">82</span>        if (!everConnected &amp;&amp; retries &gt;= 6) return; // never connected (not logged in, etc.): don&#39;t spin
+<span class="ln">83</span>        setTimeout(connect, Math.min(30_000, 1_000 * 2 ** retries++));
+<span class="ln">84</span>      };</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">tools/list -&gt; buildMcpTools
+agent tools/call -&gt; server direct tool OR brief composite OR bridge call
+bridge call -&gt; live browser runTool queue
+mutation -&gt; get_state / capture_frame verifies result</div><p>在 <code>packages/studio-ui/src/use-agent-bridge.ts:31</code>，bridge effect 内建立 websocket。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:36</code>，queue 串行外部调用。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:66</code>，get_state 在浏览器侧特判。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:75</code>，外部调用完成后回调 UI。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:81</code>，新 tab 踢旧 tab。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:88</code>，ping 保活。</p></section>
+<section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><h3><span class="arr">▸</span>失败时要让调用方知道该怎么修</h3><p>在 <code>packages/studio-engine/src/mcp.test.ts:30</code>，工具列表有测试。 在 <code>packages/studio-engine/src/mcp.test.ts:80</code>，服务端直答不走 bridge 有测试。 在 <code>packages/studio-engine/src/mcp.test.ts:110</code>，get_state 文本快照有测试。 在 <code>packages/studio-engine/src/mcp.test.ts:117</code>，bridge 失败设置 isError。 在 <code>packages/studio-engine/src/mcp.test.ts:126</code>，BYO 契约有测试。 在 <code>packages/studio-engine/src/mcp.test.ts:163</code>，capture_frame image content 有测试。</p><ul><li>studio tab 未打开时，bridge 返回 isError，调用方不能假装成功。</li><li>handoff URL 是一次性登录票据，页面明确禁止把它当用户链接。</li><li>外部调用串行执行，牺牲并发换来可预测的 Composition 变更。</li></ul></section>
+<section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><h3><span class="arr">▸</span>继续追到相邻模块</h3><p>在 <code>packages/studio-engine/src/mcp.ts:381</code>，toolResponse 对 state 直接返回文本。 在 <code>packages/studio-engine/src/mcp.ts:371</code>，单图截图作为 image content。 在 <code>packages/studio-engine/src/mcp.ts:359</code>，多图 visual_brief 保持顺序。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:98</code>，unmount 会关闭 socket。 在 <code>packages/studio-ui/src/use-agent-bridge.ts:11</code>，重连退避写在注释。</p><div class="g2"><div class="mini"><b>project-dto.ts</b><p>状态保存层决定 agent 修改能否跨设备复用。</p></div><div class="mini"><b>client-export.ts</b><p>capture_frame 和 export 共享渲染思路。</p></div></div></section><div class="foot"><span>Sub-page · 2026-07-23</span><span>Source · <a href="https://github.com/pireel/pireel">pireel/pireel</a></span><span><a href="../pireel.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a)});const setActive=el=>{links.forEach(a=>a.classList.remove('active'));if(el&&map.get(el))map.get(el).classList.add('active')};const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)setActive(e.target)})},{rootMargin:'-40% 0px -55% 0px',threshold:0});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7f3d0';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

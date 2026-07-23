@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>媒体、时间线与客户端导出 · 深度解析 · pireel</title>
+<meta name="description" content="pireel Render Export 子模块完整解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#6ee7b7; --star-soft:#a7f3d0; --star-deep:#10b981; }
+.flow{font-family:var(--mono);white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;color:var(--text-2);line-height:1.7}
+.note{border:1px solid var(--line-cyan);background:rgba(84,214,224,.06);border-radius:10px;padding:16px;margin:18px 0}
+.pillrow{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.pillrow span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--text-dim)}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">pireel<b>Render Export</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+<aside class="nav"><div class="nav-brand"><div class="glyph">pireel<b>Render Export</b></div><div class="sub">源码级架构解析 · TypeScript</div></div><span class="nav-ver">TypeScript · pnpm monorepo</span><nav><ul class="nav-list" id="navlist">
+<li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+<li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+<li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界失败</a></li>
+<li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+</ul></nav><div class="nav-foot"><div>Stars ★464 · 2026-07-20</div><div><a href="https://github.com/pireel/pireel" target="_blank">pireel/pireel</a></div><div><a href="../pireel.html">← 返回 pireel 主页面</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">媒体、时间线与客户端导出 <em>深度解析</em></h1><p class="hero-desc">这一页拆解 Pireel 为什么坚持浏览器本地合成：源视频留在本机，preview runtime 和 export pipeline 使用同一套 Composition 语义。</p></div>
+<section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>在 <code>packages/studio-ui/src/media.ts:4</code>，本地媒体管线明确源视频不上传。 在 <code>packages/studio-ui/src/media.ts:26</code>，fileSig 用 name/size/mtime 建 cache key。 在 <code>packages/studio-ui/src/media.ts:31</code>，probeVideoFile 本地读取 duration 与尺寸。 在 <code>packages/studio-ui/src/media.ts:52</code>，transcribeFile 只上传抽出的音频。 在 <code>packages/studio-ui/src/media.ts:65</code>，ASR 失败必须抛清晰错误。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-ui/src/media.ts</span> · L31-77</span><span>TypeScript</span></div><pre class="code"><span class="ln">31</span>/** Probe video metadata locally (MediaBunny dynamically loaded, no upload). */
+<span class="ln">32</span>export async function probeVideoFile(file: File): Promise&lt;ProbedFile&gt; {
+<span class="ln">33</span>  const { ALL_FORMATS, BlobSource, Input } = await import(&#39;mediabunny&#39;);
+<span class="ln">34</span>  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+<span class="ln">35</span>  try {
+<span class="ln">36</span>    const v = await input.getPrimaryVideoTrack();
+<span class="ln">37</span>    const a = await input.getPrimaryAudioTrack().catch(() =&gt; null);
+<span class="ln">38</span>    // computeDuration measures the &quot;max end timestamp&quot;: an mp4 with a non-zero first packet inflates the
+<span class="ln">39</span>    // duration by that offset. Subtract getFirstTimestamp to convert to &lt;video&gt; playback frame (currentTime 0 = earliest sample).
+<span class="ln">40</span>    const duration = (await input.computeDuration()) - Math.max(0, await input.getFirstTimestamp());
+<span class="ln">41</span>    return {
+<span class="ln">42</span>      durationSec: Number.isFinite(duration) &amp;&amp; duration &gt; 0 ? duration : 0,
+<span class="ln">43</span>      width: v?.displayWidth ?? 0,
+<span class="ln">44</span>      height: v?.displayHeight ?? 0,
+<span class="ln">45</span>      hasAudio: !!a,
+<span class="ln">46</span>    };
+<span class="ln">47</span>  } finally {
+<span class="ln">48</span>    await input.dispose();
+<span class="ln">49</span>  }
+<span class="ln">50</span>}
+<span class="ln">51</span>
+<span class="ln">52</span>/** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
+<span class="ln">53</span>export async function transcribeFile(file: File): Promise&lt;AsrSegment[]&gt; {
+<span class="ln">54</span>  const sig = fileSig(file);
+<span class="ln">55</span>  const cached = getCachedAsr(sig);
+<span class="ln">56</span>  if (cached) return cached;
+<span class="ln">57</span>
+<span class="ln">58</span>  const audio = await extractAudio(file);
+<span class="ln">59</span>  const { url } = await studioProviders().uploads.upload(audio, { contentType: audio.type || &#39;audio/mp4&#39;, filename: &#39;studio-audio.m4a&#39; });
+<span class="ln">60</span>  const r = await fetch(&#39;/api/auto-edit/asr&#39;, {
+<span class="ln">61</span>    method: &#39;POST&#39;,
+<span class="ln">62</span>    headers: { &#39;content-type&#39;: &#39;application/json&#39; },
+<span class="ln">63</span>    body: JSON.stringify({ audio_url: url }),
+<span class="ln">64</span>  });
+<span class="ln">65</span>  // Server failures must throw a clear error, not silently become an empty array — callers need to tell &quot;ASR failed&quot; apart from &quot;the video truly has no speech&quot;
+<span class="ln">66</span>  if (!r.ok) throw new Error(t(&#39;ASR 请求失败(HTTP {status})&#39;, { status: r.status }));
+<span class="ln">67</span>  const j = (await r.json()) as { segments?: Array&lt;{ start: number; end: number; text: string }&gt; };
+<span class="ln">68</span>  // ASR times are in the &quot;audio track&#39;s own zero&quot; frame (audio extraction subtracts the audio track&#39;s first
+<span class="ln">69</span>  // packet), while playback is in &quot;earliest sample across all tracks&quot;. Files whose two tracks&#39; first packets
+<span class="ln">70</span>  // are out of sync need this delta added back, or captions/cut points shift wholesale.
+<span class="ln">71</span>  const off = await audioPlaybackOffset(file);
+<span class="ln">72</span>  const segs: AsrSegment[] = (Array.isArray(j.segments) ? j.segments : [])
+<span class="ln">73</span>    .filter((s) =&gt; s.text?.trim())
+<span class="ln">74</span>    .map((s) =&gt; ({ start: Math.max(0, s.start + off), end: Math.max(s.start + off + 0.1, s.end + off), text: s.text.trim() }));
+<span class="ln">75</span>  if (segs.length) setCachedAsr(sig, segs);
+<span class="ln">76</span>  return segs;
+<span class="ln">77</span>}</pre></div></section>
+<section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>Render Export 的第一层约束</h3><p>在 <code>packages/studio-ui/src/media.ts:79</code>，audioPlaybackOffset 修正音频与播放零点。 在 <code>packages/studio-ui/src/media.ts:101</code>，extractFilmstrip 生成时间线缩略帧。 在 <code>packages/studio-ui/src/studio-timeline.tsx:3</code>，时间线是多轨 NLE。 在 <code>packages/studio-ui/src/studio-timeline.tsx:58</code>，stripTiles 锚定源时间。 在 <code>packages/studio-ui/src/studio-timeline.tsx:93</code>，PlayheadCursor 独立订阅播放头。 在 <code>packages/studio-ui/src/use-export.ts:4</code>，导出 hook 声明客户端合成。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-ui/src/client-export.ts</span> · L331-415</span><span>TypeScript</span></div><pre class="code"><span class="ln">331</span>export async function clientExportVideo(opts: ClientExportOpts): Promise&lt;Blob&gt; {
+<span class="ln">332</span>  const { comp, videoFile, clipFiles } = opts;
+<span class="ln">333</span>  const render = opts.render ?? DEFAULT_RENDER_OPTS;
+<span class="ln">334</span>  const FPS = render.fps;
+<span class="ln">335</span>  const W = comp.width;
+<span class="ln">336</span>  const H = comp.height;
+<span class="ln">337</span>  // Output size: res=short side, downscale only, never upscale; layout/framing all still computed
+<span class="ln">338</span>  // in comp coordinates, one setTransform scales at the canvas end.
+<span class="ln">339</span>  // Width and height each rounded to even (encoder requires it) → Sx/Sy computed independently, no black bars from sub-pixel diff
+<span class="ln">340</span>  const even = (x: number) =&gt; Math.max(2, Math.round(x / 2) * 2);
+<span class="ln">341</span>  // res=output short-side pixels. Upscaling to 4K relies on the vector layer re-rasterizing at target
+<span class="ln">342</span>  // resolution (svgOpen&#39;s viewBox) + the source video drawImage scaling straight from native frames to
+<span class="ln">343</span>  // output (no 1080 intermediate). Cap at 4× as a safety net against canvas/memory blowup (dropdown max 2160=2×).
+<span class="ln">344</span>  const k = Math.min(4, render.res / Math.min(W, H));
+<span class="ln">345</span>  const outW = even(W * k);
+<span class="ln">346</span>  const outH = even(H * k);
+<span class="ln">347</span>  const Sx = outW / W;
+<span class="ln">348</span>  const Sy = outH / H;
+<span class="ln">349</span>  const shots = comp.shots?.length ? comp.shots : [{ id: &#39;all&#39;, srcStart: 0, srcEnd: comp.video?.durationSec ?? 0, treatment: &#39;full&#39; as const }];
+<span class="ln">350</span>  const durationSec = Math.max(0.5, totalDuration(comp));
+<span class="ln">351</span>
+<span class="ln">352</span>  // Segment table (edited order) + each source&#39;s File
+<span class="ln">353</span>  const segs: ExpSeg[] = [];
+<span class="ln">354</span>  const files = new Map&lt;string, File&gt;([[&#39;main&#39;, videoFile]]);
+<span class="ln">355</span>  for (const sp of clipSpans(shots)) {
+<span class="ln">356</span>    const s = sp.clip as (typeof shots)[number] &amp; { src?: string; filter?: ShotFilter };
+<span class="ln">357</span>    const filterCss = shotFilterCss(s.filter);
+<span class="ln">358</span>    const filter = filterCss === &#39;none&#39; ? {} : { filter: filterCss };
+<span class="ln">359</span>    if (!s.src) {
+<span class="ln">360</span>      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: &#39;main&#39;, ...filter });
+<span class="ln">361</span>      continue;
+<span class="ln">362</span>    }
+<span class="ln">363</span>    const key = `clip_${s.id}`;
+<span class="ln">364</span>    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter });
+<span class="ln">365</span>    if (!files.has(key)) {
+<span class="ln">366</span>      const local = clipFiles.get(s.src);
+<span class="ln">367</span>      if (local) files.set(key, local);
+<span class="ln">368</span>      else {
+<span class="ln">369</span>        const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(s.src)}`);
+<span class="ln">370</span>        if (!r.ok) throw new Error(t(&#39;插入片段拉取失败&#39;));
+<span class="ln">371</span>        files.set(key, new File([await r.blob()], &#39;clip.mp4&#39;, { type: &#39;video/mp4&#39; }));
+<span class="ln">372</span>      }
+<span class="ln">373</span>    }
+<span class="ln">374</span>  }
+<span class="ln">375</span>
+<span class="ln">376</span>  // Per-source sequential sample stream: start = earliest time this source is used, end = latest
+<span class="ln">377</span>  const rigs = new Map&lt;string, SourceRig&gt;();
+<span class="ln">378</span>  for (const [key, file] of files) {
+<span class="ln">379</span>    const mine = segs.filter((s) =&gt; s.key === key);
+<span class="ln">380</span>    if (!mine.length) continue;
+<span class="ln">381</span>    const from = Math.min(...mine.map((s) =&gt; s.srcStart));
+<span class="ln">382</span>    const to = Math.max(...mine.map((s) =&gt; s.srcEnd));
+<span class="ln">383</span>    rigs.set(key, await openSource(file, from, to, W, H));
+<span class="ln">384</span>  }
+<span class="ln">385</span>
+<span class="ln">386</span>  // Overlay document + asset inlining
+<span class="ln">387</span>  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
+<span class="ln">388</span>  try {
+<span class="ln">389</span>    await inlineImages(overlay.root);
+<span class="ln">390</span>    const fontCss = await buildInlineFontCss(overlay.root.textContent ?? &#39;&#39;);
+<span class="ln">391</span>    const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
+<span class="ln">392</span>    // Layout coordinate system is always comp&#39;s W×H (font-size calibration unchanged); device size =
+<span class="ln">393</span>    // output outW×outH → vectors rasterize crisply at 4K
+<span class="ln">394</span>    const preEnc = &#39;data:image/svg+xml;charset=utf-8,&#39; + encodeURIComponent(svgOpen(W, H, outW, outH, css));
+<span class="ln">395</span>    const postEnc = encodeURIComponent(SVG_CLOSE);
+<span class="ln">396</span>    // Theme background bitmap (once): empty root goes through the same rasterization pipeline (also at output resolution)
+<span class="ln">397</span>    const bg = await rasterize(
+<span class="ln">398</span>      &#39;data:image/svg+xml;charset=utf-8,&#39; +
+<span class="ln">399</span>        encodeURIComponent(svgOpen(W, H, outW, outH, overlay.headCss) + `&lt;div xmlns=&quot;http://www.w3.org/1999/xhtml&quot; id=&quot;root&quot;&gt;&lt;/div&gt;` + SVG_CLOSE),
+<span class="ln">400</span>    );
+<span class="ln">401</span>
+<span class="ln">402</span>    const canvas = document.createElement(&#39;canvas&#39;);
+<span class="ln">403</span>    canvas.width = outW;
+<span class="ln">404</span>    canvas.height = outH;
+<span class="ln">405</span>    const ctx = canvas.getContext(&#39;2d&#39;)!;
+<span class="ln">406</span>
+<span class="ln">407</span>    const outFormat = render.format === &#39;webm&#39; ? new WebMOutputFormat() : render.format === &#39;mov&#39; ? new MovOutputFormat() : new Mp4OutputFormat();
+<span class="ln">408</span>    const output = new Output({ format: outFormat, target: new BufferTarget() });
+<span class="ln">409</span>    const videoSource = new CanvasSource(canvas, { codec: render.format === &#39;webm&#39; ? &#39;vp9&#39; : &#39;avc&#39;, bitrate: QUALITY_HIGH });
+<span class="ln">410</span>    output.addVideoTrack(videoSource, { frameRate: FPS });
+<span class="ln">411</span>    const anyAudio = [...rigs.values()].some((r) =&gt; r.audio);
+<span class="ln">412</span>    // webm container can&#39;t hold aac, so audio switches to opus for that format
+<span class="ln">413</span>    const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === &#39;webm&#39; ? &#39;opus&#39; : &#39;aac&#39;, bitrate: QUALITY_MEDIUM }) : null;
+<span class="ln">414</span>    if (audioSource) output.addAudioTrack(audioSource);
+<span class="ln">415</span>    await output.start();</pre></div><h3><span class="arr">▸</span>Render Export 的第二层约束</h3><p>在 <code>packages/studio-ui/src/use-export.ts:24</code>，发布大小上限 200MB。 在 <code>packages/studio-ui/src/use-export.ts:60</code>，exportKey 包含 comp、source 和 options。 在 <code>packages/studio-ui/src/use-export.ts:65</code>，canClientExport 要求 WebCodecs 和本地 File。 在 <code>packages/studio-ui/src/use-export.ts:86</code>，exportVideo 不再退回 server render。 在 <code>packages/studio-ui/src/use-export.ts:127</code>，publishVideo 只上传成片。 在 <code>packages/studio-ui/src/client-export.ts:1</code>，client-export 文件拆分视频层、overlay 层和音频层。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">packages/studio-ui/src/client-export.ts</span> · L497-565</span><span>TypeScript</span></div><pre class="code"><span class="ln">497</span>    // Overlay serialization only takes blocks &quot;visible at this moment&quot;: seekTimelines already marks
+<span class="ln">498</span>    // off-window blocks visibility:hidden, and skipping them leaves the hot-frame SVG doc with just a
+<span class="ln">499</span>    // few blocks — parse/layout cost no longer scales with the project&#39;s total block count (serializing
+<span class="ln">500</span>    // the whole root, an 11-minute project re-lays-out all several-hundred blocks on every hot frame).
+<span class="ln">501</span>    const rootShell = XS.serializeToString(overlay.root.cloneNode(false));
+<span class="ln">502</span>    const rootOpen = rootShell.endsWith(&#39;/&gt;&#39;) ? `${rootShell.slice(0, -2)}&gt;` : rootShell.slice(0, rootShell.lastIndexOf(&#39;&lt;/&#39;));
+<span class="ln">503</span>    const serializeVisible = (): string =&gt; {
+<span class="ln">504</span>      let s = rootOpen;
+<span class="ln">505</span>      for (const el of overlay.root.children) {
+<span class="ln">506</span>        if ((el as HTMLElement).style?.visibility === &#39;hidden&#39;) continue;
+<span class="ln">507</span>        s += XS.serializeToString(el);
+<span class="ln">508</span>      }
+<span class="ln">509</span>      return `${s}&lt;/div&gt;`;
+<span class="ln">510</span>    };
+<span class="ln">511</span>
+<span class="ln">512</span>    const total = Math.max(1, Math.round(durationSec * FPS));
+<span class="ln">513</span>    // Overlay frame cache: during tween gaps / static caption periods the serialized string is identical
+<span class="ln">514</span>    // frame to frame → reuse the previous frame&#39;s bitmap, skipping parse and rasterization of the whole
+<span class="ln">515</span>    // data URI (with inlined fonts, MB-scale — the bulk of export time).
+<span class="ln">516</span>    let lastSerial = &#39;&#39;;
+<span class="ln">517</span>    let lastOverlayImg: HTMLImageElement | null = null;
+<span class="ln">518</span>    // Overlap encoding with next-frame prep: CanvasSource.add grabs the frame synchronously on call, and
+<span class="ln">519</span>    // the returned Promise is only encoder backpressure — the canvas is free to change once grabbed, and
+<span class="ln">520</span>    // we only await the backpressure right before the next frame&#39;s add.
+<span class="ln">521</span>    let pendingAdd: Promise&lt;void&gt; | null = null;
+<span class="ln">522</span>    // Per-phase timing (parallel phases each track their own wall clock, so the sum can exceed total wall time): data shows where the bottleneck is
+<span class="ln">523</span>    const tm = { prep: 0, raster: 0, video: 0, draw: 0, enc: 0, rasterN: 0 };
+<span class="ln">524</span>    const expT0 = performance.now();
+<span class="ln">525</span>    for (let i = 0; i &lt; total; i++) {
+<span class="ln">526</span>      if (opts.shouldCancel?.()) throw new ExportCanceled();
+<span class="ln">527</span>      const t = i / FPS;
+<span class="ln">528</span>      const tPrep = performance.now();
+<span class="ln">529</span>      overlay.win.__hfPreview!.seekTimelines(t);
+<span class="ln">530</span>      const { seg, srcT } = segAt(t);
+<span class="ln">531</span>      const rig = rigs.get(seg.key);
+<span class="ln">532</span>      // Read the framing transform uniformly from #vidEl: in canvas mode every segment&#39;s (including
+<span class="ln">533</span>      // insert clips&#39;) framing keyframes land on this one canvas (videoFrameTimelineBody only does
+<span class="ln">534</span>      // tl.to(&#39;#vidEl&#39;)); looking up an element by clip_&lt;id&gt; is a leftover from the old &quot;insert clip =
+<span class="ln">535</span>      // separate &lt;video&gt;&quot; era — the element doesn&#39;t exist → identity matrix → export loses insert-clip framing
+<span class="ln">536</span>      const el = overlay.doc.getElementById(&#39;vidEl&#39;);
+<span class="ln">537</span>      const vs = readTransform(overlay.win, el);
+<span class="ln">538</span>      const serial = serializeVisible();
+<span class="ln">539</span>      tm.prep += performance.now() - tPrep;
+<span class="ln">540</span>      const hot = serial !== lastSerial || !lastOverlayImg;
+<span class="ln">541</span>      if (hot) tm.rasterN++;
+<span class="ln">542</span>      const overlayP: Promise&lt;HTMLImageElement&gt; = hot
+<span class="ln">543</span>        ? (() =&gt; {
+<span class="ln">544</span>            const s0 = performance.now();
+<span class="ln">545</span>            return rasterize(preEnc + encodeURIComponent(serial) + postEnc).then((img) =&gt; ((tm.raster += performance.now() - s0), img));
+<span class="ln">546</span>          })()
+<span class="ln">547</span>        : Promise.resolve(lastOverlayImg!);
+<span class="ln">548</span>
+<span class="ln">549</span>      const tr = trsX.find((x) =&gt; t &gt;= x.cut - x.half &amp;&amp; t &lt;= x.cut + x.half) ?? null;
+<span class="ln">550</span>      // Compute shadow sampling params first; the three decodes (overlay/current frame/shadow frame) are independent → parallel
+<span class="ln">551</span>      const pre = tr ? t &lt; tr.cut : false;
+<span class="ln">552</span>      const gseg = tr ? (pre ? tr.segB : tr.segA) : null;
+<span class="ln">553</span>      const gRig = tr ? rigs.get(pre ? tr.preKey : tr.postKey) : undefined;
+<span class="ln">554</span>      const gSrcT = tr &amp;&amp; gseg ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t)) : gseg.srcEnd + (t - tr.cut)) : 0;
+<span class="ln">555</span>      const v0 = performance.now();
+<span class="ln">556</span>      const [overlayImg, sample, gSample] = await Promise.all([
+<span class="ln">557</span>        overlayP,
+<span class="ln">558</span>        rig ? sampleAt(rig, srcT).then((s) =&gt; ((tm.video += performance.now() - v0), s)) : null,
+<span class="ln">559</span>        gRig ? sampleAt(gRig, gSrcT) : null,
+<span class="ln">560</span>      ]);
+<span class="ln">561</span>      lastSerial = serial;
+<span class="ln">562</span>      lastOverlayImg = overlayImg;
+<span class="ln">563</span>      // bg / overlay are already rasterized at output resolution (outW×outH) → draw 1:1 with identity
+<span class="ln">564</span>      // transform (crisp text/graphics at 4K). The source video is still drawn in comp coordinates;
+<span class="ln">565</span>      // setTransform(Sx) maps the target rect to output size, drawImage scales straight from native frames.</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">File -&gt; MediaBunny probe / filmstrip / audio-only ASR
+Composition -&gt; preview iframe -&gt; visible overlay serialization
+Edited timeline -&gt; source segment sampling -&gt; canvas + WebCodecs encoder
+Publish -&gt; upload finished blob only</div><p>在 <code>packages/studio-ui/src/client-export.ts:76</code>，openSource 建立 MediaBunny stream。 在 <code>packages/studio-ui/src/client-export.ts:95</code>，sampleAt 单调取样。 在 <code>packages/studio-ui/src/client-export.ts:136</code>，createOverlay 建 hidden iframe。 在 <code>packages/studio-ui/src/client-export.ts:164</code>，inlineImages 处理 foreignObject 限制。 在 <code>packages/studio-ui/src/client-export.ts:238</code>，captureCompositionFrame 与导出共用渲染逻辑。 在 <code>packages/studio-ui/src/client-export.ts:331</code>，clientExportVideo 是主导出入口。</p></section>
+<section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><h3><span class="arr">▸</span>失败时要让调用方知道该怎么修</h3><p>在 <code>packages/studio-ui/src/client-export.ts:352</code>，segment table 连接 edited time 与 source time。 在 <code>packages/studio-ui/src/client-export.ts:386</code>，overlay document 注入 preview runtime。 在 <code>packages/studio-ui/src/client-export.ts:407</code>，根据格式选择 mp4/mov/webm output。 在 <code>packages/studio-ui/src/client-export.ts:438</code>，转场双流采样。 在 <code>packages/studio-ui/src/client-export.ts:497</code>，只序列化可见 blocks。 在 <code>packages/studio-ui/src/client-export.ts:512</code>，总帧数由 durationSec 与 FPS 决定。</p><ul><li>浏览器缺 WebCodecs 时直接报错，不再生成未经验证的黑屏服务端输出。</li><li>foreignObject 不能拉外部图片，所以导出前必须把图片内联。</li><li>长项目如果序列化全部 DOM，会让每一帧承担全部 block 成本，因此只取可见 children。</li></ul></section>
+<section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><h3><span class="arr">▸</span>继续追到相邻模块</h3><p>在 <code>packages/studio-ui/src/client-export.ts:556</code>，overlay、当前帧、ghost frame 并行解码。 在 <code>packages/studio-ui/src/client-export.ts:626</code>，最终 canvas 合成背景、视频和 overlay。 在 <code>packages/studio-ui/src/client-export.ts:633</code>，编码 backpressure 延迟到下一帧前等待。 在 <code>packages/studio-ui/src/client-export.ts:636</code>，按 last-use 释放 decoder。 在 <code>packages/studio-engine/src/build-draft.ts:220</code>，layout 层决定 shots。</p><div class="g2"><div class="mini"><b>build-draft.ts</b><p>自动 storyboard 决定 shots 与 graphics placeholder。</p></div><div class="mini"><b>studio-timeline.tsx</b><p>时间线 UI 显示同一个 edited timeline。</p></div></div></section><div class="foot"><span>Sub-page · 2026-07-23</span><span>Source · <a href="https://github.com/pireel/pireel">pireel/pireel</a></span><span><a href="../pireel.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a)});const setActive=el=>{links.forEach(a=>a.classList.remove('active'));if(el&&map.get(el))map.get(el).classList.add('active')};const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)setActive(e.target)})},{rootMargin:'-40% 0px -55% 0px',threshold:0});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7f3d0';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>
