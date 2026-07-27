@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>agentacct · 本地 Agent 工作账本 · 源码观测台</title>
+<meta name="description" content="mikehasa/agentacct 源码级深度解析 — mikehasa/agentacct 源码级深度解析：本地日志发现、证据绑定、SQLite truth model 与安全控制台" />
+<meta property="og:title" content="agentacct · 源码观测台" />
+<meta property="og:description" content="mikehasa/agentacct 源码级深度解析：本地日志发现、证据绑定、SQLite truth model 与安全控制台" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #66d9a8;
+  --star-soft:  #9af0c6;
+  --star-deep:  #36a876;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">agentacct<b>acct</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agentacct<b>acct</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python · FastAPI · Typer · SQLite</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>本地日志发现与隐私边界</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>证据绑定与 canonical truth model</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从采集到控制台的读写流</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试把安全声明钉到行为上</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>为什么它值得进入工具箱</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与缺口</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★375 · 2026-07-24</div>
+      <div><a href="https://github.com/mikehasa/agentacct" target="_blank">mikehasa/agentacct</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">agentacct <em>本地 Agent 工作账本</em></h1>
+          <p class="hero-desc">agentacct 是一个 local-first 的 coding-agent 工作账本：它读取 Codex、Claude Code、Hermes、OpenCode 等本地使用证据，却刻意不保存 prompt、response 或工具参数；再把使用、工作事件、证据链接和受控执行投影到只在本机暴露的 dashboard。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 375</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">26K+</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">190</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">today</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow">local logs ──▶ evidence rows ──▶ canonical SQLite ──▶ localhost dashboard
+       ▲                 │                      │
+       └──── privacy guardrails ◀──── control projection</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>agentacct 解决的是 coding-agent 时代一个很具体的问题：团队开了很多 Codex、Claude Code、OpenCode 或自建代理后，谁做了什么、花了多少 token、哪些工作有机器证据，往往散落在不同客户端日志里。源码入口 <code>src/agent_chronicle/source_discovery.py:37</code> 先把这些客户端按来源探测出来，<code>src/agent_chronicle/usage_truth.py:49</code> 又把每种来源的可信等级写成表，而不是把所有数字都当成账单真相。<code>src/agent_chronicle/source_discovery.py:37</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:48</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:58</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:62</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:65</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:86</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:95</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:126</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:140</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:149</code></p>
+      <p>更值得拆的是它的克制：<code>src/agent_chronicle/capture_runtime.py:18</code> 明确 raw hook input 不回显，<code>src/agent_chronicle/control_web.py:50</code> 对控制台投影做脱敏，<code>src/agent_chronicle/canonical/sqlite.py:50</code> 用 application id、schema version 和 owner-only 文件权限约束候选库。这个项目不是另一个自动调度器，而是试图把本地证据、成本估算和可控执行分层。<code>src/agent_chronicle/log_evidence.py:54</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:62</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:74</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:113</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:124</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:133</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:141</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:159</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:167</code>，这里再看 <code>src/agent_chronicle/log_evidence.py:189</code></p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">本地日志发现 → evidence/event 归一化 → SQLite canonical model → FastAPI/HTML 只读或受控执行投影。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">UsageSourceDiscovery、UsageTruthRow、log-evidenced event id、CanonicalStore、ControlProjection。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">候选库使用 WAL、STRICT table、busy_timeout；UI 默认限制 recent activity、attention strip 和 advanced evidence rows。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Codex/Claude Code/OpenCode/Hermes/OpenClaw 本地日志、MCP workflow events、host hook capture、OTLP/Paperclip/Entire connectors。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">本地日志发现与隐私边界</h2>
+      <p>第一层不是导入，而是发现。<code>src/agent_chronicle/source_discovery.py:45</code> 返回六类来源的状态，<code>src/agent_chronicle/source_discovery.py:58</code> 和 <code>src/agent_chronicle/source_discovery.py:86</code> 分别处理 Claude Code 与 Codex，重要的是它只证明“来源存在”和“可导入路径”，不把未解析内容包装成确定成本。<code>tests/test_source_discovery.py:63</code>，这里再看 <code>tests/test_source_discovery.py:82</code>，这里再看 <code>tests/test_source_discovery.py:118</code>，这里再看 <code>tests/test_source_discovery.py:141</code>，这里再看 <code>tests/test_source_discovery.py:151</code>，这里再看 <code>tests/test_source_discovery.py:172</code>，这里再看 <code>tests/test_source_discovery.py:179</code>，这里再看 <code>tests/test_source_discovery.py:201</code></p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">client homes</span> ── scan paths ──▶ <span class="flow-node">UsageSourceDiscovery</span>
+   │                         │
+   │                         ├─ status: found/missing/error
+   │                         ├─ confidence: client_reported/unknown
+   ▼                         ▼
+import-local command ◀── notes/importer gate</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>模块分工很清楚：<code>src/agent_chronicle/source_discovery.py:37</code> 管发现，<code>src/agent_chronicle/log_evidence.py:113</code> 管从客户端日志里抽取可信 event id，<code>src/agent_chronicle/canonical/sqlite.py:228</code> 管候选库迁移，<code>src/agent_chronicle/control_web.py:50</code> 管 dashboard 投影脱敏。<code>src/agent_chronicle/canonical/sqlite.py:50</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:56</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:61</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:162</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:228</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:257</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:281</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:291</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:300</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:303</code></p>
+      <div class="g3"><div class="card"><div class="card-h">source_discovery</div><div class="card-d">只返回状态、路径、session_count、confidence 和 importer 命令，避免把文件存在误当成完整账单。</div></div><div class="card"><div class="card-h">log_evidence</div><div class="card-d">只允许五个 creation tools 的输出捐赠 event id，read tools 即使形似也拒绝。</div></div><div class="card"><div class="card-h">canonical/sqlite</div><div class="card-d">候选库必须显式路径、WAL、STRICT schema、迁移校验和，避免悄悄污染 live store。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/source_discovery.py</span> · L18-35</span><span>Python</span></div>
+        <pre class="code"><span class="ln">18</span>@dataclass(frozen=True)
+<span class="ln">19</span>class UsageSourceDiscovery:
+<span class="ln">20</span>    client: str
+<span class="ln">21</span>    display_name: str
+<span class="ln">22</span>    status: SourceStatus
+<span class="ln">23</span>    evidence: str
+<span class="ln">24</span>    paths: list[str]
+<span class="ln">25</span>    file_count: int
+<span class="ln">26</span>    session_count: int | None
+<span class="ln">27</span>    latest_updated_at: int | None
+<span class="ln">28</span>    usage_confidence: str
+<span class="ln">29</span>    cost_confidence: str
+<span class="ln">30</span>    importer: str | None
+<span class="ln">31</span>    notes: list[str]
+<span class="ln">32</span>
+<span class="ln">33</span>    def to_dict(self) -&gt; dict[str, object]:
+<span class="ln">34</span>        return asdict(self)
+<span class="ln">35</span></pre>
+      </div>
+
+      <a class="deep-link" href="agentacct/agentacct-log-evidence.html">深度阅读 · 日志证据绑定如何拒绝伪造 event id</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">证据绑定与 canonical truth model</h2>
+
+      <h3><span class="arr">▸</span>Usage source discovery：发现但不越权</h3>
+      <p><code>src/agent_chronicle/source_discovery.py:86</code> 的 Codex 分支同时看 state_5.sqlite 和 rollout JSONL，<code>src/agent_chronicle/source_discovery.py:128</code> 的注释说明 rollout identity 可以形成 session observation，但 usage truth 仍交给 ingestion health。这个设计把“有 session”与“有可信 token/cost”拆开。<code>src/agent_chronicle/control_web.py:50</code>，这里再看 <code>src/agent_chronicle/control_web.py:57</code>，这里再看 <code>src/agent_chronicle/control_web.py:62</code>，这里再看 <code>src/agent_chronicle/control_web.py:77</code>，这里再看 <code>src/agent_chronicle/control_web.py:100</code>，这里再看 <code>src/agent_chronicle/control_web.py:130</code>，这里再看 <code>src/agent_chronicle/control_web.py:150</code>，这里再看 <code>src/agent_chronicle/control_web.py:172</code>，这里再看 <code>src/agent_chronicle/control_web.py:181</code>，这里再看 <code>src/agent_chronicle/control_web.py:208</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/source_discovery.py</span> · L86-153</span><span>Python</span></div>
+        <pre class="code"><span class="ln">86</span>def _discover_codex_source(codex_home: Path | None) -&gt; UsageSourceDiscovery:
+<span class="ln">87</span>    source_plan = resolve_usage_source_paths(&quot;codex&quot;, explicit_home=codex_home)
+<span class="ln">88</span>    homes = list(source_plan.homes)
+<span class="ln">89</span>    session_roots = [path for home in homes for path in (home / &quot;sessions&quot;, home / &quot;archived_sessions&quot;)]
+<span class="ln">90</span>    active_session_roots = [home / &quot;sessions&quot; for home in homes]
+<span class="ln">91</span>    files_by_home = [
+<span class="ln">92</span>        _dedupe_paths(_matching_files(root, [&quot;rollout-*.jsonl&quot;]))
+<span class="ln">93</span>        for root in active_session_roots
+<span class="ln">94</span>    ]
+<span class="ln">95</span>    files = _dedupe_paths(path for home_files in files_by_home for path in home_files)
+<span class="ln">96</span>    db_paths_by_home = [
+<span class="ln">97</span>        home / &quot;state_5.sqlite&quot; if _is_file(home / &quot;state_5.sqlite&quot;) else None
+<span class="ln">98</span>        for home in homes
+<span class="ln">99</span>    ]
+<span class="ln">100</span>    db_paths = [path for path in db_paths_by_home if path is not None]
+<span class="ln">101</span>    db_session_ids_by_home = [
+<span class="ln">102</span>        _sqlite_text_values(db_path, &quot;threads&quot;, &quot;id&quot;) if db_path is not None else set()
+<span class="ln">103</span>        for db_path in db_paths_by_home
+<span class="ln">104</span>    ]
+<span class="ln">105</span>    db_usage_counts = [
+<span class="ln">106</span>        _sqlite_count(db_path, &quot;threads&quot;, where=&quot;tokens_used &gt; 0&quot;) if db_path is not None else 0
+<span class="ln">107</span>        for db_path in db_paths_by_home
+<span class="ln">108</span>    ]
+<span class="ln">109</span>    db_error_count = sum(
+<span class="ln">110</span>        session_ids is None or usage_count is None
+<span class="ln">111</span>        for session_ids, usage_count in zip(db_session_ids_by_home, db_usage_counts, strict=True)
+<span class="ln">112</span>    )
+<span class="ln">113</span>    db_usage_count = sum(count or 0 for count in db_usage_counts)
+<span class="ln">114</span>    rollout_session_ids_by_home = [
+<span class="ln">115</span>        _codex_rollout_session_ids(home_files, root=root)
+<span class="ln">116</span>        for home_files, root in zip(files_by_home, active_session_roots, strict=True)
+<span class="ln">117</span>    ]
+<span class="ln">118</span>    session_count = sum(
+<span class="ln">119</span>        len((db_session_ids or set()) | rollout_session_ids)
+<span class="ln">120</span>        for db_session_ids, rollout_session_ids in zip(
+<span class="ln">121</span>            db_session_ids_by_home,
+<span class="ln">122</span>            rollout_session_ids_by_home,
+<span class="ln">123</span>            strict=True,
+<span class="ln">124</span>        )
+<span class="ln">125</span>    )
+<span class="ln">126</span>    paths = _existing_or_attempted_paths([*db_paths, *session_roots])
+<span class="ln">127</span>    latest = _latest_mtime([*files, *db_paths])
+<span class="ln">128</span>    # Rollout identity now produces an honest session observation even when a
+<span class="ln">129</span>    # state-db row or token_count event is absent. Source discovery is only a
+<span class="ln">130</span>    # presence scan, so a rollout file is enough to expose the import path;
+<span class="ln">131</span>    # parse/usage truth remains the ingestion health endpoint&#x27;s job.
+<span class="ln">132</span>    found = session_count &gt; 0
+<span class="ln">133</span>    notes = [&quot;rollout session identity and token_count events; local cost usually unavailable&quot;]
+<span class="ln">134</span>    if db_error_count:
+<span class="ln">135</span>        notes.append(
+<span class="ln">136</span>            f&quot;{db_error_count} Codex state database(s) could not be read; inspect or repair state_5.sqlite&quot;
+<span class="ln">137</span>        )
+<span class="ln">138</span>    if source_plan.omitted_home_count:
+<span class="ln">139</span>        notes.append(f&quot;source path plan omitted {source_plan.omitted_home_count} path(s) after its safety limit&quot;)
+<span class="ln">140</span>    return UsageSourceDiscovery(
+<span class="ln">141</span>        client=&quot;codex&quot;,
+<span class="ln">142</span>        display_name=&quot;Codex&quot;,
+<span class="ln">143</span>        status=&quot;error&quot; if db_error_count else &quot;found&quot; if found else &quot;missing&quot;,
+<span class="ln">144</span>        evidence=&quot;state-db+rollout-jsonl&quot;,
+<span class="ln">145</span>        paths=paths,
+<span class="ln">146</span>        file_count=len(files),
+<span class="ln">147</span>        session_count=session_count or None,
+<span class="ln">148</span>        latest_updated_at=latest,
+<span class="ln">149</span>        usage_confidence=USAGE_CLIENT_REPORTED if db_usage_count else USAGE_UNKNOWN,
+<span class="ln">150</span>        cost_confidence=COST_UNKNOWN,
+<span class="ln">151</span>        importer=&quot;agentacct usage import-local --client codex&quot; if found else None,
+<span class="ln">152</span>        notes=notes,
+<span class="ln">153</span>    )</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Log evidence：allowlist-first 的事件配对</h3>
+      <p><code>src/agent_chronicle/log_evidence.py:54</code> 固定五个 creation tools，<code>src/agent_chronicle/log_evidence.py:113</code> 严格检查单个 created event shape，<code>src/agent_chronicle/log_evidence.py:141</code> 和 <code>src/agent_chronicle/log_evidence.py:189</code> 又分别处理 Codex namespace 与新 MCP invocation 形态。<code>src/agent_chronicle/capture_runtime.py:11</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:18</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:20</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:33</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:41</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:53</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:73</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:85</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:96</code>，这里再看 <code>src/agent_chronicle/capture_runtime.py:99</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/log_evidence.py</span> · L54-138</span><span>Python</span></div>
+        <pre class="code"><span class="ln">54</span># The ONLY tools whose responses may donate an evidenced event id. Every one
+<span class="ln">55</span># of them returns exactly one created event under a top-level &quot;event&quot; key
+<span class="ln">56</span># (mcp.py); read tools (sentinel_list_events, sentinel_get_event_summary,
+<span class="ln">57</span># sentinel_list_runs, sentinel_get_report, ...) echo foreign ids and must
+<span class="ln">58</span># never appear here.
+<span class="ln">59</span># frozen: the sentinel_* tool names survive the Agent Chronicle rename —
+<span class="ln">60</span># historical stores/logs/files carry them forever, and three shipped
+<span class="ln">61</span># instruction surfaces plus real user CLAUDE.md/AGENTS.md files quote them.
+<span class="ln">62</span>SENTINEL_CREATION_TOOLS = frozenset(
+<span class="ln">63</span>    {
+<span class="ln">64</span>        &quot;sentinel_record_event&quot;,
+<span class="ln">65</span>        &quot;sentinel_attach_client_context&quot;,
+<span class="ln">66</span>        &quot;sentinel_record_section&quot;,
+<span class="ln">67</span>        &quot;sentinel_record_agent_usage_debug&quot;,
+<span class="ln">68</span>        &quot;sentinel_record_machine_check&quot;,
+<span class="ln">69</span>    }
+<span class="ln">70</span>)
+<span class="ln">71</span>
+<span class="ln">72</span># \Z (not $) so a trailing newline is rejected: &#x27;evt_deadbeef\n&#x27; must NOT
+<span class="ln">73</span># pass at any of the .match() call sites ($ matches before a final newline).
+<span class="ln">74</span>EVIDENCED_EVENT_ID_RE = re.compile(r&quot;^evt_[0-9a-f]{6,64}\Z&quot;)
+<span class="ln">75</span>
+<span class="ln">76</span># Real max observed in one session: 157 distinct created ids. The cap bounds
+<span class="ln">77</span># hostile/huge sessions; the true total is always preserved alongside so
+<span class="ln">78</span># overflow is visible, never silent.
+<span class="ln">79</span>EVIDENCED_EVENT_IDS_CAP = 200
+<span class="ln">80</span>
+<span class="ln">81</span># Codex fork rollouts can begin by replaying the parent&#x27;s transcript, including
+<span class="ln">82</span># old MCP creation responses.  A small clock-skew allowance keeps near-boundary
+<span class="ln">83</span># facts joinable while still rejecting the impossible case: an event recorded
+<span class="ln">84</span># well before the alleged donor session existed.
+<span class="ln">85</span>CODEX_REPLAY_CLOCK_SKEW_SECONDS = 5.0
+<span class="ln">86</span>CODEX_REPLAY_REJECTION_REASON = &quot;codex_event_before_session_start&quot;
+<span class="ln">87</span>CODEX_REPLAY_TIME_UNPROVEN_REASON = &quot;codex_replay_timestamps_unproven&quot;
+<span class="ln">88</span>SOURCE_NAMESPACE_CONFLICT_REASON = &quot;source_namespace_conflict&quot;
+<span class="ln">89</span>CROSS_KIND_DONOR_IDENTITY_CONFLICT_REASON = &quot;cross_kind_donor_identity_conflict&quot;
+<span class="ln">90</span>CANONICAL_EVENT_IDENTITY_CONFLICT_REASON = &quot;canonical_event_identity_conflict&quot;
+<span class="ln">91</span>
+<span class="ln">92</span># The documented MCP registration names (every current setup path writes
+<span class="ln">93</span># &quot;agentacct&quot;). Claude Code transcripts carry the registration key verbatim in
+<span class="ln">94</span># `mcp__&lt;server&gt;__&lt;tool&gt;`; Codex normalizes the config key to underscores in the
+<span class="ln">95</span># rollout `namespace` field (`mcp__agent_chronicle` / `mcp__agent_sentinel`; the
+<span class="ln">96</span># hyphen-free `agentacct` normalizes to itself). A custom registration name
+<span class="ln">97</span># loses evidence links (skipped-but-counted, never guessed) — documented in
+<span class="ln">98</span># INSTALL.md.
+<span class="ln">99</span>#
+<span class="ln">100</span># ALL THREE names are accepted FOREVER: `agentacct` is what new installs now
+<span class="ln">101</span># register, and the pre-rename `agent-chronicle` / `agent-sentinel` keys stay
+<span class="ln">102</span># accepted because historical client logs carry them forever and pre-rename
+<span class="ln">103</span># registrations keep producing them in new sessions — dropping an old key would
+<span class="ln">104</span># silently unlink every pre-rename session on the next import.
+<span class="ln">105</span>SENTINEL_SERVER_KEY = &quot;agentacct&quot;  # the name new installs register
+<span class="ln">106</span>ACCEPTED_SERVER_KEYS = frozenset({&quot;agentacct&quot;, &quot;agent-chronicle&quot;, &quot;agent-sentinel&quot;})
+<span class="ln">107</span>_CODEX_ACCEPTED_NAMESPACES = frozenset(
+<span class="ln">108</span>    {&quot;agentacct&quot;, &quot;agent-chronicle&quot;, &quot;agent_chronicle&quot;, &quot;agent-sentinel&quot;, &quot;agent_sentinel&quot;}
+<span class="ln">109</span>)
+<span class="ln">110</span>_CLAUDE_TOOL_PREFIX = &quot;mcp__&quot;
+<span class="ln">111</span>
+<span class="ln">112</span>
+<span class="ln">113</span>def extract_created_event_id(text: str) -&gt; str | None:
+<span class="ln">114</span>    &quot;&quot;&quot;Strict single-created-event shape check shared by every wire adapter.
+<span class="ln">115</span>
+<span class="ln">116</span>    Accepts exactly the creation-tool payload shape: a JSON dict with a
+<span class="ln">117</span>    top-level ``&quot;event&quot;`` dict whose ``event_id`` is a well-formed evt id.
+<span class="ln">118</span>    Rejects (belt-and-braces — the tool-name allowlist already excludes read
+<span class="ln">119</span>    tools): list-shaped payloads carrying ``&quot;events&quot;``/``&quot;runs&quot;`` lists,
+<span class="ln">120</span>    error texts, truncated/torn JSON, outcome-only machine_check payloads,
+<span class="ln">121</span>    and any non-dict shape.
+<span class="ln">122</span>    &quot;&quot;&quot;
+<span class="ln">123</span>
+<span class="ln">124</span>    try:
+<span class="ln">125</span>        payload = json.loads(text)
+<span class="ln">126</span>    except (json.JSONDecodeError, ValueError):
+<span class="ln">127</span>        return None
+<span class="ln">128</span>    if not isinstance(payload, dict):
+<span class="ln">129</span>        return None
+<span class="ln">130</span>    event = payload.get(&quot;event&quot;)
+<span class="ln">131</span>    if not isinstance(event, dict):
+<span class="ln">132</span>        return None
+<span class="ln">133</span>    if any(isinstance(payload.get(key), list) for key in (&quot;events&quot;, &quot;runs&quot;)):
+<span class="ln">134</span>        return None
+<span class="ln">135</span>    event_id = event.get(&quot;event_id&quot;)
+<span class="ln">136</span>    if not isinstance(event_id, str) or not EVIDENCED_EVENT_ID_RE.match(event_id):
+<span class="ln">137</span>        return None
+<span class="ln">138</span>    return event_id</pre>
+      </div>
+
+      <a class="deep-link" href="agentacct/agentacct-canonical-store.html">深度阅读 · Canonical SQLite 如何保证候选库可审计</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从采集到控制台的读写流</h2>
+      <p>写入路径和展示路径都在强调 fail closed。<code>src/agent_chronicle/capture_runtime.py:41</code> 捕获 host hook payload，异常时返回 fail_open receipt 但不让 host hook 失败；<code>src/agent_chronicle/control_web.py:172</code> 又把外部 Codex/Claude 标为 observed_only，避免 dashboard 暗示它能控制未由 agentacct 启动的进程。<code>src/agent_chronicle/source_discovery.py:37</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:48</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:58</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:62</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:65</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:86</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:95</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:126</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:140</code>，这里再看 <code>src/agent_chronicle/source_discovery.py:149</code></p>
+
+      <h3><span class="arr">▸</span>Usage evidence pipeline</h3>
+      <div class="flow">client logs ─▶ source discovery ─▶ import-local ─▶ usage truth rows
+     │               │                  │
+     └─ no raw text  └─ confidence tags └─ health state separate</div>
+
+      <h3><span class="arr">▸</span>Owned execution control pipeline</h3>
+      <div class="flow">register workspace/agent ─▶ create contract ─▶ pending attempt ─▶ launch approval ─▶ sanitized projection
+          │                    │                    │
+          └──── fixed argv ────┴──── idempotency ───┴──── no process secrets in HTML</div>
+
+      <a class="deep-link" href="agentacct/agentacct-control-plane.html">深度阅读 · Local control surface 为什么只展示决策状态</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试把安全声明钉到行为上</h2>
+      <p>测试覆盖不是装饰。<code>tests/test_source_discovery.py:63</code> 验证 found/missing/importer/confidence，<code>tests/test_log_evidenced_linking.py:188</code> 钉住五个 creation tools 的配对规则，<code>tests/test_canonical_schema.py:49</code> 明确 schema 不得出现 prompt/response/tool_results 字段，<code>tests/test_control_api.py:81</code> 验证控制 API 不泄露路径、argv 或 nonce。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>下面这段测试证明 source discovery 把 Codex、Claude、Hermes、OpenClaw 和 OpenCode 分别报告，不会因某个来源缺失就制造成功。它还让 <code>tests/test_source_discovery.py:82</code> 到 <code>tests/test_source_discovery.py:91</code> 的断言覆盖 session_count、cost_confidence 与 importer。<code>tests/test_source_discovery.py:63</code>，这里再看 <code>tests/test_source_discovery.py:82</code>，这里再看 <code>tests/test_source_discovery.py:118</code>，这里再看 <code>tests/test_source_discovery.py:141</code>，这里再看 <code>tests/test_source_discovery.py:151</code>，这里再看 <code>tests/test_source_discovery.py:172</code>，这里再看 <code>tests/test_source_discovery.py:179</code>，这里再看 <code>tests/test_source_discovery.py:201</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/test_source_discovery.py</span> · L63-91</span><span>Python</span></div>
+        <pre class="code"><span class="ln">63</span>def test_discover_usage_sources_reports_found_and_pending_sources(tmp_path):
+<span class="ln">64</span>    codex_home = _make_codex_source(tmp_path)
+<span class="ln">65</span>    claude_home = _make_claude_source(tmp_path)
+<span class="ln">66</span>    hermes_home = _make_hermes_source(tmp_path)
+<span class="ln">67</span>    openclaw_home = tmp_path / &quot;openclaw-home&quot;
+<span class="ln">68</span>    openclaw_home.mkdir()
+<span class="ln">69</span>    (openclaw_home / &quot;session.jsonl&quot;).write_text(&quot;{}&quot;, encoding=&quot;utf-8&quot;)
+<span class="ln">70</span>
+<span class="ln">71</span>    sources = {
+<span class="ln">72</span>        source.client: source
+<span class="ln">73</span>        for source in discover_usage_sources(
+<span class="ln">74</span>            codex_home=codex_home,
+<span class="ln">75</span>            claude_home=claude_home,
+<span class="ln">76</span>            hermes_home=hermes_home,
+<span class="ln">77</span>            openclaw_home=openclaw_home,
+<span class="ln">78</span>            opencode_home=tmp_path / &quot;missing-opencode&quot;,
+<span class="ln">79</span>        )
+<span class="ln">80</span>    }
+<span class="ln">81</span>
+<span class="ln">82</span>    assert sources[&quot;codex&quot;].status == &quot;found&quot;
+<span class="ln">83</span>    assert sources[&quot;codex&quot;].session_count == 2
+<span class="ln">84</span>    assert sources[&quot;codex&quot;].importer == &quot;agentacct usage import-local --client codex&quot;
+<span class="ln">85</span>    assert sources[&quot;claude-code&quot;].status == &quot;found&quot;
+<span class="ln">86</span>    assert sources[&quot;hermes&quot;].status == &quot;found&quot;
+<span class="ln">87</span>    assert sources[&quot;hermes&quot;].cost_confidence == &quot;client_reported&quot;
+<span class="ln">88</span>    assert sources[&quot;openclaw&quot;].status == &quot;found&quot;
+<span class="ln">89</span>    assert sources[&quot;openclaw&quot;].usage_confidence == &quot;unknown&quot;
+<span class="ln">90</span>    assert sources[&quot;openclaw&quot;].importer == &quot;agentacct usage import-local --client openclaw&quot;
+<span class="ln">91</span>    assert sources[&quot;opencode&quot;].status == &quot;missing&quot;</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>Codex state DB 可读但 tokens_used 全为 0 时，<code>tests/test_source_discovery.py:179</code> 仍只标 usage_confidence unknown，不假装有用量真相。</li><li>Read tool 输出即使包含 event_id，也在 <code>tests/test_log_evidenced_linking.py:222</code> 被证明不能捐赠证据，避免 foreign id 污染。</li><li>候选 SQLite 路径若落在 live agentacct 或 Codex state 下，<code>tests/test_canonical_schema.py:203</code> 期望直接拒绝创建。</li><li>控制 API 的 JSON 投影在 <code>tests/test_control_api.py:81</code> 检查不得包含 store_dir、argv_template、process_group_id、nonce 等执行权柄。</li></ul>
+    </section>
+
+
+      <h3><span class="arr">▸</span>捕获 receipt 不回显原始 payload</h3>
+      <p><code>src/agent_chronicle/capture_runtime.py:11</code> 到 <code>src/agent_chronicle/capture_runtime.py:38</code> 把 capture 结果转成 body-safe receipt，明确记录 <code>src/agent_chronicle/capture_runtime.py:34</code> 的 metadata_only 和 <code>src/agent_chronicle/capture_runtime.py:35</code> 的 raw_payload_returned=false；这让 hook 集成可以反馈状态，却不把原始提示、响应或工具内容带回页面。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/capture_runtime.py</span> · L11-38</span><span>Python</span></div>
+        <pre class="code"><span class="ln">11</span>def capture_write_result_payload(
+<span class="ln">12</span>    result: CaptureWriteResult,
+<span class="ln">13</span>    *,
+<span class="ln">14</span>    vendor: str,
+<span class="ln">15</span>    host_event: str,
+<span class="ln">16</span>    enabled: bool = True,
+<span class="ln">17</span>) -&gt; dict[str, Any]:
+<span class="ln">18</span>    &quot;&quot;&quot;Return a body-safe receipt; raw hook input is never echoed.&quot;&quot;&quot;
+<span class="ln">19</span>
+<span class="ln">20</span>    return {
+<span class="ln">21</span>        &quot;schema_version&quot;: &quot;agent-chronicle.capture-receipt.v1&quot;,
+<span class="ln">22</span>        &quot;enabled&quot;: enabled,
+<span class="ln">23</span>        &quot;vendor&quot;: vendor,
+<span class="ln">24</span>        &quot;host_event&quot;: host_event,
+<span class="ln">25</span>        &quot;ok&quot;: result.ok,
+<span class="ln">26</span>        &quot;fail_open&quot;: result.fail_open,
+<span class="ln">27</span>        &quot;attempted_count&quot;: result.attempted_count,
+<span class="ln">28</span>        &quot;stored_count&quot;: result.stored_count,
+<span class="ln">29</span>        &quot;ignored_reason&quot;: result.capture.ignored_reason or None,
+<span class="ln">30</span>        &quot;warnings&quot;: list(result.capture.warnings),
+<span class="ln">31</span>        &quot;write_errors&quot;: list(result.write_errors),
+<span class="ln">32</span>        &quot;observations&quot;: [observation.to_dict() for observation in result.capture.observations],
+<span class="ln">33</span>        &quot;privacy&quot;: {
+<span class="ln">34</span>            &quot;capture_mode&quot;: &quot;metadata_only&quot;,
+<span class="ln">35</span>            &quot;raw_payload_returned&quot;: False,
+<span class="ln">36</span>            &quot;hook_exit_policy&quot;: &quot;always_zero&quot;,
+<span class="ln">37</span>        },
+<span class="ln">38</span>    }</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>控制台投影只保留决策状态</h3>
+      <p><code>src/agent_chronicle/control_web.py:50</code> 到 <code>src/agent_chronicle/control_web.py:178</code> 生成 dashboard payload，但 <code>src/agent_chronicle/control_web.py:172</code> 到 <code>src/agent_chronicle/control_web.py:177</code> 明确区分 owned_execution 与 observed_only；这也是 <code>tests/test_control_api.py:81</code> 不允许路径、argv 和进程权柄泄露的原因。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/control_web.py</span> · L150-178</span><span>Python</span></div>
+        <pre class="code"><span class="ln">150</span>    active_execution = {&quot;pending&quot;, &quot;launching&quot;, &quot;running&quot;, &quot;cancel_requested&quot;}
+<span class="ln">151</span>    summary = {
+<span class="ln">152</span>        &quot;task_count&quot;: len(tasks),
+<span class="ln">153</span>        &quot;attempt_count&quot;: len(attempts),
+<span class="ln">154</span>        &quot;active_attempt_count&quot;: sum(row[&quot;execution_state&quot;] in active_execution for row in attempts),
+<span class="ln">155</span>        &quot;running_attempt_count&quot;: sum(row[&quot;execution_state&quot;] in {&quot;launching&quot;, &quot;running&quot;, &quot;cancel_requested&quot;} for row in attempts),
+<span class="ln">156</span>        &quot;pending_approval_count&quot;: sum(row[&quot;state&quot;] == &quot;pending&quot; for row in approvals),
+<span class="ln">157</span>    }
+<span class="ln">158</span>    return {
+<span class="ln">159</span>        &quot;schema_version&quot;: CONTROL_WEB_SCHEMA_VERSION,
+<span class="ln">160</span>        &quot;summary&quot;: summary,
+<span class="ln">161</span>        &quot;tasks&quot;: tasks,
+<span class="ln">162</span>        &quot;contracts&quot;: contracts,
+<span class="ln">163</span>        &quot;agents&quot;: agents,
+<span class="ln">164</span>        &quot;workspaces&quot;: workspaces,
+<span class="ln">165</span>        &quot;attempts&quot;: attempts,
+<span class="ln">166</span>        &quot;approvals&quot;: approvals,
+<span class="ln">167</span>        &quot;budget_policies&quot;: budgets,
+<span class="ln">168</span>        &quot;schedules&quot;: schedules,
+<span class="ln">169</span>        &quot;events&quot;: events,
+<span class="ln">170</span>        &quot;issues&quot;: [{&quot;code&quot;: item.code, &quot;line_number&quot;: item.line_number} for item in projection.issues],
+<span class="ln">171</span>        &quot;observed_tasks&quot;: observed,
+<span class="ln">172</span>        &quot;authority_boundary&quot;: {
+<span class="ln">173</span>            &quot;owned_execution&quot;: &quot;controllable&quot;,
+<span class="ln">174</span>            &quot;external_codex&quot;: &quot;observed_only&quot;,
+<span class="ln">175</span>            &quot;external_claude_code&quot;: &quot;observed_only&quot;,
+<span class="ln">176</span>            &quot;external_orchestrators&quot;: &quot;observed_only&quot;,
+<span class="ln">177</span>        },
+<span class="ln">178</span>    }</pre>
+      </div>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">为什么它值得进入工具箱</h2>
+      <div class="g2"><div class="card"><div class="card-h">隐私边界明确</div><div class="card-d">代码多次声明不保存 prompt、response、tool arguments、stdout/stderr；这不是 README 承诺，而是 runtime receipt、schema test 和 projection sanitizer 的共同约束。</div></div><div class="card"><div class="card-h">证据等级诚实</div><div class="card-d">UsageTruthRow 把 client-reported、provider-reported、unknown 等等级固定下来，避免 dashboard 把估算成本包装成真实账单。</div></div><div class="card"><div class="card-h">迁移可审计</div><div class="card-d">SQLite migration 使用冻结字面量和 checksum，迁移时逐条执行并检查 transaction，不靠动态 schema 生成。</div></div><div class="card"><div class="card-h">控制面窄化</div><div class="card-d">dashboard 只控制 agentacct 自己启动的 subprocess，外部 Codex/Claude 都是 observed_only，减少误操作面。</div></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>最大风险是项目很新且表面较大：<code>src/agent_chronicle/api.py:19</code> 到 <code>src/agent_chronicle/api.py:169</code> 的 import 扇入显示它已经聚合大量模块，长期维护需要防止 API 层变成中心泥球。另一个风险是本地日志格式由上游客户端决定，<code>src/agent_chronicle/log_evidence.py:189</code> 也能看到它必须追踪 Codex wire shape 变化。</p>
+      <div class="g2"><div class="card"><div class="card-h">客户端 wire drift</div><div class="card-d">Codex/Claude/OpenCode 日志格式一变，证据配对和 usage import 都需要测试先行更新。</div></div><div class="card"><div class="card-h">成本不是账单</div><div class="card-d">本地 token/cost 字段不能代表 provider invoice，产品必须持续展示 confidence。</div></div><div class="card"><div class="card-h">控制面需要用户理解</div><div class="card-d">owned execution 与 observed-only 的区别如果 UI 没讲清，用户可能误以为它能接管现有 agent 进程。</div></div><div class="card"><div class="card-h">候选库/legacy 双轨复杂</div><div class="card-d">canonical spike 与 legacy reader 并存期间，读写路径和 cutover 策略会增加维护成本。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-07-27</span>
+      <span>Source · <a href="https://github.com/mikehasa/agentacct">mikehasa/agentacct</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../agentacct.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>本地控制面 · 深度解析 · agentacct</title>
+<meta name="description" content="agentacct control-plane 子模块完整解析 — mikehasa/agentacct 源码级深度解析：本地日志发现、证据绑定、SQLite truth model 与安全控制台" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #66d9a8;
+  --star-soft:  #9af0c6;
+  --star-deep:  #36a876;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">agentacct<b>acct</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agentacct<b>acct</b></div>
+      <div class="sub">control-plane · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../agentacct.html">← 返回 agentacct 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">本地控制面 <em>深度解析</em></h1>
+      <p class="hero-desc">本地控制面 模块拆解：从真实源码行号看 agentacct 如何把本地证据、隐私边界和控制面分开。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>control plane 子页面看 dashboard 为什么是产品投影而不是进程控制台。<code>src/agent_chronicle/control_web.py:50</code> 到 <code>src/agent_chronicle/control_web.py:178</code> 复制任务、合同、agent、workspace、attempt 和 approval 的安全字段，同时明确 external_codex 与 external_claude_code 只是 observed_only。<code>tests/test_control_api.py:81</code> 到 <code>tests/test_control_api.py:120</code> 验证路径、argv、PID、nonce、manifest id 都不出现在 API 响应里。 <code>tests/test_control_api.py:123</code>，这里再看 <code>tests/test_control_api.py:151</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/control_web.py</span> · L50-178</span><span>Python</span></div>
+        <pre class="code"><span class="ln">50</span>def sanitize_control_projection(
+<span class="ln">51</span>    projection: ControlProjection,
+<span class="ln">52</span>    *,
+<span class="ln">53</span>    observed_tasks: Sequence[Mapping[str, Any]] = (),
+<span class="ln">54</span>) -&gt; dict[str, Any]:
+<span class="ln">55</span>    &quot;&quot;&quot;Return the complete product projection without execution authority.
+<span class="ln">56</span>
+<span class="ln">57</span>    In particular this omits workspace roots/store paths, argv templates,
+<span class="ln">58</span>    process ids/groups/birth times, executable/cwd, ownership nonce hashes,
+<span class="ln">59</span>    manifest ids, event payloads/hashes, and arbitrary failure strings.
+<span class="ln">60</span>    &quot;&quot;&quot;
+<span class="ln">61</span>
+<span class="ln">62</span>    tasks = [item.to_dict() for item in sorted(projection.tasks.values(), key=lambda row: row.task_id)]
+<span class="ln">63</span>    contracts = [
+<span class="ln">64</span>        {
+<span class="ln">65</span>            &quot;task_id&quot;: item.task_id,
+<span class="ln">66</span>            &quot;revision&quot;: item.revision,
+<span class="ln">67</span>            &quot;objective&quot;: item.objective,
+<span class="ln">68</span>            &quot;workspace_id&quot;: item.workspace_id,
+<span class="ln">69</span>            &quot;mutation_mode&quot;: str(item.permission_envelope.get(&quot;mutation_mode&quot;) or &quot;not_recorded&quot;),
+<span class="ln">70</span>            &quot;launch_approval_required&quot;: contract_requires_launch_approval(item.permission_envelope),
+<span class="ln">71</span>            &quot;budget_policy_ids&quot;: list(item.budget_policy_ids),
+<span class="ln">72</span>            &quot;success_checks&quot;: list(item.success_checks),
+<span class="ln">73</span>            &quot;created_at&quot;: item.created_at,
+<span class="ln">74</span>        }
+<span class="ln">75</span>        for item in sorted(projection.contracts.values(), key=lambda row: row.task_id)
+<span class="ln">76</span>    ]
+<span class="ln">77</span>    agents = [
+<span class="ln">78</span>        {
+<span class="ln">79</span>            &quot;agent_id&quot;: item.agent_id,
+<span class="ln">80</span>            &quot;display_name&quot;: item.display_name,
+<span class="ln">81</span>            &quot;adapter&quot;: item.adapter,
+<span class="ln">82</span>            &quot;execution_backend&quot;: item.execution_backend,
+<span class="ln">83</span>            &quot;capabilities&quot;: list(item.capabilities),
+<span class="ln">84</span>            &quot;command_registered&quot;: bool(item.argv_template),
+<span class="ln">85</span>            &quot;enabled&quot;: item.enabled,
+<span class="ln">86</span>            &quot;revision&quot;: item.revision,
+<span class="ln">87</span>            &quot;updated_at&quot;: item.updated_at,
+<span class="ln">88</span>        }
+<span class="ln">89</span>        for item in sorted(projection.agents.values(), key=lambda row: row.agent_id)
+<span class="ln">90</span>    ]
+<span class="ln">91</span>    workspaces = [
+<span class="ln">92</span>        {
+<span class="ln">93</span>            &quot;workspace_id&quot;: item.workspace_id,
+<span class="ln">94</span>            &quot;enabled&quot;: item.enabled,
+<span class="ln">95</span>            &quot;revision&quot;: item.revision,
+<span class="ln">96</span>            &quot;updated_at&quot;: item.updated_at,
+<span class="ln">97</span>        }
+<span class="ln">98</span>        for item in sorted(projection.workspaces.values(), key=lambda row: row.workspace_id)
+<span class="ln">99</span>    ]
+<span class="ln">100</span>    attempt_created_at = {
+<span class="ln">101</span>        item.target_id: item.occurred_at
+<span class="ln">102</span>        for item in projection.events
+<span class="ln">103</span>        if item.action == &quot;attempt_created&quot;
+<span class="ln">104</span>    }
+<span class="ln">105</span>    attempts = [
+<span class="ln">106</span>        _safe_attempt(item, created_at=attempt_created_at.get(item.attempt_id))
+<span class="ln">107</span>        for item in sorted(
+<span class="ln">108</span>            projection.attempts.values(),
+<span class="ln">109</span>            key=lambda row: _stamp(attempt_created_at.get(row.attempt_id) or row.started_at or row.ended_at),
+<span class="ln">110</span>            reverse=True,
+<span class="ln">111</span>        )
+<span class="ln">112</span>    ]
+<span class="ln">113</span>    approvals = [
+<span class="ln">114</span>        {
+<span class="ln">115</span>            &quot;approval_id&quot;: item.approval_id,
+<span class="ln">116</span>            &quot;task_id&quot;: item.task_id,
+<span class="ln">117</span>            &quot;attempt_id&quot;: item.attempt_id,
+<span class="ln">118</span>            &quot;kind&quot;: item.kind,
+<span class="ln">119</span>            &quot;requested_action&quot;: item.requested_action,
+<span class="ln">120</span>            &quot;state&quot;: item.state,
+<span class="ln">121</span>            &quot;expires_at&quot;: item.expires_at,
+<span class="ln">122</span>            &quot;decided_at&quot;: item.decided_at,
+<span class="ln">123</span>            &quot;consumed_at&quot;: item.consumed_at,
+<span class="ln">124</span>            &quot;revision&quot;: item.revision,
+<span class="ln">125</span>        }
+<span class="ln">126</span>        for item in sorted(projection.approvals.values(), key=lambda row: row.expires_at)
+<span class="ln">127</span>    ]
+<span class="ln">128</span>    budgets = [item.to_dict() for item in sorted(projection.budget_policies.values(), key=lambda row: row.policy_id)]
+<span class="ln">129</span>    schedules = [item.to_dict() for item in sorted(projection.schedules.values(), key=lambda row: row.schedule_id)]
+<span class="ln">130</span>    events = [
+<span class="ln">131</span>        {
+<span class="ln">132</span>            &quot;event_id&quot;: item.event_id,
+<span class="ln">133</span>            &quot;occurred_at&quot;: item.occurred_at,
+<span class="ln">134</span>            &quot;action&quot;: item.action,
+<span class="ln">135</span>            &quot;target_type&quot;: item.target_type,
+<span class="ln">136</span>            &quot;target_id&quot;: item.target_id,
+<span class="ln">137</span>            &quot;prior_state&quot;: item.prior_state,
+<span class="ln">138</span>            &quot;next_state&quot;: item.next_state,
+<span class="ln">139</span>        }
+<span class="ln">140</span>        for item in sorted(projection.events, key=lambda row: row.occurred_at, reverse=True)[:24]
+<span class="ln">141</span>    ]
+<span class="ln">142</span>    observed = [
+<span class="ln">143</span>        {
+<span class="ln">144</span>            &quot;task_id&quot;: str(item.get(&quot;task_id&quot;) or &quot;&quot;),
+<span class="ln">145</span>            &quot;title&quot;: str(item.get(&quot;title&quot;) or &quot;Observed Task&quot;),
+<span class="ln">146</span>        }
+<span class="ln">147</span>        for item in observed_tasks
+<span class="ln">148</span>        if str(item.get(&quot;task_id&quot;) or &quot;&quot;).startswith(&quot;task_&quot;)
+<span class="ln">149</span>    ]
+<span class="ln">150</span>    active_execution = {&quot;pending&quot;, &quot;launching&quot;, &quot;running&quot;, &quot;cancel_requested&quot;}
+<span class="ln">151</span>    summary = {
+<span class="ln">152</span>        &quot;task_count&quot;: len(tasks),
+<span class="ln">153</span>        &quot;attempt_count&quot;: len(attempts),
+<span class="ln">154</span>        &quot;active_attempt_count&quot;: sum(row[&quot;execution_state&quot;] in active_execution for row in attempts),
+<span class="ln">155</span>        &quot;running_attempt_count&quot;: sum(row[&quot;execution_state&quot;] in {&quot;launching&quot;, &quot;running&quot;, &quot;cancel_requested&quot;} for row in attempts),
+<span class="ln">156</span>        &quot;pending_approval_count&quot;: sum(row[&quot;state&quot;] == &quot;pending&quot; for row in approvals),
+<span class="ln">157</span>    }
+<span class="ln">158</span>    return {
+<span class="ln">159</span>        &quot;schema_version&quot;: CONTROL_WEB_SCHEMA_VERSION,
+<span class="ln">160</span>        &quot;summary&quot;: summary,
+<span class="ln">161</span>        &quot;tasks&quot;: tasks,
+<span class="ln">162</span>        &quot;contracts&quot;: contracts,
+<span class="ln">163</span>        &quot;agents&quot;: agents,
+<span class="ln">164</span>        &quot;workspaces&quot;: workspaces,
+<span class="ln">165</span>        &quot;attempts&quot;: attempts,
+<span class="ln">166</span>        &quot;approvals&quot;: approvals,
+<span class="ln">167</span>        &quot;budget_policies&quot;: budgets,
+<span class="ln">168</span>        &quot;schedules&quot;: schedules,
+<span class="ln">169</span>        &quot;events&quot;: events,
+<span class="ln">170</span>        &quot;issues&quot;: [{&quot;code&quot;: item.code, &quot;line_number&quot;: item.line_number} for item in projection.issues],
+<span class="ln">171</span>        &quot;observed_tasks&quot;: observed,
+<span class="ln">172</span>        &quot;authority_boundary&quot;: {
+<span class="ln">173</span>            &quot;owned_execution&quot;: &quot;controllable&quot;,
+<span class="ln">174</span>            &quot;external_codex&quot;: &quot;observed_only&quot;,
+<span class="ln">175</span>            &quot;external_claude_code&quot;: &quot;observed_only&quot;,
+<span class="ln">176</span>            &quot;external_orchestrators&quot;: &quot;observed_only&quot;,
+<span class="ln">177</span>        },
+<span class="ln">178</span>    }</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>安全投影：没有执行权柄</h3>
+      <p><code>src/agent_chronicle/control_web.py:181</code> 到 <code>src/agent_chronicle/control_web.py:205</code> 展示第一层实现。这里不是抽象概念，而是把边界条件写成代码路径：调用方只能沿这些函数和常量进入，异常和漂移被计数或拒绝。 <code>src/agent_chronicle/control_web.py:184</code>，这里再看 <code>src/agent_chronicle/control_web.py:190</code>，这里再看 <code>src/agent_chronicle/control_web.py:203</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/control_web.py</span> · L181-205</span><span>Python</span></div>
+        <pre class="code"><span class="ln">181</span>def _hidden_fields(csrf_token: str, *, expected_revision: int | None = None) -&gt; str:
+<span class="ln">182</span>    revision = (
+<span class="ln">183</span>        f&#x27;&lt;input type=&quot;hidden&quot; name=&quot;expected_revision&quot; value=&quot;{int(expected_revision)}&quot;&gt;&#x27;
+<span class="ln">184</span>        if expected_revision is not None
+<span class="ln">185</span>        else &quot;&quot;
+<span class="ln">186</span>    )
+<span class="ln">187</span>    return (
+<span class="ln">188</span>        f&#x27;&lt;input type=&quot;hidden&quot; name=&quot;csrf_token&quot; value=&quot;{_esc(csrf_token)}&quot;&gt;&#x27;
+<span class="ln">189</span>        f&#x27;&lt;input type=&quot;hidden&quot; name=&quot;idempotency_key&quot; value=&quot;web:{secrets.token_hex(20)}&quot;&gt;&#x27;
+<span class="ln">190</span>        + revision
+<span class="ln">191</span>    )
+<span class="ln">192</span>
+<span class="ln">193</span>
+<span class="ln">194</span>def _badge(value: Any) -&gt; str:
+<span class="ln">195</span>    text = str(value or &quot;unknown&quot;).replace(&quot;_&quot;, &quot; &quot;)
+<span class="ln">196</span>    normalized = str(value or &quot;unknown&quot;).lower()
+<span class="ln">197</span>    if normalized in {&quot;ready&quot;, &quot;running&quot;, &quot;succeeded&quot;, &quot;verified&quot;, &quot;approved&quot;, &quot;consumed&quot;}:
+<span class="ln">198</span>        css = &quot;status-ready&quot;
+<span class="ln">199</span>    elif normalized in {&quot;failed&quot;, &quot;lost&quot;, &quot;rejected&quot;, &quot;control_failure&quot;, &quot;finding&quot;}:
+<span class="ln">200</span>        css = &quot;status-error&quot;
+<span class="ln">201</span>    elif normalized in {&quot;pending&quot;, &quot;launching&quot;, &quot;cancel_requested&quot;, &quot;awaiting_approval&quot;, &quot;policy_hold&quot;}:
+<span class="ln">202</span>        css = &quot;status-finding&quot;
+<span class="ln">203</span>    else:
+<span class="ln">204</span>        css = &quot;status-missing&quot;
+<span class="ln">205</span>    return f&#x27;&lt;span class=&quot;status {css}&quot;&gt;{_esc(text.title())}&lt;/span&gt;&#x27;</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>表单只创建待审合同</h3>
+      <p><code>src/agent_chronicle/control_web.py:208</code> 到 <code>src/agent_chronicle/control_web.py:259</code> 是第二层实现，重点在失败路径和原子性。页面关注的是这些分支如何避免把未验证输入提升为 authority。 <code>src/agent_chronicle/control_web.py:212</code>，这里再看 <code>src/agent_chronicle/control_web.py:220</code>，这里再看 <code>src/agent_chronicle/control_web.py:256</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/control_web.py</span> · L208-259</span><span>Python</span></div>
+        <pre class="code"><span class="ln">208</span>def _task_form(payload: Mapping[str, Any], csrf_token: str) -&gt; str:
+<span class="ln">209</span>    agents = [
+<span class="ln">210</span>        row
+<span class="ln">211</span>        for row in payload.get(&quot;agents&quot;, [])
+<span class="ln">212</span>        if isinstance(row, Mapping)
+<span class="ln">213</span>        and row.get(&quot;enabled&quot;)
+<span class="ln">214</span>        and row.get(&quot;adapter&quot;) == &quot;local_argv&quot;
+<span class="ln">215</span>        and row.get(&quot;execution_backend&quot;) == &quot;subprocess&quot;
+<span class="ln">216</span>    ]
+<span class="ln">217</span>    workspaces = [row for row in payload.get(&quot;workspaces&quot;, []) if isinstance(row, Mapping) and row.get(&quot;enabled&quot;)]
+<span class="ln">218</span>    if not agents or not workspaces:
+<span class="ln">219</span>        return &quot;&quot;&quot;&lt;section class=&quot;section control-setup&quot;&gt;
+<span class="ln">220</span>          &lt;div class=&quot;section-header&quot;&gt;&lt;div&gt;&lt;h2&gt;Register owned execution&lt;/h2&gt;&lt;p&gt;agentacct needs one explicit workspace and one fixed argv adapter before it can start anything.&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+<span class="ln">221</span>          &lt;div class=&quot;control-command-grid&quot;&gt;
+<span class="ln">222</span>            &lt;div&gt;&lt;strong&gt;1 · Register this workspace&lt;/strong&gt;&lt;code&gt;agentacct control register-workspace --store-dir .agent-sentinel/state --root . --workspace-id project&lt;/code&gt;&lt;/div&gt;
+<span class="ln">223</span>            &lt;div&gt;&lt;strong&gt;2 · Register a local argv adapter&lt;/strong&gt;&lt;code&gt;agentacct control register-agent --store-dir .agent-sentinel/state --agent-id local-agent --display-name &amp;quot;Local agent&amp;quot; --argv-json &#x27;[&amp;quot;/absolute/command&amp;quot;,&amp;quot;arg&amp;quot;]&#x27;&lt;/code&gt;&lt;/div&gt;
+<span class="ln">224</span>          &lt;/div&gt;
+<span class="ln">225</span>          &lt;p class=&quot;section-note&quot;&gt;Registration does not adopt a running Codex, Claude Code, or orchestrator process. It creates a separate agentacct-owned launch definition.&lt;/p&gt;
+<span class="ln">226</span>        &lt;/section&gt;&quot;&quot;&quot;
+<span class="ln">227</span>    task_options = [&#x27;&lt;option value=&quot;&quot;&gt;Create a new planned Task&lt;/option&gt;&#x27;]
+<span class="ln">228</span>    for row in payload.get(&quot;observed_tasks&quot;, []):
+<span class="ln">229</span>        if isinstance(row, Mapping):
+<span class="ln">230</span>            task_options.append(
+<span class="ln">231</span>                f&#x27;&lt;option value=&quot;{_esc(row.get(&quot;task_id&quot;))}&quot;&gt;{_esc(row.get(&quot;title&quot;) or &quot;Observed Task&quot;)}&lt;/option&gt;&#x27;
+<span class="ln">232</span>            )
+<span class="ln">233</span>    agent_options = &quot;&quot;.join(
+<span class="ln">234</span>        f&#x27;&lt;option value=&quot;{_esc(row.get(&quot;agent_id&quot;))}&quot;&gt;{_esc(row.get(&quot;display_name&quot;) or row.get(&quot;agent_id&quot;))}&lt;/option&gt;&#x27;
+<span class="ln">235</span>        for row in agents
+<span class="ln">236</span>    )
+<span class="ln">237</span>    workspace_options = &quot;&quot;.join(
+<span class="ln">238</span>        f&#x27;&lt;option value=&quot;{_esc(row.get(&quot;workspace_id&quot;))}&quot;&gt;{_esc(row.get(&quot;workspace_id&quot;))}&lt;/option&gt;&#x27;
+<span class="ln">239</span>        for row in workspaces
+<span class="ln">240</span>    )
+<span class="ln">241</span>    budget_options = &#x27;&lt;option value=&quot;&quot;&gt;No agentacct budget policy&lt;/option&gt;&#x27; + &quot;&quot;.join(
+<span class="ln">242</span>        f&#x27;&lt;option value=&quot;{_esc(row.get(&quot;policy_id&quot;))}&quot;&gt;{_esc(row.get(&quot;policy_id&quot;))} · {_esc(row.get(&quot;action&quot;))}&lt;/option&gt;&#x27;
+<span class="ln">243</span>        for row in payload.get(&quot;budget_policies&quot;, [])
+<span class="ln">244</span>        if isinstance(row, Mapping) and row.get(&quot;enabled&quot;)
+<span class="ln">245</span>    )
+<span class="ln">246</span>    return f&quot;&quot;&quot;&lt;section class=&quot;section control-create&quot;&gt;
+<span class="ln">247</span>      &lt;div class=&quot;section-header&quot;&gt;&lt;div&gt;&lt;h2&gt;Plan an owned attempt&lt;/h2&gt;&lt;p&gt;Create a reviewable contract first. Nothing starts until you press Launch.&lt;/p&gt;&lt;/div&gt;&lt;/div&gt;
+<span class="ln">248</span>      &lt;form class=&quot;control-task-form&quot; method=&quot;post&quot; action=&quot;/control/tasks&quot;&gt;
+<span class="ln">249</span>        {_hidden_fields(csrf_token)}
+<span class="ln">250</span>        &lt;label&gt;&lt;span&gt;Task&lt;/span&gt;&lt;select name=&quot;task_id&quot;&gt;{&#x27;&#x27;.join(task_options)}&lt;/select&gt;&lt;small&gt;Choose an observed Task only when you explicitly want its next attempt governed here.&lt;/small&gt;&lt;/label&gt;
+<span class="ln">251</span>        &lt;label class=&quot;control-wide&quot;&gt;&lt;span&gt;Objective&lt;/span&gt;&lt;input name=&quot;objective&quot; maxlength=&quot;4000&quot; required placeholder=&quot;What should this attempt accomplish?&quot;&gt;&lt;/label&gt;
+<span class="ln">252</span>        &lt;label&gt;&lt;span&gt;Workspace&lt;/span&gt;&lt;select name=&quot;workspace_id&quot; required&gt;{workspace_options}&lt;/select&gt;&lt;/label&gt;
+<span class="ln">253</span>        &lt;label&gt;&lt;span&gt;Agent adapter&lt;/span&gt;&lt;select name=&quot;agent_id&quot; required&gt;{agent_options}&lt;/select&gt;&lt;/label&gt;
+<span class="ln">254</span>        &lt;label&gt;&lt;span&gt;Mutation boundary&lt;/span&gt;&lt;select name=&quot;mutation_mode&quot;&gt;&lt;option value=&quot;read_only&quot;&gt;Read only&lt;/option&gt;&lt;option value=&quot;workspace_write&quot;&gt;Workspace write · approval required&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+<span class="ln">255</span>        &lt;label&gt;&lt;span&gt;Budget policy&lt;/span&gt;&lt;select name=&quot;budget_policy_id&quot;&gt;{budget_options}&lt;/select&gt;&lt;/label&gt;
+<span class="ln">256</span>        &lt;label class=&quot;control-wide&quot;&gt;&lt;span&gt;Success checks&lt;/span&gt;&lt;textarea name=&quot;success_checks&quot; maxlength=&quot;4000&quot; placeholder=&quot;One objective check per line&quot;&gt;&lt;/textarea&gt;&lt;/label&gt;
+<span class="ln">257</span>        &lt;div class=&quot;control-wide control-form-action&quot;&gt;&lt;p&gt;agentacct freezes this contract and local launch identity. Agent-native permissions still apply.&lt;/p&gt;&lt;button class=&quot;button&quot; type=&quot;submit&quot;&gt;Create pending attempt&lt;/button&gt;&lt;/div&gt;
+<span class="ln">258</span>      &lt;/form&gt;
+<span class="ln">259</span>    &lt;/section&gt;&quot;&quot;&quot;</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">registered workspace/agent ─▶ contract ─▶ pending attempt ─▶ launch button ─▶ sanitized control JSON</div>
+      <h3><span class="arr">▸</span>实现判断</h3>
+      <p>这里的设计重心是“先冻结合同，再启动 owned subprocess”。UI 里出现的 button 并不意味着它能控制外部 Codex；只有由 agentacct 注册的 local_argv adapter 才进入可启动集合。 这条路径还可以和主页面的 <code>src/agent_chronicle/source_discovery.py:37</code>、<code>src/agent_chronicle/capture_runtime.py:41</code>、<code>src/agent_chronicle/control_web.py:50</code> 连起来看：agentacct 的策略是收集证据但不收集敏感正文，展示状态但不泄露执行权柄。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>src/agent_chronicle/control_web.py:50</code> 附近的入口如果收到不可信输入，只能产出降级或拒绝，不得写入 raw prompt/response。</li><li><code>src/agent_chronicle/control_web.py:181</code> 的分支必须和测试夹具保持同步，避免客户端格式漂移后静默误归因。</li><li><code>src/agent_chronicle/control_web.py:259</code> 附近的失败路径需要持续保留计数或错误码，方便 dashboard 暴露健康状态。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">主页面</div><div class="card-d"><a href="../agentacct.html">回到 agentacct 总览，查看完整 source discovery、canonical store 与 control web 关系。</a></div></div><div class="card"><div class="card-h">测试证据</div><div class="card-d"><code>tests/test_log_evidenced_linking.py:188</code>、<code>tests/test_canonical_schema.py:12</code>、<code>tests/test_control_api.py:81</code> 分别覆盖三个安全面。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-27</span>
+      <span>Source · <a href="https://github.com/mikehasa/agentacct">mikehasa/agentacct</a></span>
+      <span><a href="../agentacct.html">↑ agentacct 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

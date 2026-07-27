@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Canonical SQLite · 深度解析 · agentacct</title>
+<meta name="description" content="agentacct canonical-store 子模块完整解析 — mikehasa/agentacct 源码级深度解析：本地日志发现、证据绑定、SQLite truth model 与安全控制台" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #66d9a8;
+  --star-soft:  #9af0c6;
+  --star-deep:  #36a876;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">agentacct<b>acct</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agentacct<b>acct</b></div>
+      <div class="sub">canonical-store · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../agentacct.html">← 返回 agentacct 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Canonical SQLite <em>深度解析</em></h1>
+      <p class="hero-desc">Canonical SQLite 模块拆解：从真实源码行号看 agentacct 如何把本地证据、隐私边界和控制面分开。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>canonical store 子页面关注数据层约束。<code>src/agent_chronicle/canonical/sqlite.py:50</code> 到 <code>src/agent_chronicle/canonical/sqlite.py:63</code> 定义 application id、schema version 和 live filename，<code>src/agent_chronicle/canonical/sqlite.py:132</code> 到 <code>src/agent_chronicle/canonical/sqlite.py:153</code> 给迁移步骤计算 checksum。测试 <code>tests/test_canonical_schema.py:12</code> 和 <code>tests/test_canonical_schema.py:49</code> 又把 STRICT、WAL、owner-only 与禁用 raw payload 字段钉住。 <code>tests/test_canonical_schema.py:80</code>，这里再看 <code>tests/test_canonical_schema.py:203</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/canonical/sqlite.py</span> · L50-113</span><span>Python</span></div>
+        <pre class="code"><span class="ln">50</span>APPLICATION_ID = 0x41434354  # &quot;ACCT&quot;
+<span class="ln">51</span># Version 1 was the spike&#x27;s unstable DDL (it drifted while the number stood
+<span class="ln">52</span># still); version 2 is the first checksum-pinned schema; version 3 admits the
+<span class="ln">53</span># &#x27;live&#x27; store role for the writer-integration phase; version 4 adds the
+<span class="ln">54</span># session_observed_lineage absorb-state table. v1 candidates are rebuilt
+<span class="ln">55</span># from a fresh snapshot, never migrated; v2+ stores migrate forward.
+<span class="ln">56</span>SCHEMA_VERSION = 4
+<span class="ln">57</span>SCHEMA_BASE_NAME = &quot;canonical-v4&quot;
+<span class="ln">58</span>APP_VERSION_DEFAULT = &quot;sqlite-truth-spike&quot;
+<span class="ln">59</span>MINIMUM_SQLITE_VERSION = (3, 37, 0)
+<span class="ln">60</span>TASK_PUBLIC_ID_PREFIX = &quot;task_&quot;
+<span class="ln">61</span>LIVE_STORE_FILENAME = &quot;chronicle.sqlite3&quot;
+<span class="ln">62</span>_MAX_SQLITE_INT = 9_223_372_036_854_775_807
+<span class="ln">63</span># Bare directory names, not &lt;name&gt;/state: live state also lives beside state/
+<span class="ln">64</span># (policy.yaml) and the -global root itself serves as a hooks project-dir.
+<span class="ln">65</span>_FORBIDDEN_STATE_SEQUENCES = (
+<span class="ln">66</span>    (&quot;.agent-sentinel&quot;,),
+<span class="ln">67</span>    (&quot;.agent-sentinel-global&quot;,),
+<span class="ln">68</span>    (&quot;.agent-chronicle&quot;,),
+<span class="ln">69</span>    (&quot;.agent-chronicle-global&quot;,),
+<span class="ln">70</span>)
+<span class="ln">71</span>
+<span class="ln">72</span>_GET_TASK_SQL = &quot;SELECT * FROM rm_task_current WHERE public_task_id = ?&quot;
+<span class="ln">73</span>_LIST_TASKS_SQL = (
+<span class="ln">74</span>    &quot;SELECT * FROM rm_task_current INDEXED BY idx_rm_task_work_recent &quot;
+<span class="ln">75</span>    &quot;WHERE (sort_activity_at_us, public_task_id) &lt; (?, ?) &quot;
+<span class="ln">76</span>    &quot;ORDER BY sort_activity_at_us DESC, public_task_id DESC LIMIT ?&quot;
+<span class="ln">77</span>)
+<span class="ln">78</span>_LIST_SESSIONS_SQL = (
+<span class="ln">79</span>    &quot;SELECT * FROM sessions INDEXED BY idx_sessions_recent &quot;
+<span class="ln">80</span>    &quot;WHERE (sort_activity_at_us, session_id) &lt; (?, ?) &quot;
+<span class="ln">81</span>    &quot;ORDER BY sort_activity_at_us DESC, session_id DESC LIMIT ?&quot;
+<span class="ln">82</span>)
+<span class="ln">83</span># Batched point lookups for surface labeling (phase 4.2): each resolves by
+<span class="ln">84</span># primary key / a pinned index over an id list bounded by the page the caller
+<span class="ln">85</span># just fetched. The placeholder count varies with the batch; the shape does
+<span class="ln">86</span># not.
+<span class="ln">87</span>_SESSIONS_BY_IDS_SQL = &quot;SELECT * FROM sessions WHERE session_id IN ({placeholders})&quot;
+<span class="ln">88</span>_SOURCES_BY_IDS_SQL = (
+<span class="ln">89</span>    &quot;SELECT * FROM source_instances WHERE source_instance_id IN ({placeholders})&quot;
+<span class="ln">90</span>)
+<span class="ln">91</span># At most one row per child: uq_session_edges_one_valid_parent is
+<span class="ln">92</span># relation-agnostic (one valid edge per child, whatever its relation), and
+<span class="ln">93</span># writers mint the relation from the child&#x27;s session kind — &#x27;continuation&#x27;
+<span class="ln">94</span># and &#x27;retry&#x27; children carry their single validated lineage edge under those
+<span class="ln">95</span># relations, so filtering to relation=&#x27;parent&#x27; would silently drop them.
+<span class="ln">96</span>_VALID_LINEAGE_EDGES_SQL = (
+<span class="ln">97</span>    &quot;SELECT child_session_id, parent_session_id, relation &quot;
+<span class="ln">98</span>    &quot;FROM session_edges INDEXED BY idx_session_edges_child &quot;
+<span class="ln">99</span>    &quot;WHERE child_session_id IN ({placeholders}) &quot;
+<span class="ln">100</span>    &quot;AND validation_state = &#x27;valid&#x27;&quot;
+<span class="ln">101</span>)
+<span class="ln">102</span># Bound for every by-ids batch: one page of the widest list surface.
+<span class="ln">103</span>_BY_IDS_BATCH_LIMIT = 2_000
+<span class="ln">104</span>_HEALTH_STORE_SQL = (
+<span class="ln">105</span>    &quot;SELECT store_uuid, store_role, schema_version, canonical_sequence &quot;
+<span class="ln">106</span>    &quot;FROM store_metadata WHERE singleton = 1&quot;
+<span class="ln">107</span>)
+<span class="ln">108</span># The single authority for which rm_* read models the minimal rebuild
+<span class="ln">109</span># maintains. The rebuild policy (canonical_live) and the health probe
+<span class="ln">110</span># (canonical_read) both derive from this tuple — a new read model added to
+<span class="ln">111</span># rebuild_minimal_read_models without updating this constant would silently
+<span class="ln">112</span># escape staleness detection and never_built synthesis.
+<span class="ln">113</span>MINIMAL_READ_MODEL_NAMES = (&quot;rm_task_current&quot;, &quot;rm_usage_day&quot;)</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Schema version 与迁移校验</h3>
+      <p><code>src/agent_chronicle/canonical/sqlite.py:132</code> 到 <code>src/agent_chronicle/canonical/sqlite.py:190</code> 展示第一层实现。这里不是抽象概念，而是把边界条件写成代码路径：调用方只能沿这些函数和常量进入，异常和漂移被计数或拒绝。 <code>src/agent_chronicle/canonical/sqlite.py:135</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:141</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:188</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/canonical/sqlite.py</span> · L132-190</span><span>Python</span></div>
+        <pre class="code"><span class="ln">132</span>@dataclass(frozen=True)
+<span class="ln">133</span>class SchemaMigration:
+<span class="ln">134</span>    &quot;&quot;&quot;One forward schema step from ``from_version`` to ``from_version + 1``.
+<span class="ln">135</span>
+<span class="ln">136</span>    Statements run one by one inside a single transaction (never via
+<span class="ln">137</span>    ``executescript``, which would commit early) and must produce exactly the
+<span class="ln">138</span>    DDL that compiling the target build&#x27;s packaged ``schema.sql`` produces —
+<span class="ln">139</span>    the open-time inventory comparison enforces that equivalence.
+<span class="ln">140</span>    &quot;&quot;&quot;
+<span class="ln">141</span>
+<span class="ln">142</span>    from_version: int
+<span class="ln">143</span>    name: str
+<span class="ln">144</span>    statements: tuple[str, ...]
+<span class="ln">145</span>
+<span class="ln">146</span>    @property
+<span class="ln">147</span>    def checksum(self) -&gt; str:
+<span class="ln">148</span>        digest = hashlib.sha256(b&quot;agent-chronicle-schema-migration-v1\x00&quot;)
+<span class="ln">149</span>        for statement in self.statements:
+<span class="ln">150</span>            payload = statement.encode(&quot;utf-8&quot;)
+<span class="ln">151</span>            digest.update(len(payload).to_bytes(8, &quot;big&quot;))
+<span class="ln">152</span>            digest.update(payload)
+<span class="ln">153</span>        return digest.hexdigest()
+<span class="ln">154</span>
+<span class="ln">155</span>
+<span class="ln">156</span># Forward steps keyed by from_version. Version 1 was the spike&#x27;s unstable
+<span class="ln">157</span># DDL, so v1 candidates rebuild rather than migrate. Statements are frozen
+<span class="ln">158</span># literals: the registered checksum is validated against every previously
+<span class="ln">159</span># migrated store on open, so a step may never be regenerated from the moving
+<span class="ln">160</span># schema.sql — the inventory comparison is what proves the literal still
+<span class="ln">161</span># produces the packaged DDL.
+<span class="ln">162</span>SCHEMA_MIGRATIONS: dict[int, SchemaMigration] = {
+<span class="ln">163</span>    2: SchemaMigration(
+<span class="ln">164</span>        from_version=2,
+<span class="ln">165</span>        name=&quot;allow-live-store-role&quot;,
+<span class="ln">166</span>        statements=(
+<span class="ln">167</span>            # SQLite cannot alter a CHECK constraint in place; rebuild the
+<span class="ln">168</span>            # singleton table around the copied row. The final CREATE must
+<span class="ln">169</span>            # stay byte-identical to the store_metadata block in schema.sql.
+<span class="ln">170</span>            &quot;CREATE TABLE store_metadata_role_migration AS &quot;
+<span class="ln">171</span>            &quot;SELECT singleton, store_uuid, store_role, schema_version, &quot;
+<span class="ln">172</span>            &quot;canonical_sequence, created_at_us FROM store_metadata&quot;,
+<span class="ln">173</span>            &quot;DROP TABLE store_metadata&quot;,
+<span class="ln">174</span>            (
+<span class="ln">175</span>                &quot;CREATE TABLE store_metadata (\n&quot;
+<span class="ln">176</span>                &quot;    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),\n&quot;
+<span class="ln">177</span>                &quot;    store_uuid TEXT NOT NULL UNIQUE,\n&quot;
+<span class="ln">178</span>                &quot;    store_role TEXT NOT NULL CHECK (store_role IN (&#x27;candidate&#x27;, &#x27;live&#x27;)),\n&quot;
+<span class="ln">179</span>                &quot;    schema_version INTEGER NOT NULL CHECK (schema_version &gt;= 1),\n&quot;
+<span class="ln">180</span>                &quot;    canonical_sequence INTEGER NOT NULL DEFAULT 0 CHECK (canonical_sequence &gt;= 0),\n&quot;
+<span class="ln">181</span>                &quot;    created_at_us INTEGER NOT NULL CHECK (created_at_us &gt;= 0)\n&quot;
+<span class="ln">182</span>                &quot;) STRICT&quot;
+<span class="ln">183</span>            ),
+<span class="ln">184</span>            &quot;INSERT INTO store_metadata(singleton, store_uuid, store_role, &quot;
+<span class="ln">185</span>            &quot;schema_version, canonical_sequence, created_at_us) &quot;
+<span class="ln">186</span>            &quot;SELECT singleton, store_uuid, store_role, schema_version, &quot;
+<span class="ln">187</span>            &quot;canonical_sequence, created_at_us FROM store_metadata_role_migration&quot;,
+<span class="ln">188</span>            &quot;DROP TABLE store_metadata_role_migration&quot;,
+<span class="ln">189</span>        ),
+<span class="ln">190</span>    ),</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>迁移在事务里逐条执行</h3>
+      <p><code>src/agent_chronicle/canonical/sqlite.py:228</code> 到 <code>src/agent_chronicle/canonical/sqlite.py:316</code> 是第二层实现，重点在失败路径和原子性。页面关注的是这些分支如何避免把未验证输入提升为 authority。 <code>src/agent_chronicle/canonical/sqlite.py:232</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:240</code>，这里再看 <code>src/agent_chronicle/canonical/sqlite.py:313</code></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent_chronicle/canonical/sqlite.py</span> · L228-316</span><span>Python</span></div>
+        <pre class="code"><span class="ln">228</span>def _apply_schema_migrations(
+<span class="ln">229</span>    connection: sqlite3.Connection,
+<span class="ln">230</span>    *,
+<span class="ln">231</span>    from_version: int,
+<span class="ln">232</span>    app_version: str,
+<span class="ln">233</span>) -&gt; int:
+<span class="ln">234</span>    journal_mode = str(connection.execute(&quot;PRAGMA journal_mode&quot;).fetchone()[0]).lower()
+<span class="ln">235</span>    if journal_mode != &quot;wal&quot;:
+<span class="ln">236</span>        raise ValueError(&quot;candidate database is not in WAL mode; refusing to migrate&quot;)
+<span class="ln">237</span>    metadata_version = connection.execute(
+<span class="ln">238</span>        &quot;SELECT schema_version FROM store_metadata WHERE singleton = 1&quot;
+<span class="ln">239</span>    ).fetchone()
+<span class="ln">240</span>    if metadata_version is None or int(metadata_version[0]) &lt; from_version:
+<span class="ln">241</span>        raise ValueError(&quot;candidate metadata disagrees with the schema version; refusing to migrate&quot;)
+<span class="ln">242</span>    current = from_version
+<span class="ln">243</span>    while current &lt; SCHEMA_VERSION:
+<span class="ln">244</span>        step = SCHEMA_MIGRATIONS.get(current)
+<span class="ln">245</span>        if step is None:
+<span class="ln">246</span>            raise ValueError(
+<span class="ln">247</span>                f&quot;candidate schema version {current} has no upgrade path in &quot;
+<span class="ln">248</span>                f&quot;this build; rebuild the candidate from a fresh snapshot&quot;
+<span class="ln">249</span>            )
+<span class="ln">250</span>        if step.from_version != current:
+<span class="ln">251</span>            raise ValueError(
+<span class="ln">252</span>                f&quot;schema migration &#x27;{step.name}&#x27; is registered for version &quot;
+<span class="ln">253</span>                f&quot;{current} but declares from_version {step.from_version}&quot;
+<span class="ln">254</span>            )
+<span class="ln">255</span>        target = current + 1
+<span class="ln">256</span>        try:
+<span class="ln">257</span>            connection.execute(&quot;BEGIN IMMEDIATE&quot;)
+<span class="ln">258</span>        except sqlite3.OperationalError as exc:
+<span class="ln">259</span>            raise ValueError(
+<span class="ln">260</span>                f&quot;schema migration &#x27;{step.name}&#x27; to version {target} could not &quot;
+<span class="ln">261</span>                f&quot;acquire the write lock; another process may be migrating&quot;
+<span class="ln">262</span>            ) from exc
+<span class="ln">263</span>        try:
+<span class="ln">264</span>            # Re-read versions under the exclusive lock: a concurrent writable
+<span class="ln">265</span>            # open may have finished this step (or the whole chain) while we
+<span class="ln">266</span>            # waited. Adopting its committed progress keeps racing opens
+<span class="ln">267</span>            # idempotent instead of failing on the stamping UNIQUE constraint.
+<span class="ln">268</span>            observed = int(connection.execute(&quot;PRAGMA user_version&quot;).fetchone()[0])
+<span class="ln">269</span>            row = connection.execute(
+<span class="ln">270</span>                &quot;SELECT schema_version FROM store_metadata WHERE singleton = 1&quot;
+<span class="ln">271</span>            ).fetchone()
+<span class="ln">272</span>            stamped = None if row is None else int(row[0])
+<span class="ln">273</span>            if observed != current or stamped != current:
+<span class="ln">274</span>                if stamped == observed and current &lt; observed &lt;= SCHEMA_VERSION:
+<span class="ln">275</span>                    connection.execute(&quot;ROLLBACK&quot;)
+<span class="ln">276</span>                    current = observed
+<span class="ln">277</span>                    continue
+<span class="ln">278</span>                raise ValueError(
+<span class="ln">279</span>                    &quot;candidate metadata disagrees with the schema version; refusing to migrate&quot;
+<span class="ln">280</span>                )
+<span class="ln">281</span>            for statement in step.statements:
+<span class="ln">282</span>                connection.execute(statement)
+<span class="ln">283</span>                if not connection.in_transaction:
+<span class="ln">284</span>                    # A statement that is itself COMMIT/ROLLBACK/END would
+<span class="ln">285</span>                    # make the stamping writes below autocommit one by one,
+<span class="ln">286</span>                    # silently breaking per-step atomicity.
+<span class="ln">287</span>                    raise ValueError(
+<span class="ln">288</span>                        f&quot;schema migration &#x27;{step.name}&#x27; statement ended the &quot;
+<span class="ln">289</span>                        f&quot;transaction; step atomicity cannot be proved&quot;
+<span class="ln">290</span>                    )
+<span class="ln">291</span>            connection.execute(
+<span class="ln">292</span>                &quot;INSERT INTO schema_migrations(version, name, checksum, app_version, applied_at_us) &quot;
+<span class="ln">293</span>                &quot;VALUES (?, ?, ?, ?, ?)&quot;,
+<span class="ln">294</span>                (target, step.name, step.checksum, app_version, now_us()),
+<span class="ln">295</span>            )
+<span class="ln">296</span>            connection.execute(
+<span class="ln">297</span>                &quot;UPDATE store_metadata SET schema_version = ? WHERE singleton = 1&quot;,
+<span class="ln">298</span>                (target,),
+<span class="ln">299</span>            )
+<span class="ln">300</span>            connection.execute(f&quot;PRAGMA user_version = {target}&quot;)
+<span class="ln">301</span>            connection.execute(&quot;COMMIT&quot;)
+<span class="ln">302</span>        except BaseException as exc:
+<span class="ln">303</span>            if connection.in_transaction:
+<span class="ln">304</span>                try:
+<span class="ln">305</span>                    connection.execute(&quot;ROLLBACK&quot;)
+<span class="ln">306</span>                except sqlite3.Error:
+<span class="ln">307</span>                    pass
+<span class="ln">308</span>            if isinstance(exc, sqlite3.Error):
+<span class="ln">309</span>                # A distinct error class keeps migration failures out of the
+<span class="ln">310</span>                # generic unreadable-DDL diagnosis in open().
+<span class="ln">311</span>                raise ValueError(
+<span class="ln">312</span>                    f&quot;schema migration &#x27;{step.name}&#x27; to version {target} failed&quot;
+<span class="ln">313</span>                ) from exc
+<span class="ln">314</span>            raise
+<span class="ln">315</span>        current = target
+<span class="ln">316</span>    return current</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">candidate path ─▶ schema checksum ─▶ WAL transaction ─▶ migration stamp ─▶ read model health</div>
+      <h3><span class="arr">▸</span>实现判断</h3>
+      <p>它不像普通 sqlite helper 那样自动选默认路径；候选库必须显式创建，迁移也要持有写锁、验证 metadata、逐条执行 DDL 并 stamp schema_migrations。 这条路径还可以和主页面的 <code>src/agent_chronicle/source_discovery.py:37</code>、<code>src/agent_chronicle/capture_runtime.py:41</code>、<code>src/agent_chronicle/control_web.py:50</code> 连起来看：agentacct 的策略是收集证据但不收集敏感正文，展示状态但不泄露执行权柄。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>src/agent_chronicle/canonical/sqlite.py:50</code> 附近的入口如果收到不可信输入，只能产出降级或拒绝，不得写入 raw prompt/response。</li><li><code>src/agent_chronicle/canonical/sqlite.py:132</code> 的分支必须和测试夹具保持同步，避免客户端格式漂移后静默误归因。</li><li><code>src/agent_chronicle/canonical/sqlite.py:316</code> 附近的失败路径需要持续保留计数或错误码，方便 dashboard 暴露健康状态。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">主页面</div><div class="card-d"><a href="../agentacct.html">回到 agentacct 总览，查看完整 source discovery、canonical store 与 control web 关系。</a></div></div><div class="card"><div class="card-h">测试证据</div><div class="card-d"><code>tests/test_log_evidenced_linking.py:188</code>、<code>tests/test_canonical_schema.py:12</code>、<code>tests/test_control_api.py:81</code> 分别覆盖三个安全面。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-07-27</span>
+      <span>Source · <a href="https://github.com/mikehasa/agentacct">mikehasa/agentacct</a></span>
+      <span><a href="../agentacct.html">↑ agentacct 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
