@@ -1,0 +1,532 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>workflow loader 与 phase 生命周期 · deer-workflow</title><meta name="description" content="deerwork-ai/deer-workflow 源码级深度解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#58d68d; --star-soft:#91e6b1; --star-deep:#2fa96a; }</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">deer<b>workflow</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">deer<b>workflow</b></div><div class="sub">workflow loader 与 phase 生命周期 · 深度解析</div></div><span class="nav-ver">TypeScript · Bun package</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>运行核心</a></li><li><a href="#section-2"><span class="idx">02</span>流程原语</a></li><li><a href="#section-3"><span class="idx">03</span>事件流</a></li><li><a href="#section-4"><span class="idx">04</span>测试证据</a></li><li><a href="#section-5"><span class="idx">05</span>亮点</a></li><li><a href="#section-6"><span class="idx">06</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★259 · 2026-07-26</div><div><a href="https://github.com/deerwork-ai/deer-workflow" target="_blank">deerwork-ai/deer-workflow</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">workflow loader 与 phase 生命周期 <em>深度解析</em></h1><p class="hero-desc">从 deer-workflow 源码逐段确认该模块的契约、执行路径、事件语义和失败边界。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>workflow loader 与 phase 生命周期 的第一层证据来自 <code>src/flow/workflow.ts:90</code>、<code>src/flow/workflow.ts:94</code>、<code>src/flow/workflow.ts:97</code>、<code>src/flow/workflow.ts:101</code> 与 <code>src/flow/context.ts:30</code>：这些行把入口、上下文、错误或配置集中在一个小范围内，说明 deer-workflow 倾向把复杂度留在明确契约里，而不是散到调用者脚本。这里的设计价值是让 Agent 自动化可以被测试、被日志系统消费，也能被 CLI 和库调用共享。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/src/flow/workflow.ts</span> · L90-147</span><span>TypeScript</span></div><pre class="code"><span class="ln">90</span>export async function workflow&lt;TOutput = unknown, TArgs = unknown&gt;(
+<span class="ln">91</span>  target: WorkflowTarget,
+<span class="ln">92</span>  args?: TArgs,
+<span class="ln">93</span>): Promise&lt;TOutput&gt; {
+<span class="ln">94</span>  const parentContext = getWorkflowContext();
+<span class="ln">95</span>  const depth = parentContext ? parentContext.depth + 1 : 0;
+<span class="ln">96</span>
+<span class="ln">97</span>  if (depth &gt; MAX_NESTED_WORKFLOW_DEPTH) {
+<span class="ln">98</span>    throw new WorkflowNestingError(depth);
+<span class="ln">99</span>  }
+<span class="ln">100</span>
+<span class="ln">101</span>  const scriptPath = resolveWorkflowPath(target, parentContext);
+<span class="ln">102</span>  const context: WorkflowExecutionContext&lt;TArgs | undefined&gt; = {
+<span class="ln">103</span>    id: crypto.randomUUID(),
+<span class="ln">104</span>    parentId: parentContext?.id,
+<span class="ln">105</span>    depth,
+<span class="ln">106</span>    scriptPath,
+<span class="ln">107</span>    args,
+<span class="ln">108</span>  };
+<span class="ln">109</span>
+<span class="ln">110</span>  return runInWorkflowContext(context, async () =&gt; {
+<span class="ln">111</span>    const startedAt = performance.now();
+<span class="ln">112</span>    emitWorkflowEvent({
+<span class="ln">113</span>      type: &quot;workflow:start&quot;,
+<span class="ln">114</span>      ...toWorkflowEventContext(context),
+<span class="ln">115</span>    });
+<span class="ln">116</span>
+<span class="ln">117</span>    try {
+<span class="ln">118</span>      const definition = await loadWorkflowDefinition&lt;
+<span class="ln">119</span>        TArgs | undefined,
+<span class="ln">120</span>        TOutput
+<span class="ln">121</span>      &gt;(scriptPath);
+<span class="ln">122</span>      if (definition.meta !== undefined) {
+<span class="ln">123</span>        emitWorkflowEvent({
+<span class="ln">124</span>          type: &quot;workflow:meta&quot;,
+<span class="ln">125</span>          ...toWorkflowEventContext(context),
+<span class="ln">126</span>          meta: definition.meta,
+<span class="ln">127</span>        });
+<span class="ln">128</span>      }
+<span class="ln">129</span>      const result = await definition.handler(args, context);
+<span class="ln">130</span>      endCurrentPhase(context);
+<span class="ln">131</span>      emitWorkflowEvent({
+<span class="ln">132</span>        type: &quot;workflow:end&quot;,
+<span class="ln">133</span>        ...toWorkflowEventContext(context),
+<span class="ln">134</span>        durationMs: elapsedMilliseconds(startedAt),
+<span class="ln">135</span>      });
+<span class="ln">136</span>      return result;
+<span class="ln">137</span>    } catch (error) {
+<span class="ln">138</span>      endCurrentPhase(context);
+<span class="ln">139</span>      emitWorkflowEvent({
+<span class="ln">140</span>        type: &quot;workflow:error&quot;,
+<span class="ln">141</span>        ...toWorkflowEventContext(context),
+<span class="ln">142</span>        durationMs: elapsedMilliseconds(startedAt),
+<span class="ln">143</span>        error: serializeWorkflowError(error),
+<span class="ln">144</span>      });
+<span class="ln">145</span>      throw error;
+<span class="ln">146</span>    }
+<span class="ln">147</span>  });</pre></div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>入口与状态</h3><p>第二层证据是 <code>src/flow/workflow.ts:118</code>、<code>src/flow/workflow.ts:129</code>、<code>src/flow/workflow.ts:137</code>、<code>src/flow/phase.ts:34</code> 与 <code>src/flow/phase.ts:49</code>。这些引用展示了失败路径、事件路径或参数路径如何闭环：不是只在 happy path 发一个结果，而是把输入解析、阶段切换、stdout/stderr、schema 或 duration 都纳入可解释的运行轨迹。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/src/flow/phase.ts</span> · L34-91</span><span>TypeScript</span></div><pre class="code"><span class="ln">34</span>export function phase(title: string): void {
+<span class="ln">35</span>  const normalizedTitle = title.trim();
+<span class="ln">36</span>  if (!normalizedTitle) {
+<span class="ln">37</span>    throw new TypeError(&quot;phase() requires a non-empty title.&quot;);
+<span class="ln">38</span>  }
+<span class="ln">39</span>
+<span class="ln">40</span>  const context = getWorkflowContext();
+<span class="ln">41</span>  if (!context) {
+<span class="ln">42</span>    throw new PhaseContextError();
+<span class="ln">43</span>  }
+<span class="ln">44</span>
+<span class="ln">45</span>  if (context.phase === normalizedTitle) {
+<span class="ln">46</span>    return;
+<span class="ln">47</span>  }
+<span class="ln">48</span>
+<span class="ln">49</span>  endCurrentPhase(context);
+<span class="ln">50</span>  context.phase = normalizedTitle;
+<span class="ln">51</span>  phaseStartTimes.set(context, performance.now());
+<span class="ln">52</span>  emitWorkflowEvent({
+<span class="ln">53</span>    type: &quot;workflow:phase:start&quot;,
+<span class="ln">54</span>    ...toWorkflowEventContext(context),
+<span class="ln">55</span>    phase: normalizedTitle,
+<span class="ln">56</span>  });
+<span class="ln">57</span>}
+<span class="ln">58</span>
+<span class="ln">59</span>/**
+<span class="ln">60</span> * Reads the active Workflow&#x27;s current phase.
+<span class="ln">61</span> *
+<span class="ln">62</span> * @returns The phase title, or `undefined` outside a Workflow or before the
+<span class="ln">63</span> * first call to {@link phase}.
+<span class="ln">64</span> */
+<span class="ln">65</span>export function getCurrentPhase(): string | undefined {
+<span class="ln">66</span>  return getWorkflowContext()?.phase;
+<span class="ln">67</span>}
+<span class="ln">68</span>
+<span class="ln">69</span>/**
+<span class="ln">70</span> * Ends the active phase and emits its lifecycle event.
+<span class="ln">71</span> *
+<span class="ln">72</span> * @internal
+<span class="ln">73</span> */
+<span class="ln">74</span>export function endCurrentPhase(
+<span class="ln">75</span>  context: WorkflowExecutionContext = requireWorkflowContext(),
+<span class="ln">76</span>): void {
+<span class="ln">77</span>  const currentPhase = context.phase;
+<span class="ln">78</span>  if (!currentPhase) {
+<span class="ln">79</span>    return;
+<span class="ln">80</span>  }
+<span class="ln">81</span>
+<span class="ln">82</span>  const startedAt = phaseStartTimes.get(context);
+<span class="ln">83</span>  context.phase = undefined;
+<span class="ln">84</span>  phaseStartTimes.delete(context);
+<span class="ln">85</span>
+<span class="ln">86</span>  emitWorkflowEvent({
+<span class="ln">87</span>    type: &quot;workflow:phase:end&quot;,
+<span class="ln">88</span>    ...toWorkflowEventContext(context),
+<span class="ln">89</span>    phase: currentPhase,
+<span class="ln">90</span>    durationMs: elapsedMilliseconds(startedAt),
+<span class="ln">91</span>  });</pre></div><h3><span class="arr">▸</span>失败与边界</h3><p>第三层证据来自 <code>src/flow/workflow.ts:232</code>、<code>src/flow/workflow.ts:246</code>、<code>src/flow/workflow.ts:271</code>、<code>tests/flow/workflow.test.ts:175</code> 与 <code>tests/flow/workflow.test.ts:187</code>。这些行说明这个模块的边界主要靠类型和测试守住：当 workflow 嵌套、metadata、JSON input、CLI 命令或 Agent 子进程出现异常时，源码会抛出具名错误或保留原始诊断，而不是吞掉上下文。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/src/flow/workflow.ts</span> · L220-350</span><span>TypeScript</span></div><pre class="code"><span class="ln">220</span>  value: unknown,
+<span class="ln">221</span>  scriptPath: string,
+<span class="ln">222</span>): WorkflowMeta | undefined {
+<span class="ln">223</span>  if (value === undefined) {
+<span class="ln">224</span>    return undefined;
+<span class="ln">225</span>  }
+<span class="ln">226</span>
+<span class="ln">227</span>  if (!isModuleRecord(value)) {
+<span class="ln">228</span>    throw invalidWorkflowMeta(scriptPath, &quot;meta must be an object&quot;);
+<span class="ln">229</span>  }
+<span class="ln">230</span>
+<span class="ln">231</span>  const { name, description, phases } = value;
+<span class="ln">232</span>  if (typeof name !== &quot;string&quot; || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+<span class="ln">233</span>    throw invalidWorkflowMeta(scriptPath, &quot;meta.name must be kebab-case&quot;);
+<span class="ln">234</span>  }
+<span class="ln">235</span>  if (
+<span class="ln">236</span>    typeof description !== &quot;string&quot; ||
+<span class="ln">237</span>    !description.trim() ||
+<span class="ln">238</span>    /[\r\n]/.test(description) ||
+<span class="ln">239</span>    hasControlCharacters(description)
+<span class="ln">240</span>  ) {
+<span class="ln">241</span>    throw invalidWorkflowMeta(
+<span class="ln">242</span>      scriptPath,
+<span class="ln">243</span>      &quot;meta.description must be a non-empty, one-line string&quot;,
+<span class="ln">244</span>    );
+<span class="ln">245</span>  }
+<span class="ln">246</span>  if (!Array.isArray(phases) || phases.length === 0) {
+<span class="ln">247</span>    throw invalidWorkflowMeta(
+<span class="ln">248</span>      scriptPath,
+<span class="ln">249</span>      &quot;meta.phases must be a non-empty array&quot;,
+<span class="ln">250</span>    );
+<span class="ln">251</span>  }
+<span class="ln">252</span>
+<span class="ln">253</span>  const titles = phases.map((phase, index) =&gt; {
+<span class="ln">254</span>    if (
+<span class="ln">255</span>      !isModuleRecord(phase) ||
+<span class="ln">256</span>      typeof phase.title !== &quot;string&quot; ||
+<span class="ln">257</span>      !phase.title.trim() ||
+<span class="ln">258</span>      hasControlCharacters(phase.title)
+<span class="ln">259</span>    ) {
+<span class="ln">260</span>      throw invalidWorkflowMeta(
+<span class="ln">261</span>        scriptPath,
+<span class="ln">262</span>        `meta.phases[${index}].title must be a non-empty string`,
+<span class="ln">263</span>      );
+<span class="ln">264</span>    }
+<span class="ln">265</span>    return phase.title.trim();
+<span class="ln">266</span>  });
+<span class="ln">267</span>  if (new Set(titles).size !== titles.length) {
+<span class="ln">268</span>    throw invalidWorkflowMeta(scriptPath, &quot;meta.phases titles must be unique&quot;);
+<span class="ln">269</span>  }
+<span class="ln">270</span>
+<span class="ln">271</span>  const exampleArgs = parseExampleArgs(value.exampleArgs, scriptPath);
+<span class="ln">272</span>  return Object.freeze({
+<span class="ln">273</span>    name,
+<span class="ln">274</span>    description: description.trim(),
+<span class="ln">275</span>    phases: Object.freeze(titles.map((title) =&gt; Object.freeze({ title }))),
+<span class="ln">276</span>    ...(exampleArgs === undefined ? {} : { exampleArgs }),
+<span class="ln">277</span>  });
+<span class="ln">278</span>}
+<span class="ln">279</span>
+<span class="ln">280</span>function parseExampleArgs(
+<span class="ln">281</span>  value: unknown,
+<span class="ln">282</span>  scriptPath: string,
+<span class="ln">283</span>): Readonly&lt;Record&lt;string, WorkflowExampleValue&gt;&gt; | undefined {
+<span class="ln">284</span>  if (value === undefined) {
+<span class="ln">285</span>    return undefined;
+<span class="ln">286</span>  }
+<span class="ln">287</span>  if (!isModuleRecord(value) || Array.isArray(value)) {
+<span class="ln">288</span>    throw invalidWorkflowMeta(
+<span class="ln">289</span>      scriptPath,
+<span class="ln">290</span>      &quot;meta.exampleArgs must be a JSON-safe object&quot;,
+<span class="ln">291</span>    );
+<span class="ln">292</span>  }
+<span class="ln">293</span>
+<span class="ln">294</span>  return Object.freeze(
+<span class="ln">295</span>    Object.fromEntries(
+<span class="ln">296</span>      Object.entries(value).map(([key, item]) =&gt; [
+<span class="ln">297</span>        key,
+<span class="ln">298</span>        cloneExampleValue(item, scriptPath),
+<span class="ln">299</span>      ]),
+<span class="ln">300</span>    ),
+<span class="ln">301</span>  );
+<span class="ln">302</span>}
+<span class="ln">303</span>
+<span class="ln">304</span>function cloneExampleValue(
+<span class="ln">305</span>  value: unknown,
+<span class="ln">306</span>  scriptPath: string,
+<span class="ln">307</span>): WorkflowExampleValue {
+<span class="ln">308</span>  if (
+<span class="ln">309</span>    value === null ||
+<span class="ln">310</span>    typeof value === &quot;boolean&quot; ||
+<span class="ln">311</span>    typeof value === &quot;number&quot; ||
+<span class="ln">312</span>    typeof value === &quot;string&quot;
+<span class="ln">313</span>  ) {
+<span class="ln">314</span>    if (typeof value === &quot;number&quot; &amp;&amp; !Number.isFinite(value)) {
+<span class="ln">315</span>      throw invalidWorkflowMeta(
+<span class="ln">316</span>        scriptPath,
+<span class="ln">317</span>        &quot;meta.exampleArgs must contain only finite JSON numbers&quot;,
+<span class="ln">318</span>      );
+<span class="ln">319</span>    }
+<span class="ln">320</span>    return value;
+<span class="ln">321</span>  }
+<span class="ln">322</span>  if (Array.isArray(value)) {
+<span class="ln">323</span>    return Object.freeze(
+<span class="ln">324</span>      value.map((item) =&gt; cloneExampleValue(item, scriptPath)),
+<span class="ln">325</span>    );
+<span class="ln">326</span>  }
+<span class="ln">327</span>  if (isModuleRecord(value)) {
+<span class="ln">328</span>    return Object.freeze(
+<span class="ln">329</span>      Object.fromEntries(
+<span class="ln">330</span>        Object.entries(value).map(([key, item]) =&gt; [
+<span class="ln">331</span>          key,
+<span class="ln">332</span>          cloneExampleValue(item, scriptPath),
+<span class="ln">333</span>        ]),
+<span class="ln">334</span>      ),
+<span class="ln">335</span>    );
+<span class="ln">336</span>  }
+<span class="ln">337</span>  throw invalidWorkflowMeta(
+<span class="ln">338</span>    scriptPath,
+<span class="ln">339</span>    &quot;meta.exampleArgs must contain only JSON-safe values&quot;,
+<span class="ln">340</span>  );
+<span class="ln">341</span>}
+<span class="ln">342</span>
+<span class="ln">343</span>function invalidWorkflowMeta(
+<span class="ln">344</span>  scriptPath: string,
+<span class="ln">345</span>  detail: string,
+<span class="ln">346</span>): WorkflowLoadError {
+<span class="ln">347</span>  return new WorkflowLoadError(
+<span class="ln">348</span>    scriptPath,
+<span class="ln">349</span>    `Invalid Workflow metadata at ${scriptPath}: ${detail}.`,
+<span class="ln">350</span>  );</pre></div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><h3><span class="arr">▸</span>端到端调用路径</h3><div class="flow">input → contract check → context/event binding → user handler → end/error event → typed result</div><p>最后看 <code>src/flow/phase.ts:52</code>、<code>src/flow/phase.ts:74</code>、<code>src/flow/context.ts:42</code>、<code>tests/flow/workflow.test.ts:199</code> 与 <code>tests/flow/workflow.test.ts:205</code>。这组证据把实现和测试连起来：源码定义行为，测试断言事件顺序、错误闭合和返回值结构。对真实 coding-agent 平台来说，这比 README 示例更有价值，因为它回答了失败时系统还剩下哪些可观察信号。</p></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li>源码把错误路径显式化，但调用方仍要决定 null、throw 和 retry 的业务语义。</li><li>CLI adapter 依赖宿主机安装对应命令，测试中通过 stub 覆盖，生产中还需要版本治理。</li><li>事件流是同步 emitter，监听器自身不能做阻塞重活。</li></ul></section><section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">回主页面</div><div class="card-d"><a href="../deer-workflow.html">deer-workflow 主页面</a></div></div><div class="card"><div class="card-h">源码仓库</div><div class="card-d"><a href="https://github.com/deerwork-ai/deer-workflow">deerwork-ai/deer-workflow</a></div></div></div></section><div class="foot"><span>Generated · 2026-07-28</span><span>Source · <a href="https://github.com/deerwork-ai/deer-workflow">deerwork-ai/deer-workflow</a></span><span><a href="index.html">↑ 回到索引</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#91e6b1';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>
