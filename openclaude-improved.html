@@ -1,0 +1,1111 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>openclaude-improved 源码观测台 · openclaude-improved</title><meta name="description" content="多模型 Claude Code 兼容层源码解析"/><style>/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root{--star:#61c6ff;--star-soft:#9adfff;--star-deep:#2f8fc9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">openclaude<b>improved</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">openclaude<b>improved</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · Bun / npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>Bridge</a></li><li><a href="#section-2"><span class="idx">02</span>QueryEngine</a></li><li><a href="#section-3"><span class="idx">03</span>Provider</a></li><li><a href="#section-4"><span class="idx">04</span>Tests</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★583 · 2026-07-26</div><div><a href="https://github.com/0xwilliamortiz/openclaude-improved" target="_blank">0xwilliamortiz/openclaude-improved</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">openclaude-improved <em>多模型 Claude Code 兼容层</em></h1><p class="hero-desc">openclaude-improved 把 Claude Code 风格的编码代理运行时扩展到 OpenAI、Gemini、Ollama、Codex、GitHub Copilot 等 provider，同时保留 bridge、权限、安装、会话和 SDK 兼容路径。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 583</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">50M</div><div class="stat-lbl">源码快照</div></div><div class="stat"><div class="stat-num">3.2K</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-07-27</div><div class="stat-lbl">Last commit</div></div></div></div><div class="flow">CLI / SDK
+  ├─ QueryEngine submitMessage
+  ├─ Bridge session runner
+  ├─ Provider profile resolver
+  └─ Installer / diagnostics</div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2><p>这个仓库不是简单换壳 CLI。<code>src/QueryEngine.ts:187</code> 把单轮对话生命周期抽成可复用类，<code>src/bridge/replBridge.ts:92</code> 又把远端会话的初始化参数显式化，因此它的核心价值是把交互式编码代理拆成 SDK、bridge、provider 和 installer 几条可替换链路。</p><p>它值得源码级阅读，是因为安全边界写在实现里而不是只写在 README：<code>src/bridge/sessionRunner.ts:24</code> 用环境变量 allowlist 阻断父进程 secret 继承，<code>src/bridge/workSecret.ts:64</code> 拒绝非本地明文 HTTP，<code>src/bridge/sessionRunner.test.ts:34</code> 又用测试锁住任意 secret 不外泄。</p><h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">CLI runtime + bridge transport + provider profile + installer hardening</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">QueryEngine、BridgeCoreParams、SessionSpawner、ProviderProfile</div></div><div class="card"><div class="card-h">性能/精度数据</div><div class="card-d">仓库主打 200+ 模型兼容，源码侧重点是 provider route 和 bridge lifecycle</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">Bun、React Ink、Anthropic SDK、MCP SDK、OpenAI-compatible APIs</div></div></div></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">Bridge 如何把本地 CLI 接到远端会话</h2><h3><span class="arr">▸</span>子进程环境 allowlist</h3><p>Bridge 层的设计重点是“只传该传的”。<code>src/bridge/sessionRunner.ts:56</code> 从父环境构造子进程环境，<code>src/bridge/sessionRunner.ts:72</code> 单独注入 session access token，避免把用户 shell 里的 API key、数据库密码或代理 secret 直接交给子进程。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/sessionRunner.ts</span> · L24-80</span><span>TypeScript</span></div><pre class="code"><span class="ln">24</span>const CHILD_ENV_ALLOWLIST = new Set([
+<span class="ln">25</span>  // System / shell
+<span class="ln">26</span>  &#x27;PATH&#x27;, &#x27;HOME&#x27;, &#x27;USERPROFILE&#x27;, &#x27;HOMEPATH&#x27;, &#x27;HOMEDRIVE&#x27;,
+<span class="ln">27</span>  &#x27;USERNAME&#x27;, &#x27;USER&#x27;, &#x27;LOGNAME&#x27;,
+<span class="ln">28</span>  &#x27;TEMP&#x27;, &#x27;TMP&#x27;, &#x27;TMPDIR&#x27;,
+<span class="ln">29</span>  &#x27;SYSTEMROOT&#x27;, &#x27;SYSTEMDRIVE&#x27;, &#x27;COMSPEC&#x27;, &#x27;WINDIR&#x27;,
+<span class="ln">30</span>  &#x27;LANG&#x27;, &#x27;LC_ALL&#x27;, &#x27;LC_CTYPE&#x27;,
+<span class="ln">31</span>  // Node.js runtime
+<span class="ln">32</span>  &#x27;NODE_OPTIONS&#x27;, &#x27;NODE_PATH&#x27;, &#x27;NODE_ENV&#x27;,
+<span class="ln">33</span>  // OpenClaude session / bridge (non-secret)
+<span class="ln">34</span>  &#x27;CLAUDE_CODE_ENVIRONMENT_KIND&#x27;,
+<span class="ln">35</span>  &#x27;CLAUDE_CODE_FORCE_SANDBOX&#x27;,
+<span class="ln">36</span>  &#x27;CLAUDE_CODE_BUBBLEWRAP&#x27;,
+<span class="ln">37</span>  &#x27;CLAUDE_CODE_ENTRYPOINT&#x27;,
+<span class="ln">38</span>  &#x27;CLAUDE_CODE_COORDINATOR_MODE&#x27;,
+<span class="ln">39</span>  &#x27;CLAUDE_CODE_PERMISSIONS_VERSION&#x27;,
+<span class="ln">40</span>  &#x27;CLAUDE_CODE_PERMISSIONS_SETTING&#x27;,
+<span class="ln">41</span>  // Display / terminal
+<span class="ln">42</span>  &#x27;TERM&#x27;, &#x27;COLORTERM&#x27;, &#x27;FORCE_COLOR&#x27;, &#x27;NO_COLOR&#x27;,
+<span class="ln">43</span>])
+<span class="ln">44</span>
+<span class="ln">45</span>type BuildChildEnvOpts = {
+<span class="ln">46</span>  accessToken: string
+<span class="ln">47</span>  useCcrV2: boolean
+<span class="ln">48</span>  workerEpoch?: number
+<span class="ln">49</span>  sandbox?: boolean
+<span class="ln">50</span>}
+<span class="ln">51</span>
+<span class="ln">52</span>/**
+<span class="ln">53</span> * Build the environment for the child CC process from an explicit allowlist.
+<span class="ln">54</span> * This prevents the parent&#x27;s API keys and credentials from leaking to the child.
+<span class="ln">55</span> */
+<span class="ln">56</span>export function buildChildEnv(
+<span class="ln">57</span>  parentEnv: NodeJS.ProcessEnv,
+<span class="ln">58</span>  opts: BuildChildEnvOpts,
+<span class="ln">59</span>): NodeJS.ProcessEnv {
+<span class="ln">60</span>  // Start from allowlisted parent vars only
+<span class="ln">61</span>  const env: NodeJS.ProcessEnv = {}
+<span class="ln">62</span>  for (const key of Object.keys(parentEnv)) {
+<span class="ln">63</span>    if (CHILD_ENV_ALLOWLIST.has(key)) {
+<span class="ln">64</span>      env[key] = parentEnv[key]
+<span class="ln">65</span>    }
+<span class="ln">66</span>  }
+<span class="ln">67</span>
+<span class="ln">68</span>  // Bridge-required overrides
+<span class="ln">69</span>  env.CLAUDE_CODE_OAUTH_TOKEN = undefined // explicitly strip
+<span class="ln">70</span>  env.CLAUDE_CODE_ENVIRONMENT_KIND = &#x27;bridge&#x27;
+<span class="ln">71</span>  if (opts.sandbox) env.CLAUDE_CODE_FORCE_SANDBOX = &#x27;1&#x27;
+<span class="ln">72</span>  env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = opts.accessToken
+<span class="ln">73</span>  env.CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2 = &#x27;1&#x27;
+<span class="ln">74</span>  if (opts.useCcrV2) {
+<span class="ln">75</span>    env.CLAUDE_CODE_USE_CCR_V2 = &#x27;1&#x27;
+<span class="ln">76</span>    env.CLAUDE_CODE_WORKER_EPOCH = String(opts.workerEpoch)
+<span class="ln">77</span>  }
+<span class="ln">78</span>
+<span class="ln">79</span>  return env
+<span class="ln">80</span>}</pre></div><h3><span class="arr">▸</span>会话 ID 与权限请求</h3><p>会话 runner 还处理文件名安全与权限请求结构。<code>src/bridge/sessionRunner.ts:87</code> 会清理 session id，<code>src/bridge/sessionRunner.ts:96</code> 定义 control_request 结构，<code>src/bridge/sessionRunner.ts:132</code> 把工具名转成人类可读的活动摘要。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/sessionRunner.ts</span> · L87-167</span><span>TypeScript</span></div><pre class="code"><span class="ln">87</span>export function safeFilenameId(id: string): string {
+<span class="ln">88</span>  return id.replace(/[^a-zA-Z0-9_-]/g, &#x27;_&#x27;)
+<span class="ln">89</span>}
+<span class="ln">90</span>
+<span class="ln">91</span>/**
+<span class="ln">92</span> * A control_request emitted by the child CLI when it needs permission to
+<span class="ln">93</span> * execute a **specific** tool invocation (not a general capability check).
+<span class="ln">94</span> * The bridge forwards this to the server so the user can approve/deny.
+<span class="ln">95</span> */
+<span class="ln">96</span>export type PermissionRequest = {
+<span class="ln">97</span>  type: &#x27;control_request&#x27;
+<span class="ln">98</span>  request_id: string
+<span class="ln">99</span>  request: {
+<span class="ln">100</span>    /** Per-invocation permission check — &quot;may I run this tool with these inputs?&quot; */
+<span class="ln">101</span>    subtype: &#x27;can_use_tool&#x27;
+<span class="ln">102</span>    tool_name: string
+<span class="ln">103</span>    input: Record&lt;string, unknown&gt;
+<span class="ln">104</span>    tool_use_id: string
+<span class="ln">105</span>  }
+<span class="ln">106</span>}
+<span class="ln">107</span>
+<span class="ln">108</span>type SessionSpawnerDeps = {
+<span class="ln">109</span>  execPath: string
+<span class="ln">110</span>  /**
+<span class="ln">111</span>   * Arguments that must precede the CLI flags when spawning. Empty for
+<span class="ln">112</span>   * compiled binaries (where execPath is the claude binary itself); contains
+<span class="ln">113</span>   * the script path (process.argv[1]) for npm installs where execPath is the
+<span class="ln">114</span>   * node runtime. Without this, node sees --sdk-url as a node option and
+<span class="ln">115</span>   * exits with &quot;bad option: --sdk-url&quot; (see anthropics/claude-code#28334).
+<span class="ln">116</span>   */
+<span class="ln">117</span>  scriptArgs: string[]
+<span class="ln">118</span>  env: NodeJS.ProcessEnv
+<span class="ln">119</span>  verbose: boolean
+<span class="ln">120</span>  sandbox: boolean
+<span class="ln">121</span>  debugFile?: string
+<span class="ln">122</span>  permissionMode?: string
+<span class="ln">123</span>  onDebug: (msg: string) =&gt; void
+<span class="ln">124</span>  onActivity?: (sessionId: string, activity: SessionActivity) =&gt; void
+<span class="ln">125</span>  onPermissionRequest?: (
+<span class="ln">126</span>    sessionId: string,
+<span class="ln">127</span>    request: PermissionRequest,
+<span class="ln">128</span>    accessToken: string,
+<span class="ln">129</span>  ) =&gt; void
+<span class="ln">130</span>}
+<span class="ln">131</span>
+<span class="ln">132</span>/** Map tool names to human-readable verbs for the status display. */
+<span class="ln">133</span>const TOOL_VERBS: Record&lt;string, string&gt; = {
+<span class="ln">134</span>  Read: &#x27;Reading&#x27;,
+<span class="ln">135</span>  Write: &#x27;Writing&#x27;,
+<span class="ln">136</span>  Edit: &#x27;Editing&#x27;,
+<span class="ln">137</span>  MultiEdit: &#x27;Editing&#x27;,
+<span class="ln">138</span>  Bash: &#x27;Running&#x27;,
+<span class="ln">139</span>  Glob: &#x27;Searching&#x27;,
+<span class="ln">140</span>  Grep: &#x27;Searching&#x27;,
+<span class="ln">141</span>  WebFetch: &#x27;Fetching&#x27;,
+<span class="ln">142</span>  WebSearch: &#x27;Searching&#x27;,
+<span class="ln">143</span>  Task: &#x27;Running task&#x27;,
+<span class="ln">144</span>  FileReadTool: &#x27;Reading&#x27;,
+<span class="ln">145</span>  FileWriteTool: &#x27;Writing&#x27;,
+<span class="ln">146</span>  FileEditTool: &#x27;Editing&#x27;,
+<span class="ln">147</span>  GlobTool: &#x27;Searching&#x27;,
+<span class="ln">148</span>  GrepTool: &#x27;Searching&#x27;,
+<span class="ln">149</span>  BashTool: &#x27;Running&#x27;,
+<span class="ln">150</span>  NotebookEditTool: &#x27;Editing notebook&#x27;,
+<span class="ln">151</span>  LSP: &#x27;LSP&#x27;,
+<span class="ln">152</span>}
+<span class="ln">153</span>
+<span class="ln">154</span>function toolSummary(name: string, input: Record&lt;string, unknown&gt;): string {
+<span class="ln">155</span>  const verb = TOOL_VERBS[name] ?? name
+<span class="ln">156</span>  const target =
+<span class="ln">157</span>    (input.file_path as string) ??
+<span class="ln">158</span>    (input.filePath as string) ??
+<span class="ln">159</span>    (input.pattern as string) ??
+<span class="ln">160</span>    (input.command as string | undefined)?.slice(0, 60) ??
+<span class="ln">161</span>    (input.url as string) ??
+<span class="ln">162</span>    (input.query as string) ??
+<span class="ln">163</span>    &#x27;&#x27;
+<span class="ln">164</span>  if (target) {
+<span class="ln">165</span>    return `${verb} ${target}`
+<span class="ln">166</span>  }
+<span class="ln">167</span>  return verb</pre></div><h3><span class="arr">▸</span>深度阅读入口</h3><a class="deep-link" href="openclaude-improved/openclaude-improved-bridge-session.html">深度阅读 · Bridge session isolation</a></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">QueryEngine 如何承载无界多轮会话</h2><h3><span class="arr">▸</span>QueryEngine 配置面</h3><p>QueryEngine 是 headless/SDK 路径的主循环。<code>src/QueryEngine.ts:132</code> 把工具、命令、MCP clients、agents、budget 和 schema 都放进配置对象，<code>src/QueryEngine.ts:213</code> 让每次 submitMessage 作为异步生成器产出 SDKMessage。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/QueryEngine.ts</span> · L132-211</span><span>TypeScript</span></div><pre class="code"><span class="ln">132</span>export type QueryEngineConfig = {
+<span class="ln">133</span>  cwd: string
+<span class="ln">134</span>  tools: Tools
+<span class="ln">135</span>  commands: Command[]
+<span class="ln">136</span>  mcpClients: MCPServerConnection[]
+<span class="ln">137</span>  agents: AgentDefinition[]
+<span class="ln">138</span>  canUseTool: CanUseToolFn
+<span class="ln">139</span>  getAppState: () =&gt; AppState
+<span class="ln">140</span>  setAppState: (f: (prev: AppState) =&gt; AppState) =&gt; void
+<span class="ln">141</span>  initialMessages?: Message[]
+<span class="ln">142</span>  readFileCache: FileStateCache
+<span class="ln">143</span>  customSystemPrompt?: string
+<span class="ln">144</span>  appendSystemPrompt?: string
+<span class="ln">145</span>  userSpecifiedModel?: string
+<span class="ln">146</span>  fallbackModel?: string
+<span class="ln">147</span>  thinkingConfig?: ThinkingConfig
+<span class="ln">148</span>  maxTurns?: number
+<span class="ln">149</span>  maxBudgetUsd?: number
+<span class="ln">150</span>  taskBudget?: { total: number }
+<span class="ln">151</span>  jsonSchema?: Record&lt;string, unknown&gt;
+<span class="ln">152</span>  verbose?: boolean
+<span class="ln">153</span>  replayUserMessages?: boolean
+<span class="ln">154</span>  /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
+<span class="ln">155</span>  handleElicitation?: ToolUseContext[&#x27;handleElicitation&#x27;]
+<span class="ln">156</span>  includePartialMessages?: boolean
+<span class="ln">157</span>  setSDKStatus?: (status: SDKStatus) =&gt; void
+<span class="ln">158</span>  abortController?: AbortController
+<span class="ln">159</span>  orphanedPermission?: OrphanedPermission
+<span class="ln">160</span>  /**
+<span class="ln">161</span>   * Snip-boundary handler: receives each yielded system message plus the
+<span class="ln">162</span>   * current mutableMessages store. Returns undefined if the message is not a
+<span class="ln">163</span>   * snip boundary; otherwise returns the replayed snip result. Injected by
+<span class="ln">164</span>   * ask() when HISTORY_SNIP is enabled so feature-gated strings stay inside
+<span class="ln">165</span>   * the gated module (keeps QueryEngine free of excluded strings and testable
+<span class="ln">166</span>   * despite feature() returning false under bun test). SDK-only: the REPL
+<span class="ln">167</span>   * keeps full history for UI scrollback and projects on demand via
+<span class="ln">168</span>   * projectSnippedView; QueryEngine truncates here to bound memory in long
+<span class="ln">169</span>   * headless sessions (no UI to preserve).
+<span class="ln">170</span>   */
+<span class="ln">171</span>  snipReplay?: (
+<span class="ln">172</span>    yieldedSystemMsg: Message,
+<span class="ln">173</span>    store: Message[],
+<span class="ln">174</span>  ) =&gt; { messages: Message[]; executed: boolean } | undefined
+<span class="ln">175</span>  query?: typeof defaultQuery
+<span class="ln">176</span>}
+<span class="ln">177</span>
+<span class="ln">178</span>/**
+<span class="ln">179</span> * QueryEngine owns the query lifecycle and session state for a conversation.
+<span class="ln">180</span> * It extracts the core logic from ask() into a standalone class that can be
+<span class="ln">181</span> * used by both the headless/SDK path and (in a future phase) the REPL.
+<span class="ln">182</span> *
+<span class="ln">183</span> * One QueryEngine per conversation. Each submitMessage() call starts a new
+<span class="ln">184</span> * turn within the same conversation. State (messages, file cache, usage, etc.)
+<span class="ln">185</span> * persists across turns.
+<span class="ln">186</span> */
+<span class="ln">187</span>export class QueryEngine {
+<span class="ln">188</span>  private config: QueryEngineConfig
+<span class="ln">189</span>  private mutableMessages: Message[]
+<span class="ln">190</span>  private abortController: AbortController
+<span class="ln">191</span>  private permissionDenials: SDKPermissionDenial[]
+<span class="ln">192</span>  private totalUsage: NonNullableUsage
+<span class="ln">193</span>  private hasHandledOrphanedPermission = false
+<span class="ln">194</span>  private readFileState: FileStateCache
+<span class="ln">195</span>  private autoCompactTracking: AutoCompactTrackingState | undefined
+<span class="ln">196</span>  // Turn-scoped skill discovery tracking (feeds was_discovered on
+<span class="ln">197</span>  // tengu_skill_tool_invocation). Must persist across the two
+<span class="ln">198</span>  // processUserInputContext rebuilds inside submitMessage, but is cleared
+<span class="ln">199</span>  // at the start of each submitMessage to avoid unbounded growth across
+<span class="ln">200</span>  // many turns in SDK mode.
+<span class="ln">201</span>  private discoveredSkillNames = new Set&lt;string&gt;()
+<span class="ln">202</span>  private loadedNestedMemoryPaths = new Set&lt;string&gt;()
+<span class="ln">203</span>
+<span class="ln">204</span>  constructor(config: QueryEngineConfig) {
+<span class="ln">205</span>    this.config = config
+<span class="ln">206</span>    this.mutableMessages = config.initialMessages ?? []
+<span class="ln">207</span>    this.abortController = config.abortController ?? createAbortController()
+<span class="ln">208</span>    this.permissionDenials = []
+<span class="ln">209</span>    this.readFileState = config.readFileCache
+<span class="ln">210</span>    this.totalUsage = EMPTY_USAGE
+<span class="ln">211</span>  }</pre></div><h3><span class="arr">▸</span>输入处理上下文</h3><p>每一轮开始时，<code>src/QueryEngine.ts:242</code> 清空本轮 skill discovery，<code>src/QueryEngine.ts:248</code> 包装 canUseTool 记录拒绝，<code>src/QueryEngine.ts:339</code> 再构造 processUserInputContext，把 slash command、file history、nested memory 和动态 skill 发现放在同一个可变上下文里。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/QueryEngine.ts</span> · L213-430</span><span>TypeScript</span></div><pre class="code"><span class="ln">213</span>  async *submitMessage(
+<span class="ln">214</span>    prompt: string | ContentBlockParam[],
+<span class="ln">215</span>    options?: { uuid?: string; isMeta?: boolean },
+<span class="ln">216</span>  ): AsyncGenerator&lt;SDKMessage, void, unknown&gt; {
+<span class="ln">217</span>    const {
+<span class="ln">218</span>      cwd,
+<span class="ln">219</span>      commands,
+<span class="ln">220</span>      tools,
+<span class="ln">221</span>      mcpClients,
+<span class="ln">222</span>      verbose = false,
+<span class="ln">223</span>      thinkingConfig,
+<span class="ln">224</span>      maxTurns,
+<span class="ln">225</span>      maxBudgetUsd,
+<span class="ln">226</span>      taskBudget,
+<span class="ln">227</span>      canUseTool,
+<span class="ln">228</span>      customSystemPrompt,
+<span class="ln">229</span>      appendSystemPrompt,
+<span class="ln">230</span>      userSpecifiedModel,
+<span class="ln">231</span>      fallbackModel,
+<span class="ln">232</span>      jsonSchema,
+<span class="ln">233</span>      getAppState,
+<span class="ln">234</span>      setAppState,
+<span class="ln">235</span>      replayUserMessages = false,
+<span class="ln">236</span>      includePartialMessages = false,
+<span class="ln">237</span>      agents = [],
+<span class="ln">238</span>      setSDKStatus,
+<span class="ln">239</span>      orphanedPermission,
+<span class="ln">240</span>    } = this.config
+<span class="ln">241</span>
+<span class="ln">242</span>    this.discoveredSkillNames.clear()
+<span class="ln">243</span>    setCwd(cwd)
+<span class="ln">244</span>    const persistSession = !isSessionPersistenceDisabled()
+<span class="ln">245</span>    const startTime = Date.now()
+<span class="ln">246</span>
+<span class="ln">247</span>    // Wrap canUseTool to track permission denials
+<span class="ln">248</span>    const wrappedCanUseTool: CanUseToolFn = async (
+<span class="ln">249</span>      tool,
+<span class="ln">250</span>      input,
+<span class="ln">251</span>      toolUseContext,
+<span class="ln">252</span>      assistantMessage,
+<span class="ln">253</span>      toolUseID,
+<span class="ln">254</span>      forceDecision,
+<span class="ln">255</span>    ) =&gt; {
+<span class="ln">256</span>      const result = await canUseTool(
+<span class="ln">257</span>        tool,
+<span class="ln">258</span>        input,
+<span class="ln">259</span>        toolUseContext,
+<span class="ln">260</span>        assistantMessage,
+<span class="ln">261</span>        toolUseID,
+<span class="ln">262</span>        forceDecision,
+<span class="ln">263</span>      )
+<span class="ln">264</span>
+<span class="ln">265</span>      // Track denials for SDK reporting
+<span class="ln">266</span>      if (result.behavior !== &#x27;allow&#x27;) {
+<span class="ln">267</span>        this.permissionDenials.push({
+<span class="ln">268</span>          tool_name: sdkCompatToolName(tool.name),
+<span class="ln">269</span>          tool_use_id: toolUseID,
+<span class="ln">270</span>          tool_input: input,
+<span class="ln">271</span>        })
+<span class="ln">272</span>      }
+<span class="ln">273</span>
+<span class="ln">274</span>      return result
+<span class="ln">275</span>    }
+<span class="ln">276</span>
+<span class="ln">277</span>    const initialAppState = getAppState()
+<span class="ln">278</span>    const initialMainLoopModel = userSpecifiedModel
+<span class="ln">279</span>      ? parseUserSpecifiedModel(userSpecifiedModel)
+<span class="ln">280</span>      : getMainLoopModel()
+<span class="ln">281</span>
+<span class="ln">282</span>    const initialThinkingConfig: ThinkingConfig = thinkingConfig
+<span class="ln">283</span>      ? thinkingConfig
+<span class="ln">284</span>      : shouldEnableThinkingByDefault() !== false
+<span class="ln">285</span>        ? { type: &#x27;adaptive&#x27; }
+<span class="ln">286</span>        : { type: &#x27;disabled&#x27; }
+<span class="ln">287</span>
+<span class="ln">288</span>    headlessProfilerCheckpoint(&#x27;before_getSystemPrompt&#x27;)
+<span class="ln">289</span>    // Narrow once so TS tracks the type through the conditionals below.
+<span class="ln">290</span>    const customPrompt =
+<span class="ln">291</span>      typeof customSystemPrompt === &#x27;string&#x27; ? customSystemPrompt : undefined
+<span class="ln">292</span>    const {
+<span class="ln">293</span>      defaultSystemPrompt,
+<span class="ln">294</span>      userContext: baseUserContext,
+<span class="ln">295</span>      systemContext,
+<span class="ln">296</span>    } = await fetchSystemPromptParts({
+<span class="ln">297</span>      tools,
+<span class="ln">298</span>      mainLoopModel: initialMainLoopModel,
+<span class="ln">299</span>      additionalWorkingDirectories: Array.from(
+<span class="ln">300</span>        initialAppState.toolPermissionContext.additionalWorkingDirectories.keys(),
+<span class="ln">301</span>      ),
+<span class="ln">302</span>      mcpClients,
+<span class="ln">303</span>      customSystemPrompt: customPrompt,
+<span class="ln">304</span>    })
+<span class="ln">305</span>    headlessProfilerCheckpoint(&#x27;after_getSystemPrompt&#x27;)
+<span class="ln">306</span>    const userContext = {
+<span class="ln">307</span>      ...baseUserContext,
+<span class="ln">308</span>      ...getCoordinatorUserContext(
+<span class="ln">309</span>        mcpClients,
+<span class="ln">310</span>        isScratchpadEnabled() ? getScratchpadDir() : undefined,
+<span class="ln">311</span>      ),
+<span class="ln">312</span>    }
+<span class="ln">313</span>
+<span class="ln">314</span>    // When an SDK caller provides a custom system prompt AND has set
+<span class="ln">315</span>    // CLAUDE_COWORK_MEMORY_PATH_OVERRIDE, inject the memory-mechanics prompt.
+<span class="ln">316</span>    // The env var is an explicit opt-in signal — the caller has wired up
+<span class="ln">317</span>    // a memory directory and needs Claude to know how to use it (which
+<span class="ln">318</span>    // Write/Edit tools to call, MEMORY.md filename, loading semantics).
+<span class="ln">319</span>    // The caller can layer their own policy text via appendSystemPrompt.
+<span class="ln">320</span>    const memoryMechanicsPrompt =
+<span class="ln">321</span>      customPrompt !== undefined &amp;&amp; hasAutoMemPathOverride()
+<span class="ln">322</span>        ? await loadMemoryPrompt()
+<span class="ln">323</span>        : null
+<span class="ln">324</span>
+<span class="ln">325</span>    const systemPrompt = asSystemPrompt([
+<span class="ln">326</span>      ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
+<span class="ln">327</span>      ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
+<span class="ln">328</span>      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+<span class="ln">329</span>    ])
+<span class="ln">330</span>
+<span class="ln">331</span>    // Register function hook for structured output enforcement
+<span class="ln">332</span>    const hasStructuredOutputTool = tools.some(t =&gt;
+<span class="ln">333</span>      toolMatchesName(t, SYNTHETIC_OUTPUT_TOOL_NAME),
+<span class="ln">334</span>    )
+<span class="ln">335</span>    if (jsonSchema &amp;&amp; hasStructuredOutputTool) {
+<span class="ln">336</span>      registerStructuredOutputEnforcement(setAppState, getSessionId())
+<span class="ln">337</span>    }
+<span class="ln">338</span>
+<span class="ln">339</span>    let processUserInputContext: ProcessUserInputContext = {
+<span class="ln">340</span>      messages: this.mutableMessages,
+<span class="ln">341</span>      // Slash commands that mutate the message array (e.g. /clear)
+<span class="ln">342</span>      // call setMessages(fn).  In interactive mode this writes back to
+<span class="ln">343</span>      // AppState; in print mode we write back to mutableMessages so the
+<span class="ln">344</span>      // rest of the query loop (push at :389, snapshot at :392) sees
+<span class="ln">345</span>      // the result.  The second processUserInputContext below (after
+<span class="ln">346</span>      // slash-command processing) keeps the no-op — nothing else calls
+<span class="ln">347</span>      // setMessages past that point.
+<span class="ln">348</span>      setMessages: fn =&gt; {
+<span class="ln">349</span>        this.mutableMessages = fn(this.mutableMessages)
+<span class="ln">350</span>      },
+<span class="ln">351</span>      onChangeAPIKey: () =&gt; {},
+<span class="ln">352</span>      handleElicitation: this.config.handleElicitation,
+<span class="ln">353</span>      options: {
+<span class="ln">354</span>        commands,
+<span class="ln">355</span>        debug: false, // we use stdout, so don&#x27;t want to clobber it
+<span class="ln">356</span>        tools,
+<span class="ln">357</span>        verbose,
+<span class="ln">358</span>        mainLoopModel: initialMainLoopModel,
+<span class="ln">359</span>        thinkingConfig: initialThinkingConfig,
+<span class="ln">360</span>        mcpClients,
+<span class="ln">361</span>        mcpResources: {},
+<span class="ln">362</span>        ideInstallationStatus: null,
+<span class="ln">363</span>        isNonInteractiveSession: true,
+<span class="ln">364</span>        customSystemPrompt,
+<span class="ln">365</span>        appendSystemPrompt,
+<span class="ln">366</span>        agentDefinitions: { activeAgents: agents, allAgents: agents },
+<span class="ln">367</span>        theme: resolveThemeSetting(getGlobalConfig().theme),
+<span class="ln">368</span>        maxBudgetUsd,
+<span class="ln">369</span>      },
+<span class="ln">370</span>      getAppState,
+<span class="ln">371</span>      setAppState,
+<span class="ln">372</span>      abortController: this.abortController,
+<span class="ln">373</span>      readFileState: this.readFileState,
+<span class="ln">374</span>      nestedMemoryAttachmentTriggers: new Set&lt;string&gt;(),
+<span class="ln">375</span>      loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
+<span class="ln">376</span>      dynamicSkillDirTriggers: new Set&lt;string&gt;(),
+<span class="ln">377</span>      discoveredSkillNames: this.discoveredSkillNames,
+<span class="ln">378</span>      setInProgressToolUseIDs: () =&gt; {},
+<span class="ln">379</span>      setResponseLength: () =&gt; {},
+<span class="ln">380</span>      updateFileHistoryState: (
+<span class="ln">381</span>        updater: (prev: FileHistoryState) =&gt; FileHistoryState,
+<span class="ln">382</span>      ) =&gt; {
+<span class="ln">383</span>        setAppState(prev =&gt; {
+<span class="ln">384</span>          const updated = updater(prev.fileHistory)
+<span class="ln">385</span>          if (updated === prev.fileHistory) return prev
+<span class="ln">386</span>          return { ...prev, fileHistory: updated }
+<span class="ln">387</span>        })
+<span class="ln">388</span>      },
+<span class="ln">389</span>      updateAttributionState: (
+<span class="ln">390</span>        updater: (prev: AttributionState) =&gt; AttributionState,
+<span class="ln">391</span>      ) =&gt; {
+<span class="ln">392</span>        setAppState(prev =&gt; {
+<span class="ln">393</span>          const updated = updater(prev.attribution)
+<span class="ln">394</span>          if (updated === prev.attribution) return prev
+<span class="ln">395</span>          return { ...prev, attribution: updated }
+<span class="ln">396</span>        })
+<span class="ln">397</span>      },
+<span class="ln">398</span>      setSDKStatus,
+<span class="ln">399</span>    }
+<span class="ln">400</span>
+<span class="ln">401</span>    // Handle orphaned permission (only once per engine lifetime)
+<span class="ln">402</span>    if (orphanedPermission &amp;&amp; !this.hasHandledOrphanedPermission) {
+<span class="ln">403</span>      this.hasHandledOrphanedPermission = true
+<span class="ln">404</span>      for await (const message of handleOrphanedPermission(
+<span class="ln">405</span>        orphanedPermission,
+<span class="ln">406</span>        tools,
+<span class="ln">407</span>        this.mutableMessages,
+<span class="ln">408</span>        processUserInputContext,
+<span class="ln">409</span>      )) {
+<span class="ln">410</span>        yield message
+<span class="ln">411</span>      }
+<span class="ln">412</span>    }
+<span class="ln">413</span>
+<span class="ln">414</span>    const {
+<span class="ln">415</span>      messages: messagesFromUserInput,
+<span class="ln">416</span>      shouldQuery,
+<span class="ln">417</span>      allowedTools,
+<span class="ln">418</span>      model: modelFromUserInput,
+<span class="ln">419</span>      resultText,
+<span class="ln">420</span>    } = await processUserInput({
+<span class="ln">421</span>      input: prompt,
+<span class="ln">422</span>      mode: &#x27;prompt&#x27;,
+<span class="ln">423</span>      setToolJSX: () =&gt; {},
+<span class="ln">424</span>      context: {
+<span class="ln">425</span>        ...processUserInputContext,
+<span class="ln">426</span>        messages: this.mutableMessages,
+<span class="ln">427</span>      },
+<span class="ln">428</span>      messages: this.mutableMessages,
+<span class="ln">429</span>      uuid: options?.uuid,
+<span class="ln">430</span>      isMeta: options?.isMeta,</pre></div><h3><span class="arr">▸</span>深度阅读入口</h3><a class="deep-link" href="openclaude-improved/openclaude-improved-query-engine.html">深度阅读 · Query lifecycle</a></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">Provider 与安装链路的现实边界</h2><h3><span class="arr">▸</span>Provider profile</h3><p>Provider 配置不是一个字符串枚举那么简单。<code>src/utils/providerProfile.ts:58</code> 收拢大量环境变量，<code>src/utils/providerProfile.ts:124</code> 明确列出 anthropic、openai、gemini、codex、ollama 等兼容 profile，<code>src/utils/providerProfile.ts:215</code> 又把 secret source 设计成开放类型，避免新增 provider 时无法统一脱敏。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/utils/providerProfile.ts</span> · L49-122</span><span>TypeScript</span></div><pre class="code"><span class="ln">49</span>export const PROFILE_FILE_NAME = &#x27;.openclaude-profile.json&#x27;
+<span class="ln">50</span>export const DEFAULT_GEMINI_BASE_URL =
+<span class="ln">51</span>  &#x27;https://generativelanguage.googleapis.com/v1beta/openai&#x27;
+<span class="ln">52</span>export const DEFAULT_GEMINI_MODEL = &#x27;gemini-3-flash-preview&#x27;
+<span class="ln">53</span>export const DEFAULT_MISTRAL_BASE_URL = &#x27;https://api.mistral.ai/v1&#x27;
+<span class="ln">54</span>export const DEFAULT_MISTRAL_MODEL = &#x27;mistral-vibe-cli-latest&#x27;
+<span class="ln">55</span>export const DEFAULT_STARTUP_PROVIDER_ENV_VAR =
+<span class="ln">56</span>  &#x27;CLAUDE_CODE_DEFAULT_STARTUP_PROVIDER&#x27;
+<span class="ln">57</span>
+<span class="ln">58</span>const PROFILE_ENV_KEYS = [
+<span class="ln">59</span>  &#x27;CLAUDE_CODE_USE_OPENAI&#x27;,
+<span class="ln">60</span>  &#x27;CLAUDE_CODE_USE_GITHUB&#x27;,
+<span class="ln">61</span>  &#x27;CLAUDE_CODE_USE_GEMINI&#x27;,
+<span class="ln">62</span>  &#x27;CLAUDE_CODE_USE_MISTRAL&#x27;,
+<span class="ln">63</span>  &#x27;CLAUDE_CODE_USE_BEDROCK&#x27;,
+<span class="ln">64</span>  &#x27;CLAUDE_CODE_USE_VERTEX&#x27;,
+<span class="ln">65</span>  &#x27;CLAUDE_CODE_USE_FOUNDRY&#x27;,
+<span class="ln">66</span>  &#x27;ANTHROPIC_BASE_URL&#x27;,
+<span class="ln">67</span>  &#x27;ANTHROPIC_MODEL&#x27;,
+<span class="ln">68</span>  &#x27;ANTHROPIC_API_KEY&#x27;,
+<span class="ln">69</span>  &#x27;ANTHROPIC_AUTH_TOKEN&#x27;,
+<span class="ln">70</span>  &#x27;ANTHROPIC_CUSTOM_HEADERS&#x27;,
+<span class="ln">71</span>  &#x27;ANTHROPIC_BEDROCK_BASE_URL&#x27;,
+<span class="ln">72</span>  &#x27;ANTHROPIC_VERTEX_BASE_URL&#x27;,
+<span class="ln">73</span>  &#x27;OPENAI_BASE_URL&#x27;,
+<span class="ln">74</span>  &#x27;OPENAI_API_BASE&#x27;,
+<span class="ln">75</span>  &#x27;OPENAI_MODEL&#x27;,
+<span class="ln">76</span>  &#x27;OPENAI_API_FORMAT&#x27;,
+<span class="ln">77</span>  &#x27;OPENAI_AZURE_STYLE&#x27;,
+<span class="ln">78</span>  &#x27;OPENAI_AUTH_HEADER&#x27;,
+<span class="ln">79</span>  &#x27;OPENAI_AUTH_SCHEME&#x27;,
+<span class="ln">80</span>  &#x27;OPENAI_AUTH_HEADER_VALUE&#x27;,
+<span class="ln">81</span>  &#x27;OPENAI_API_KEYS&#x27;,
+<span class="ln">82</span>  &#x27;OPENAI_API_KEY&#x27;,
+<span class="ln">83</span>  &#x27;GITHUB_COPILOT_KEY&#x27;,
+<span class="ln">84</span>  &#x27;GITHUB_ENTERPRISE_URL&#x27;,
+<span class="ln">85</span>  &#x27;CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS&#x27;,
+<span class="ln">86</span>  &#x27;CODEX_API_KEY&#x27;,
+<span class="ln">87</span>  &#x27;CODEX_CREDENTIAL_SOURCE&#x27;,
+<span class="ln">88</span>  &#x27;CHATGPT_ACCOUNT_ID&#x27;,
+<span class="ln">89</span>  &#x27;CODEX_ACCOUNT_ID&#x27;,
+<span class="ln">90</span>  &#x27;GEMINI_API_KEY&#x27;,
+<span class="ln">91</span>  &#x27;GEMINI_AUTH_MODE&#x27;,
+<span class="ln">92</span>  &#x27;GEMINI_ACCESS_TOKEN&#x27;,
+<span class="ln">93</span>  &#x27;GEMINI_MODEL&#x27;,
+<span class="ln">94</span>  &#x27;GEMINI_BASE_URL&#x27;,
+<span class="ln">95</span>  &#x27;GOOGLE_API_KEY&#x27;,
+<span class="ln">96</span>  &#x27;NVIDIA_NIM&#x27;,
+<span class="ln">97</span>  &#x27;NVIDIA_API_KEY&#x27;,
+<span class="ln">98</span>  &#x27;NVIDIA_MODEL&#x27;,
+<span class="ln">99</span>  &#x27;MINIMAX_API_KEY&#x27;,
+<span class="ln">100</span>  &#x27;MINIMAX_BASE_URL&#x27;,
+<span class="ln">101</span>  &#x27;MINIMAX_MODEL&#x27;,
+<span class="ln">102</span>  &#x27;MISTRAL_BASE_URL&#x27;,
+<span class="ln">103</span>  &#x27;MISTRAL_API_KEY&#x27;,
+<span class="ln">104</span>  &#x27;MISTRAL_MODEL&#x27;,
+<span class="ln">105</span>  &#x27;BANKR_BASE_URL&#x27;,
+<span class="ln">106</span>  &#x27;BNKR_API_KEY&#x27;,
+<span class="ln">107</span>  &#x27;BANKR_MODEL&#x27;,
+<span class="ln">108</span>  &#x27;XAI_API_KEY&#x27;,
+<span class="ln">109</span>  &#x27;XAI_CREDENTIAL_SOURCE&#x27;,
+<span class="ln">110</span>  &#x27;AIMLAPI_API_KEY&#x27;,
+<span class="ln">111</span>  &#x27;VENICE_API_KEY&#x27;,
+<span class="ln">112</span>  &#x27;MIMO_API_KEY&#x27;,
+<span class="ln">113</span>  &#x27;ATLAS_CLOUD_API_KEY&#x27;,
+<span class="ln">114</span>  &#x27;NEARAI_API_KEY&#x27;,
+<span class="ln">115</span>  &#x27;FIREWORKS_API_KEY&#x27;,
+<span class="ln">116</span>  &#x27;LONGCAT_API_KEY&#x27;,
+<span class="ln">117</span>  &#x27;CLINE_API_KEY&#x27;,
+<span class="ln">118</span>  &#x27;OPENCODE_API_KEY&#x27;,
+<span class="ln">119</span>  &#x27;CLAUDE_CODE_PROVIDER_ROUTE_ID&#x27;,
+<span class="ln">120</span>  &#x27;CLOUDFLARE_API_TOKEN&#x27;,
+<span class="ln">121</span>  DEFAULT_STARTUP_PROVIDER_ENV_VAR,
+<span class="ln">122</span>] as const</pre></div><h3><span class="arr">▸</span>安装与修复流程</h3><p>安装命令也体现了“兼容但不越界”。<code>src/commands/install.tsx:107</code> 检测没有 native distribution 的 npm build，<code>src/commands/install.tsx:131</code> 调用 installLatest，<code>src/commands/install.tsx:149</code> 清理旧 npm 安装，<code>src/commands/install.tsx:177</code> 再验证 shell launcher。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/commands/install.tsx</span> · L91-180</span><span>TypeScript</span></div><pre class="code"><span class="ln">91</span>export function Install({
+<span class="ln">92</span>  onDone,
+<span class="ln">93</span>  force,
+<span class="ln">94</span>  target
+<span class="ln">95</span>}: InstallProps): React.ReactNode {
+<span class="ln">96</span>  const [state, setState] = useState&lt;InstallState&gt;({
+<span class="ln">97</span>    type: &#x27;checking&#x27;
+<span class="ln">98</span>  });
+<span class="ln">99</span>  useEffect(() =&gt; {
+<span class="ln">100</span>    async function run() {
+<span class="ln">101</span>      try {
+<span class="ln">102</span>        logForDebugging(`Install: Starting installation process (force=${force}, target=${target})`);
+<span class="ln">103</span>
+<span class="ln">104</span>        // npm-only builds have no native binary to install. Downloading here
+<span class="ln">105</span>        // would fetch the first-party Claude Code binary and replace the npm
+<span class="ln">106</span>        // install the user is running, so just confirm the current install.
+<span class="ln">107</span>        if (!hasNativeDistribution()) {
+<span class="ln">108</span>          logForDebugging(&#x27;Install: build has no native distribution; reporting npm installation instead&#x27;);
+<span class="ln">109</span>          logEvent(&#x27;tengu_claude_install_command&#x27;, {
+<span class="ln">110</span>            has_version: 1,
+<span class="ln">111</span>            forced: force ? 1 : 0
+<span class="ln">112</span>          });
+<span class="ln">113</span>          setState({
+<span class="ln">114</span>            type: &#x27;success&#x27;,
+<span class="ln">115</span>            version: MACRO.DISPLAY_VERSION,
+<span class="ln">116</span>            location: process.argv[1] || &#x27;npm global installation&#x27;,
+<span class="ln">117</span>            setupMessages: [`This build is distributed via npm (${MACRO.PACKAGE_URL}) and has no native binary, so nothing was downloaded.`, `To update, run: npm install -g ${MACRO.PACKAGE_URL}@latest`]
+<span class="ln">118</span>          });
+<span class="ln">119</span>          return;
+<span class="ln">120</span>        }
+<span class="ln">121</span>
+<span class="ln">122</span>        // Install native build first
+<span class="ln">123</span>        const channelOrVersion = target || getInitialSettings()?.autoUpdatesChannel || &#x27;latest&#x27;;
+<span class="ln">124</span>        setState({
+<span class="ln">125</span>          type: &#x27;installing&#x27;,
+<span class="ln">126</span>          version: channelOrVersion
+<span class="ln">127</span>        });
+<span class="ln">128</span>
+<span class="ln">129</span>        // Pass force flag to trigger reinstall even if up to date
+<span class="ln">130</span>        logForDebugging(`Install: Calling installLatest(channelOrVersion=${channelOrVersion}, forceReinstall=${force})`);
+<span class="ln">131</span>        const result = await installLatest(channelOrVersion, force);
+<span class="ln">132</span>        logForDebugging(`Install: installLatest returned version=${result.latestVersion}, wasUpdated=${result.wasUpdated}, lockFailed=${result.lockFailed}`);
+<span class="ln">133</span>
+<span class="ln">134</span>        // Check specifically for lock failure
+<span class="ln">135</span>        if (result.lockFailed) {
+<span class="ln">136</span>          throw new Error(&#x27;Could not install - another process is currently installing Claude. Please try again in a moment.&#x27;);
+<span class="ln">137</span>        }
+<span class="ln">138</span>
+<span class="ln">139</span>        // If we couldn&#x27;t get the version, there might be an issue
+<span class="ln">140</span>        if (!result.latestVersion) {
+<span class="ln">141</span>          logForDebugging(&#x27;Install: Failed to retrieve version information during install&#x27;, {
+<span class="ln">142</span>            level: &#x27;error&#x27;
+<span class="ln">143</span>          });
+<span class="ln">144</span>        }
+<span class="ln">145</span>        if (!result.wasUpdated) {
+<span class="ln">146</span>          logForDebugging(&#x27;Install: Already up to date&#x27;);
+<span class="ln">147</span>        }
+<span class="ln">148</span>
+<span class="ln">149</span>        // Now that native installation succeeded, clean up old npm installations.
+<span class="ln">150</span>        // npm uninstall owns its bin entries and can remove ~/.local/bin/openclaude
+<span class="ln">151</span>        // when the npm prefix overlaps the native launcher directory, so repair the
+<span class="ln">152</span>        // native launcher after cleanup before checking the final install state.
+<span class="ln">153</span>        logForDebugging(&#x27;Install: Cleaning up npm installations after successful install&#x27;);
+<span class="ln">154</span>        const {
+<span class="ln">155</span>          removed,
+<span class="ln">156</span>          errors,
+<span class="ln">157</span>          warnings
+<span class="ln">158</span>        } = await cleanupNpmInstallations();
+<span class="ln">159</span>        if (removed &gt; 0) {
+<span class="ln">160</span>          logForDebugging(`Cleaned up ${removed} npm installation(s)`);
+<span class="ln">161</span>        }
+<span class="ln">162</span>        if (errors.length &gt; 0) {
+<span class="ln">163</span>          logForDebugging(`Cleanup errors: ${errors.join(&#x27;, &#x27;)}`);
+<span class="ln">164</span>          // Continue despite cleanup errors - native install already succeeded
+<span class="ln">165</span>        }
+<span class="ln">166</span>
+<span class="ln">167</span>        setState({
+<span class="ln">168</span>          type: &#x27;setting-up&#x27;
+<span class="ln">169</span>        });
+<span class="ln">170</span>        if (!result.latestVersion) {
+<span class="ln">171</span>          throw new Error(&#x27;Could not repair native launcher - installed version is unknown.&#x27;);
+<span class="ln">172</span>        }
+<span class="ln">173</span>        logForDebugging(`Install: Repairing native launcher after npm cleanup`);
+<span class="ln">174</span>        await repairNativeLauncher(result.latestVersion);
+<span class="ln">175</span>
+<span class="ln">176</span>        // Set up launcher and shell integration against the final post-cleanup state
+<span class="ln">177</span>        const setupMessages = await checkInstall(true);
+<span class="ln">178</span>        logForDebugging(`Install: Setup launcher completed with ${setupMessages.length} messages`);
+<span class="ln">179</span>        if (setupMessages.length &gt; 0) {
+<span class="ln">180</span>          setupMessages.forEach(msg =&gt; logForDebugging(`Install: Setup message: ${msg.message}`));</pre></div><h3><span class="arr">▸</span>系统流程图</h3><div class="flow">User prompt
+  -> QueryEngine.submitMessage
+  -> processUserInput / commands / tools
+  -> provider profile routes model calls
+  -> bridge transport mirrors remote session state
+  -> tests enforce env and permission boundaries</div></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · TESTS & VALIDATION</div><h2 class="sec-title">测试把安全假设固定下来</h2><h3><span class="arr">▸</span>Secret 不外泄</h3><p>最重要的测试不是 UI 快照，而是安全不变量。<code>src/bridge/sessionRunner.test.ts:13</code> 验证 ANTHROPIC_API_KEY 不传给 child，<code>src/bridge/sessionRunner.test.ts:24</code> 覆盖 OPENAI_API_KEY，<code>src/bridge/sessionRunner.test.ts:34</code> 覆盖 DB、AWS、GitHub token。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/sessionRunner.test.ts</span> · L13-85</span><span>TypeScript</span></div><pre class="code"><span class="ln">13</span>test(&#x27;buildChildEnv does not leak ANTHROPIC_API_KEY to child&#x27;, () =&gt; {
+<span class="ln">14</span>  const parentEnv = {
+<span class="ln">15</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">16</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">17</span>    ANTHROPIC_API_KEY: &#x27;sk-ant-secret-key&#x27;,
+<span class="ln">18</span>    CLAUDE_CODE_SESSION_ACCESS_TOKEN: &#x27;will-be-overwritten&#x27;,
+<span class="ln">19</span>  }
+<span class="ln">20</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">21</span>  expect(env.ANTHROPIC_API_KEY).toBeUndefined()
+<span class="ln">22</span>})
+<span class="ln">23</span>
+<span class="ln">24</span>test(&#x27;buildChildEnv does not leak OPENAI_API_KEY to child&#x27;, () =&gt; {
+<span class="ln">25</span>  const parentEnv = {
+<span class="ln">26</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">27</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">28</span>    OPENAI_API_KEY: &#x27;sk-openai-secret&#x27;,
+<span class="ln">29</span>  }
+<span class="ln">30</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">31</span>  expect(env.OPENAI_API_KEY).toBeUndefined()
+<span class="ln">32</span>})
+<span class="ln">33</span>
+<span class="ln">34</span>test(&#x27;buildChildEnv does not leak arbitrary secrets to child&#x27;, () =&gt; {
+<span class="ln">35</span>  const parentEnv = {
+<span class="ln">36</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">37</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">38</span>    DB_PASSWORD: &#x27;super-secret&#x27;,
+<span class="ln">39</span>    AWS_SECRET_ACCESS_KEY: &#x27;aws-secret&#x27;,
+<span class="ln">40</span>    GITHUB_TOKEN: &#x27;ghp_token&#x27;,
+<span class="ln">41</span>  }
+<span class="ln">42</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">43</span>  expect(env.DB_PASSWORD).toBeUndefined()
+<span class="ln">44</span>  expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
+<span class="ln">45</span>  expect(env.GITHUB_TOKEN).toBeUndefined()
+<span class="ln">46</span>})
+<span class="ln">47</span>
+<span class="ln">48</span>test(&#x27;buildChildEnv includes PATH and HOME from parent&#x27;, () =&gt; {
+<span class="ln">49</span>  const parentEnv = {
+<span class="ln">50</span>    PATH: &#x27;/usr/bin:/usr/local/bin&#x27;,
+<span class="ln">51</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">52</span>    ANTHROPIC_API_KEY: &#x27;sk-secret&#x27;,
+<span class="ln">53</span>  }
+<span class="ln">54</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">55</span>  expect(env.PATH).toBe(&#x27;/usr/bin:/usr/local/bin&#x27;)
+<span class="ln">56</span>  expect(env.HOME).toBe(&#x27;/home/user&#x27;)
+<span class="ln">57</span>})
+<span class="ln">58</span>
+<span class="ln">59</span>test(&#x27;buildChildEnv sets CLAUDE_CODE_SESSION_ACCESS_TOKEN from opts&#x27;, () =&gt; {
+<span class="ln">60</span>  const env = buildChildEnv({ PATH: &#x27;/usr/bin&#x27; }, { ...baseOpts, accessToken: &#x27;my-token&#x27; })
+<span class="ln">61</span>  expect(env.CLAUDE_CODE_SESSION_ACCESS_TOKEN).toBe(&#x27;my-token&#x27;)
+<span class="ln">62</span>})
+<span class="ln">63</span>
+<span class="ln">64</span>test(&#x27;buildChildEnv sets CLAUDE_CODE_ENVIRONMENT_KIND to bridge&#x27;, () =&gt; {
+<span class="ln">65</span>  const env = buildChildEnv({ PATH: &#x27;/usr/bin&#x27; }, baseOpts)
+<span class="ln">66</span>  expect(env.CLAUDE_CODE_ENVIRONMENT_KIND).toBe(&#x27;bridge&#x27;)
+<span class="ln">67</span>})
+<span class="ln">68</span>
+<span class="ln">69</span>test(&#x27;buildChildEnv does not pass CLAUDE_CODE_OAUTH_TOKEN to child&#x27;, () =&gt; {
+<span class="ln">70</span>  const parentEnv = {
+<span class="ln">71</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">72</span>    CLAUDE_CODE_OAUTH_TOKEN: &#x27;oauth-token-to-strip&#x27;,
+<span class="ln">73</span>  }
+<span class="ln">74</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">75</span>  expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+<span class="ln">76</span>})
+<span class="ln">77</span>
+<span class="ln">78</span>test(&#x27;buildChildEnv sets CCR v2 vars when useCcrV2 is true&#x27;, () =&gt; {
+<span class="ln">79</span>  const env = buildChildEnv(
+<span class="ln">80</span>    { PATH: &#x27;/usr/bin&#x27; },
+<span class="ln">81</span>    { accessToken: &#x27;tok&#x27;, useCcrV2: true, workerEpoch: 42 },
+<span class="ln">82</span>  )
+<span class="ln">83</span>  expect(env.CLAUDE_CODE_USE_CCR_V2).toBe(&#x27;1&#x27;)
+<span class="ln">84</span>  expect(env.CLAUDE_CODE_WORKER_EPOCH).toBe(&#x27;42&#x27;)
+<span class="ln">85</span>})</pre></div><h3><span class="arr">▸</span>消息路由测试面</h3><p>实现本身提供了足够可测接口：<code>src/bridge/bridgeMessaging.ts:36</code> 是 SDKMessage type guard，<code>src/bridge/bridgeMessaging.ts:77</code> 过滤 eligible message，<code>src/bridge/bridgeMessaging.ts:132</code> 则把 ingress parsing 和去重逻辑集中起来。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/bridgeMessaging.ts</span> · L31-122</span><span>TypeScript</span></div><pre class="code"><span class="ln">31</span>// ─── Type guards ─────────────────────────────────────────────────────────────
+<span class="ln">32</span>
+<span class="ln">33</span>/** Type predicate for parsed WebSocket messages. SDKMessage is a
+<span class="ln">34</span> *  discriminated union on `type` — validating the discriminant is
+<span class="ln">35</span> *  sufficient for the predicate; callers narrow further via the union. */
+<span class="ln">36</span>export function isSDKMessage(value: unknown): value is SDKMessage {
+<span class="ln">37</span>  return (
+<span class="ln">38</span>    value !== null &amp;&amp;
+<span class="ln">39</span>    typeof value === &#x27;object&#x27; &amp;&amp;
+<span class="ln">40</span>    &#x27;type&#x27; in value &amp;&amp;
+<span class="ln">41</span>    typeof value.type === &#x27;string&#x27;
+<span class="ln">42</span>  )
+<span class="ln">43</span>}
+<span class="ln">44</span>
+<span class="ln">45</span>/** Type predicate for control_response messages from the server. */
+<span class="ln">46</span>export function isSDKControlResponse(
+<span class="ln">47</span>  value: unknown,
+<span class="ln">48</span>): value is SDKControlResponse {
+<span class="ln">49</span>  return (
+<span class="ln">50</span>    value !== null &amp;&amp;
+<span class="ln">51</span>    typeof value === &#x27;object&#x27; &amp;&amp;
+<span class="ln">52</span>    &#x27;type&#x27; in value &amp;&amp;
+<span class="ln">53</span>    value.type === &#x27;control_response&#x27; &amp;&amp;
+<span class="ln">54</span>    &#x27;response&#x27; in value
+<span class="ln">55</span>  )
+<span class="ln">56</span>}
+<span class="ln">57</span>
+<span class="ln">58</span>/** Type predicate for control_request messages from the server. */
+<span class="ln">59</span>export function isSDKControlRequest(
+<span class="ln">60</span>  value: unknown,
+<span class="ln">61</span>): value is SDKControlRequest {
+<span class="ln">62</span>  return (
+<span class="ln">63</span>    value !== null &amp;&amp;
+<span class="ln">64</span>    typeof value === &#x27;object&#x27; &amp;&amp;
+<span class="ln">65</span>    &#x27;type&#x27; in value &amp;&amp;
+<span class="ln">66</span>    value.type === &#x27;control_request&#x27; &amp;&amp;
+<span class="ln">67</span>    &#x27;request_id&#x27; in value &amp;&amp;
+<span class="ln">68</span>    &#x27;request&#x27; in value
+<span class="ln">69</span>  )
+<span class="ln">70</span>}
+<span class="ln">71</span>
+<span class="ln">72</span>/**
+<span class="ln">73</span> * True for message types that should be forwarded to the bridge transport.
+<span class="ln">74</span> * The server only wants user/assistant turns and slash-command system events;
+<span class="ln">75</span> * everything else (tool_result, progress, etc.) is internal REPL chatter.
+<span class="ln">76</span> */
+<span class="ln">77</span>export function isEligibleBridgeMessage(m: Message): boolean {
+<span class="ln">78</span>  // Virtual messages (REPL inner calls) are display-only — bridge/SDK
+<span class="ln">79</span>  // consumers see the REPL tool_use/result which summarizes the work.
+<span class="ln">80</span>  if ((m.type === &#x27;user&#x27; || m.type === &#x27;assistant&#x27;) &amp;&amp; m.isVirtual) {
+<span class="ln">81</span>    return false
+<span class="ln">82</span>  }
+<span class="ln">83</span>  return (
+<span class="ln">84</span>    m.type === &#x27;user&#x27; ||
+<span class="ln">85</span>    m.type === &#x27;assistant&#x27; ||
+<span class="ln">86</span>    (m.type === &#x27;system&#x27; &amp;&amp; m.subtype === &#x27;local_command&#x27;)
+<span class="ln">87</span>  )
+<span class="ln">88</span>}
+<span class="ln">89</span>
+<span class="ln">90</span>/**
+<span class="ln">91</span> * Extract title-worthy text from a Message for onUserMessage. Returns
+<span class="ln">92</span> * undefined for messages that shouldn&#x27;t title the session: non-user, meta
+<span class="ln">93</span> * (nudges), tool results, compact summaries, non-human origins (task
+<span class="ln">94</span> * notifications, channel messages), or pure display-tag content
+<span class="ln">95</span> * (&lt;ide_opened_file&gt;, &lt;session-start-hook&gt;, etc.).
+<span class="ln">96</span> *
+<span class="ln">97</span> * Synthetic interrupts ([Request interrupted by user]) are NOT filtered here —
+<span class="ln">98</span> * isSyntheticMessage lives in messages.ts (heavy import, pulls command
+<span class="ln">99</span> * registry). The initialMessages path in initReplBridge checks it; the
+<span class="ln">100</span> * writeMessages path reaching an interrupt as the *first* message is
+<span class="ln">101</span> * implausible (an interrupt implies a prior prompt already flowed through).
+<span class="ln">102</span> */
+<span class="ln">103</span>export function extractTitleText(m: Message): string | undefined {
+<span class="ln">104</span>  if (m.type !== &#x27;user&#x27; || m.isMeta || m.toolUseResult || m.isCompactSummary)
+<span class="ln">105</span>    return undefined
+<span class="ln">106</span>  if (m.origin &amp;&amp; m.origin.kind !== &#x27;human&#x27;) return undefined
+<span class="ln">107</span>  const content = m.message.content
+<span class="ln">108</span>  let raw: string | undefined
+<span class="ln">109</span>  if (typeof content === &#x27;string&#x27;) {
+<span class="ln">110</span>    raw = content
+<span class="ln">111</span>  } else {
+<span class="ln">112</span>    for (const block of content) {
+<span class="ln">113</span>      if (block.type === &#x27;text&#x27;) {
+<span class="ln">114</span>        raw = block.text
+<span class="ln">115</span>        break
+<span class="ln">116</span>      }
+<span class="ln">117</span>    }
+<span class="ln">118</span>  }
+<span class="ln">119</span>  if (!raw) return undefined
+<span class="ln">120</span>  const clean = stripDisplayTagsAllowEmpty(raw)
+<span class="ln">121</span>  return clean || undefined
+<span class="ln">122</span>}</pre></div></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2><h3><span class="arr">▸</span>源码证据地图</h3><p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:24</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:56</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:72</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:87</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:96</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:170</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:201</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:247</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.ts:310</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:92</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:120</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:151</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:166</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:183</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:193</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/replBridge.ts:214</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:187</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:213</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:242</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:248</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:292</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:320</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:339</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:401</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/QueryEngine.ts:414</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:36</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:77</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:103</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:143</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:151</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:171</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:183</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:194</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/bridgeMessaging.ts:206</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:5</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:44</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:64</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:81</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:101</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/workSecret.ts:136</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.test.ts:13</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.test.ts:34</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/bridge/sessionRunner.test.ts:78</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/utils/providerProfile.ts:49</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/utils/providerProfile.ts:58</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/utils/providerProfile.ts:124</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/utils/providerProfile.ts:209</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/utils/providerProfile.ts:215</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/commands/install.tsx:91</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/commands/install.tsx:107</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/commands/install.tsx:131</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/commands/install.tsx:149</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>主页面源码分析 的证据点 <code>src/commands/install.tsx:177</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p><h3><span class="arr">▸</span>亮点与风险</h3><div class="g2"><div class="card"><div class="card-h">亮点</div><div class="card-d">Bridge 与 QueryEngine 有明确分层，适合做多 provider coding-agent runtime。</div></div><div class="card"><div class="card-h">风险</div><div class="card-d">仓库包含大量兼容与 fork 痕迹，后续维护质量取决于测试能否覆盖 provider 差异。</div></div></div></section><div class="foot"><span>Generated · 2026-07-29</span><span>Source · <a href="https://github.com/0xwilliamortiz/openclaude-improved">0xwilliamortiz/openclaude-improved</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9adfff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

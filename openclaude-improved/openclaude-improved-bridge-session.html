@@ -1,0 +1,654 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Bridge session isolation · openclaude-improved</title><meta name="description" content="bridge/session 子模块解析"/><style>/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root{--star:#61c6ff;--star-soft:#9adfff;--star-deep:#2f8fc9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">openclaude<b>improved</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">openclaude<b>improved</b></div><div class="sub">Bridge · session isolation</div></div><span class="nav-ver">TypeScript · Bun / npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>Bridge</a></li><li><a href="#section-2"><span class="idx">02</span>QueryEngine</a></li><li><a href="#section-3"><span class="idx">03</span>Provider</a></li><li><a href="#section-4"><span class="idx">04</span>Tests</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★583 · 2026-07-26</div><div><a href="https://github.com/0xwilliamortiz/openclaude-improved" target="_blank">0xwilliamortiz/openclaude-improved</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Bridge session isolation <em>深度解析</em></h1><p class="hero-desc">这一页聚焦 bridge/session 层如何隔离环境变量、处理 ingress 消息、构造 websocket URL 和注册 worker。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><h3><span class="arr">▸</span>环境隔离</h3><p>Bridge session 的安全边界从 <code>src/bridge/sessionRunner.ts:24</code> 开始，allowlist 明确哪些系统变量可以进入 child process；再通过 <code>src/bridge/workSecret.ts:81</code> 和 <code>src/bridge/workSecret.ts:120</code> 构造 v1/v2 session URL。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/sessionRunner.ts</span> · L24-80</span><span>TypeScript</span></div><pre class="code"><span class="ln">24</span>const CHILD_ENV_ALLOWLIST = new Set([
+<span class="ln">25</span>  // System / shell
+<span class="ln">26</span>  &#x27;PATH&#x27;, &#x27;HOME&#x27;, &#x27;USERPROFILE&#x27;, &#x27;HOMEPATH&#x27;, &#x27;HOMEDRIVE&#x27;,
+<span class="ln">27</span>  &#x27;USERNAME&#x27;, &#x27;USER&#x27;, &#x27;LOGNAME&#x27;,
+<span class="ln">28</span>  &#x27;TEMP&#x27;, &#x27;TMP&#x27;, &#x27;TMPDIR&#x27;,
+<span class="ln">29</span>  &#x27;SYSTEMROOT&#x27;, &#x27;SYSTEMDRIVE&#x27;, &#x27;COMSPEC&#x27;, &#x27;WINDIR&#x27;,
+<span class="ln">30</span>  &#x27;LANG&#x27;, &#x27;LC_ALL&#x27;, &#x27;LC_CTYPE&#x27;,
+<span class="ln">31</span>  // Node.js runtime
+<span class="ln">32</span>  &#x27;NODE_OPTIONS&#x27;, &#x27;NODE_PATH&#x27;, &#x27;NODE_ENV&#x27;,
+<span class="ln">33</span>  // OpenClaude session / bridge (non-secret)
+<span class="ln">34</span>  &#x27;CLAUDE_CODE_ENVIRONMENT_KIND&#x27;,
+<span class="ln">35</span>  &#x27;CLAUDE_CODE_FORCE_SANDBOX&#x27;,
+<span class="ln">36</span>  &#x27;CLAUDE_CODE_BUBBLEWRAP&#x27;,
+<span class="ln">37</span>  &#x27;CLAUDE_CODE_ENTRYPOINT&#x27;,
+<span class="ln">38</span>  &#x27;CLAUDE_CODE_COORDINATOR_MODE&#x27;,
+<span class="ln">39</span>  &#x27;CLAUDE_CODE_PERMISSIONS_VERSION&#x27;,
+<span class="ln">40</span>  &#x27;CLAUDE_CODE_PERMISSIONS_SETTING&#x27;,
+<span class="ln">41</span>  // Display / terminal
+<span class="ln">42</span>  &#x27;TERM&#x27;, &#x27;COLORTERM&#x27;, &#x27;FORCE_COLOR&#x27;, &#x27;NO_COLOR&#x27;,
+<span class="ln">43</span>])
+<span class="ln">44</span>
+<span class="ln">45</span>type BuildChildEnvOpts = {
+<span class="ln">46</span>  accessToken: string
+<span class="ln">47</span>  useCcrV2: boolean
+<span class="ln">48</span>  workerEpoch?: number
+<span class="ln">49</span>  sandbox?: boolean
+<span class="ln">50</span>}
+<span class="ln">51</span>
+<span class="ln">52</span>/**
+<span class="ln">53</span> * Build the environment for the child CC process from an explicit allowlist.
+<span class="ln">54</span> * This prevents the parent&#x27;s API keys and credentials from leaking to the child.
+<span class="ln">55</span> */
+<span class="ln">56</span>export function buildChildEnv(
+<span class="ln">57</span>  parentEnv: NodeJS.ProcessEnv,
+<span class="ln">58</span>  opts: BuildChildEnvOpts,
+<span class="ln">59</span>): NodeJS.ProcessEnv {
+<span class="ln">60</span>  // Start from allowlisted parent vars only
+<span class="ln">61</span>  const env: NodeJS.ProcessEnv = {}
+<span class="ln">62</span>  for (const key of Object.keys(parentEnv)) {
+<span class="ln">63</span>    if (CHILD_ENV_ALLOWLIST.has(key)) {
+<span class="ln">64</span>      env[key] = parentEnv[key]
+<span class="ln">65</span>    }
+<span class="ln">66</span>  }
+<span class="ln">67</span>
+<span class="ln">68</span>  // Bridge-required overrides
+<span class="ln">69</span>  env.CLAUDE_CODE_OAUTH_TOKEN = undefined // explicitly strip
+<span class="ln">70</span>  env.CLAUDE_CODE_ENVIRONMENT_KIND = &#x27;bridge&#x27;
+<span class="ln">71</span>  if (opts.sandbox) env.CLAUDE_CODE_FORCE_SANDBOX = &#x27;1&#x27;
+<span class="ln">72</span>  env.CLAUDE_CODE_SESSION_ACCESS_TOKEN = opts.accessToken
+<span class="ln">73</span>  env.CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2 = &#x27;1&#x27;
+<span class="ln">74</span>  if (opts.useCcrV2) {
+<span class="ln">75</span>    env.CLAUDE_CODE_USE_CCR_V2 = &#x27;1&#x27;
+<span class="ln">76</span>    env.CLAUDE_CODE_WORKER_EPOCH = String(opts.workerEpoch)
+<span class="ln">77</span>  }
+<span class="ln">78</span>
+<span class="ln">79</span>  return env
+<span class="ln">80</span>}</pre></div><h3><span class="arr">▸</span>测试锁住 secret 边界</h3><p>环境隔离的关键不是删除某一个 token，而是默认拒绝。<code>src/bridge/sessionRunner.ts:56</code> 从空对象开始，<code>src/bridge/sessionRunner.ts:62</code> 只复制 allowlist 里的 key，<code>src/bridge/sessionRunner.ts:69</code> 还显式去掉 OAuth token。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/sessionRunner.test.ts</span> · L13-85</span><span>TypeScript</span></div><pre class="code"><span class="ln">13</span>test(&#x27;buildChildEnv does not leak ANTHROPIC_API_KEY to child&#x27;, () =&gt; {
+<span class="ln">14</span>  const parentEnv = {
+<span class="ln">15</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">16</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">17</span>    ANTHROPIC_API_KEY: &#x27;sk-ant-secret-key&#x27;,
+<span class="ln">18</span>    CLAUDE_CODE_SESSION_ACCESS_TOKEN: &#x27;will-be-overwritten&#x27;,
+<span class="ln">19</span>  }
+<span class="ln">20</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">21</span>  expect(env.ANTHROPIC_API_KEY).toBeUndefined()
+<span class="ln">22</span>})
+<span class="ln">23</span>
+<span class="ln">24</span>test(&#x27;buildChildEnv does not leak OPENAI_API_KEY to child&#x27;, () =&gt; {
+<span class="ln">25</span>  const parentEnv = {
+<span class="ln">26</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">27</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">28</span>    OPENAI_API_KEY: &#x27;sk-openai-secret&#x27;,
+<span class="ln">29</span>  }
+<span class="ln">30</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">31</span>  expect(env.OPENAI_API_KEY).toBeUndefined()
+<span class="ln">32</span>})
+<span class="ln">33</span>
+<span class="ln">34</span>test(&#x27;buildChildEnv does not leak arbitrary secrets to child&#x27;, () =&gt; {
+<span class="ln">35</span>  const parentEnv = {
+<span class="ln">36</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">37</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">38</span>    DB_PASSWORD: &#x27;super-secret&#x27;,
+<span class="ln">39</span>    AWS_SECRET_ACCESS_KEY: &#x27;aws-secret&#x27;,
+<span class="ln">40</span>    GITHUB_TOKEN: &#x27;ghp_token&#x27;,
+<span class="ln">41</span>  }
+<span class="ln">42</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">43</span>  expect(env.DB_PASSWORD).toBeUndefined()
+<span class="ln">44</span>  expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined()
+<span class="ln">45</span>  expect(env.GITHUB_TOKEN).toBeUndefined()
+<span class="ln">46</span>})
+<span class="ln">47</span>
+<span class="ln">48</span>test(&#x27;buildChildEnv includes PATH and HOME from parent&#x27;, () =&gt; {
+<span class="ln">49</span>  const parentEnv = {
+<span class="ln">50</span>    PATH: &#x27;/usr/bin:/usr/local/bin&#x27;,
+<span class="ln">51</span>    HOME: &#x27;/home/user&#x27;,
+<span class="ln">52</span>    ANTHROPIC_API_KEY: &#x27;sk-secret&#x27;,
+<span class="ln">53</span>  }
+<span class="ln">54</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">55</span>  expect(env.PATH).toBe(&#x27;/usr/bin:/usr/local/bin&#x27;)
+<span class="ln">56</span>  expect(env.HOME).toBe(&#x27;/home/user&#x27;)
+<span class="ln">57</span>})
+<span class="ln">58</span>
+<span class="ln">59</span>test(&#x27;buildChildEnv sets CLAUDE_CODE_SESSION_ACCESS_TOKEN from opts&#x27;, () =&gt; {
+<span class="ln">60</span>  const env = buildChildEnv({ PATH: &#x27;/usr/bin&#x27; }, { ...baseOpts, accessToken: &#x27;my-token&#x27; })
+<span class="ln">61</span>  expect(env.CLAUDE_CODE_SESSION_ACCESS_TOKEN).toBe(&#x27;my-token&#x27;)
+<span class="ln">62</span>})
+<span class="ln">63</span>
+<span class="ln">64</span>test(&#x27;buildChildEnv sets CLAUDE_CODE_ENVIRONMENT_KIND to bridge&#x27;, () =&gt; {
+<span class="ln">65</span>  const env = buildChildEnv({ PATH: &#x27;/usr/bin&#x27; }, baseOpts)
+<span class="ln">66</span>  expect(env.CLAUDE_CODE_ENVIRONMENT_KIND).toBe(&#x27;bridge&#x27;)
+<span class="ln">67</span>})
+<span class="ln">68</span>
+<span class="ln">69</span>test(&#x27;buildChildEnv does not pass CLAUDE_CODE_OAUTH_TOKEN to child&#x27;, () =&gt; {
+<span class="ln">70</span>  const parentEnv = {
+<span class="ln">71</span>    PATH: &#x27;/usr/bin&#x27;,
+<span class="ln">72</span>    CLAUDE_CODE_OAUTH_TOKEN: &#x27;oauth-token-to-strip&#x27;,
+<span class="ln">73</span>  }
+<span class="ln">74</span>  const env = buildChildEnv(parentEnv, baseOpts)
+<span class="ln">75</span>  expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+<span class="ln">76</span>})
+<span class="ln">77</span>
+<span class="ln">78</span>test(&#x27;buildChildEnv sets CCR v2 vars when useCcrV2 is true&#x27;, () =&gt; {
+<span class="ln">79</span>  const env = buildChildEnv(
+<span class="ln">80</span>    { PATH: &#x27;/usr/bin&#x27; },
+<span class="ln">81</span>    { accessToken: &#x27;tok&#x27;, useCcrV2: true, workerEpoch: 42 },
+<span class="ln">82</span>  )
+<span class="ln">83</span>  expect(env.CLAUDE_CODE_USE_CCR_V2).toBe(&#x27;1&#x27;)
+<span class="ln">84</span>  expect(env.CLAUDE_CODE_WORKER_EPOCH).toBe(&#x27;42&#x27;)
+<span class="ln">85</span>})</pre></div><h3><span class="arr">▸</span>URL 与 worker 注册</h3><p>workSecret 层处理网络边界：<code>src/bridge/workSecret.ts:44</code> 精确识别 localhost，<code>src/bridge/workSecret.ts:64</code> 拒绝非本地 HTTP，<code>src/bridge/workSecret.ts:136</code> 注册 worker 并校验 worker_epoch。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/workSecret.ts</span> · L44-165</span><span>TypeScript</span></div><pre class="code"><span class="ln">44</span>export function isLocalhostBaseUrl(baseUrl: string): boolean {
+<span class="ln">45</span>  let hostname: string
+<span class="ln">46</span>  try {
+<span class="ln">47</span>    hostname = new URL(baseUrl).hostname
+<span class="ln">48</span>  } catch {
+<span class="ln">49</span>    return false
+<span class="ln">50</span>  }
+<span class="ln">51</span>  return hostname === &#x27;localhost&#x27; || hostname === &#x27;127.0.0.1&#x27;
+<span class="ln">52</span>}
+<span class="ln">53</span>
+<span class="ln">54</span>/**
+<span class="ln">55</span> * Whether a base URL would send traffic to a non-localhost host over plaintext
+<span class="ln">56</span> * HTTP, which must be rejected to keep credentials off the wire.
+<span class="ln">57</span> *
+<span class="ln">58</span> * The scheme is read from the parsed URL (`protocol === &#x27;http:&#x27;`) rather than a
+<span class="ln">59</span> * `startsWith(&#x27;http://&#x27;)` test so that mixed-case schemes like `HTTP://` — which
+<span class="ln">60</span> * the URL parser normalizes to `http:` and would otherwise carry credentials in
+<span class="ln">61</span> * the clear — are still caught. A malformed URL is treated as not-insecure (the
+<span class="ln">62</span> * safe default: the callers fall through to their normal handling).
+<span class="ln">63</span> */
+<span class="ln">64</span>export function isInsecureHttpBaseUrl(baseUrl: string): boolean {
+<span class="ln">65</span>  let protocol: string
+<span class="ln">66</span>  try {
+<span class="ln">67</span>    protocol = new URL(baseUrl).protocol
+<span class="ln">68</span>  } catch {
+<span class="ln">69</span>    return false
+<span class="ln">70</span>  }
+<span class="ln">71</span>  return protocol === &#x27;http:&#x27; &amp;&amp; !isLocalhostBaseUrl(baseUrl)
+<span class="ln">72</span>}
+<span class="ln">73</span>
+<span class="ln">74</span>/**
+<span class="ln">75</span> * Build a WebSocket SDK URL from the API base URL and session ID.
+<span class="ln">76</span> * Strips the HTTP(S) protocol and constructs a ws(s):// ingress URL.
+<span class="ln">77</span> *
+<span class="ln">78</span> * Uses /v2/ for localhost (direct to session-ingress, no Envoy rewrite)
+<span class="ln">79</span> * and /v1/ for production (Envoy rewrites /v1/ → /v2/).
+<span class="ln">80</span> */
+<span class="ln">81</span>export function buildSdkUrl(apiBaseUrl: string, sessionId: string): string {
+<span class="ln">82</span>  const isLocalhost = isLocalhostBaseUrl(apiBaseUrl)
+<span class="ln">83</span>  const protocol = isLocalhost ? &#x27;ws&#x27; : &#x27;wss&#x27;
+<span class="ln">84</span>  const version = isLocalhost ? &#x27;v2&#x27; : &#x27;v1&#x27;
+<span class="ln">85</span>  const host = apiBaseUrl.replace(/^https?:\/\//, &#x27;&#x27;).replace(/\/+$/, &#x27;&#x27;)
+<span class="ln">86</span>  return `${protocol}://${host}/${version}/session_ingress/ws/${sessionId}`
+<span class="ln">87</span>}
+<span class="ln">88</span>
+<span class="ln">89</span>/**
+<span class="ln">90</span> * Compare two session IDs regardless of their tagged-ID prefix.
+<span class="ln">91</span> *
+<span class="ln">92</span> * Tagged IDs have the form {tag}_{body} or {tag}_staging_{body}, where the
+<span class="ln">93</span> * body encodes a UUID. CCR v2&#x27;s compat layer returns `session_*` to v1 API
+<span class="ln">94</span> * clients (compat/convert.go:41) but the infrastructure layer (sandbox-gateway
+<span class="ln">95</span> * work queue, work poll response) uses `cse_*` (compat/CLAUDE.md:13). Both
+<span class="ln">96</span> * have the same underlying UUID.
+<span class="ln">97</span> *
+<span class="ln">98</span> * Without this, replBridge rejects its own session as &quot;foreign&quot; at the
+<span class="ln">99</span> * work-received check when the ccr_v2_compat_enabled gate is on.
+<span class="ln">100</span> */
+<span class="ln">101</span>export function sameSessionId(a: string, b: string): boolean {
+<span class="ln">102</span>  if (a === b) return true
+<span class="ln">103</span>  // The body is everything after the last underscore — this handles both
+<span class="ln">104</span>  // `{tag}_{body}` and `{tag}_staging_{body}`.
+<span class="ln">105</span>  const aBody = a.slice(a.lastIndexOf(&#x27;_&#x27;) + 1)
+<span class="ln">106</span>  const bBody = b.slice(b.lastIndexOf(&#x27;_&#x27;) + 1)
+<span class="ln">107</span>  // Guard against IDs with no underscore (bare UUIDs): lastIndexOf returns -1,
+<span class="ln">108</span>  // slice(0) returns the whole string, and we already checked a === b above.
+<span class="ln">109</span>  // Require a minimum length to avoid accidental matches on short suffixes
+<span class="ln">110</span>  // (e.g. single-char tag remnants from malformed IDs).
+<span class="ln">111</span>  return aBody.length &gt;= 4 &amp;&amp; aBody === bBody
+<span class="ln">112</span>}
+<span class="ln">113</span>
+<span class="ln">114</span>/**
+<span class="ln">115</span> * Build a CCR v2 session URL from the API base URL and session ID.
+<span class="ln">116</span> * Unlike buildSdkUrl, this returns an HTTP(S) URL (not ws://) and points at
+<span class="ln">117</span> * /v1/code/sessions/{id} — the child CC will derive the SSE stream path
+<span class="ln">118</span> * and worker endpoints from this base.
+<span class="ln">119</span> */
+<span class="ln">120</span>export function buildCCRv2SdkUrl(
+<span class="ln">121</span>  apiBaseUrl: string,
+<span class="ln">122</span>  sessionId: string,
+<span class="ln">123</span>): string {
+<span class="ln">124</span>  const base = apiBaseUrl.replace(/\/+$/, &#x27;&#x27;)
+<span class="ln">125</span>  return `${base}/v1/code/sessions/${sessionId}`
+<span class="ln">126</span>}
+<span class="ln">127</span>
+<span class="ln">128</span>/**
+<span class="ln">129</span> * Register this bridge as the worker for a CCR v2 session.
+<span class="ln">130</span> * Returns the worker_epoch, which must be passed to the child CC process
+<span class="ln">131</span> * so its CCRClient can include it in every heartbeat/state/event request.
+<span class="ln">132</span> *
+<span class="ln">133</span> * Mirrors what environment-manager does in the container path
+<span class="ln">134</span> * (api-go/environment-manager/cmd/cmd_task_run.go RegisterWorker).
+<span class="ln">135</span> */
+<span class="ln">136</span>export async function registerWorker(
+<span class="ln">137</span>  sessionUrl: string,
+<span class="ln">138</span>  accessToken: string,
+<span class="ln">139</span>): Promise&lt;number&gt; {
+<span class="ln">140</span>  const response = await axios.post(
+<span class="ln">141</span>    `${sessionUrl}/worker/register`,
+<span class="ln">142</span>    {},
+<span class="ln">143</span>    {
+<span class="ln">144</span>      headers: {
+<span class="ln">145</span>        Authorization: `Bearer ${accessToken}`,
+<span class="ln">146</span>        &#x27;Content-Type&#x27;: &#x27;application/json&#x27;,
+<span class="ln">147</span>        &#x27;anthropic-version&#x27;: &#x27;2023-06-01&#x27;,
+<span class="ln">148</span>      },
+<span class="ln">149</span>      timeout: 10_000,
+<span class="ln">150</span>    },
+<span class="ln">151</span>  )
+<span class="ln">152</span>  // protojson serializes int64 as a string to avoid JS number precision loss;
+<span class="ln">153</span>  // the Go side may also return a number depending on encoder settings.
+<span class="ln">154</span>  const raw = response.data?.worker_epoch
+<span class="ln">155</span>  const epoch = typeof raw === &#x27;string&#x27; ? Number(raw) : raw
+<span class="ln">156</span>  if (
+<span class="ln">157</span>    typeof epoch !== &#x27;number&#x27; ||
+<span class="ln">158</span>    !Number.isFinite(epoch) ||
+<span class="ln">159</span>    !Number.isSafeInteger(epoch)
+<span class="ln">160</span>  ) {
+<span class="ln">161</span>    throw new Error(
+<span class="ln">162</span>      `registerWorker: invalid worker_epoch in response: ${jsonStringify(response.data)}`,
+<span class="ln">163</span>    )
+<span class="ln">164</span>  }
+<span class="ln">165</span>  return epoch</pre></div><h3><span class="arr">▸</span>消息去重与控制请求</h3><p>Ingress 处理把 control_response、control_request 和 SDKMessage 分开。<code>src/bridge/bridgeMessaging.ts:143</code> 先处理 control_response，<code>src/bridge/bridgeMessaging.ts:151</code> 再处理 control_request，<code>src/bridge/bridgeMessaging.ts:171</code> 和 <code>src/bridge/bridgeMessaging.ts:183</code> 分别处理 echo 与重放。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/bridge/bridgeMessaging.ts</span> · L124-211</span><span>TypeScript</span></div><pre class="code"><span class="ln">124</span>// ─── Ingress routing ─────────────────────────────────────────────────────────
+<span class="ln">125</span>
+<span class="ln">126</span>/**
+<span class="ln">127</span> * Parse an ingress WebSocket message and route it to the appropriate handler.
+<span class="ln">128</span> * Ignores messages whose UUID is in recentPostedUUIDs (echoes of what we sent)
+<span class="ln">129</span> * or in recentInboundUUIDs (re-deliveries we&#x27;ve already forwarded — e.g.
+<span class="ln">130</span> * server replayed history after a transport swap lost the seq-num cursor).
+<span class="ln">131</span> */
+<span class="ln">132</span>export function handleIngressMessage(
+<span class="ln">133</span>  data: string,
+<span class="ln">134</span>  recentPostedUUIDs: BoundedUUIDSet,
+<span class="ln">135</span>  recentInboundUUIDs: BoundedUUIDSet,
+<span class="ln">136</span>  onInboundMessage: ((msg: SDKMessage) =&gt; void | Promise&lt;void&gt;) | undefined,
+<span class="ln">137</span>  onPermissionResponse?: ((response: SDKControlResponse) =&gt; void) | undefined,
+<span class="ln">138</span>  onControlRequest?: ((request: SDKControlRequest) =&gt; void) | undefined,
+<span class="ln">139</span>): void {
+<span class="ln">140</span>  try {
+<span class="ln">141</span>    const parsed: unknown = normalizeControlMessageKeys(jsonParse(data))
+<span class="ln">142</span>
+<span class="ln">143</span>    // control_response is not an SDKMessage — check before the type guard
+<span class="ln">144</span>    if (isSDKControlResponse(parsed)) {
+<span class="ln">145</span>      const controlResponse = parsed as SDKControlResponse
+<span class="ln">146</span>      logForDebugging(&#x27;[bridge:repl] Ingress message type=control_response&#x27;)
+<span class="ln">147</span>      onPermissionResponse?.(controlResponse)
+<span class="ln">148</span>      return
+<span class="ln">149</span>    }
+<span class="ln">150</span>
+<span class="ln">151</span>    // control_request from the server (initialize, set_model, can_use_tool).
+<span class="ln">152</span>    // Must respond promptly or the server kills the WS (~10-14s timeout).
+<span class="ln">153</span>    if (isSDKControlRequest(parsed)) {
+<span class="ln">154</span>      const controlRequest = parsed as SDKControlRequest
+<span class="ln">155</span>      logForDebugging(
+<span class="ln">156</span>        `[bridge:repl] Inbound control_request subtype=${controlRequest.request.subtype}`,
+<span class="ln">157</span>      )
+<span class="ln">158</span>      onControlRequest?.(controlRequest)
+<span class="ln">159</span>      return
+<span class="ln">160</span>    }
+<span class="ln">161</span>
+<span class="ln">162</span>    if (!isSDKMessage(parsed)) return
+<span class="ln">163</span>    const sdkMessage = parsed as SDKMessage
+<span class="ln">164</span>
+<span class="ln">165</span>    // Check for UUID to detect echoes of our own messages
+<span class="ln">166</span>    const uuid =
+<span class="ln">167</span>      &#x27;uuid&#x27; in sdkMessage &amp;&amp; typeof sdkMessage.uuid === &#x27;string&#x27;
+<span class="ln">168</span>        ? sdkMessage.uuid
+<span class="ln">169</span>        : undefined
+<span class="ln">170</span>
+<span class="ln">171</span>    if (uuid &amp;&amp; recentPostedUUIDs.has(uuid)) {
+<span class="ln">172</span>      logForDebugging(
+<span class="ln">173</span>        `[bridge:repl] Ignoring echo: type=${sdkMessage.type} uuid=${uuid}`,
+<span class="ln">174</span>      )
+<span class="ln">175</span>      return
+<span class="ln">176</span>    }
+<span class="ln">177</span>
+<span class="ln">178</span>    // Defensive dedup: drop inbound prompts we&#x27;ve already forwarded. The
+<span class="ln">179</span>    // SSE seq-num carryover (lastTransportSequenceNum) is the primary fix
+<span class="ln">180</span>    // for history-replay; this catches edge cases where that negotiation
+<span class="ln">181</span>    // fails (server ignores from_sequence_num, transport died before
+<span class="ln">182</span>    // receiving any frames, etc).
+<span class="ln">183</span>    if (uuid &amp;&amp; recentInboundUUIDs.has(uuid)) {
+<span class="ln">184</span>      logForDebugging(
+<span class="ln">185</span>        `[bridge:repl] Ignoring re-delivered inbound: type=${sdkMessage.type} uuid=${uuid}`,
+<span class="ln">186</span>      )
+<span class="ln">187</span>      return
+<span class="ln">188</span>    }
+<span class="ln">189</span>
+<span class="ln">190</span>    logForDebugging(
+<span class="ln">191</span>      `[bridge:repl] Ingress message type=${sdkMessage.type}${uuid ? ` uuid=${uuid}` : &#x27;&#x27;}`,
+<span class="ln">192</span>    )
+<span class="ln">193</span>
+<span class="ln">194</span>    if (sdkMessage.type === &#x27;user&#x27;) {
+<span class="ln">195</span>      if (uuid) recentInboundUUIDs.add(uuid)
+<span class="ln">196</span>      logEvent(&#x27;tengu_bridge_message_received&#x27;, {
+<span class="ln">197</span>        is_repl: true,
+<span class="ln">198</span>      })
+<span class="ln">199</span>      // Fire-and-forget — handler may be async (attachment resolution).
+<span class="ln">200</span>      void onInboundMessage?.(sdkMessage)
+<span class="ln">201</span>    } else {
+<span class="ln">202</span>      logForDebugging(
+<span class="ln">203</span>        `[bridge:repl] Ignoring non-user inbound message: type=${sdkMessage.type}`,
+<span class="ln">204</span>      )
+<span class="ln">205</span>    }
+<span class="ln">206</span>  } catch (err) {
+<span class="ln">207</span>    logForDebugging(
+<span class="ln">208</span>      `[bridge:repl] Failed to parse ingress message: ${errorMessage(err)}`,
+<span class="ln">209</span>    )
+<span class="ln">210</span>  }
+<span class="ln">211</span>}</pre></div><h3><span class="arr">▸</span>逐行证据</h3><p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:24</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:56</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:72</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:87</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:96</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:170</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:201</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:247</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.ts:310</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:92</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:120</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:151</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:166</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:183</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:193</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/replBridge.ts:214</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:36</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:77</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:103</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:143</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:151</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:171</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:183</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:194</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/bridgeMessaging.ts:206</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:5</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:44</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:64</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:81</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:101</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/workSecret.ts:136</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:13</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:34</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Bridge 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:78</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p></section><div class="foot"><span>Generated · 2026-07-29</span><span>Source · <a href="https://github.com/0xwilliamortiz/openclaude-improved">0xwilliamortiz/openclaude-improved</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9adfff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

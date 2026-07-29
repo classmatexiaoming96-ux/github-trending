@@ -1,0 +1,699 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Query lifecycle · openclaude-improved</title><meta name="description" content="QueryEngine 子模块解析"/><style>/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root{--star:#61c6ff;--star-soft:#9adfff;--star-deep:#2f8fc9;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">openclaude<b>improved</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">openclaude<b>improved</b></div><div class="sub">QueryEngine · provider lifecycle</div></div><span class="nav-ver">TypeScript · Bun / npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>Bridge</a></li><li><a href="#section-2"><span class="idx">02</span>QueryEngine</a></li><li><a href="#section-3"><span class="idx">03</span>Provider</a></li><li><a href="#section-4"><span class="idx">04</span>Tests</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★583 · 2026-07-26</div><div><a href="https://github.com/0xwilliamortiz/openclaude-improved" target="_blank">0xwilliamortiz/openclaude-improved</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Query lifecycle <em>深度解析</em></h1><p class="hero-desc">这一页拆 QueryEngine 如何把 prompt、tools、commands、MCP、memory 和 provider profile 组合成可复用 SDK 运行时。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><h3><span class="arr">▸</span>QueryEngine 配置</h3><p>QueryEngine 的构造参数在 <code>src/QueryEngine.ts:132</code> 到 <code>src/QueryEngine.ts:176</code> 展开，显示它不是 UI 组件，而是把工具、命令、MCP、agents、budget 和 schema 都收敛进 headless runtime。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/QueryEngine.ts</span> · L132-211</span><span>TypeScript</span></div><pre class="code"><span class="ln">132</span>export type QueryEngineConfig = {
+<span class="ln">133</span>  cwd: string
+<span class="ln">134</span>  tools: Tools
+<span class="ln">135</span>  commands: Command[]
+<span class="ln">136</span>  mcpClients: MCPServerConnection[]
+<span class="ln">137</span>  agents: AgentDefinition[]
+<span class="ln">138</span>  canUseTool: CanUseToolFn
+<span class="ln">139</span>  getAppState: () =&gt; AppState
+<span class="ln">140</span>  setAppState: (f: (prev: AppState) =&gt; AppState) =&gt; void
+<span class="ln">141</span>  initialMessages?: Message[]
+<span class="ln">142</span>  readFileCache: FileStateCache
+<span class="ln">143</span>  customSystemPrompt?: string
+<span class="ln">144</span>  appendSystemPrompt?: string
+<span class="ln">145</span>  userSpecifiedModel?: string
+<span class="ln">146</span>  fallbackModel?: string
+<span class="ln">147</span>  thinkingConfig?: ThinkingConfig
+<span class="ln">148</span>  maxTurns?: number
+<span class="ln">149</span>  maxBudgetUsd?: number
+<span class="ln">150</span>  taskBudget?: { total: number }
+<span class="ln">151</span>  jsonSchema?: Record&lt;string, unknown&gt;
+<span class="ln">152</span>  verbose?: boolean
+<span class="ln">153</span>  replayUserMessages?: boolean
+<span class="ln">154</span>  /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
+<span class="ln">155</span>  handleElicitation?: ToolUseContext[&#x27;handleElicitation&#x27;]
+<span class="ln">156</span>  includePartialMessages?: boolean
+<span class="ln">157</span>  setSDKStatus?: (status: SDKStatus) =&gt; void
+<span class="ln">158</span>  abortController?: AbortController
+<span class="ln">159</span>  orphanedPermission?: OrphanedPermission
+<span class="ln">160</span>  /**
+<span class="ln">161</span>   * Snip-boundary handler: receives each yielded system message plus the
+<span class="ln">162</span>   * current mutableMessages store. Returns undefined if the message is not a
+<span class="ln">163</span>   * snip boundary; otherwise returns the replayed snip result. Injected by
+<span class="ln">164</span>   * ask() when HISTORY_SNIP is enabled so feature-gated strings stay inside
+<span class="ln">165</span>   * the gated module (keeps QueryEngine free of excluded strings and testable
+<span class="ln">166</span>   * despite feature() returning false under bun test). SDK-only: the REPL
+<span class="ln">167</span>   * keeps full history for UI scrollback and projects on demand via
+<span class="ln">168</span>   * projectSnippedView; QueryEngine truncates here to bound memory in long
+<span class="ln">169</span>   * headless sessions (no UI to preserve).
+<span class="ln">170</span>   */
+<span class="ln">171</span>  snipReplay?: (
+<span class="ln">172</span>    yieldedSystemMsg: Message,
+<span class="ln">173</span>    store: Message[],
+<span class="ln">174</span>  ) =&gt; { messages: Message[]; executed: boolean } | undefined
+<span class="ln">175</span>  query?: typeof defaultQuery
+<span class="ln">176</span>}
+<span class="ln">177</span>
+<span class="ln">178</span>/**
+<span class="ln">179</span> * QueryEngine owns the query lifecycle and session state for a conversation.
+<span class="ln">180</span> * It extracts the core logic from ask() into a standalone class that can be
+<span class="ln">181</span> * used by both the headless/SDK path and (in a future phase) the REPL.
+<span class="ln">182</span> *
+<span class="ln">183</span> * One QueryEngine per conversation. Each submitMessage() call starts a new
+<span class="ln">184</span> * turn within the same conversation. State (messages, file cache, usage, etc.)
+<span class="ln">185</span> * persists across turns.
+<span class="ln">186</span> */
+<span class="ln">187</span>export class QueryEngine {
+<span class="ln">188</span>  private config: QueryEngineConfig
+<span class="ln">189</span>  private mutableMessages: Message[]
+<span class="ln">190</span>  private abortController: AbortController
+<span class="ln">191</span>  private permissionDenials: SDKPermissionDenial[]
+<span class="ln">192</span>  private totalUsage: NonNullableUsage
+<span class="ln">193</span>  private hasHandledOrphanedPermission = false
+<span class="ln">194</span>  private readFileState: FileStateCache
+<span class="ln">195</span>  private autoCompactTracking: AutoCompactTrackingState | undefined
+<span class="ln">196</span>  // Turn-scoped skill discovery tracking (feeds was_discovered on
+<span class="ln">197</span>  // tengu_skill_tool_invocation). Must persist across the two
+<span class="ln">198</span>  // processUserInputContext rebuilds inside submitMessage, but is cleared
+<span class="ln">199</span>  // at the start of each submitMessage to avoid unbounded growth across
+<span class="ln">200</span>  // many turns in SDK mode.
+<span class="ln">201</span>  private discoveredSkillNames = new Set&lt;string&gt;()
+<span class="ln">202</span>  private loadedNestedMemoryPaths = new Set&lt;string&gt;()
+<span class="ln">203</span>
+<span class="ln">204</span>  constructor(config: QueryEngineConfig) {
+<span class="ln">205</span>    this.config = config
+<span class="ln">206</span>    this.mutableMessages = config.initialMessages ?? []
+<span class="ln">207</span>    this.abortController = config.abortController ?? createAbortController()
+<span class="ln">208</span>    this.permissionDenials = []
+<span class="ln">209</span>    this.readFileState = config.readFileCache
+<span class="ln">210</span>    this.totalUsage = EMPTY_USAGE
+<span class="ln">211</span>  }</pre></div><h3><span class="arr">▸</span>一轮消息如何开始</h3><p>每次 submitMessage 从 <code>src/QueryEngine.ts:213</code> 进入，先读取配置，再在 <code>src/QueryEngine.ts:242</code> 清掉本轮 skill discovery；这让长会话保留历史消息，但不会把本轮发现的 skill 无限增长到后续轮次。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/QueryEngine.ts</span> · L213-337</span><span>TypeScript</span></div><pre class="code"><span class="ln">213</span>  async *submitMessage(
+<span class="ln">214</span>    prompt: string | ContentBlockParam[],
+<span class="ln">215</span>    options?: { uuid?: string; isMeta?: boolean },
+<span class="ln">216</span>  ): AsyncGenerator&lt;SDKMessage, void, unknown&gt; {
+<span class="ln">217</span>    const {
+<span class="ln">218</span>      cwd,
+<span class="ln">219</span>      commands,
+<span class="ln">220</span>      tools,
+<span class="ln">221</span>      mcpClients,
+<span class="ln">222</span>      verbose = false,
+<span class="ln">223</span>      thinkingConfig,
+<span class="ln">224</span>      maxTurns,
+<span class="ln">225</span>      maxBudgetUsd,
+<span class="ln">226</span>      taskBudget,
+<span class="ln">227</span>      canUseTool,
+<span class="ln">228</span>      customSystemPrompt,
+<span class="ln">229</span>      appendSystemPrompt,
+<span class="ln">230</span>      userSpecifiedModel,
+<span class="ln">231</span>      fallbackModel,
+<span class="ln">232</span>      jsonSchema,
+<span class="ln">233</span>      getAppState,
+<span class="ln">234</span>      setAppState,
+<span class="ln">235</span>      replayUserMessages = false,
+<span class="ln">236</span>      includePartialMessages = false,
+<span class="ln">237</span>      agents = [],
+<span class="ln">238</span>      setSDKStatus,
+<span class="ln">239</span>      orphanedPermission,
+<span class="ln">240</span>    } = this.config
+<span class="ln">241</span>
+<span class="ln">242</span>    this.discoveredSkillNames.clear()
+<span class="ln">243</span>    setCwd(cwd)
+<span class="ln">244</span>    const persistSession = !isSessionPersistenceDisabled()
+<span class="ln">245</span>    const startTime = Date.now()
+<span class="ln">246</span>
+<span class="ln">247</span>    // Wrap canUseTool to track permission denials
+<span class="ln">248</span>    const wrappedCanUseTool: CanUseToolFn = async (
+<span class="ln">249</span>      tool,
+<span class="ln">250</span>      input,
+<span class="ln">251</span>      toolUseContext,
+<span class="ln">252</span>      assistantMessage,
+<span class="ln">253</span>      toolUseID,
+<span class="ln">254</span>      forceDecision,
+<span class="ln">255</span>    ) =&gt; {
+<span class="ln">256</span>      const result = await canUseTool(
+<span class="ln">257</span>        tool,
+<span class="ln">258</span>        input,
+<span class="ln">259</span>        toolUseContext,
+<span class="ln">260</span>        assistantMessage,
+<span class="ln">261</span>        toolUseID,
+<span class="ln">262</span>        forceDecision,
+<span class="ln">263</span>      )
+<span class="ln">264</span>
+<span class="ln">265</span>      // Track denials for SDK reporting
+<span class="ln">266</span>      if (result.behavior !== &#x27;allow&#x27;) {
+<span class="ln">267</span>        this.permissionDenials.push({
+<span class="ln">268</span>          tool_name: sdkCompatToolName(tool.name),
+<span class="ln">269</span>          tool_use_id: toolUseID,
+<span class="ln">270</span>          tool_input: input,
+<span class="ln">271</span>        })
+<span class="ln">272</span>      }
+<span class="ln">273</span>
+<span class="ln">274</span>      return result
+<span class="ln">275</span>    }
+<span class="ln">276</span>
+<span class="ln">277</span>    const initialAppState = getAppState()
+<span class="ln">278</span>    const initialMainLoopModel = userSpecifiedModel
+<span class="ln">279</span>      ? parseUserSpecifiedModel(userSpecifiedModel)
+<span class="ln">280</span>      : getMainLoopModel()
+<span class="ln">281</span>
+<span class="ln">282</span>    const initialThinkingConfig: ThinkingConfig = thinkingConfig
+<span class="ln">283</span>      ? thinkingConfig
+<span class="ln">284</span>      : shouldEnableThinkingByDefault() !== false
+<span class="ln">285</span>        ? { type: &#x27;adaptive&#x27; }
+<span class="ln">286</span>        : { type: &#x27;disabled&#x27; }
+<span class="ln">287</span>
+<span class="ln">288</span>    headlessProfilerCheckpoint(&#x27;before_getSystemPrompt&#x27;)
+<span class="ln">289</span>    // Narrow once so TS tracks the type through the conditionals below.
+<span class="ln">290</span>    const customPrompt =
+<span class="ln">291</span>      typeof customSystemPrompt === &#x27;string&#x27; ? customSystemPrompt : undefined
+<span class="ln">292</span>    const {
+<span class="ln">293</span>      defaultSystemPrompt,
+<span class="ln">294</span>      userContext: baseUserContext,
+<span class="ln">295</span>      systemContext,
+<span class="ln">296</span>    } = await fetchSystemPromptParts({
+<span class="ln">297</span>      tools,
+<span class="ln">298</span>      mainLoopModel: initialMainLoopModel,
+<span class="ln">299</span>      additionalWorkingDirectories: Array.from(
+<span class="ln">300</span>        initialAppState.toolPermissionContext.additionalWorkingDirectories.keys(),
+<span class="ln">301</span>      ),
+<span class="ln">302</span>      mcpClients,
+<span class="ln">303</span>      customSystemPrompt: customPrompt,
+<span class="ln">304</span>    })
+<span class="ln">305</span>    headlessProfilerCheckpoint(&#x27;after_getSystemPrompt&#x27;)
+<span class="ln">306</span>    const userContext = {
+<span class="ln">307</span>      ...baseUserContext,
+<span class="ln">308</span>      ...getCoordinatorUserContext(
+<span class="ln">309</span>        mcpClients,
+<span class="ln">310</span>        isScratchpadEnabled() ? getScratchpadDir() : undefined,
+<span class="ln">311</span>      ),
+<span class="ln">312</span>    }
+<span class="ln">313</span>
+<span class="ln">314</span>    // When an SDK caller provides a custom system prompt AND has set
+<span class="ln">315</span>    // CLAUDE_COWORK_MEMORY_PATH_OVERRIDE, inject the memory-mechanics prompt.
+<span class="ln">316</span>    // The env var is an explicit opt-in signal — the caller has wired up
+<span class="ln">317</span>    // a memory directory and needs Claude to know how to use it (which
+<span class="ln">318</span>    // Write/Edit tools to call, MEMORY.md filename, loading semantics).
+<span class="ln">319</span>    // The caller can layer their own policy text via appendSystemPrompt.
+<span class="ln">320</span>    const memoryMechanicsPrompt =
+<span class="ln">321</span>      customPrompt !== undefined &amp;&amp; hasAutoMemPathOverride()
+<span class="ln">322</span>        ? await loadMemoryPrompt()
+<span class="ln">323</span>        : null
+<span class="ln">324</span>
+<span class="ln">325</span>    const systemPrompt = asSystemPrompt([
+<span class="ln">326</span>      ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
+<span class="ln">327</span>      ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
+<span class="ln">328</span>      ...(appendSystemPrompt ? [appendSystemPrompt] : []),
+<span class="ln">329</span>    ])
+<span class="ln">330</span>
+<span class="ln">331</span>    // Register function hook for structured output enforcement
+<span class="ln">332</span>    const hasStructuredOutputTool = tools.some(t =&gt;
+<span class="ln">333</span>      toolMatchesName(t, SYNTHETIC_OUTPUT_TOOL_NAME),
+<span class="ln">334</span>    )
+<span class="ln">335</span>    if (jsonSchema &amp;&amp; hasStructuredOutputTool) {
+<span class="ln">336</span>      registerStructuredOutputEnforcement(setAppState, getSessionId())
+<span class="ln">337</span>    }</pre></div><h3><span class="arr">▸</span>processUserInput 上下文</h3><p>processUserInputContext 是核心胶水。<code>src/QueryEngine.ts:339</code> 绑定 mutableMessages，<code>src/QueryEngine.ts:373</code> 带入 readFileState，<code>src/QueryEngine.ts:374</code> 到 <code>src/QueryEngine.ts:377</code> 把 nested memory 与动态 skill triggers 一并暴露。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/QueryEngine.ts</span> · L339-430</span><span>TypeScript</span></div><pre class="code"><span class="ln">339</span>    let processUserInputContext: ProcessUserInputContext = {
+<span class="ln">340</span>      messages: this.mutableMessages,
+<span class="ln">341</span>      // Slash commands that mutate the message array (e.g. /clear)
+<span class="ln">342</span>      // call setMessages(fn).  In interactive mode this writes back to
+<span class="ln">343</span>      // AppState; in print mode we write back to mutableMessages so the
+<span class="ln">344</span>      // rest of the query loop (push at :389, snapshot at :392) sees
+<span class="ln">345</span>      // the result.  The second processUserInputContext below (after
+<span class="ln">346</span>      // slash-command processing) keeps the no-op — nothing else calls
+<span class="ln">347</span>      // setMessages past that point.
+<span class="ln">348</span>      setMessages: fn =&gt; {
+<span class="ln">349</span>        this.mutableMessages = fn(this.mutableMessages)
+<span class="ln">350</span>      },
+<span class="ln">351</span>      onChangeAPIKey: () =&gt; {},
+<span class="ln">352</span>      handleElicitation: this.config.handleElicitation,
+<span class="ln">353</span>      options: {
+<span class="ln">354</span>        commands,
+<span class="ln">355</span>        debug: false, // we use stdout, so don&#x27;t want to clobber it
+<span class="ln">356</span>        tools,
+<span class="ln">357</span>        verbose,
+<span class="ln">358</span>        mainLoopModel: initialMainLoopModel,
+<span class="ln">359</span>        thinkingConfig: initialThinkingConfig,
+<span class="ln">360</span>        mcpClients,
+<span class="ln">361</span>        mcpResources: {},
+<span class="ln">362</span>        ideInstallationStatus: null,
+<span class="ln">363</span>        isNonInteractiveSession: true,
+<span class="ln">364</span>        customSystemPrompt,
+<span class="ln">365</span>        appendSystemPrompt,
+<span class="ln">366</span>        agentDefinitions: { activeAgents: agents, allAgents: agents },
+<span class="ln">367</span>        theme: resolveThemeSetting(getGlobalConfig().theme),
+<span class="ln">368</span>        maxBudgetUsd,
+<span class="ln">369</span>      },
+<span class="ln">370</span>      getAppState,
+<span class="ln">371</span>      setAppState,
+<span class="ln">372</span>      abortController: this.abortController,
+<span class="ln">373</span>      readFileState: this.readFileState,
+<span class="ln">374</span>      nestedMemoryAttachmentTriggers: new Set&lt;string&gt;(),
+<span class="ln">375</span>      loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
+<span class="ln">376</span>      dynamicSkillDirTriggers: new Set&lt;string&gt;(),
+<span class="ln">377</span>      discoveredSkillNames: this.discoveredSkillNames,
+<span class="ln">378</span>      setInProgressToolUseIDs: () =&gt; {},
+<span class="ln">379</span>      setResponseLength: () =&gt; {},
+<span class="ln">380</span>      updateFileHistoryState: (
+<span class="ln">381</span>        updater: (prev: FileHistoryState) =&gt; FileHistoryState,
+<span class="ln">382</span>      ) =&gt; {
+<span class="ln">383</span>        setAppState(prev =&gt; {
+<span class="ln">384</span>          const updated = updater(prev.fileHistory)
+<span class="ln">385</span>          if (updated === prev.fileHistory) return prev
+<span class="ln">386</span>          return { ...prev, fileHistory: updated }
+<span class="ln">387</span>        })
+<span class="ln">388</span>      },
+<span class="ln">389</span>      updateAttributionState: (
+<span class="ln">390</span>        updater: (prev: AttributionState) =&gt; AttributionState,
+<span class="ln">391</span>      ) =&gt; {
+<span class="ln">392</span>        setAppState(prev =&gt; {
+<span class="ln">393</span>          const updated = updater(prev.attribution)
+<span class="ln">394</span>          if (updated === prev.attribution) return prev
+<span class="ln">395</span>          return { ...prev, attribution: updated }
+<span class="ln">396</span>        })
+<span class="ln">397</span>      },
+<span class="ln">398</span>      setSDKStatus,
+<span class="ln">399</span>    }
+<span class="ln">400</span>
+<span class="ln">401</span>    // Handle orphaned permission (only once per engine lifetime)
+<span class="ln">402</span>    if (orphanedPermission &amp;&amp; !this.hasHandledOrphanedPermission) {
+<span class="ln">403</span>      this.hasHandledOrphanedPermission = true
+<span class="ln">404</span>      for await (const message of handleOrphanedPermission(
+<span class="ln">405</span>        orphanedPermission,
+<span class="ln">406</span>        tools,
+<span class="ln">407</span>        this.mutableMessages,
+<span class="ln">408</span>        processUserInputContext,
+<span class="ln">409</span>      )) {
+<span class="ln">410</span>        yield message
+<span class="ln">411</span>      }
+<span class="ln">412</span>    }
+<span class="ln">413</span>
+<span class="ln">414</span>    const {
+<span class="ln">415</span>      messages: messagesFromUserInput,
+<span class="ln">416</span>      shouldQuery,
+<span class="ln">417</span>      allowedTools,
+<span class="ln">418</span>      model: modelFromUserInput,
+<span class="ln">419</span>      resultText,
+<span class="ln">420</span>    } = await processUserInput({
+<span class="ln">421</span>      input: prompt,
+<span class="ln">422</span>      mode: &#x27;prompt&#x27;,
+<span class="ln">423</span>      setToolJSX: () =&gt; {},
+<span class="ln">424</span>      context: {
+<span class="ln">425</span>        ...processUserInputContext,
+<span class="ln">426</span>        messages: this.mutableMessages,
+<span class="ln">427</span>      },
+<span class="ln">428</span>      messages: this.mutableMessages,
+<span class="ln">429</span>      uuid: options?.uuid,
+<span class="ln">430</span>      isMeta: options?.isMeta,</pre></div><h3><span class="arr">▸</span>Provider profile 与 secret 面</h3><p>多模型能力落到 provider profile。<code>src/utils/providerProfile.ts:124</code> 定义兼容 profile，<code>src/utils/providerProfile.ts:152</code> 定义各 provider env，<code>src/utils/providerProfile.ts:215</code> 则让新增 credential 也能参与脱敏。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/utils/providerProfile.ts</span> · L124-218</span><span>TypeScript</span></div><pre class="code"><span class="ln">124</span>export type CompatibilityProfileMode =
+<span class="ln">125</span>  | &#x27;anthropic&#x27;
+<span class="ln">126</span>  | &#x27;openai&#x27;
+<span class="ln">127</span>  | &#x27;gemini&#x27;
+<span class="ln">128</span>  | &#x27;mistral&#x27;
+<span class="ln">129</span>  | &#x27;github&#x27;
+<span class="ln">130</span>  | &#x27;github-enterprise&#x27;
+<span class="ln">131</span>  | &#x27;bedrock&#x27;
+<span class="ln">132</span>  | &#x27;vertex&#x27;
+<span class="ln">133</span>
+<span class="ln">134</span>export type ProviderProfile =
+<span class="ln">135</span>  | &#x27;anthropic&#x27;
+<span class="ln">136</span>  | &#x27;openai&#x27;
+<span class="ln">137</span>  | &#x27;ollama&#x27;
+<span class="ln">138</span>  | &#x27;codex&#x27;
+<span class="ln">139</span>  | &#x27;gemini&#x27;
+<span class="ln">140</span>  | &#x27;atomic-chat&#x27;
+<span class="ln">141</span>  | &#x27;nvidia-nim&#x27;
+<span class="ln">142</span>  | &#x27;minimax&#x27;
+<span class="ln">143</span>  | &#x27;mistral&#x27;
+<span class="ln">144</span>  | &#x27;github&#x27;
+<span class="ln">145</span>  | &#x27;github-enterprise&#x27;
+<span class="ln">146</span>  | &#x27;bedrock&#x27;
+<span class="ln">147</span>  | &#x27;vertex&#x27;
+<span class="ln">148</span>  | &#x27;xai&#x27;
+<span class="ln">149</span>  | &#x27;opencode&#x27;
+<span class="ln">150</span>  | &#x27;clinepass&#x27;
+<span class="ln">151</span>
+<span class="ln">152</span>export type ProfileEnv = {
+<span class="ln">153</span>  ANTHROPIC_BASE_URL?: string
+<span class="ln">154</span>  ANTHROPIC_MODEL?: string
+<span class="ln">155</span>  ANTHROPIC_API_KEY?: string
+<span class="ln">156</span>  ANTHROPIC_AUTH_TOKEN?: string
+<span class="ln">157</span>  ANTHROPIC_CUSTOM_HEADERS?: string
+<span class="ln">158</span>  ANTHROPIC_BEDROCK_BASE_URL?: string
+<span class="ln">159</span>  ANTHROPIC_VERTEX_BASE_URL?: string
+<span class="ln">160</span>  OPENAI_BASE_URL?: string
+<span class="ln">161</span>  OPENAI_API_BASE?: string
+<span class="ln">162</span>  OPENAI_MODEL?: string
+<span class="ln">163</span>  OPENAI_API_FORMAT?: &#x27;chat_completions&#x27; | &#x27;responses&#x27; | &#x27;responses_compat&#x27;
+<span class="ln">164</span>  OPENAI_AZURE_STYLE?: string
+<span class="ln">165</span>  OPENAI_AUTH_HEADER?: string
+<span class="ln">166</span>  OPENAI_AUTH_SCHEME?: &#x27;bearer&#x27; | &#x27;raw&#x27;
+<span class="ln">167</span>  OPENAI_AUTH_HEADER_VALUE?: string
+<span class="ln">168</span>  OPENAI_API_KEYS?: string
+<span class="ln">169</span>  OPENAI_API_KEY?: string
+<span class="ln">170</span>  GITHUB_COPILOT_KEY?: string
+<span class="ln">171</span>  GITHUB_ENTERPRISE_URL?: string
+<span class="ln">172</span>  CODEX_API_KEY?: string
+<span class="ln">173</span>  CODEX_CREDENTIAL_SOURCE?: &#x27;oauth&#x27; | &#x27;existing&#x27;
+<span class="ln">174</span>  CHATGPT_ACCOUNT_ID?: string
+<span class="ln">175</span>  CODEX_ACCOUNT_ID?: string
+<span class="ln">176</span>  GEMINI_API_KEY?: string
+<span class="ln">177</span>  GEMINI_AUTH_MODE?: &#x27;api-key&#x27; | &#x27;access-token&#x27; | &#x27;adc&#x27;
+<span class="ln">178</span>  GEMINI_ACCESS_TOKEN?: string
+<span class="ln">179</span>  GEMINI_MODEL?: string
+<span class="ln">180</span>  GEMINI_BASE_URL?: string
+<span class="ln">181</span>  GOOGLE_API_KEY?: string
+<span class="ln">182</span>  NVIDIA_NIM?: string
+<span class="ln">183</span>  NVIDIA_API_KEY?: string
+<span class="ln">184</span>  MINIMAX_API_KEY?: string
+<span class="ln">185</span>  MINIMAX_BASE_URL?: string
+<span class="ln">186</span>  MINIMAX_MODEL?: string
+<span class="ln">187</span>  MISTRAL_BASE_URL?: string
+<span class="ln">188</span>  MISTRAL_API_KEY?: string
+<span class="ln">189</span>  MISTRAL_MODEL?: string
+<span class="ln">190</span>  BANKR_BASE_URL?: string
+<span class="ln">191</span>  BNKR_API_KEY?: string
+<span class="ln">192</span>  BANKR_MODEL?: string
+<span class="ln">193</span>  XAI_API_KEY?: string
+<span class="ln">194</span>  XAI_CREDENTIAL_SOURCE?: &#x27;oauth&#x27;
+<span class="ln">195</span>  AIMLAPI_API_KEY?: string
+<span class="ln">196</span>  VENICE_API_KEY?: string
+<span class="ln">197</span>  MIMO_API_KEY?: string
+<span class="ln">198</span>  ATLAS_CLOUD_API_KEY?: string
+<span class="ln">199</span>  CLINE_API_KEY?: string
+<span class="ln">200</span>  NEARAI_API_KEY?: string
+<span class="ln">201</span>  FIREWORKS_API_KEY?: string
+<span class="ln">202</span>  LONGCAT_API_KEY?: string
+<span class="ln">203</span>  OPENCODE_API_KEY?: string
+<span class="ln">204</span>  CLOUDFLARE_API_TOKEN?: string
+<span class="ln">205</span>  CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS?: string
+<span class="ln">206</span>  CLAUDE_CODE_PROVIDER_ROUTE_ID?: string
+<span class="ln">207</span>}
+<span class="ln">208</span>
+<span class="ln">209</span>export type ProfileFile = {
+<span class="ln">210</span>  profile: ProviderProfile
+<span class="ln">211</span>  env: ProfileEnv
+<span class="ln">212</span>  createdAt: string
+<span class="ln">213</span>}
+<span class="ln">214</span>
+<span class="ln">215</span>// SecretValueSource is intentionally open (Partial&lt;Record&lt;string, ...&gt;&gt;) so
+<span class="ln">216</span>// that newly declared provider credential env vars are redactable without a
+<span class="ln">217</span>// matching type update. See providerSecrets.ts for the canonical definition.
+<span class="ln">218</span>export type { SecretValueSource } from &#x27;./providerSecrets.js&#x27;</pre></div><h3><span class="arr">▸</span>逐行证据</h3><p>Query 子页面 的证据点 <code>src/QueryEngine.ts:132</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:187</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:213</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:242</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:248</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:292</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:320</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:339</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:401</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/QueryEngine.ts:414</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/utils/providerProfile.ts:49</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/utils/providerProfile.ts:58</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/utils/providerProfile.ts:124</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/utils/providerProfile.ts:209</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/utils/providerProfile.ts:215</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/commands/install.tsx:91</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/commands/install.tsx:107</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/commands/install.tsx:131</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/commands/install.tsx:149</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/commands/install.tsx:177</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:5</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:44</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:64</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:81</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:101</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/workSecret.ts:136</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:13</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:34</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p>
+<p>Query 子页面 的证据点 <code>src/bridge/sessionRunner.test.ts:78</code> 不是孤立行号：这一处把状态、权限或传输边界固定在源码里，和相邻模块形成可测试契约；阅读时应把它当成调用链的一段，而不是 README 里的营销描述。</p></section><div class="foot"><span>Generated · 2026-07-29</span><span>Source · <a href="https://github.com/0xwilliamortiz/openclaude-improved">0xwilliamortiz/openclaude-improved</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#9adfff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>
