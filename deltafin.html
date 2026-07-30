@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>deltafin · Kimi K3 本地 MoE 推理 · 源码观测台</title>
+<meta name="description" content="gavamedia/deltafin 源码级深度解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START - copied from github-trending-monitor */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #8fd6ff;
+  --star-soft: #c7ecff;
+  --star-deep: #3a91c7;
+}
+.flow pre { white-space: pre-wrap; }
+.note-list li { margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">delta<b>fin</b></div><select id="msel" aria-label="跳转章节"></select></div>
+
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">delta<b>fin</b></div><div class="sub">源码级架构解析</div></div>
+    <span class="nav-ver">Python · Metal/CUDA/MPS</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#arch"><span class="idx">01</span>分层架构</a></li>
+<li><a href="#runtime"><span class="idx">02</span>运行时</a></li>
+<li><a href="#experts"><span class="idx">03</span>专家缓存</a></li>
+<li><a href="#api"><span class="idx">04</span>OpenAI API</a></li>
+<li><a href="#validation"><span class="idx">05</span>验证</a></li>
+<li><a href="#risks"><span class="idx">06</span>风险</a></li></ul></nav>
+    <div class="nav-foot">
+      <div>Stars ★341 · 2026-07-28</div>
+      <div><a href="https://github.com/gavamedia/deltafin" target="_blank">gavamedia/deltafin</a></div>
+      <div><a href="index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">deltafin <em>本地 2.8T MoE 推理实验</em></h1>
+          <p class="hero-desc">Deltafin 尝试在单台 Apple Silicon 或 Linux workstation 上运行 Kimi K3 2.8T MoE：本地 resident spine、按需 expert streaming/cache、Metal/CUDA/CPU backend 和 OpenAI-compatible API 组成一条可验证的本地推理链路。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 341</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">41K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">107</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-07-29</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div><div class="flow"><pre>Kimi K3 prompt
+  -> LazyEmbed rows
+  -> 92 decoder layers
+  -> resident spine read/apply
+  -> routed MXFP4 experts
+  -> greedy/spec decode
+  -> CLI or OpenAI-compatible API</pre></div></div>
+      </div>
+    </div>
+
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>Deltafin 值得拆，是因为它没有把“Kimi K3 本地运行”简化成一个包装脚本。项目在 README 里声明的核心事实是本地 workstation、2.8T MoE、自动选择 MPS/CUDA/CPU，以及 M1 Max 上 0.0687 token/s 的参考速度；源码侧真正承接这些承诺的是 <code>sources/deltafin/tools/kimi_run.py:39</code>、<code>sources/deltafin/tools/kimi_run.py:45</code>、<code>sources/deltafin/tools/kimi_run.py:72</code>、<code>sources/deltafin/tools/kimi_run.py:121</code>，它们把配置、专家 top-k、设备解析和主设备落到可执行状态。</p>
+      <p>更重要的是，它把超大 MoE 的瓶颈拆成三个可治理平面：resident spine 每 token 循环读，routed experts 按需拉取/缓存，最后通过 fast MoE backend 执行。<code>sources/deltafin/tools/kimi_run.py:1557</code>、<code>sources/deltafin/tools/kimi_run.py:1578</code>、<code>sources/deltafin/tools/kimi_run.py:1119</code>、<code>sources/deltafin/tools/kimi_run.py:1161</code> 对应这三段实际路径，说明页面看到的性能叙述不是营销语，而是源码里可追踪的分支。</p>
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card"><div class="card-h">架构模式</div><div class="card-d">lazy layer streaming + routed expert cache + optional native backend</div></div>
+        <div class="card"><div class="card-h">核心抽象</div><div class="card-d"><code>sources/deltafin/tools/kimi_run.py:1332</code>、<code>sources/deltafin/tools/k3loader.py:144</code>、<code>sources/deltafin/tools/fetch_v2.py:260</code> 共同构成“层模板、专家读取、缓存写入”的执行面。</div></div>
+        <div class="card"><div class="card-h">性能数据</div><div class="card-d">README 给出的 reference 是 64GB M1 Max 上 0.0687 tok/s，full 模式约 14.6 秒/token，stream 模式可能超过 3 分钟/token。</div></div>
+        <div class="card"><div class="card-h">下游入口</div><div class="card-d">CLI 与 OpenAI API 共用 <code>sources/deltafin/tools/kimi_run.py:1885</code> 的生成函数，避免两套解码逻辑漂移。</div></div>
+      </div>
+    </section>
+
+    <section class="sec" id="arch">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">分层架构：<em>模型太大时</em>先管 I/O</h2>
+      <p>主流程不是一次加载整模，而是只让当前层和当前 token 需要的 expert 进入工作集。<code>sources/deltafin/tools/kimi_run.py:1332</code>、<code>sources/deltafin/tools/kimi_run.py:1341</code>、<code>sources/deltafin/tools/kimi_run.py:1386</code>、<code>sources/deltafin/tools/kimi_run.py:1640</code> 展示了层模板和逐层 forward 的配合：列表里可以重复引用模板对象，但每次通过 layer_idx 绑定真实层号。</p>
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><pre>CLI / API request
+  -> tokenizer + LazyEmbed
+  -> forward_pass over 92 layers
+     -> _spine_read / _spine_apply for resident tensors
+     -> moe_infer_lazy for routed experts
+        -> fetch_v2 / k3loader cache path
+        -> fast_moe / metal_moe / cuda_moe
+  -> lm_head + greedy/spec decode
+  -> stream tokens or JSON response</pre></div>
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>模块分工非常清楚：<code>sources/deltafin/tools/kimi_run.py:996</code>、<code>sources/deltafin/tools/kimi_run.py:997</code>、<code>sources/deltafin/tools/kimi_run.py:1000</code>、<code>sources/deltafin/tools/kimi_run.py:1008</code> 将 fetch_v2 插入 k3loader；<code>sources/deltafin/tools/kimi_run.py:976</code>、<code>sources/deltafin/tools/kimi_run.py:988</code>、<code>sources/deltafin/tools/kimi_run.py:996</code> 再选择 MoE backend；API 层只通过 <code>sources/deltafin/tools/serve_openai.py:77</code>、<code>sources/deltafin/tools/serve_openai.py:91</code> 调用生成函数。</p>
+      <div class="g3"><div class="card"><div class="card-h">resident spine</div><div class="card-d">非专家权重走本地 resident spine，并在 <code>sources/deltafin/tools/kimi_run.py:1557</code>、<code>sources/deltafin/tools/kimi_run.py:1578</code> 中按 fast pack、mixed 或旧路径分派。</div></div>
+<div class="card"><div class="card-h">expert cache</div><div class="card-d">专家权重按路由选择才读取，<code>sources/deltafin/tools/k3loader.py:118</code>、<code>sources/deltafin/tools/fetch_v2.py:56</code> 把每个 expert 的 packed/scale 布局固定下来。</div></div>
+<div class="card"><div class="card-h">MoE backend</div><div class="card-d"><code>sources/deltafin/tools/kimi_run.py:902</code>、<code>sources/deltafin/tools/kimi_run.py:976</code> 把 CPU、Metal、CUDA 都放进同一个失败可回退的选择面。</div></div></div>
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <p>这段代码是项目的“运行时开关面”：<code>sources/deltafin/tools/kimi_run.py:121</code>、<code>sources/deltafin/tools/kimi_run.py:122</code>、<code>sources/deltafin/tools/kimi_run.py:135</code>、<code>sources/deltafin/tools/kimi_run.py:150</code> 把 device、spine 格式、mixed spine 与 approximate mode 都变成环境变量可控，而不是散落在调用点。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/kimi_run.py:121-153</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">121</span>DEV = _resolve_device()                                      # cpu | mps | cuda[:N]
+<span class="ln">122</span>SPINE = os.environ.get(&quot;K3_SPINE&quot;) or _auto_spine()           # bf16 | int8 | mixed
+<span class="ln">123</span>if SPINE == &quot;bf16&quot; and &quot;K3_SPINE&quot; not in os.environ:
+<span class="ln">124</span>    print(&quot;[config] int8 spine not found — using bf16 (2x the per-token I/O). &quot;
+<span class="ln">125</span>          &quot;Build it with: python tools/convert_spine_int8.py&quot;, flush=True)
+<span class="ln">126</span>
+<span class="ln">127</span># --- mixed-precision spine (K3_SPINE=mixed; DEFAULT IS UNCHANGED) ------------
+<span class="ln">128</span># The 53 GB int8 spine is re-read every token, so bytes are seconds. A mixed
+<span class="ln">129</span># spine keeps int8 where the error lands on token identity and drops selected
+<span class="ln">130</span># ROLES to 6 or 4 bits; tools/mixed_spine.py reads the mix (falling back to the
+<span class="ln">131</span># int8 spine for every tensor the policy left alone) and dequantizes each codec
+<span class="ln">132</span># with its own Metal kernel. Build one with:
+<span class="ln">133</span>#     python tools/convert_spine_int4.py --policy moe4
+<span class="ln">134</span># Per-role error measurements that justify a policy: tools/spine_sensitivity.py.
+<span class="ln">135</span>MIXED = SPINE == &quot;mixed&quot;
+<span class="ln">136</span>QUANT = SPINE in (&quot;int8&quot;, &quot;mixed&quot;)      # &quot;a quantized spine of some kind&quot;
+<span class="ln">137</span>if MIXED:
+<span class="ln">138</span>    import mixed_spine  # noqa: E402
+<span class="ln">139</span>    if not mixed_spine.available():
+<span class="ln">140</span>        sys.exit(f&quot;K3_SPINE=mixed but no mixed spine at {mixed_spine.MIXED_DIR}. &quot;
+<span class="ln">141</span>                 f&quot;Build one with: python tools/convert_spine_int4.py --policy moe4&quot;)
+<span class="ln">142</span>    print(f&quot;[spine] mixed: {mixed_spine.describe()}&quot;, flush=True)
+<span class="ln">143</span>    if os.environ.get(&quot;K3_PROFILE&quot;, &quot;0&quot;) == &quot;1&quot;:
+<span class="ln">144</span>        import atexit
+<span class="ln">145</span>        atexit.register(lambda: print(mixed_spine.phase_report(), flush=True))
+<span class="ln">146</span># K3_APPROX=1 = &quot;approx mode&quot;: approximate numerics (fp16 weights) + n-gram
+<span class="ln">147</span># speculation. Output stays coherent but near-tie tokens may differ from the
+<span class="ln">148</span># fp32 reference — never use for oracle runs. Speed effect is unproven until a
+<span class="ln">149</span># quiet-machine A/B; if it measures faster it can earn a faster name.
+<span class="ln">150</span>APPROX = os.environ.get(&quot;K3_APPROX&quot;, &quot;0&quot;) == &quot;1&quot;
+<span class="ln">151</span>DT = torch.float16 if (APPROX or os.environ.get(&quot;K3_DTYPE&quot;, &quot;fp32&quot;) == &quot;fp16&quot;) else torch.float32
+<span class="ln">152</span>
+<span class="ln">153</span></pre>
+      </div>
+      <a class="deep-link" href="deltafin/deltafin-runtime.html">深度阅读 · 运行时层模板与生成循环</a>
+    </section>
+
+    <section class="sec" id="runtime">
+      <div class="sec-no">§ <b>02</b> · RUNTIME</div>
+      <h2 class="sec-title">运行时：<em>模板复用</em>和顺序层扫描</h2>
+      <h3><span class="arr">▸</span>层模板不是缓存魔法</h3>
+      <p>Deltafin 的模板复用不是把 92 层都常驻，而是用三个 shape class 覆盖 dense、KDA+MoE、MLA+MoE。<code>sources/deltafin/tools/kimi_run.py:1341</code>、<code>sources/deltafin/tools/kimi_run.py:1342</code>、<code>sources/deltafin/tools/kimi_run.py:1343</code>、<code>sources/deltafin/tools/kimi_run.py:1387</code> 说明这个设计牺牲并行常驻，换来内存占用下降。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/kimi_run.py:1332-1390</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">1332</span>def build_layers():
+<span class="ln">1333</span>    global _INT8_KDA_QKV_CONTROLLERS
+<span class="ln">1334</span>    layers = []
+<span class="ln">1335</span>    if not TEMPLATES:
+<span class="ln">1336</span>        with torch.device(&quot;meta&quot;):
+<span class="ln">1337</span>            for i in range(NL):
+<span class="ln">1338</span>                layers.append(ml.KimiDecoderLayer(config, i).eval())
+<span class="ln">1339</span>        return layers
+<span class="ln">1340</span>    with torch.device(&quot;meta&quot;):
+<span class="ln">1341</span>        l0 = ml.KimiDecoderLayer(config, 0).eval()        # dense KDA (unique shape)
+<span class="ln">1342</span>        tpl_kda = ml.KimiDecoderLayer(config, 1).eval()   # KDA + MoE class
+<span class="ln">1343</span>        tpl_mla = ml.KimiDecoderLayer(config, 3).eval()   # MLA + MoE class
+<span class="ln">1344</span>    if INT8_KDA_QKV and _INT8_KDA_QKV_STATE.enabled:
+<span class="ln">1345</span>        installed = []
+<span class="ln">1346</span>        try:
+<span class="ln">1347</span>            # The reusable KDA template executes 68 layers per pass. Layer 0
+<span class="ln">1348</span>            # executes once and stays on the dense fallback: giving it another
+<span class="ln">1349</span>            # 337.7 MiB packed arena is a poor memory/I/O trade, while attempting
+<span class="ln">1350</span>            # to register one MPS arena on both modules caused the original
+<span class="ln">1351</span>            # full-model candidate to disable itself before its first call.
+<span class="ln">1352</span>            # A future backend with an explicitly supported shared-storage
+<span class="ln">1353</span>            # contract can reconsider layer 0 independently.
+<span class="ln">1354</span>            if tpl_kda.is_linear_attn:
+<span class="ln">1355</span>                installed.append(
+<span class="ln">1356</span>                    spine_fast.install_dynamic_q8_qkv(
+<span class="ln">1357</span>                        tpl_kda,
+<span class="ln">1358</span>                        DEV,
+<span class="ln">1359</span>                        _INT8_KDA_QKV_STATE,
+<span class="ln">1360</span>                        _PACKED_Q8_BACKEND,
+<span class="ln">1361</span>                        storage_mode=_INT8_KDA_STORAGE_MODE,
+<span class="ln">1362</span>                        stage_sync_mode=_INT8_KDA_STAGE_SYNC_MODE,
+<span class="ln">1363</span>                    )
+<span class="ln">1364</span>                )
+<span class="ln">1365</span>        except (RuntimeError, ValueError, MemoryError) as exc:
+<span class="ln">1366</span>            for controller in reversed(installed):
+<span class="ln">1367</span>                controller.uninstall()
+<span class="ln">1368</span>            _INT8_KDA_QKV_STATE.disable(exc)
+<span class="ln">1369</span>        else:
+<span class="ln">1370</span>            _INT8_KDA_QKV_CONTROLLERS = installed
+<span class="ln">1371</span>            packed_bytes = sum(
+<span class="ln">1372</span>                controller.nbytes for controller in installed
+<span class="ln">1373</span>            )
+<span class="ln">1374</span>            print(
+<span class="ln">1375</span>                f&quot;[kda-bundle] native packed-int8 active for &quot;
+<span class="ln">1376</span>                f&quot;{len(installed)} KDA template(s), &quot;
+<span class="ln">1377</span>                f&quot;{packed_bytes/2**20:.1f} MiB persistent storage, &quot;
+<span class="ln">1378</span>                f&quot;device={DEV.type}, max_T={_PACKED_Q8_BACKEND.max_tokens}, &quot;
+<span class="ln">1379</span>                f&quot;fused_bundle={int(_PACKED_Q8_BACKEND.fuse_qkv)}, &quot;
+<span class="ln">1380</span>                f&quot;storage={_INT8_KDA_STORAGE_MODE}, &quot;
+<span class="ln">1381</span>                f&quot;stage_sync={_INT8_KDA_STAGE_SYNC_MODE}&quot;,
+<span class="ln">1382</span>                flush=True,
+<span class="ln">1383</span>            )
+<span class="ln">1384</span>    if TEMPLATE_ARENA:
+<span class="ln">1385</span>        _bind_template_arena(((0, l0), (1, tpl_kda), (3, tpl_mla)))
+<span class="ln">1386</span>    for i in range(NL):
+<span class="ln">1387</span>        layers.append(l0 if i == 0 else
+<span class="ln">1388</span>                      tpl_kda if config.is_kda_layer(i) else tpl_mla)
+<span class="ln">1389</span>    return layers
+<span class="ln">1390</span></pre>
+      </div>
+      <h3><span class="arr">▸</span>forward_pass 才是主调度器</h3>
+      <p>真正的执行循环在 <code>sources/deltafin/tools/kimi_run.py:1605</code>、<code>sources/deltafin/tools/kimi_run.py:1638</code>、<code>sources/deltafin/tools/kimi_run.py:1647</code>、<code>sources/deltafin/tools/kimi_run.py:1669</code>：先提交下一层读请求，再等待当前层的 blobs，然后 apply 到模板上执行层计算。这里把 I/O 和 compute 尽量重叠，但仍保留可读的顺序控制流。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/kimi_run.py:1605-1686</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">1605</span>def forward_pass(layers, cache, hidden, step, verbose=True):
+<span class="ln">1606</span>    &quot;&quot;&quot;hidden: [1, T, H] fp32. Returns logits [1, T, vocab].&quot;&quot;&quot;
+<span class="ln">1607</span>    T = hidden.shape[1]
+<span class="ln">1608</span>    if pilot.PILOT:
+<span class="ln">1609</span>        pilot.init(config, DEV, _pilot_load, PFX,
+<span class="ln">1610</span>                   load_packed=_load_int8_packed if QUANT else None,
+<span class="ln">1611</span>                   native_int8=(
+<span class="ln">1612</span>                       _PACKED_Q8_BACKEND.matmul
+<span class="ln">1613</span>                       if (
+<span class="ln">1614</span>                           _PACKED_Q8_BACKEND.available
+<span class="ln">1615</span>                           and DEV.type == &quot;mps&quot;
+<span class="ln">1616</span>                       )
+<span class="ln">1617</span>                       else False
+<span class="ln">1618</span>                   ))
+<span class="ln">1619</span>        pilot.begin_pass(fetch_v2)
+<span class="ln">1620</span>        if PREAD:
+<span class="ln">1621</span>            fetch_v2.drop_prefetch()    # nothing from the previous pass is valid
+<span class="ln">1622</span>            if pilot.ASYNC_DRAIN:
+<span class="ln">1623</span>                pilot.install_async_drain(fetch_v2.reader())
+<span class="ln">1624</span>    elif EXPERT_PREFETCH:
+<span class="ln">1625</span>        global _PREV_SEL
+<span class="ln">1626</span>        _PREV_SEL = dict(_LAST_SEL)     # last token&#x27;s routing = this pass&#x27;s oracle
+<span class="ln">1627</span>        fetch_v2.drop_prefetch()        # nothing from the previous pass is valid
+<span class="ln">1628</span>    past = cache.get_seq_length() or 0
+<span class="ln">1629</span>    mask = causal_mask(T, past) if T &gt; 1 else None
+<span class="ln">1630</span>    block_residual = hidden.new_zeros(T, 0, H)
+<span class="ln">1631</span>
+<span class="ln">1632</span>    def _next_unpinned(j):
+<span class="ln">1633</span>        while j &lt; NL and j &lt; PIN_N and getattr(layers[j], &quot;_k3_res&quot;, False):
+<span class="ln">1634</span>            j += 1
+<span class="ln">1635</span>        return j
+<span class="ln">1636</span>
+<span class="ln">1637</span>    nxt = _next_unpinned(0)
+<span class="ln">1638</span>    fut = (_PRELOADER.submit(_spine_read, layers[nxt], f&quot;{PFX}layers.{nxt}.&quot;)
+<span class="ln">1639</span>           if PRELOAD and nxt &lt; NL else None)
+<span class="ln">1640</span>    for i, layer in enumerate(layers):
+<span class="ln">1641</span>        _step_ctx[&quot;layer&quot;] = i
+<span class="ln">1642</span>        if TEMPLATES:
+<span class="ln">1643</span>            layer.layer_idx = i
+<span class="ln">1644</span>            layer.self_attn.layer_idx = i
+<span class="ln">1645</span>        pinned = i &lt; PIN_N and getattr(layer, &quot;_k3_res&quot;, False)
+<span class="ln">1646</span>        if not pinned:
+<span class="ln">1647</span>            if PRELOAD and fut is not None and i == nxt:
+<span class="ln">1648</span>                _tw = time.time()
+<span class="ln">1649</span>                blobs = fut.result()
+<span class="ln">1650</span>                TIMES[&quot;preload_wait&quot;] += time.time() - _tw
+<span class="ln">1651</span>                j = _next_unpinned(i + 1)
+<span class="ln">1652</span>                fut = (_PRELOADER.submit(_spine_read, layers[j], f&quot;{PFX}layers.{j}.&quot;)
+<span class="ln">1653</span>                       if j &lt; NL else None)
+<span class="ln">1654</span>                nxt = j
+<span class="ln">1655</span>                _spine_apply(layer, f&quot;{PFX}layers.{i}.&quot;, blobs)
+<span class="ln">1656</span>            else:
+<span class="ln">1657</span>                if TEMPLATES or spine_fast.PACK:
+<span class="ln">1658</span>                    pfx = f&quot;{PFX}layers.{i}.&quot;
+<span class="ln">1659</span>                    _spine_apply(layer, pfx, _spine_read(layer, pfx))
+<span class="ln">1660</span>                else:
+<span class="ln">1661</span>                    materialize_resident(layer, f&quot;{PFX}layers.{i}.&quot;)
+<span class="ln">1662</span>            if i &lt; PIN_N:
+<span class="ln">1663</span>                layer._k3_res = True   # pinned from now on
+<span class="ln">1664</span>        if pilot.enabled():
+<span class="ln">1665</span>            pilot.arm(layer)
+<span class="ln">1666</span>        if PROFILE and DEV.type in (&quot;mps&quot;, &quot;cuda&quot;):
+<span class="ln">1667</span>            _device_synchronize()
+<span class="ln">1668</span>        t0 = time.time()
+<span class="ln">1669</span>        hidden, block_residual = layer(
+<span class="ln">1670</span>            hidden, attention_mask=mask, position_ids=None,
+<span class="ln">1671</span>            past_key_values=cache, use_cache=True, block_residual=block_residual)
+<span class="ln">1672</span>        if PROFILE and DEV.type in (&quot;mps&quot;, &quot;cuda&quot;):
+<span class="ln">1673</span>            _device_synchronize()
+<span class="ln">1674</span>        dt_layer = time.time() - t0
+<span class="ln">1675</span>        TIMES[&quot;compute&quot;] += dt_layer
+<span class="ln">1676</span>        if PROFILE:
+<span class="ln">1677</span>            k = &quot;kda&quot; if layer.is_linear_attn else &quot;mla&quot;
+<span class="ln">1678</span>            PROF[k] += dt_layer
+<span class="ln">1679</span>            PROF[&quot;n_&quot; + k] += 1
+<span class="ln">1680</span>        if not TEMPLATES and not (i &lt; PIN_N):
+<span class="ln">1681</span>            dematerialize(layer)
+<span class="ln">1682</span>        if verbose and (i % 10 == 0 or i == NL - 1):
+<span class="ln">1683</span>            print(f&quot;    layer {i:2d}/92 done  (res_io {TIMES[&#x27;resident_io&#x27;]:.0f}s &quot;
+<span class="ln">1684</span>                  f&quot;exp {TIMES[&#x27;expert_fetch&#x27;]:.0f}s comp {TIMES[&#x27;compute&#x27;]:.0f}s)&quot;,
+<span class="ln">1685</span>                  flush=True)
+<span class="ln">1686</span>    TRACE.end_pass()</pre>
+      </div>
+      <a class="deep-link" href="deltafin/deltafin-expert-cache.html">深度阅读 · expert cache 和 fetch_v2</a>
+    </section>
+
+    <section class="sec" id="experts">
+      <div class="sec-no">§ <b>03</b> · EXPERT CACHE</div>
+      <h2 class="sec-title">专家缓存：<em>按需读取</em>但不能阻塞前台</h2>
+      <p>MoE 的成本来自每层每 token 选择的 experts。<code>sources/deltafin/tools/kimi_run.py:1119</code>、<code>sources/deltafin/tools/kimi_run.py:1132</code>、<code>sources/deltafin/tools/kimi_run.py:1161</code>、<code>sources/deltafin/tools/kimi_run.py:1169</code> 显示 Deltafin 先把 top-k 路由压成唯一 expert 列表，再从缓存/网络取 raw MXFP4，最后才发下一层可选预取，避免 speculative read 排在 demand read 前面。</p>
+      <h3><span class="arr">▸</span>fetch_v2 固定 expert 布局</h3>
+      <p><code>sources/deltafin/tools/fetch_v2.py:56</code>、<code>sources/deltafin/tools/fetch_v2.py:57</code>、<code>sources/deltafin/tools/fetch_v2.py:59</code>、<code>sources/deltafin/tools/fetch_v2.py:68</code> 是 fetch_v2 的关键：它知道一个 expert 是 17.55MB，六段 packed/scale 连续排布，因此可以把多次 Range 请求合并为一次 span，减少连接和 seek 成本。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/fetch_v2.py:56-85</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">56</span># ---- fixed intra-expert layout (offset, nbytes, shape) --------------------
+<span class="ln">57</span>EXPERT_SPAN = 17547264
+<span class="ln">58</span>_P, _S = 5505024, 344064
+<span class="ln">59</span>LAYOUT = [
+<span class="ln">60</span>    (&quot;w1_p&quot;, 0,            _P, (3072, 1792)),
+<span class="ln">61</span>    (&quot;w1_s&quot;, _P,           _S, (3072, 112)),
+<span class="ln">62</span>    (&quot;w2_p&quot;, _P + _S,      _P, (3584, 1536)),
+<span class="ln">63</span>    (&quot;w2_s&quot;, 2 * _P + _S,  _S, (3584, 96)),
+<span class="ln">64</span>    (&quot;w3_p&quot;, 2 * (_P + _S), _P, (3072, 1792)),
+<span class="ln">65</span>    (&quot;w3_s&quot;, 3 * _P + 2 * _S, _S, (3072, 112)),
+<span class="ln">66</span>]
+<span class="ln">67</span>
+<span class="ln">68</span>USER_AGENT = &quot;k3-lazy-fetch/2.0&quot;
+<span class="ln">69</span>MAX_CONNS = int(os.environ.get(&quot;K3_FETCH_CONNS&quot;, &quot;4&quot;))
+<span class="ln">70</span>BACKEND = os.environ.get(&quot;K3_FETCH_BACKEND&quot;, &quot;httpclient&quot;)  # or &quot;httpx&quot;
+<span class="ln">71</span>MAX_COALESCE = int(os.environ.get(&quot;K3_FETCH_COALESCE&quot;, &quot;4&quot;))  # experts per merged range
+<span class="ln">72</span>
+<span class="ln">73</span># ---- local read path (K3_EXPERT_READ) -------------------------------------
+<span class="ln">74</span># &quot;mmap&quot;  : np.memmap views over the .bin cache; the pages are demand-faulted
+<span class="ln">75</span>#           later, inside the GEMV kernel. Measured 0.87-0.93 GB/s.
+<span class="ln">76</span># &quot;pread&quot; : the whole layer&#x27;s selected experts are pread() in parallel by a
+<span class="ln">77</span>#           persistent worker pool into reused page-aligned buffers, so the
+<span class="ln">78</span>#           kernel only ever touches resident memory. Measured ~7.0 GB/s.
+<span class="ln">79</span>EXPERT_READ = os.environ.get(&quot;K3_EXPERT_READ&quot;, &quot;pread&quot;)
+<span class="ln">80</span># Real F_NOCACHE grid on the 8 TB M1 Max SSD: 8 workers sustained 7.51
+<span class="ln">81</span># logical GB/s versus 6.91/6.69/6.91 for 4/6/12.  Keep the env override: newer
+<span class="ln">82</span># chips and different SSD widths must rerun tools/bench_expert_io_grid.py.
+<span class="ln">83</span>PREAD_WORKERS = runtime_platform.configured_cpu_workers(
+<span class="ln">84</span>    &quot;K3_PREAD_WORKERS&quot;, 8
+<span class="ln">85</span>)</pre>
+      </div>
+      <h3><span class="arr">▸</span>baseline loader 仍保留</h3>
+      <p>保留 k3loader 的意义在于有一条清晰的慢路径：<code>sources/deltafin/tools/k3loader.py:78</code>、<code>sources/deltafin/tools/k3loader.py:101</code>、<code>sources/deltafin/tools/k3loader.py:118</code>、<code>sources/deltafin/tools/k3loader.py:144</code> 先按 inventory range 读 resident 或 expert，再按 dequant 参数返回，便于 fast path 出问题时回退。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/k3loader.py:118-158</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">118</span>def fetch_expert_raw(layer, eid):
+<span class="ln">119</span>    &quot;&quot;&quot;Return dict wname -&gt; (packed U8 np, scale U8 np). Disk-cached as raw packed bytes (~17.5MB).&quot;&quot;&quot;
+<span class="ln">120</span>    path = os.path.join(ECACHE, f&quot;L{layer}-E{eid}.npz&quot;)
+<span class="ln">121</span>    if os.path.exists(path):
+<span class="ln">122</span>        with _stats_lock:
+<span class="ln">123</span>            stats[&quot;expert_disk&quot;] += 1
+<span class="ln">124</span>        z = np.load(path)
+<span class="ln">125</span>        return {w: (z[w + &quot;_p&quot;], z[w + &quot;_s&quot;]) for w in (&quot;w1&quot;, &quot;w2&quot;, &quot;w3&quot;)}
+<span class="ln">126</span>    pfx = _expert_prefix(layer, eid)
+<span class="ln">127</span>    out = {}
+<span class="ln">128</span>    for w in (&quot;w1&quot;, &quot;w2&quot;, &quot;w3&quot;):
+<span class="ln">129</span>        tp = INV[pfx + f&quot;.{w}.weight_packed&quot;]
+<span class="ln">130</span>        ts = INV[pfx + f&quot;.{w}.weight_scale&quot;]
+<span class="ln">131</span>        p = np.frombuffer(_range_fetch(pfx + f&quot;.{w}.weight_packed&quot;), dtype=np.uint8).reshape(tp[&quot;shape&quot;])
+<span class="ln">132</span>        s = np.frombuffer(_range_fetch(pfx + f&quot;.{w}.weight_scale&quot;), dtype=np.uint8).reshape(ts[&quot;shape&quot;])
+<span class="ln">133</span>        out[w] = (p, s)
+<span class="ln">134</span>    tmp = path + f&quot;.tmp{os.getpid()}&quot;
+<span class="ln">135</span>    np.savez(tmp, **{w + suf: arr for w, (p, s) in out.items()
+<span class="ln">136</span>                     for suf, arr in ((&quot;_p&quot;, p), (&quot;_s&quot;, s))})
+<span class="ln">137</span>    os.replace(tmp + &quot;.npz&quot; if os.path.exists(tmp + &quot;.npz&quot;) else tmp, path)
+<span class="ln">138</span>    register_cache_file(path)
+<span class="ln">139</span>    with _stats_lock:
+<span class="ln">140</span>        stats[&quot;expert_http&quot;] += 1
+<span class="ln">141</span>    return out
+<span class="ln">142</span>
+<span class="ln">143</span>
+<span class="ln">144</span>def fetch_experts(layer, eids, workers=12, dequant=True):
+<span class="ln">145</span>    &quot;&quot;&quot;Parallel fetch of a routed set. dequant=True -&gt; {eid: {w: fp32 torch tensor}};
+<span class="ln">146</span>    dequant=False -&gt; {eid: {w: (packed u8, scale u8) contiguous np arrays}}.&quot;&quot;&quot;
+<span class="ln">147</span>    raw = {}
+<span class="ln">148</span>    with concurrent.futures.ThreadPoolExecutor(workers) as ex:
+<span class="ln">149</span>        futs = {ex.submit(fetch_expert_raw, layer, e): e for e in eids}
+<span class="ln">150</span>        for f in concurrent.futures.as_completed(futs):
+<span class="ln">151</span>            raw[futs[f]] = f.result()
+<span class="ln">152</span>    if not dequant:
+<span class="ln">153</span>        return {e: {w: (np.ascontiguousarray(p), np.ascontiguousarray(s))
+<span class="ln">154</span>                    for w, (p, s) in ws.items()} for e, ws in raw.items()}
+<span class="ln">155</span>    out = {}
+<span class="ln">156</span>    for e, ws in raw.items():
+<span class="ln">157</span>        out[e] = {w: torch.from_numpy(dequant_mxfp4(p, s)) for w, (p, s) in ws.items()}
+<span class="ln">158</span>    return out</pre>
+      </div>
+      <a class="deep-link" href="deltafin/deltafin-api-server.html">深度阅读 · OpenAI-compatible API server</a>
+    </section>
+
+    <section class="sec" id="api">
+      <div class="sec-no">§ <b>04</b> · API SERVER</div>
+      <h2 class="sec-title">API 层：兼容 OpenAI，<em>但承认慢速</em></h2>
+      <p>API 层没有另起一套模型实现。<code>sources/deltafin/tools/serve_openai.py:56</code>、<code>sources/deltafin/tools/serve_openai.py:63</code>、<code>sources/deltafin/tools/serve_openai.py:77</code>、<code>sources/deltafin/tools/serve_openai.py:91</code> 先 boot tokenizer、layers 和 LazyEmbed，再把请求 token 交给同一个 generate。这样 CLI 和 server 的行为边界一致。</p>
+      <h3><span class="arr">▸</span>请求解析和全局锁</h3>
+      <p><code>sources/deltafin/tools/serve_openai.py:128</code>、<code>sources/deltafin/tools/serve_openai.py:138</code>、<code>sources/deltafin/tools/serve_openai.py:151</code>、<code>sources/deltafin/tools/serve_openai.py:162</code> 是最重要的产品契约：支持 chat/completions 与 completions，但一次只跑一个 generation。对这种速度级别的本地 MoE 来说，诚实拒绝并发比假装吞吐更可靠。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/serve_openai.py:128-170</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">128</span>    def do_POST(self):
+<span class="ln">129</span>        try:
+<span class="ln">130</span>            body = json.loads(self.rfile.read(int(self.headers.get(&quot;Content-Length&quot;, 0)) or 0) or b&quot;{}&quot;)
+<span class="ln">131</span>        except json.JSONDecodeError:
+<span class="ln">132</span>            return self._err(400, &quot;invalid JSON body&quot;)
+<span class="ln">133</span>        chat = self.path in (&quot;/v1/chat/completions&quot;, &quot;/chat/completions&quot;)
+<span class="ln">134</span>        comp = self.path in (&quot;/v1/completions&quot;, &quot;/completions&quot;)
+<span class="ln">135</span>        if not (chat or comp):
+<span class="ln">136</span>            return self._err(404, f&quot;no route {self.path}&quot;)
+<span class="ln">137</span>
+<span class="ln">138</span>        if chat:
+<span class="ln">139</span>            messages = body.get(&quot;messages&quot;)
+<span class="ln">140</span>            if not messages:
+<span class="ln">141</span>                return self._err(400, &quot;messages required&quot;)
+<span class="ln">142</span>            ids = _tok.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+<span class="ln">143</span>        else:
+<span class="ln">144</span>            prompt = body.get(&quot;prompt&quot;)
+<span class="ln">145</span>            if not isinstance(prompt, str):
+<span class="ln">146</span>                return self._err(400, &quot;prompt (string) required&quot;)
+<span class="ln">147</span>            ids = _tok.encode(prompt)
+<span class="ln">148</span>        # OpenAI semantics: omitted max_tokens means the model decides. Chat ends
+<span class="ln">149</span>        # naturally at EOS; raw completions have no terminator, so only THEY get
+<span class="ln">150</span>        # a default cap (256) — an explicit max_tokens is always honored.
+<span class="ln">151</span>        req_max = body.get(&quot;max_tokens&quot;)
+<span class="ln">152</span>        if req_max:
+<span class="ln">153</span>            max_new = int(req_max)
+<span class="ln">154</span>        else:
+<span class="ln">155</span>            max_new = 1_000_000 if chat else 256
+<span class="ln">156</span>        if MAX_TOKENS_CAP:
+<span class="ln">157</span>            max_new = min(max_new, MAX_TOKENS_CAP)
+<span class="ln">158</span>        stream = bool(body.get(&quot;stream&quot;))
+<span class="ln">159</span>        rid = (&quot;chatcmpl-&quot; if chat else &quot;cmpl-&quot;) + uuid.uuid4().hex[:20]
+<span class="ln">160</span>        created = int(time.time())
+<span class="ln">161</span>
+<span class="ln">162</span>        if not _lock.acquire(timeout=5):
+<span class="ln">163</span>            return self._err(429, &quot;a generation is already running (Deltafin serves one at a time)&quot;)
+<span class="ln">164</span>        try:
+<span class="ln">165</span>            mode = &quot;chat&quot; if chat else &quot;completion&quot;
+<span class="ln">166</span>            cached = _memo.get(mode, ids, max_new)
+<span class="ln">167</span>            if cached is not None:
+<span class="ln">168</span>                print(f&quot;[serve] deterministic response memo hit &quot;
+<span class="ln">169</span>                      f&quot;({len(cached.token_ids)} tokens)&quot;, flush=True)
+<span class="ln">170</span>            if stream:</pre>
+      </div>
+      <h3><span class="arr">▸</span>流式输出和 deterministic memo</h3>
+      <p>因为解码是 greedy，可复现，<code>sources/deltafin/tools/response_memo.py:23</code>、<code>sources/deltafin/tools/response_memo.py:43</code>、<code>sources/deltafin/tools/response_memo.py:58</code>、<code>sources/deltafin/tools/serve_openai.py:192</code> 用精确 prompt token 序列做 memo。它只缓存完全相同的 mode、prompt ids 和 max_new，不会对相似前缀做危险猜测。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/response_memo.py:23-75</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">23</span>class DeterministicResponseMemo:
+<span class="ln">24</span>    def __init__(self, max_entries: int):
+<span class="ln">25</span>        if max_entries &lt; 0:
+<span class="ln">26</span>            raise ValueError(&quot;max_entries must be non-negative&quot;)
+<span class="ln">27</span>        self.max_entries = max_entries
+<span class="ln">28</span>        self._items: collections.OrderedDict[
+<span class="ln">29</span>            tuple[str, tuple[int, ...], int], MemoizedResponse
+<span class="ln">30</span>        ] = collections.OrderedDict()
+<span class="ln">31</span>        self._lock = threading.Lock()
+<span class="ln">32</span>        self.hits = 0
+<span class="ln">33</span>        self.misses = 0
+<span class="ln">34</span>
+<span class="ln">35</span>    @staticmethod
+<span class="ln">36</span>    def _key(
+<span class="ln">37</span>            mode: str, prompt_ids: Iterable[int], max_new: int,
+<span class="ln">38</span>    ) -&gt; tuple[str, tuple[int, ...], int]:
+<span class="ln">39</span>        if max_new &lt;= 0:
+<span class="ln">40</span>            raise ValueError(&quot;max_new must be positive&quot;)
+<span class="ln">41</span>        return str(mode), tuple(int(value) for value in prompt_ids), int(max_new)
+<span class="ln">42</span>
+<span class="ln">43</span>    def get(
+<span class="ln">44</span>            self, mode: str, prompt_ids: Iterable[int], max_new: int,
+<span class="ln">45</span>    ) -&gt; MemoizedResponse | None:
+<span class="ln">46</span>        if self.max_entries == 0:
+<span class="ln">47</span>            return None
+<span class="ln">48</span>        key = self._key(mode, prompt_ids, max_new)
+<span class="ln">49</span>        with self._lock:
+<span class="ln">50</span>            value = self._items.pop(key, None)
+<span class="ln">51</span>            if value is None:
+<span class="ln">52</span>                self.misses += 1
+<span class="ln">53</span>                return None
+<span class="ln">54</span>            self._items[key] = value
+<span class="ln">55</span>            self.hits += 1
+<span class="ln">56</span>            return value
+<span class="ln">57</span>
+<span class="ln">58</span>    def put(
+<span class="ln">59</span>            self, mode: str, prompt_ids: Iterable[int], max_new: int,
+<span class="ln">60</span>            token_ids: Iterable[int], text: str, finish_reason: str,
+<span class="ln">61</span>    ) -&gt; None:
+<span class="ln">62</span>        if self.max_entries == 0:
+<span class="ln">63</span>            return
+<span class="ln">64</span>        key = self._key(mode, prompt_ids, max_new)
+<span class="ln">65</span>        value = MemoizedResponse(
+<span class="ln">66</span>            tuple(int(token) for token in token_ids),
+<span class="ln">67</span>            str(text),
+<span class="ln">68</span>            str(finish_reason),
+<span class="ln">69</span>        )
+<span class="ln">70</span>        with self._lock:
+<span class="ln">71</span>            self._items.pop(key, None)
+<span class="ln">72</span>            self._items[key] = value
+<span class="ln">73</span>            while len(self._items) &gt; self.max_entries:
+<span class="ln">74</span>                self._items.popitem(last=False)
+<span class="ln">75</span></pre>
+      </div>
+    </section>
+
+    <section class="sec" id="validation">
+      <div class="sec-no">§ <b>05</b> · TESTS & VALIDATION</div>
+      <h2 class="sec-title">验证思路：<em>每个优化</em>都要能关掉</h2>
+      <p>项目的测试目录覆盖 attention portability、cache reorder、mxfp4、packed q8、async cache write、Metal/CUDA MoE 等路径。主代码也明显保留回退阀门：<code>sources/deltafin/tools/kimi_run.py:929</code>、<code>sources/deltafin/tools/kimi_run.py:939</code>、<code>sources/deltafin/tools/kimi_run.py:948</code>、<code>sources/deltafin/tools/kimi_run.py:970</code> 说明 CUDA fast path 一旦资格检查或运行失败，会回到已建立 CPU expert path。</p>
+      <h3><span class="arr">▸</span>生成函数维护 API 上限</h3>
+      <p><code>sources/deltafin/tools/kimi_run.py:1885</code>、<code>sources/deltafin/tools/kimi_run.py:1903</code>、<code>sources/deltafin/tools/kimi_run.py:1920</code>、<code>sources/deltafin/tools/kimi_run.py:1951</code> 的生成循环在 speculative burst 后仍裁剪到 max_new，避免因为一次 verifier 接受多个 token 而突破 API 契约。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/kimi_run.py:1885-1958</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">1885</span>def generate(layers, cache, embed, ids, max_new, spec=None, on_token=None,
+<span class="ln">1886</span>             verbose_prefill=False, log=lambda *a: None):
+<span class="ln">1887</span>    &quot;&quot;&quot;Greedy generation (+ certified-lossless n-gram speculation).
+<span class="ln">1888</span>
+<span class="ln">1889</span>    Shared by the CLI and the OpenAI-compatible server. Calls on_token(token_id)
+<span class="ln">1890</span>    as each token is emitted. Returns at most ``max_new`` tokens and never
+<span class="ln">1891</span>    streams anything after EOS_ID, including inside a speculative burst.&quot;&quot;&quot;
+<span class="ln">1892</span>    if spec is None:
+<span class="ln">1893</span>        spec = os.environ.get(&quot;K3_SPEC&quot;, &quot;1&quot;) == &quot;1&quot;
+<span class="ln">1894</span>    if max_new &lt;= 0:
+<span class="ln">1895</span>        return []
+<span class="ln">1896</span>    generated = []
+<span class="ln">1897</span>
+<span class="ln">1898</span>    def emit(t):
+<span class="ln">1899</span>        generated.append(t)
+<span class="ln">1900</span>        if on_token:
+<span class="ln">1901</span>            on_token(t)
+<span class="ln">1902</span>
+<span class="ln">1903</span>    _step_ctx[&quot;step&quot;] = 0
+<span class="ln">1904</span>    logits = forward_pass(layers, cache, embed(ids), step=0, verbose=verbose_prefill)
+<span class="ln">1905</span>    first = int(logits[0, -1].argmax())
+<span class="ln">1906</span>    emit(first)
+<span class="ln">1907</span>    if first == EOS_ID:
+<span class="ln">1908</span>        return generated
+<span class="ln">1909</span>    for _k in EXPERT_SEL:      # the union factor that matters is the decode one
+<span class="ln">1910</span>        EXPERT_SEL[_k] = 0
+<span class="ln">1911</span>    s = 1
+<span class="ln">1912</span>    deep = spec and spec_decode.enabled()
+<span class="ln">1913</span>    while len(generated) &lt; max_new:
+<span class="ln">1914</span>        _step_ctx[&quot;step&quot;] = s
+<span class="ln">1915</span>        if os.environ.get(&quot;K3_PREFETCH&quot;, &quot;1&quot;) == &quot;1&quot;:
+<span class="ln">1916</span>            prefetch_prev_token()
+<span class="ln">1917</span>        t0 = time.perf_counter_ns()
+<span class="ln">1918</span>        tag = &quot;&quot;
+<span class="ln">1919</span>        if deep:
+<span class="ln">1920</span>            new, tag = _spec_step_deep(layers, cache, embed,
+<span class="ln">1921</span>                                       ids + generated, generated[-1], s)
+<span class="ln">1922</span>            if EOS_ID in new:   # never stream past EOS (a pass emits up to D+1)
+<span class="ln">1923</span>                new = new[:new.index(EOS_ID) + 1]
+<span class="ln">1924</span>        else:
+<span class="ln">1925</span>            draft = ngram_draft(ids + generated) if spec else None
+<span class="ln">1926</span>            if draft is not None:
+<span class="ln">1927</span>                snap = snapshot_states(cache)
+<span class="ln">1928</span>                logits = forward_pass(layers, cache, embed([generated[-1], draft]),
+<span class="ln">1929</span>                                      step=s, verbose=False)
+<span class="ln">1930</span>                # Read both verifier decisions in one device-to-host transfer.
+<span class="ln">1931</span>                # The first position decides accept/rollback; on acceptance the
+<span class="ln">1932</span>                # second ID is already present instead of forcing another sync.
+<span class="ln">1933</span>                verified = logits[0].argmax(-1).tolist()
+<span class="ln">1934</span>                n1 = verified[0]
+<span class="ln">1935</span>                if n1 == draft:
+<span class="ln">1936</span>                    new = verified[:2]
+<span class="ln">1937</span>                    tag = &quot; spec+2&quot;
+<span class="ln">1938</span>                else:
+<span class="ln">1939</span>                    restore_states(cache, snap)
+<span class="ln">1940</span>                    logits = forward_pass(layers, cache, embed([generated[-1]]),
+<span class="ln">1941</span>                                          step=s, verbose=False)
+<span class="ln">1942</span>                    new = [int(logits[0, -1].argmax())]
+<span class="ln">1943</span>                    tag = &quot; spec-miss&quot;
+<span class="ln">1944</span>            else:
+<span class="ln">1945</span>                logits = forward_pass(layers, cache, embed([generated[-1]]),
+<span class="ln">1946</span>                                      step=s, verbose=False)
+<span class="ln">1947</span>                new = [int(logits[0, -1].argmax())]
+<span class="ln">1948</span>        # A verifier can accept several tokens in one pass. Bound the burst
+<span class="ln">1949</span>        # before invoking callbacks or structured logging so max_new remains a
+<span class="ln">1950</span>        # real API contract and throughput cannot be inflated by over-emission.
+<span class="ln">1951</span>        new = new[:max_new - len(generated)]
+<span class="ln">1952</span>        for t in new:
+<span class="ln">1953</span>            emit(t)
+<span class="ln">1954</span>        log(s, tag, t0, list(generated))
+<span class="ln">1955</span>        s += 1
+<span class="ln">1956</span>        if EOS_ID in new:
+<span class="ln">1957</span>            break
+<span class="ln">1958</span>    return generated</pre>
+      </div>
+      <h3><span class="arr">▸</span>内存缓存的反例写在代码里</h3>
+      <p>spine_cache 的文档块很罕见地记录了错误尝试：<code>sources/deltafin/tools/spine_cache.py:5</code>、<code>sources/deltafin/tools/spine_cache.py:14</code>、<code>sources/deltafin/tools/spine_cache.py:20</code>、<code>sources/deltafin/tools/spine_cache.py:40</code> 指出 free+inactive 会误判可用内存，正确做法是按内核压力增长/收缩。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/deltafin/tools/spine_cache.py:1-58</span></span><span>Python</span></div>
+        <pre class="code"><span class="ln">1</span>&quot;&quot;&quot;Self-tuning, pressure-aware RAM cache for the int8 spine.
+<span class="ln">2</span>
+<span class="ln">3</span>WHY THE OLD ONE WAS OFF BY DEFAULT
+<span class="ln">4</span>----------------------------------
+<span class="ln">5</span>kimi_run.py&#x27;s first attempt sized a spine RAM cache from &quot;free + inactive&quot; and
+<span class="ln">6</span>took 29.7 GB on this 64 GB box.  A decode token went from 14 s to 122 s: the
+<span class="ln">7</span>inactive pages it counted as spare were the page cache that was already serving
+<span class="ln">8</span>the spine and the expert blobs, so claiming them as anonymous heap did not add
+<span class="ln">9</span>capacity, it MOVED capacity from a class the kernel can drop for free (clean
+<span class="ln">10</span>file pages) into a class it can only reclaim by compressing or swapping.  It
+<span class="ln">11</span>then compressed, and every token paid for it.  Two things follow, and this
+<span class="ln">12</span>module implements both:
+<span class="ln">13</span>
+<span class="ln">14</span>  1. THE HEADROOM SIGNAL MUST BE `free`, NOT `free + inactive`.  `free` is the
+<span class="ln">15</span>     only class that can be taken without displacing something that is already
+<span class="ln">16</span>     doing useful work.  We additionally hold a reserve (K3_SPINE_CACHE_FLOOR_GB,
+<span class="ln">17</span>     default 8 GB) below which we stop growing, because the page cache still has
+<span class="ln">18</span>     to hold the expert payloads.
+<span class="ln">19</span>
+<span class="ln">20</span>  2. GROWTH MUST BE WATCHED, NOT PREDICTED.  No static budget can know what else
+<span class="ln">21</span>     the machine will do while we run. Every admission re-reads the kernel&#x27;s own
+<span class="ln">22</span>     accounting (Mach host_statistics64 on macOS; /proc on Linux); if the
+<span class="ln">23</span>     compressor or swapper starts moving, we stop growing and give memory back
+<span class="ln">24</span>     layer by layer. That is the difference between the 8x cliff and a cache
+<span class="ln">25</span>     that just quietly becomes smaller.
+<span class="ln">26</span>
+<span class="ln">27</span>WHAT THE CACHE IS WORTH, MEASURED ON THIS MACHINE
+<span class="ln">28</span>-------------------------------------------------
+<span class="ln">29</span>Reading a layer&#x27;s blobs cold off the NVMe:            ~7.0 GB/s
+<span class="ln">30</span>Reading the same blobs back out of the page cache:   ~27-38 GB/s
+<span class="ln">31</span>So an in-RAM layer is ~5x cheaper, and the 53 GB spine&#x27;s ~7.5 s/token of read
+<span class="ln">32</span>collapses toward ~1.5 s for whatever fraction is resident.  The fraction is what
+<span class="ln">33</span>matters: access is a strict 0..91 cycle, so under LRU a working set larger than
+<span class="ln">34</span>RAM gets a ~0% hit rate (each layer is evicted just before it is needed again).
+<span class="ln">35</span>Caching a FIXED SUBSET instead converts that into a hit rate equal to the
+<span class="ln">36</span>fraction that fits, which is why a partial cache is still worth having -- but
+<span class="ln">37</span>only if the layers outside the subset can be prevented from evicting it, which
+<span class="ln">38</span>is what K3_SPINE_STREAM_NOCACHE (see spine_io) is for.
+<span class="ln">39</span>
+<span class="ln">40</span>FLAGS (defaults reproduce today&#x27;s behaviour exactly: no cache at all)
+<span class="ln">41</span>    K3_SPINE_CACHE_GB=&lt;n&gt;       hard ceiling on the cache, 0 = disabled
+<span class="ln">42</span>    K3_SPINE_CACHE_AUTO=1       grow toward the ceiling only while the kernel
+<span class="ln">43</span>                                says there is room; without _GB, cap growth by
+<span class="ln">44</span>                                queried physical/recommended working-set limits
+<span class="ln">45</span>    K3_SPINE_CACHE_FLOOR_GB=&lt;n&gt; stop growing with less than this much `free`
+<span class="ln">46</span>                                (default 8)
+<span class="ln">47</span>    K3_SPINE_CACHE_TOL_GB=&lt;n&gt;   how much new compressor traffic to tolerate
+<span class="ln">48</span>                                before shrinking (default 0.5)
+<span class="ln">49</span>    K3_SPINE_CACHE_SHRINK=&lt;n&gt;   layers to drop per shrink event (default 4)
+<span class="ln">50</span>
+<span class="ln">51</span>ON A 128 GB MAC set K3_SPINE_CACHE_AUTO=1 and leave the ceiling alone (or
+<span class="ln">52</span>K3_SPINE_CACHE_GB=44 K3_SPINE_CACHE_AUTO=1 to be explicit): 53 GB of spine plus
+<span class="ln">53</span>~12 GB of hot expert page cache plus the model&#x27;s own working set fits with room
+<span class="ln">54</span>to spare, and the watchdog will still claw it back if something else on the box
+<span class="ln">55</span>wants memory.  On 64 GB, K3_SPINE_CACHE_GB=6 K3_SPINE_CACHE_AUTO=1 is the
+<span class="ln">56</span>conservative setting -- it caches the first ~10 layers and cannot reach the
+<span class="ln">57</span>pressure point.
+<span class="ln">58</span>&quot;&quot;&quot;</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="risks">
+      <div class="sec-no">§ <b>06</b> · RISKS & GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>Deltafin 的价值是把“不可能一次装下”的模型跑起来，但它仍然是研究工程。<code>sources/deltafin/tools/kimi_run.py:1965</code>、<code>sources/deltafin/tools/kimi_run.py:1976</code>、<code>sources/deltafin/tools/kimi_run.py:1981</code>、<code>sources/deltafin/tools/kimi_run.py:1996</code> 的启动提示已经说明，expert pool 不完整时，首个冷 prompt 会被网络和磁盘成本支配。</p>
+      <div class="g2"><div class="card"><div class="card-h">不是玩具 demo</div><div class="card-d">README 明确列出 2.8T MoE、本地 workstation、MPS/CUDA/CPU 选择和 0.0687 tok/s 参考值；源码里对应到 <code>sources/deltafin/tools/kimi_run.py:121</code>、<code>sources/deltafin/tools/kimi_run.py:1332</code> 的真实运行路径。</div></div>
+<div class="card"><div class="card-h">缓存策略很工程化</div><div class="card-d"><code>sources/deltafin/tools/spine_cache.py:14</code>、<code>sources/deltafin/tools/spine_cache.py:20</code>、<code>sources/deltafin/tools/spine_cache.py:234</code> 说明作者不是盲目把内存塞满，而是用内核压力信号决定增长和缩容。</div></div>
+<div class="card"><div class="card-h">API 层诚实暴露限制</div><div class="card-d"><code>sources/deltafin/tools/serve_openai.py:15</code>、<code>sources/deltafin/tools/serve_openai.py:162</code> 把“全局单请求锁”写进实现，避免对外呈现不真实的并发能力。</div></div>
+<div class="card"><div class="card-h">优化有 kill switch</div><div class="card-d"><code>sources/deltafin/tools/kimi_run.py:929</code>、<code>sources/deltafin/tools/kimi_run.py:948</code>、<code>sources/deltafin/tools/kimi_run.py:974</code> 对 CUDA/Metal fast path 采用资格检查和失败回落，而不是默认信任硬件名。</div></div><div class="card"><div class="card-h">速度仍偏实验</div><div class="card-d">即使 full download，README 给出的 M1 Max 参考仍是 14.6 秒/token；<code>sources/deltafin/tools/kimi_run.py:1979</code>、<code>sources/deltafin/tools/kimi_run.py:1982</code> 还会提示 streaming 模式可能变成分钟级。</div></div>
+<div class="card"><div class="card-h">部署成本高</div><div class="card-d">完整 expert pool 是 TB 级；<code>sources/deltafin/tools/kimi_run.py:1961</code>、<code>sources/deltafin/tools/kimi_run.py:1973</code> 用 82,432 个 expert 和每 expert 17,547,264 bytes 直接计算缺口。</div></div>
+<div class="card"><div class="card-h">API 兼容不等于行为兼容</div><div class="card-d"><code>sources/deltafin/tools/serve_openai.py:148</code>、<code>sources/deltafin/tools/serve_openai.py:155</code>、<code>sources/deltafin/tools/serve_openai.py:220</code> 显示它接受 OpenAI 形状，但温度、并发和 reasoning 字段都有项目自己的语义。</div></div>
+<div class="card"><div class="card-h">硬件路径复杂</div><div class="card-d"><code>sources/deltafin/tools/kimi_run.py:72</code>、<code>sources/deltafin/tools/kimi_run.py:90</code>、<code>sources/deltafin/tools/runtime_platform.py:1</code> 的存在说明设备选择是主要风险面，用户必须按机器验证。</div></div></div>
+      <div class="callout warn"><strong>诚实记录</strong> — 我没有在本机下载 1.7TB 模型或跑真实 K3 推理；这份分析基于源码结构、README 说明和可验证行号。</div>
+    </section>
+
+    <div class="foot"><span>Generated · 2026-07-30</span><span>Source · <a href="https://github.com/gavamedia/deltafin">gavamedia/deltafin</a></span><span><a href="index.html">↑ 全部分析</a></span></div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el && map.get(el)) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:64}, () => ({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.004}));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#8fd6ff'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
