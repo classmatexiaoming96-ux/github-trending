@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>qwen-audio-agent · 实时语音 Agent Runtime · 源码观测台</title>
+<meta name="description" content="QwenAudio/qwen-audio-agent 源码级深度解析 — QwenAudio/qwen-audio-agent 源码级深度解析：实时语音网关、Qwen Realtime 前台、ACP 后台 Agent 与任务账本。" />
+<meta property="og:title" content="qwen-audio-agent · 源码观测台" />
+<meta property="og:description" content="QwenAudio/qwen-audio-agent 源码级深度解析：实时语音网关、Qwen Realtime 前台、ACP 后台 Agent 与任务账本。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #7fd7ff;
+  --star-soft:  #a9e7ff;
+  --star-deep:  #2f9fcc;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">qwen-audio-agent<b>Audio</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">qwen-audio-agent<b>Audio</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">JavaScript · npm workspaces · Electron · React</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>三层语音 Agent 架构</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>Realtime、工具调用与任务账本</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从语音轮次到后台执行</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试覆盖与失败保护</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>值得拆的工程亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与边界</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★439 · 2026-07-27</div>
+      <div><a href="https://github.com/QwenAudio/qwen-audio-agent" target="_blank">QwenAudio/qwen-audio-agent</a></div>
+      <div><a href="index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">qwen-audio-agent <em>实时语音 Agent Runtime</em></h1>
+          <p class="hero-desc">qwen-audio-agent 把 Qwen Audio Realtime 放在前台，把 Codex、Claude、OpenClaw、OpenCode 等后台 Agent 放在 ACP 适配层后面，形成“语音协调 Agent + 后台执行 Agent + 项目 Session”的三层结构。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 439</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">~18K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">276</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-07-30</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p><p>第一层入口不是简单 WebSocket 转发。<code>server/src/voice/realtime-gateway.mjs:86</code> 创建 noServer 网关，<code>server/src/voice/realtime-gateway.mjs:112</code> 到 <code>server/src/voice/realtime-gateway.mjs:126</code> 在 upgrade 阶段同时做路径、Origin 和身份校验，这解释了为什么它能被桌面、Web 和 TUI 共用而不是暴露任意 socket。</p><p>语音所有权是这个项目的核心状态机之一。<code>server/src/voice/realtime-gateway.mjs:98</code> 到 <code>server/src/voice/realtime-gateway.mjs:109</code> 对同一 owner 广播 active/busy/available，<code>server/src/voice/realtime-gateway.mjs:279</code> 到 <code>server/src/voice/realtime-gateway.mjs:292</code> 决定 takeover 后输入和输出是否真正生效，避免两个客户端同时抢麦。</p></p>
+      <p><p>响应相关性不是靠“最后一条消息”猜测。<code>server/src/voice/realtime-gateway.mjs:144</code> 到 <code>server/src/voice/realtime-gateway.mjs:158</code> 保存 response candidate、turn correlation、transcript 和 permission 集合，<code>server/src/voice/realtime-gateway.mjs:377</code> 到 <code>server/src/voice/realtime-gateway.mjs:400</code> 还放了 12 秒 watchdog，实时模型不开始回复时会重建前端连接。</p><p>前台模型拿到的工具定义集中在 <code>server/src/voice/realtime-provider.mjs:17</code> 到 <code>server/src/voice/realtime-provider.mjs:163</code>，其中 <code>server/src/voice/realtime-provider.mjs:197</code> 到 <code>server/src/voice/realtime-provider.mjs:222</code> 把 Qwen Realtime session 和这些工具绑定，所以语音 Agent 可以委派任务、查询状态、处理权限和读写用户记忆。</p></p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">WebSocket realtime gateway + Qwen Audio frontend + ACP backend adapter + persistent task ledger。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">turn generation、response context、voice ownership、spawn_thinking work、ACP coordinator/project Session。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">网关限制 pending audio chunk 为 30，响应启动 watchdog 为 12s，Realtime 连接稳定窗口为 10s。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Web UI、TUI、Electron desktop、OpenClaw/OpenCode/Codex/Claude/Qoder 等 ACP 后台。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">三层语音 Agent 架构</h2>
+      <p><p>后台任务提交经过明显的防重复和防陈旧保护。<code>server/src/voice/tools/tool-call-handler.mjs:187</code> 到 <code>server/src/voice/tools/tool-call-handler.mjs:215</code> 解析 call_id、工具名和 turn generation，<code>server/src/voice/tools/tool-call-handler.mjs:350</code> 到 <code>server/src/voice/tools/tool-call-handler.mjs:374</code> 防止同一轮重复提交。</p></p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">Web / TUI / Desktop</span>
+  <span class="flow-arr">│ realtime websocket + audio chunks</span>
+  ▼
+<span class="flow-node">server/src/voice/realtime-gateway.mjs</span>
+  <span class="flow-arr">│ turn correlation · playback receipts · task announcements</span>
+  ▼
+<span class="flow-node">RealtimeFrontend / Qwen Audio Realtime</span>
+  <span class="flow-arr">│ function calls</span>
+  ▼
+<span class="flow-node">ToolCallHandler</span> ── spawn_thinking / status / permission / memory
+  <span class="flow-arr">│</span>
+  ▼
+<span class="flow-node">ACP Backend Adapter</span> ── Codex / Claude / OpenClaw / OpenCode sessions</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p><p>任务账本不是旁路日志，而是交付机制。<code>server/src/task/task-manager.mjs:225</code> 到 <code>server/src/task/task-manager.mjs:288</code> 创建 work，<code>server/src/task/task-manager.mjs:291</code> 到 <code>server/src/task/task-manager.mjs:317</code> 由 scheduler 控制启动和 progress 事件，语音层再根据这些事件决定何时播报结果。</p></p>
+      <div class="g3"><div class="card"><div class="card-h">实时语音网关</div><div class="card-d">WebSocket 入口、活跃语音客户端、响应上下文和播报窗口集中在 server/src/voice/realtime-gateway.mjs，负责把音频流变成可追踪的 turn。</div></div><div class="card"><div class="card-h">前台 Realtime 客户端</div><div class="card-d">server/src/voice/realtime-provider.mjs 封装 Qwen Audio Realtime，会话工具、结果注入、权限询问和响应队列都在这里排队。</div></div><div class="card"><div class="card-h">后台 Agent 适配</div><div class="card-d">server/src/agent/acp-backend-adapter.mjs 把语音层的任务交给 ACP Session，并处理权限、模型覆盖和第三层 delegation。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/voice/realtime-gateway.mjs</span> · L86-105</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">86</span>export function attachRealtimeGateway(server, {
+<span class="ln">87</span>  identityManager,
+<span class="ln">88</span>  memoryStore,
+<span class="ln">89</span>  coordinator,
+<span class="ln">90</span>  coordinatorAvailable = async () =&gt; true,
+<span class="ln">91</span>  respondPermission,
+<span class="ln">92</span>  permissionPolicy,
+<span class="ln">93</span>}) {
+<span class="ln">94</span>  const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 })
+<span class="ln">95</span>  const activeVoiceClients = new ActiveVoiceClients()
+<span class="ln">96</span>  const voiceConnections = new Map()
+<span class="ln">97</span>
+<span class="ln">98</span>  const broadcastVoiceOwnership = ownerId =&gt; {
+<span class="ln">99</span>    const active = activeVoiceClients.active(ownerId)
+<span class="ln">100</span>    const holder = active?.descriptor || null
+<span class="ln">101</span>    for (const client of voiceConnections.get(ownerId) || []) {
+<span class="ln">102</span>      send(client.ws, {
+<span class="ln">103</span>        type: 'voice.ownership',
+<span class="ln">104</span>        state: active === client
+<span class="ln">105</span>          ? 'active'</pre>
+      </div>
+
+      <a class="deep-link" href="qwen-audio-agent/qwen-audio-agent-realtime-gateway.html">深度阅读 · Realtime 语音网关</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">Realtime、工具调用与任务账本</h2>
+
+      <h3><span class="arr">▸</span>ToolCallHandler：把语音函数调用变成后台 work</h3>
+      <p><p>ACP 后台适配的亮点在 Session 复用。<code>server/src/agent/acp-backend-adapter.mjs:280</code> 到 <code>server/src/agent/acp-backend-adapter.mjs:329</code> 尝试恢复 coordinator session，失败才新建；<code>server/src/agent/acp-backend-adapter.mjs:335</code> 到 <code>server/src/agent/acp-backend-adapter.mjs:357</code> 再统一配置模式和模型。</p></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/voice/tools/tool-call-handler.mjs</span> · L187-244</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">187</span>  async handle(event, callContext = {}) {
+<span class="ln">188</span>    const callId = event.call_id || event.item?.call_id || ''
+<span class="ln">189</span>    const toolName = event.name || event.item?.name || ''
+<span class="ln">190</span>    if (!callId) throw new Error('Realtime 工具调用缺少 call_id')
+<span class="ln">191</span>    if (this.processedCalls.has(callId)) return
+<span class="ln">192</span>    this.processedCalls.add(callId)
+<span class="ln">193</span>    if (this.processedCalls.size &gt; 500) {
+<span class="ln">194</span>      this.processedCalls.delete(this.processedCalls.values().next().value)
+<span class="ln">195</span>    }
+<span class="ln">196</span>
+<span class="ln">197</span>    const turnId = callContext.turnId
+<span class="ln">198</span>      || event.__voiceContext?.turnId
+<span class="ln">199</span>      || this.getTurnId()
+<span class="ln">200</span>    const generation = Number.isInteger(callContext.turnGeneration)
+<span class="ln">201</span>      ? callContext.turnGeneration
+<span class="ln">202</span>      : Number.isInteger(event.__voiceContext?.turnGeneration)
+<span class="ln">203</span>        ? event.__voiceContext.turnGeneration
+<span class="ln">204</span>        : this.getTurnGeneration()
+<span class="ln">205</span>    let args = {}
+<span class="ln">206</span>    try {
+<span class="ln">207</span>      args = JSON.parse(event.arguments || '{}')
+<span class="ln">208</span>    } catch {
+<span class="ln">209</span>      // Invalid arguments are handled as missing fields below.
+<span class="ln">210</span>    }
+<span class="ln">211</span>
+<span class="ln">212</span>    if (this.isStale(turnId, generation)) {
+<span class="ln">213</span>      await this.closeStaleCall(callId, turnId)
+<span class="ln">214</span>      return
+<span class="ln">215</span>    }
+<span class="ln">216</span>
+<span class="ln">217</span>    if (toolName === GET_CURRENT_TIME_TOOL_NAME) {
+<span class="ln">218</span>      await this.getCurrentTime(callId, turnId)
+<span class="ln">219</span>      return
+<span class="ln">220</span>    }
+<span class="ln">221</span>    if (toolName === USER_MEMORY_TOOL_NAME) {
+<span class="ln">222</span>      await this.userMemory(callId, turnId, generation, args)
+<span class="ln">223</span>      return
+<span class="ln">224</span>    }
+<span class="ln">225</span>    if (toolName === CANCEL_AGENT_TASK_TOOL_NAME) {
+<span class="ln">226</span>      await this.cancelAgentTask(callId, turnId, args)
+<span class="ln">227</span>      return
+<span class="ln">228</span>    }
+<span class="ln">229</span>    if (toolName === GET_AGENT_TASK_STATUS_TOOL_NAME) {
+<span class="ln">230</span>      await this.getAgentTaskStatus(callId, turnId, args)
+<span class="ln">231</span>      return
+<span class="ln">232</span>    }
+<span class="ln">233</span>    if (toolName === RESPOND_AGENT_PERMISSION_TOOL_NAME) {
+<span class="ln">234</span>      await this.respondAgentPermission(callId, turnId, args)
+<span class="ln">235</span>      return
+<span class="ln">236</span>    }
+<span class="ln">237</span>    if (toolName !== DELEGATE_TOOL_NAME) {
+<span class="ln">238</span>      await this.sendOutput(
+<span class="ln">239</span>        callId,
+<span class="ln">240</span>        failure('unsupported_tool', '当前无法执行这个操作。'),
+<span class="ln">241</span>        turnId,
+<span class="ln">242</span>      )
+<span class="ln">243</span>      return
+<span class="ln">244</span>    }</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>AcpBackendAdapter：恢复 Session、模型与权限</h3>
+      <p><p>权限不是模型一句话放行。<code>server/src/agent/acp-backend-adapter.mjs:501</code> 到 <code>server/src/agent/acp-backend-adapter.mjs:550</code> 把原生工具权限转成 pending permission，<code>server/src/voice/tools/tool-call-handler.mjs:440</code> 到 <code>server/src/voice/tools/tool-call-handler.mjs:531</code> 再把用户自然语言决定转回后台。</p></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent/acp-backend-adapter.mjs</span> · L280-329</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">280</span>      return this.coordinatorSessions.get(key)
+<span class="ln">281</span>    }
+<span class="ln">282</span>    if (this.coordinatorSessionPromises.has(key)) {
+<span class="ln">283</span>      return this.coordinatorSessionPromises.get(key)
+<span class="ln">284</span>    }
+<span class="ln">285</span>    const pending = (async () =&gt; {
+<span class="ln">286</span>      const stored = this.registry.get(key)
+<span class="ln">287</span>      let session
+<span class="ln">288</span>      if (stored?.sessionId) {
+<span class="ln">289</span>        try {
+<span class="ln">290</span>          session = await this.client.resumeSession(stored.sessionId, {
+<span class="ln">291</span>            cwd: stored.cwd || this.directory,
+<span class="ln">292</span>            mcpServers,
+<span class="ln">293</span>            meta: this.coordinatorMeta(ownerId),
+<span class="ln">294</span>            ownerId,
+<span class="ln">295</span>            role: 'coordinator',
+<span class="ln">296</span>          })
+<span class="ln">297</span>          const accepted = this.profile.acceptResumedSession?.({
+<span class="ln">298</span>            session,
+<span class="ln">299</span>            role: 'coordinator',
+<span class="ln">300</span>            coordinatorAgent: this.coordinatorAgent,
+<span class="ln">301</span>          }) !== false
+<span class="ln">302</span>          if (!accepted) {
+<span class="ln">303</span>            this.registry.delete(key)
+<span class="ln">304</span>            session = null
+<span class="ln">305</span>          } else {
+<span class="ln">306</span>            session.isNew = false
+<span class="ln">307</span>          }
+<span class="ln">308</span>        } catch {
+<span class="ln">309</span>          this.registry.delete(key)
+<span class="ln">310</span>        }
+<span class="ln">311</span>      }
+<span class="ln">312</span>      if (!session) {
+<span class="ln">313</span>        session = await this.client.newSession({
+<span class="ln">314</span>          cwd: this.directory,
+<span class="ln">315</span>          mcpServers,
+<span class="ln">316</span>          meta: this.coordinatorMeta(ownerId),
+<span class="ln">317</span>          ownerId,
+<span class="ln">318</span>          role: 'coordinator',
+<span class="ln">319</span>        })
+<span class="ln">320</span>        session.isNew = true
+<span class="ln">321</span>      }
+<span class="ln">322</span>      await this.configureSession(session, 'coordinator')
+<span class="ln">323</span>      this.coordinatorSessions.set(key, session)
+<span class="ln">324</span>      this.registry.set(key, session)
+<span class="ln">325</span>      return session
+<span class="ln">326</span>    })().finally(() =&gt; this.coordinatorSessionPromises.delete(key))
+<span class="ln">327</span>    this.coordinatorSessionPromises.set(key, pending)
+<span class="ln">328</span>    return pending
+<span class="ln">329</span>  }</pre>
+      </div>
+
+      <a class="deep-link" href="qwen-audio-agent/qwen-audio-agent-acp-delegation.html">深度阅读 · ACP 委派与任务账本</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从语音轮次到后台执行</h2>
+      <p><p>CLI runtime 负责把本地网关进程安全拉起。<code>cli/src/runtime.mjs:302</code> 到 <code>cli/src/runtime.mjs:349</code> 在没有健康网关时 spawn server，<code>cli/src/runtime.mjs:351</code> 到 <code>cli/src/runtime.mjs:389</code> 再验证实际 backend 协议、归属和凭据，避免连接到配置不一致的旧进程。</p></p>
+
+      <h3><span class="arr">▸</span>语音轮次如何关联响应</h3>
+      <div class="flow">User speech → speech_started → turnId/generation → pending audio → Qwen Realtime
+Qwen response.created → response context → audio.delta/transcript.delta → client playback receipts
+playback.started confirms task notification; playback.ended releases announcement window.</div>
+
+      <h3><span class="arr">▸</span>后台任务如何回到前台播报</h3>
+      <div class="flow">Realtime function call spawn_thinking → ToolCallHandler validates turn freshness
+→ TaskManager creates lane-limited work → Coordinator runs ACP backend
+→ delegated/completed/permission events stream back to the same voice session.</div>
+
+      <a class="deep-link" href="qwen-audio-agent/qwen-audio-agent-realtime-gateway.html">深度阅读 · 播放回执与通知确认</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试覆盖与失败保护</h2>
+      <p><p>浏览器端不是只播放音频。<code>src/useRealtimeVoice.js:256</code> 到 <code>src/useRealtimeVoice.js:357</code> 管理 socket 重连和服务端事件，<code>src/useRealtimeVoice.js:414</code> 到 <code>src/useRealtimeVoice.js:493</code> 打开麦克风、重采样并上报音频，同时用音量电平驱动 UI。</p></p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p><p>测试覆盖集中在协议边界和恢复逻辑：<code>server/test/realtime-gateway.test.mjs:9</code> 到 <code>server/test/realtime-gateway.test.mjs:37</code> 验证 WebSocket upgrade 只接受 /api/realtime，<code>server/test/realtime-gateway.test.mjs:52</code> 到 <code>server/test/realtime-gateway.test.mjs:73</code> 验证播放回执必须来自 active output client。ACP 测试则在 <code>server/test/acp-backend-adapter.test.mjs:221</code> 到 <code>server/test/acp-backend-adapter.test.mjs:307</code> 覆盖空响应重试和初始化冲突重试。</p></p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/realtime-gateway.test.mjs</span> · L39-73</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">39</span>test('confirms task notifications when client playback starts', () =&gt; {
+<span class="ln">40</span>  assert.equal(confirmsTaskNotificationOnPlaybackStart({
+<span class="ln">41</span>    origin: 'announcement',
+<span class="ln">42</span>  }), true)
+<span class="ln">43</span>  assert.equal(confirmsTaskNotificationOnPlaybackStart({
+<span class="ln">44</span>    origin: 'model',
+<span class="ln">45</span>    consumesTaskNotification: true,
+<span class="ln">46</span>  }), true)
+<span class="ln">47</span>  assert.equal(confirmsTaskNotificationOnPlaybackStart({
+<span class="ln">48</span>    origin: 'model',
+<span class="ln">49</span>  }), false)
+<span class="ln">50</span>})
+<span class="ln">51</span>
+<span class="ln">52</span>test('accepts playback receipts only from the active output client for a known response', () =&gt; {
+<span class="ln">53</span>  assert.equal(acceptsPlaybackReceipt({
+<span class="ln">54</span>    outputEnabled: true,
+<span class="ln">55</span>    active: true,
+<span class="ln">56</span>    responseKnown: true,
+<span class="ln">57</span>  }), true)
+<span class="ln">58</span>  assert.equal(acceptsPlaybackReceipt({
+<span class="ln">59</span>    outputEnabled: true,
+<span class="ln">60</span>    active: false,
+<span class="ln">61</span>    responseKnown: true,
+<span class="ln">62</span>  }), false)
+<span class="ln">63</span>  assert.equal(acceptsPlaybackReceipt({
+<span class="ln">64</span>    outputEnabled: false,
+<span class="ln">65</span>    active: true,
+<span class="ln">66</span>    responseKnown: true,
+<span class="ln">67</span>  }), false)
+<span class="ln">68</span>  assert.equal(acceptsPlaybackReceipt({
+<span class="ln">69</span>    outputEnabled: true,
+<span class="ln">70</span>    active: true,
+<span class="ln">71</span>    responseKnown: false,
+<span class="ln">72</span>  }), false)
+<span class="ln">73</span>})</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>Realtime 模型不开始回复时，<code>server/src/voice/realtime-gateway.mjs:377</code> 到 <code>server/src/voice/realtime-gateway.mjs:400</code> 会清理旧 frontend 并重连。</li><li>用户新一轮打断旧响应时，<code>server/src/voice/realtime-gateway.mjs:720</code> 到 <code>server/src/voice/realtime-gateway.mjs:735</code> 会清空播放并提升 turn generation。</li><li>后台权限待决时，<code>server/src/voice/tools/tool-call-handler.mjs:246</code> 到 <code>server/src/voice/tools/tool-call-handler.mjs:278</code> 阻止把回答误提交成新任务。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">值得拆的工程亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">语音所有权</div><div class="card-d">ActiveVoiceClients 让 Web、TUI、Desktop 不会同时抢占麦克风；证据是 <code>server/src/voice/realtime-gateway.mjs:94</code>、<code>server/src/voice/realtime-gateway.mjs:98</code> 和 <code>server/src/voice/realtime-gateway.mjs:279</code> 附近的 owner 级激活逻辑。</div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">src/voice/realtime-provider.mjs · L416-433</span></span><span>JavaScript</span></div><pre class="code"><span class="ln">416</span>  sendFunctionOutput(callId, output, context = {}, {
+<span class="ln">417</span>    createResponse = true,
+<span class="ln">418</span>    response,
+<span class="ln">419</span>  } = {}) {
+<span class="ln">420</span>    const sendOutput = () =&gt; this.createConversationItem({
+<span class="ln">421</span>      type: 'function_call_output',
+<span class="ln">422</span>      call_id: callId,
+<span class="ln">423</span>      output: JSON.stringify(output),
+<span class="ln">424</span>    })
+<span class="ln">425</span>    if (!createResponse) return this.enqueueAction(sendOutput)
+<span class="ln">426</span>    return this.enqueueResponse('agent', context, async () =&gt; {
+<span class="ln">427</span>      await sendOutput()
+<span class="ln">428</span>      this.send({
+<span class="ln">429</span>        type: 'response.create',
+<span class="ln">430</span>        ...(response ? { response } : {}),
+<span class="ln">431</span>      })
+<span class="ln">432</span>    })
+<span class="ln">433</span>  }</pre></div><div class="card"><div class="card-h">任务播报闭环</div><div class="card-d">任务完成先写入 conversationSync，再由 announcement manager 排队播报；<code>server/src/voice/realtime-gateway.mjs:411</code>、<code>server/src/voice/realtime-gateway.mjs:594</code>、<code>server/src/voice/realtime-gateway.mjs:688</code> 说明结果持久化、通知 claim 和 inline 时间线是同一条链。</div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">src/cli/src/runtime.mjs · L302-349</span></span><span>JavaScript</span></div><pre class="code"><span class="ln">302</span>export async function ensureRuntime(options, {
+<span class="ln">303</span>  root,
+<span class="ln">304</span>  env = process.env,
+<span class="ln">305</span>  fetchImpl = fetch,
+<span class="ln">306</span>  spawnImpl = spawn,
+<span class="ln">307</span>  platform = process.platform,
+<span class="ln">308</span>  loadEnvironment = () =&gt; loadRuntimeEnvironment({ root, env }),
+<span class="ln">309</span>  requireCredential = () =&gt; requireDashScopeCredential(env),
+<span class="ln">310</span>} = {}) {
+<span class="ln">311</span>  loadEnvironment()
+<span class="ln">312</span>  const runtime = new ManagedRuntime([], { platform })
+<span class="ln">313</span>  const local = isLocalGateway(options.url)
+<span class="ln">314</span>  const backend = resolveBackend(options, env)
+<span class="ln">315</span>  const backendLabel = backend.protocol
+<span class="ln">316</span>    ? backendDefinition(backend.protocol)?.label || backend.protocol
+<span class="ln">317</span>    : '后台 Agent'
+<span class="ln">318</span>  let health = await readGatewayHealth(options.url, fetchImpl)
+<span class="ln">319</span>  const existingGateway = Boolean(health)
+<span class="ln">320</span>
+<span class="ln">321</span>  try {
+<span class="ln">322</span>    if (!health) {
+<span class="ln">323</span>      if (!local) throw new Error(`无法连接远程 Gateway：${options.url}`)
+<span class="ln">324</span>      if (options.allowMissingCredential !== true) requireCredential()
+<span class="ln">325</span>      const target = new URL(options.url)
+<span class="ln">326</span>      if (target.protocol !== 'http:') {
+<span class="ln">327</span>        throw new Error('本地自动启动 Gateway 只支持 http 地址')
+<span class="ln">328</span>      }
+<span class="ln">329</span>      Object.assign(env, backendEnvironment(env, backend))
+<span class="ln">330</span>      const spec = gatewaySpawn(
+<span class="ln">331</span>        root,
+<span class="ln">332</span>        platform,
+<span class="ln">333</span>        backendEnvironment(env, backend),
+<span class="ln">334</span>        target,
+<span class="ln">335</span>        options,
+<span class="ln">336</span>      )
+<span class="ln">337</span>      const gateway = spawnImpl(spec.command, spec.args, spec.options)
+<span class="ln">338</span>      runtime.children.push(gateway)
+<span class="ln">339</span>      health = await waitForReadiness(
+<span class="ln">340</span>        gateway,
+<span class="ln">341</span>        waitForGateway(options.url, {
+<span class="ln">342</span>          fetchImpl,
+<span class="ln">343</span>          requireBackend: Boolean(
+<span class="ln">344</span>            backend.protocol &amp;&amp; options.waitForBackend !== false
+<span class="ln">345</span>          ),
+<span class="ln">346</span>        }),
+<span class="ln">347</span>        'Gateway',
+<span class="ln">348</span>      )
+<span class="ln">349</span>    }</pre></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>这个项目的风险主要来自实时音频、后台 Agent 和权限系统同时运行；任何一层的时序错误都会变成用户能听见的错误确认。</p>
+      <div class="g2"><div class="card"><div class="card-h">实时队列时序复杂</div><div class="card-d"><code>server/src/voice/realtime-provider.mjs:572</code> 到 <code>server/src/voice/realtime-provider.mjs:620</code> 用 response queue generation 控制并发，逻辑可靠但对维护者理解成本较高。</div></div><div class="card"><div class="card-h">权限 UX 依赖模型语义判断</div><div class="card-d"><code>server/src/voice/tools/tool-call-handler.mjs:440</code> 到 <code>server/src/voice/tools/tool-call-handler.mjs:531</code> 把自然语言同意映射为权限决定，体验自然但必须防止模型误判。</div></div><div class="card"><div class="card-h">本地进程复用要求严格</div><div class="card-d"><code>cli/src/runtime.mjs:351</code> 到 <code>cli/src/runtime.mjs:389</code> 检查旧 Gateway 兼容性，说明用户机器上已有进程会造成配置漂移风险。</div></div><div class="card"><div class="card-h">测试偏协议层</div><div class="card-d"><code>server/test/realtime-gateway.test.mjs:39</code> 到 <code>server/test/realtime-gateway.test.mjs:73</code> 覆盖关键函数，但端到端音频设备和真实 Qwen Realtime 网络抖动仍需要更重的集成测试。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+
+      <div class="callout info">
+        <strong>前端证据补充</strong> — 浏览器端实时语音 Hook 是三层架构的客户端落点。<code>src/useRealtimeVoice.js:256</code> 到 <code>src/useRealtimeVoice.js:285</code> 建立 socket 并声明 voice/input/output 能力，<code>src/useRealtimeVoice.js:287</code> 到 <code>src/useRealtimeVoice.js:339</code> 分派 voice state、audio delta 和 transcript 事件，说明服务端上下文会被完整投影到 UI。
+      </div>
+      <p>播放队列是前端最容易出错的部分，<code>src/useRealtimeVoice.js:140</code> 到 <code>src/useRealtimeVoice.js:168</code> 统一取消正在排队和已经开始的音频 source，<code>src/useRealtimeVoice.js:170</code> 到 <code>src/useRealtimeVoice.js:188</code> 等待 response done、transcript done 和 source count 清零后才发送播放结束，这与服务端的 task notification 确认互相咬合。</p>
+      <p>麦克风输入不是原样透传。<code>src/useRealtimeVoice.js:414</code> 到 <code>src/useRealtimeVoice.js:428</code> 请求带回声消除和降噪的媒体流，<code>src/useRealtimeVoice.js:436</code> 到 <code>src/useRealtimeVoice.js:448</code> 把浏览器采样率重采样到服务端要求的输入采样率并编码为 PCM base64，这让 Qwen Realtime 的输入格式保持稳定。</p>
+      <p>可视化状态也来自真实音频数据。<code>src/useRealtimeVoice.js:457</code> 到 <code>src/useRealtimeVoice.js:476</code> 用 analyser 计算能量电平并驱动 listening UI，<code>src/useRealtimeVoice.js:500</code> 到 <code>src/useRealtimeVoice.js:503</code> 的 interrupt 同时停止本地播放并通知网关，形成用户打断的双端闭环。</p>
+      <p>客户端连接恢复设计和服务端 watchdog 对齐。<code>src/useRealtimeVoice.js:341</code> 到 <code>src/useRealtimeVoice.js:357</code> 在 socket 错误或关闭后清理播放并指数退避重连，<code>src/useRealtimeVoice.js:362</code> 到 <code>src/useRealtimeVoice.js:369</code> 在组件卸载时关闭 socket、停止播放、清空 muted response，避免页面切换留下幽灵音频。</p>
+      <p>这也是为什么主页面把它归类为 runtime，而不是单纯 React 组件：<code>src/useRealtimeVoice.js:202</code> 到 <code>src/useRealtimeVoice.js:254</code> 自己调度 AudioBufferSource 的开始时间和完成回执，<code>src/useRealtimeVoice.js:31</code> 到 <code>src/useRealtimeVoice.js:56</code> 则把语音所有权和输入/输出 mute 行为抽成共享判断函数。</p>
+
+    <div class="foot">
+      <span>Generated · 2026-07-31</span>
+      <span>Source · <a href="https://github.com/QwenAudio/qwen-audio-agent">QwenAudio/qwen-audio-agent</a></span>
+      <span><a href="index.html">← 返回 Trending 索引</a></span>
+      <span><a href="qwen-audio-agent.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
