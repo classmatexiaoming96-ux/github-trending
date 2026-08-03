@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qm · multiplayer agent harness · 源码观测台</title><meta name="description" content="yc-software/qm source-level deep dive">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#7fd7ff; --star-soft:#a9e8ff; --star-deep:#3c98c9; }
+.flow { white-space:pre; overflow:auto; font-family:var(--mono); font-size:12px; line-height:1.7; padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text-2); }
+.source-note { color:var(--text-dim); font-family:var(--mono); font-size:12px; }
+</style></head><body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">qm<b>QM</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">qm<b>QM</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · Node/Fastify/Postgres</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>运行时路由</a></li><li><a href="#section-2"><span class="idx">02</span>租约 worker</a></li><li><a href="#section-3"><span class="idx">03</span>沙箱与技能</a></li><li><a href="#section-4"><span class="idx">04</span>测试证据</a></li><li><a href="#section-5"><span class="idx">05</span>亮点</a></li><li><a href="#section-6"><span class="idx">06</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★7,463 · 2026-07-29</div><div><a href="https://github.com/yc-software/qm" target="_blank">yc-software/qm</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">qm <em>multiplayer agent harness</em></h1><p class="hero-desc">QM 不是单个 coding agent，而是一套让 Slack、Web、Cron 和多种 agent runtime 共用的组织级 Agent 工作台。源码里最值得拆的是它怎么把人、scope、harness、sandbox、skills 和凭据串成一个可租约化、可审计的 turn。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 7,463</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">1013</div><div class="stat-lbl">TS/JS Files</div></div><div class="stat"><div class="stat-num">5d</div><div class="stat-lbl">Created Window</div></div><div class="stat"><div class="stat-num">Node</div><div class="stat-lbl">Runtime</div></div></div></div><div><div class="flow">Slack/Web/Cron
+      │
+      ▼
+app-turn.ts → orchestrator.ts → harness-router.ts
+      │              │              │
+      ▼              ▼              ▼
+RunStore lease   sandbox scope   Codex / Claude / OpenCode / Pi</div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2><p>QM 的 README 把它称为“multiplayer agent harness for work”，源码对应的是一个组织级 agent control plane：Web turn 入口先在 <code>src/api/app-turn.ts:56</code> 刷新身份并解析 actor，随后在 <code>src/api/app-turn.ts:102</code> 通过项目 roster 版本保护共享上下文，最后把 surface、conversation、runtime 和权限信息拼成 orchestrator 输入。</p><p>它值得拆的原因不是 stars 数，而是边界足够复杂：<code>src/core/orchestrator.ts:189</code> 创建的 orchestrator 同时接入 memory、skills、credential broker、security posture、attachments 和 delivery；<code>src/runs/worker.ts:22</code> 又把 turn 变成可租约、可心跳、可释放的后台 run。</p><h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">多 surface → durable run queue → orchestrator → sandbox/harness adapter。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">Scope、Conversation、Run lease、Harness、SandboxHandle、SkillResolution。</div></div><div class="card"><div class="card-h">工程强度</div><div class="card-d">源码超过千个 TS/JS 文件，覆盖 CLI、插件、Web UI、沙箱和核心服务。</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">Fastify、Postgres、Slack、OpenAI/Codex、Claude/OpenCode、Fly/AWS 沙箱。</div></div></div><h3><span class="arr">▸</span>源码阅读路线</h3><p>第一条路线看 runtime：<code>src/harness/harness-router.ts:12</code> 决定 harness/model，<code>src/api/app-turn.ts:122</code> 在 Web turn 中执行 provider 和模型可用性检查，<code>src/runs/worker.ts:59</code> 再把排队时间和 attempt 注入 orchestrator。</p><p>第二条路线看隔离：<code>src/core/orchestrator/sandboxes.ts:198</code> 用 resolution layers provision sandbox，<code>src/workspace/workspace-store.ts:16</code> 用 safeJoin 防止 workspace path escape，<code>src/skills/materialize.ts:210</code> 负责把可见 skills 投影进 sandbox。</p></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">运行时路由不是配置开关，而是安全边界</h2><p><code>src/harness/harness-router.ts:19</code> 先读取部署批准的 harness 集合，<code>src/harness/harness-router.ts:31</code> 再把 org 默认值和 scope 覆盖合成继承链；这意味着用户临时指定 model/harness 不是自由字符串，而要通过 <code>src/harness/harness-router.ts:48</code> 的 approved + supported 检查。</p><h3><span class="arr">▸</span>RuntimeChoice 的收敛路径</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/harness/harness-router.ts</span> · L12-54</span><span>TypeScript</span></div><pre class="code"><span class="ln">12</span>export function resolveRuntimeChoice(
+<span class="ln">13</span>  config: Pick&lt;ScopedConfigStore, &quot;getApprovedHarnesses&quot; | &quot;getRuntimeSelection&quot; | &quot;getBaseModel&quot;&gt;,
+<span class="ln">14</span>  orgScopeId: ScopeId,
+<span class="ln">15</span>  scope: ScopeId,
+<span class="ln">16</span>  fallback: RuntimeChoice,
+<span class="ln">17</span>  requested?: Partial&lt;RuntimeChoice&gt;,
+<span class="ln">18</span>): RuntimeChoice {
+<span class="ln">19</span>  const approved = config.getApprovedHarnesses() ?? [fallback.harnessId];
+<span class="ln">20</span>  const orgStored = config.getRuntimeSelection(orgScopeId);
+<span class="ln">21</span>  const orgLegacy = config.getBaseModel(orgScopeId);
+<span class="ln">22</span>  const configuredOrg =
+<span class="ln">23</span>    orgStored &amp;&amp; isHarnessId(orgStored.harnessId)
+<span class="ln">24</span>      ? { harnessId: orgStored.harnessId, modelId: orgStored.modelId }
+<span class="ln">25</span>      : { harnessId: fallback.harnessId, modelId: orgLegacy ?? fallback.modelId };
+<span class="ln">26</span>  const firstApproved = approved.find(isHarnessId) ?? fallback.harnessId;
+<span class="ln">27</span>  const safeFallback =
+<span class="ln">28</span>    approved.includes(fallback.harnessId) &amp;&amp; modelSupportedByHarness(fallback.modelId, fallback.harnessId)
+<span class="ln">29</span>      ? fallback
+<span class="ln">30</span>      : { harnessId: firstApproved, modelId: defaultModelForHarness(firstApproved, fallback.modelId) };
+<span class="ln">31</span>  const org =
+<span class="ln">32</span>    approved.includes(configuredOrg.harnessId) &amp;&amp;
+<span class="ln">33</span>    modelSupportedByHarness(configuredOrg.modelId, configuredOrg.harnessId)
+<span class="ln">34</span>      ? configuredOrg
+<span class="ln">35</span>      : safeFallback;
+<span class="ln">36</span>  const scopedStored = scope === orgScopeId ? null : config.getRuntimeSelection(scope);
+<span class="ln">37</span>  const scopedLegacy = scope === orgScopeId ? null : config.getBaseModel(scope);
+<span class="ln">38</span>  let inherited = org;
+<span class="ln">39</span>  if (scopedStored &amp;&amp; isHarnessId(scopedStored.harnessId)) {
+<span class="ln">40</span>    inherited = { harnessId: scopedStored.harnessId, modelId: scopedStored.modelId };
+<span class="ln">41</span>  } else if (scopedLegacy) {
+<span class="ln">42</span>    inherited = { harnessId: fallback.harnessId, modelId: scopedLegacy };
+<span class="ln">43</span>  }
+<span class="ln">44</span>  const choice =
+<span class="ln">45</span>    requested?.harnessId || requested?.modelId
+<span class="ln">46</span>      ? { harnessId: requested.harnessId ?? inherited.harnessId, modelId: requested.modelId ?? inherited.modelId }
+<span class="ln">47</span>      : inherited;
+<span class="ln">48</span>  if (!approved.includes(choice.harnessId) || !modelSupportedByHarness(choice.modelId, choice.harnessId)) {
+<span class="ln">49</span>    if (requested?.harnessId || requested?.modelId)
+<span class="ln">50</span>      throw new NonRetryableTurnError(`runtime ${choice.harnessId}/${choice.modelId} is not approved`);
+<span class="ln">51</span>    return org;
+<span class="ln">52</span>  }
+<span class="ln">53</span>  return choice;
+<span class="ln">54</span>}</pre></div><p><code>src/harness/harness-router.ts:44</code> 把 requested runtime 合入 inherited runtime，但 <code>src/harness/harness-router.ts:49</code> 会把未批准的请求变成 NonRetryableTurnError。这个设计让 Web UI 可以暴露模型选择，同时不会绕过组织批准的 harness 白名单。</p><h3><span class="arr">▸</span>Web turn 入口先裁剪权限，再运行模型</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/api/app-turn.ts</span> · L56-100</span><span>TypeScript</span></div><pre class="code"><span class="ln">56</span>    async turn(req: TurnRequest): Promise&lt;TurnResult&gt; {
+<span class="ln">57</span>      await deps.identity.refresh();
+<span class="ln">58</span>      const actor: Principal = deps.identity.resolve(req.actor);
+<span class="ln">59</span>      let projectAudience: Principal[] | undefined;
+<span class="ln">60</span>      let projectName: string | undefined;
+<span class="ln">61</span>      let projectVersion: string | undefined;
+<span class="ln">62</span>      let sessionParticipantIds: string[] | undefined;
+<span class="ln">63</span>      const conversationRef = req.conversation.channelRef;
+<span class="ln">64</span>      const projectGroup = req.conversation.kind === &quot;group&quot; &amp;&amp; !!conversationRef &amp;&amp; isProjectGroupRef(conversationRef);
+<span class="ln">65</span>      const projectId = projectGroup ? projectIdFromGroupRef(conversationRef) : null;
+<span class="ln">66</span>
+<span class="ln">67</span>      if (projectGroup) {
+<span class="ln">68</span>        if (!deps.identity.isInternal(actor)) {
+<span class="ln">69</span>          return { status: &quot;refused&quot;, reason: &quot;you&#x27;re not a member of that context&quot; };
+<span class="ln">70</span>        }
+<span class="ln">71</span>        if (!projectId) return { status: &quot;refused&quot;, reason: &quot;you&#x27;re not a member of that context&quot; };
+<span class="ln">72</span>        const project = await deps.projects?.get(projectId);
+<span class="ln">73</span>        if (
+<span class="ln">74</span>          !project ||
+<span class="ln">75</span>          project.orgId !== orgIdOf() ||
+<span class="ln">76</span>          !deps.identity.isInternal(deps.identity.classify(project.ownerId))
+<span class="ln">77</span>        ) {
+<span class="ln">78</span>          return { status: &quot;refused&quot;, reason: &quot;you&#x27;re not a member of that context&quot; };
+<span class="ln">79</span>        }
+<span class="ln">80</span>        const activeMemberIds = project.memberIds.filter((memberId) =&gt;
+<span class="ln">81</span>          deps.identity.isInternal(deps.identity.classify(memberId)),
+<span class="ln">82</span>        );
+<span class="ln">83</span>        if (!activeMemberIds.includes(actor.id))
+<span class="ln">84</span>          return { status: &quot;refused&quot;, reason: &quot;you&#x27;re not a member of that context&quot; };
+<span class="ln">85</span>        projectAudience = await Promise.all(
+<span class="ln">86</span>          activeMemberIds.map(async (memberId) =&gt; {
+<span class="ln">87</span>            if (memberId === actor.id) return actor;
+<span class="ln">88</span>            const principal = deps.identity.classify(memberId);
+<span class="ln">89</span>            const member = await deps.directory.get(memberId).catch(() =&gt; null);
+<span class="ln">90</span>            return member?.displayName ? { ...principal, displayName: member.displayName } : principal;
+<span class="ln">91</span>          }),
+<span class="ln">92</span>        );
+<span class="ln">93</span>        projectName = project.name;
+<span class="ln">94</span>        projectVersion = String(project.updatedAt);
+<span class="ln">95</span>        sessionParticipantIds = [...activeMemberIds];
+<span class="ln">96</span>      } else if (req.surface === &quot;web&quot; &amp;&amp; req.conversation.kind !== &quot;dm&quot;) {
+<span class="ln">97</span>        if (!conversationRef || !(await mayUseSharedScope(req.conversation.kind, conversationRef, actor))) {
+<span class="ln">98</span>          return { status: &quot;refused&quot;, reason: &quot;you&#x27;re not a member of that context&quot; };
+<span class="ln">99</span>        }
+<span class="ln">100</span>      }</pre></div><p><code>src/api/app-turn.ts:67</code> 对 project group 做内部成员校验，<code>src/api/app-turn.ts:80</code> 刷 active member，<code>src/api/app-turn.ts:96</code> 又对非 DM Web conversation 检查 shared scope。这里的路线说明 QM 不是“先让 Agent 决定”，而是在 Agent 前先确定人和上下文是否匹配。</p><h3><span class="arr">▸</span>模型可用性和 provider keys 一起校验</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/api/app-turn.ts</span> · L122-190</span><span>TypeScript</span></div><pre class="code"><span class="ln">122</span>        const org = scopeId(&quot;org&quot;, orgIdOf());
+<span class="ln">123</span>        const targetScope =
+<span class="ln">124</span>          req.conversation.kind === &quot;dm&quot;
+<span class="ln">125</span>            ? scopeId(&quot;personal&quot;, actor.id)
+<span class="ln">126</span>            : scopeId(req.conversation.kind, req.conversation.channelRef ?? threadRef);
+<span class="ln">127</span>        const fallbackHarness = isHarnessId(deps.harnessId) ? deps.harnessId : &quot;pi&quot;;
+<span class="ln">128</span>        const runtimeFallback = deps.runtimeFallback ?? {
+<span class="ln">129</span>          harnessId: fallbackHarness,
+<span class="ln">130</span>          modelId: defaultModelForHarness(fallbackHarness),
+<span class="ln">131</span>        };
+<span class="ln">132</span>        let orgRuntime;
+<span class="ln">133</span>        let configuredRuntime;
+<span class="ln">134</span>        let runtime;
+<span class="ln">135</span>        try {
+<span class="ln">136</span>          orgRuntime = await resolveRuntimeChoiceDurable(deps.config, org, org, runtimeFallback);
+<span class="ln">137</span>          configuredRuntime =
+<span class="ln">138</span>            targetScope === org
+<span class="ln">139</span>              ? orgRuntime
+<span class="ln">140</span>              : await resolveRuntimeChoiceDurable(deps.config, org, targetScope, runtimeFallback);
+<span class="ln">141</span>          runtime =
+<span class="ln">142</span>            req.harness || req.model
+<span class="ln">143</span>              ? await resolveRuntimeChoiceDurable(deps.config, org, targetScope, runtimeFallback, {
+<span class="ln">144</span>                  ...(req.harness &amp;&amp; isHarnessId(req.harness) ? { harnessId: req.harness } : {}),
+<span class="ln">145</span>                  ...(req.model ? { modelId: req.model } : {}),
+<span class="ln">146</span>                })
+<span class="ln">147</span>              : configuredRuntime;
+<span class="ln">148</span>        } catch (error) {
+<span class="ln">149</span>          return { status: &quot;refused&quot;, reason: errMessage(error) };
+<span class="ln">150</span>        }
+<span class="ln">151</span>        if (req.harness &amp;&amp; !isHarnessId(req.harness)) {
+<span class="ln">152</span>          return { status: &quot;refused&quot;, reason: `runtime ${req.harness} is not approved` };
+<span class="ln">153</span>        }
+<span class="ln">154</span>        const configuredKeys = deps.providerKeys ??
+<span class="ln">155</span>          deps.modelProviders ?? { anthropic: false, openai: false, openrouter: false };
+<span class="ln">156</span>        let providers = deps.modelProviders;
+<span class="ln">157</span>        if (deps.modelCredentials) {
+<span class="ln">158</span>          providers = modelProviderAvailabilityFor(
+<span class="ln">159</span>            runtime.harnessId,
+<span class="ln">160</span>            configuredKeys,
+<span class="ln">161</span>            await deps.modelCredentials.availability(),
+<span class="ln">162</span>          );
+<span class="ln">163</span>        } else if (deps.providerKeys) {
+<span class="ln">164</span>          providers = modelProviderAvailabilityFor(runtime.harnessId, configuredKeys);
+<span class="ln">165</span>        }
+<span class="ln">166</span>        if (providers &amp;&amp; !modelServiceable(runtime.modelId, providers)) {
+<span class="ln">167</span>          return {
+<span class="ln">168</span>            status: &quot;refused&quot;,
+<span class="ln">169</span>            reason: &quot;that model isn&#x27;t available on this deployment (its provider isn&#x27;t configured)&quot;,
+<span class="ln">170</span>          };
+<span class="ln">171</span>        }
+<span class="ln">172</span>        const configuredWebuiModels = await deps.config.getWebuiModelsDurable(org);
+<span class="ln">173</span>        let enabledWebuiModels: string[] | null = null;
+<span class="ln">174</span>        if (configuredWebuiModels?.length) {
+<span class="ln">175</span>          enabledWebuiModels = [...new Set([...configuredWebuiModels, orgRuntime.modelId])];
+<span class="ln">176</span>        } else if (providers?.openrouter) {
+<span class="ln">177</span>          enabledWebuiModels = [
+<span class="ln">178</span>            ...new Set([
+<span class="ln">179</span>              ...selectableCatalogForHarness(
+<span class="ln">180</span>                await selectableModelCatalog(deps.modelCredentialFetch),
+<span class="ln">181</span>                runtime.harnessId,
+<span class="ln">182</span>              ).map((model) =&gt; model.id),
+<span class="ln">183</span>              ...(orgRuntime.harnessId === runtime.harnessId ? [orgRuntime.modelId] : []),
+<span class="ln">184</span>            ]),
+<span class="ln">185</span>          ];
+<span class="ln">186</span>        }
+<span class="ln">187</span>        const invalidModelOption =
+<span class="ln">188</span>          validateWebTurnModelOptions(req, enabledWebuiModels, providers) ??
+<span class="ln">189</span>          webTurnRuntimeModelRefusal(runtime.modelId, orgRuntime.modelId, configuredWebuiModels);
+<span class="ln">190</span>        if (invalidModelOption) return { status: &quot;refused&quot;, reason: invalidModelOption };</pre></div><p><code>src/api/app-turn.ts:136</code> 先解析 org runtime，<code>src/api/app-turn.ts:141</code> 再解析 target scope runtime，<code>src/api/app-turn.ts:166</code> 用 provider availability 判断模型是否 serviceable。这对企业部署很关键：配置里允许某 harness，不代表每个 provider key 都已经可用。</p><a class="deep-link" href="qm/qm-runtime-router.html">深度阅读 · runtime router 和 worker lease</a></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · WORKER</div><h2 class="sec-title">后台 run 靠租约心跳避免多实例踩踏</h2><p>QM 的 worker 不是简单 while true。<code>src/runs/worker.ts:22</code> 的 processRun 要求 run 已经持有 lease token，<code>src/runs/worker.ts:29</code> 定时 heartbeat，<code>src/runs/worker.ts:37</code> 统计连续 lease lost，超过 <code>src/runs/worker.ts:38</code> 的阈值才取消本地 turn。</p><h3><span class="arr">▸</span>Run processing 包含取消信号和最终 attempt</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/runs/worker.ts</span> · L22-82</span><span>TypeScript</span></div><pre class="code"><span class="ln">22</span>export async function processRun(deps: ProcessDeps, run: Run, opts?: { background?: boolean }): Promise&lt;TurnResult&gt; {
+<span class="ln">23</span>  const token = run.leaseToken;
+<span class="ln">24</span>  if (token === null) throw new Error(`processRun called with an unleased run ${run.id}`);
+<span class="ln">25</span>  const intervalMs = deps.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(deps.leaseTtlMs / 3));
+<span class="ln">26</span>  const cancel = new AbortController();
+<span class="ln">27</span>  let consecutiveLost = 0;
+<span class="ln">28</span>  let leaseLost = false;
+<span class="ln">29</span>  const beat = setInterval(() =&gt; {
+<span class="ln">30</span>    void deps.runs
+<span class="ln">31</span>      .heartbeat(run.id, token, deps.leaseTtlMs)
+<span class="ln">32</span>      .then((alive) =&gt; {
+<span class="ln">33</span>        if (alive) {
+<span class="ln">34</span>          consecutiveLost = 0;
+<span class="ln">35</span>          return;
+<span class="ln">36</span>        }
+<span class="ln">37</span>        consecutiveLost += 1;
+<span class="ln">38</span>        if (consecutiveLost &gt;= LEASE_LOST_CONSECUTIVE &amp;&amp; !leaseLost) {
+<span class="ln">39</span>          leaseLost = true;
+<span class="ln">40</span>          clearInterval(beat);
+<span class="ln">41</span>          console.warn(
+<span class="ln">42</span>            `[worker] run ${run.id} lost its lease after ${consecutiveLost} consecutive beats; cancelling the in-process turn`,
+<span class="ln">43</span>          );
+<span class="ln">44</span>          cancel.abort();
+<span class="ln">45</span>        }
+<span class="ln">46</span>      })
+<span class="ln">47</span>      .catch((err: unknown) =&gt; {
+<span class="ln">48</span>        consecutiveLost = 0;
+<span class="ln">49</span>        console.warn(`[worker] heartbeat failed for run ${run.id} (transient, ignored): ${errMessage(err)}`);
+<span class="ln">50</span>      });
+<span class="ln">51</span>  }, intervalMs);
+<span class="ln">52</span>  let beatStopped = false;
+<span class="ln">53</span>  const stopBeat = (): void =&gt; {
+<span class="ln">54</span>    if (beatStopped) return;
+<span class="ln">55</span>    beatStopped = true;
+<span class="ln">56</span>    clearInterval(beat);
+<span class="ln">57</span>  };
+<span class="ln">58</span>  try {
+<span class="ln">59</span>    const queueMs = run.startedAt !== null ? Math.max(0, run.startedAt - run.createdAt) : undefined;
+<span class="ln">60</span>    const result = await deps.orchestrator.handleTurn({
+<span class="ln">61</span>      ...run.request,
+<span class="ln">62</span>      origin: resolveTurnOrigin(run.request),
+<span class="ln">63</span>      runId: run.id,
+<span class="ln">64</span>      attempt: run.attempts,
+<span class="ln">65</span>      finalAttempt: errorParks(run, deps.runs.maxClaims),
+<span class="ln">66</span>      background: opts?.background ?? false,
+<span class="ln">67</span>      cancel: cancel.signal,
+<span class="ln">68</span>      ...(queueMs !== undefined ? { queueMs } : {}),
+<span class="ln">69</span>    });
+<span class="ln">70</span>    stopBeat();
+<span class="ln">71</span>    await deps.runs.complete(run.id, token, result);
+<span class="ln">72</span>    return result;
+<span class="ln">73</span>  } catch (err) {
+<span class="ln">74</span>    stopBeat();
+<span class="ln">75</span>    await deps.runs.fail(run.id, token, errMessage(err), {
+<span class="ln">76</span>      retry: !(err instanceof NonRetryableTurnError),
+<span class="ln">77</span>    });
+<span class="ln">78</span>    throw err;
+<span class="ln">79</span>  } finally {
+<span class="ln">80</span>    stopBeat();
+<span class="ln">81</span>  }
+<span class="ln">82</span>}</pre></div><p><code>src/runs/worker.ts:60</code> 调 orchestrator.handleTurn 时会带 runId、attempt、finalAttempt、background 和 cancel signal；<code>src/runs/worker.ts:71</code> 完成 run，<code>src/runs/worker.ts:75</code> 失败时决定是否 retry。这种结构使长任务、自动化和恢复逻辑可以共用同一条执行语义。</p><h3><span class="arr">▸</span>Worker loop 有 transient claim backoff</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/runs/worker.ts</span> · L101-187</span><span>TypeScript</span></div><pre class="code"><span class="ln">101</span>export function createWorker(deps: WorkerDeps): Worker {
+<span class="ln">102</span>  const workerId = deps.workerId ?? `w-${randomUUID().slice(0, 8)}`;
+<span class="ln">103</span>  const pollMs = deps.pollMs ?? 50;
+<span class="ln">104</span>  let stopped = false;
+<span class="ln">105</span>  let loopDone: Promise&lt;void&gt; | null = null;
+<span class="ln">106</span>  let inFlight: { runId: string; leaseToken: string; threadRef: string } | null = null;
+<span class="ln">107</span>  let releasedLeaseToken: string | null = null;
+<span class="ln">108</span>  let releasing: Promise&lt;void&gt; | null = null;
+<span class="ln">109</span>
+<span class="ln">110</span>  async function loop(): Promise&lt;void&gt; {
+<span class="ln">111</span>    let claimFailures = 0;
+<span class="ln">112</span>    while (!stopped) {
+<span class="ln">113</span>      if (deps.canClaim &amp;&amp; !deps.canClaim()) {
+<span class="ln">114</span>        await sleep(pollMs);
+<span class="ln">115</span>        continue;
+<span class="ln">116</span>      }
+<span class="ln">117</span>      let run: Run | null;
+<span class="ln">118</span>      try {
+<span class="ln">119</span>        run = await deps.runs.claim(workerId, deps.leaseTtlMs);
+<span class="ln">120</span>        claimFailures = 0;
+<span class="ln">121</span>      } catch (e) {
+<span class="ln">122</span>        claimFailures += 1;
+<span class="ln">123</span>        if (claimFailures &gt;= CLAIM_FAIL_CRASH_CONSECUTIVE) throw e;
+<span class="ln">124</span>        swallow(&quot;worker: claim failed (transient, retrying)&quot;, e);
+<span class="ln">125</span>        await sleep(Math.min(pollMs * 2 ** Math.min(claimFailures, 5), 5_000));
+<span class="ln">126</span>        continue;
+<span class="ln">127</span>      }
+<span class="ln">128</span>      if (!run) {
+<span class="ln">129</span>        await sleep(pollMs);
+<span class="ln">130</span>        continue;
+<span class="ln">131</span>      }
+<span class="ln">132</span>      if (stopped) {
+<span class="ln">133</span>        if (run.leaseToken !== null)
+<span class="ln">134</span>          await deps.runs
+<span class="ln">135</span>            .releaseLease(run.id, run.leaseToken)
+<span class="ln">136</span>            .catch((e) =&gt; swallow(&quot;worker: post-stop claim handback failed&quot;, e));
+<span class="ln">137</span>        break;
+<span class="ln">138</span>      }
+<span class="ln">139</span>      inFlight =
+<span class="ln">140</span>        run.leaseToken !== null ? { runId: run.id, leaseToken: run.leaseToken, threadRef: run.sessionId } : null;
+<span class="ln">141</span>      deps.onClaimed?.();
+<span class="ln">142</span>      try {
+<span class="ln">143</span>        await processRun(deps, run, { background: true });
+<span class="ln">144</span>      } catch (e) {
+<span class="ln">145</span>        swallow(&quot;worker: background run crashed&quot;, e);
+<span class="ln">146</span>      } finally {
+<span class="ln">147</span>        inFlight = null;
+<span class="ln">148</span>      }
+<span class="ln">149</span>    }
+<span class="ln">150</span>  }
+<span class="ln">151</span>
+<span class="ln">152</span>  return {
+<span class="ln">153</span>    start() {
+<span class="ln">154</span>      if (loopDone) return;
+<span class="ln">155</span>      stopped = false;
+<span class="ln">156</span>      loopDone = loop();
+<span class="ln">157</span>    },
+<span class="ln">158</span>    busy() {
+<span class="ln">159</span>      return inFlight !== null;
+<span class="ln">160</span>    },
+<span class="ln">161</span>    releaseInFlight() {
+<span class="ln">162</span>      const held = inFlight;
+<span class="ln">163</span>      if (!held || held.leaseToken === releasedLeaseToken) return Promise.resolve();
+<span class="ln">164</span>      if (releasing) return releasing;
+<span class="ln">165</span>      releasing = (async () =&gt; {
+<span class="ln">166</span>        try {
+<span class="ln">167</span>          if (await deps.runs.heartbeat(held.runId, held.leaseToken, deps.leaseTtlMs)) {
+<span class="ln">168</span>            const session = await deps.sessions.getByThread(held.threadRef);
+<span class="ln">169</span>            if (session) await deps.sessions.forceReleaseLease(session.id);
+<span class="ln">170</span>            await deps.runs.releaseLease(held.runId, held.leaseToken);
+<span class="ln">171</span>          }
+<span class="ln">172</span>          releasedLeaseToken = held.leaseToken;
+<span class="ln">173</span>        } catch (e) {
+<span class="ln">174</span>          swallow(&quot;worker: releaseInFlight failed&quot;, e);
+<span class="ln">175</span>        } finally {
+<span class="ln">176</span>          releasing = null;
+<span class="ln">177</span>        }
+<span class="ln">178</span>      })();
+<span class="ln">179</span>      return releasing;
+<span class="ln">180</span>    },
+<span class="ln">181</span>    async stop(drainMs = STOP_DRAIN_MS) {
+<span class="ln">182</span>      stopped = true;
+<span class="ln">183</span>      await Promise.race([loopDone, sleep(drainMs, { unref: true })]);
+<span class="ln">184</span>      loopDone = null;
+<span class="ln">185</span>    },
+<span class="ln">186</span>  };
+<span class="ln">187</span>}</pre></div><p><code>src/runs/worker.ts:119</code> 从 RunStore claim，<code>src/runs/worker.ts:123</code> 只有连续失败到阈值才崩溃，<code>src/runs/worker.ts:161</code> 还提供 releaseInFlight。它适合 blue-green 或多实例部署，因为 in-flight run 可以被显式释放而不是僵在某个进程里。</p></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · SANDBOX & SKILLS</div><h2 class="sec-title">沙箱承载凭据、技能和文件系统的交汇点</h2><p><code>src/core/orchestrator/sandboxes.ts:60</code> 的 createTurnSandboxes 很像 turn 的硬件抽象层。它拿到 actor、session、resolution layers、connectorEnv、skillScopes、brokeredTools，再把这些材料推到 sandbox handle 上。</p><h3><span class="arr">▸</span>凭据 wrapper 是运行时生成的</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/core/orchestrator/sandboxes.ts</span> · L93-130</span><span>TypeScript</span></div><pre class="code"><span class="ln">93</span>  let ownerAuthCommand: ((command: string) =&gt; string) | undefined;
+<span class="ln">94</span>  if (ownerAuthAvailable) {
+<span class="ln">95</span>    ownerAuthCommand = (command) =&gt; {
+<span class="ln">96</span>      for (const credentialId of ownerEnvCredentialIds) {
+<span class="ln">97</span>        deps.auditLog.record({
+<span class="ln">98</span>          at: Date.now(),
+<span class="ln">99</span>          principalId: actor.id,
+<span class="ln">100</span>          action: &quot;keychain.materialize&quot;,
+<span class="ln">101</span>          resource: `${credentialId} (owner-auth command)`,
+<span class="ln">102</span>          scopeLabel: scopeId,
+<span class="ln">103</span>        });
+<span class="ln">104</span>      }
+<span class="ln">105</span>      const invoked = [...brokerVended.values()].filter(({ tool }) =&gt;
+<span class="ln">106</span>        new RegExp(`(^|[\\s;&amp;|()])${tool.binary}(?=$|[\\s;&amp;|()])`).test(command),
+<span class="ln">107</span>      );
+<span class="ln">108</span>      for (const { tool } of invoked) {
+<span class="ln">109</span>        deps.auditLog.record({
+<span class="ln">110</span>          at: Date.now(),
+<span class="ln">111</span>          principalId: actor.id,
+<span class="ln">112</span>          action: &quot;credential.materialize&quot;,
+<span class="ln">113</span>          resource: `${tool.service} (ephemeral broker)`,
+<span class="ln">114</span>          scopeLabel: scopeId,
+<span class="ln">115</span>        });
+<span class="ln">116</span>      }
+<span class="ln">117</span>      const exports = Object.entries(ownerAuthEnv)
+<span class="ln">118</span>        .map(([key, value]) =&gt; `${key}=${shq(value)}`)
+<span class="ln">119</span>        .join(&quot; &quot;);
+<span class="ln">120</span>      const wrappers = invoked
+<span class="ln">121</span>        .map(({ tool, env }) =&gt; {
+<span class="ln">122</span>          const brokerExports = Object.entries(env)
+<span class="ln">123</span>            .map(([key, value]) =&gt; `${key}=${shq(value)}`)
+<span class="ln">124</span>            .join(&quot; &quot;);
+<span class="ln">125</span>          return `${tool.binary}() { ${brokerExports} command ${tool.binary} &quot;$@&quot;; }; `;
+<span class="ln">126</span>        })
+<span class="ln">127</span>        .join(&quot;&quot;);
+<span class="ln">128</span>      return `${exports ? `export ${exports}; ` : &quot;&quot;}${wrappers}${command}`;
+<span class="ln">129</span>    };
+<span class="ln">130</span>  }</pre></div><p><code>src/core/orchestrator/sandboxes.ts:97</code> 会对 owner-auth command 记录 keychain materialize 审计，<code>src/core/orchestrator/sandboxes.ts:105</code> 检测命令里调用了哪些 brokered tool，<code>src/core/orchestrator/sandboxes.ts:120</code> 再生成 shell wrapper。这里的重点是凭据不是永久塞进环境，而是按实际调用路径记录和注入。</p><h3><span class="arr">▸</span>Sandbox provision 带 resolution layers 和 egress token</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/core/orchestrator/sandboxes.ts</span> · L198-260</span><span>TypeScript</span></div><pre class="code"><span class="ln">198</span>  const doProvision = async (emit: typeof emitGapWork): Promise&lt;SandboxHandle&gt; =&gt; {
+<span class="ln">199</span>    const provisionStart = Date.now();
+<span class="ln">200</span>    const handle = await deps.sandbox.provision(resolution.layers, {
+<span class="ln">201</span>      env: connectorEnv,
+<span class="ln">202</span>      egress: resolution.egress,
+<span class="ln">203</span>      ...(egressTokenForTurn ? { egressToken: egressTokenForTurn } : {}),
+<span class="ln">204</span>      ...(onSandboxStatus ? { onStatus: onSandboxStatus } : {}),
+<span class="ln">205</span>    });
+<span class="ln">206</span>    box.pending = handle;
+<span class="ln">207</span>    emit(&quot;provision&quot;, provisionStart, Date.now());
+<span class="ln">208</span>    box.provisionMs = Date.now() - provisionStart;
+<span class="ln">209</span>    handle.env = { ...handle.env, AGENT_OUTBOX: `${handle.rootDir}/${turnOutboxDir}` };
+<span class="ln">210</span>    if (deps.keychain) {
+<span class="ln">211</span>      const deviceFlowStart = Date.now();
+<span class="ln">212</span>      const restoreOwnerId =
+<span class="ln">213</span>        input.origin.kind === &quot;automation&quot; &amp;&amp; input.origin.useOwnerKeychain &amp;&amp; !isolateOwnerKeychain
+<span class="ln">214</span>          ? actor.id
+<span class="ln">215</span>          : deviceFlowCredOwner(memoryScopeId, actor.id);
+<span class="ln">216</span>      const resetGenerations = new Map&lt;string, string&gt;();
+<span class="ln">217</span>      for (const tool of brokeredTools) {
+<span class="ln">218</span>        if (cutoverModeOf(tool.service) !== &quot;legacy&quot;) continue;
+<span class="ln">219</span>        const generation = await deps.deviceFlowCutover?.residentResetGeneration(memoryScopeId, tool.service);
+<span class="ln">220</span>        if (generation) resetGenerations.set(tool.service, generation);
+<span class="ln">221</span>      }
+<span class="ln">222</span>      const owned = resetGenerations.size ? await deps.keychain.listByOwner(restoreOwnerId) : [];
+<span class="ln">223</span>      const resetServices = [...resetGenerations.keys()].filter((service) =&gt;
+<span class="ln">224</span>        owned.some((record) =&gt; record.service === service),
+<span class="ln">225</span>      );
+<span class="ln">226</span>      const removeServices = [...new Set([...quarantinedServices, ...resetServices])];
+<span class="ln">227</span>      if (removeServices.length) {
+<span class="ln">228</span>        await removeDeviceFlowLogins({
+<span class="ln">229</span>          sandbox: deps.sandbox,
+<span class="ln">230</span>          handle,
+<span class="ln">231</span>          keychain: deps.keychain,
+<span class="ln">232</span>          ownerId: restoreOwnerId,
+<span class="ln">233</span>          services: removeServices,
+<span class="ln">234</span>          canonicalRoots: brokeredTools
+<span class="ln">235</span>            .filter((tool) =&gt; removeServices.includes(tool.service))
+<span class="ln">236</span>            .flatMap((tool) =&gt; tool.roots),
+<span class="ln">237</span>        });
+<span class="ln">238</span>      }
+<span class="ln">239</span>      try {
+<span class="ln">240</span>        const restoredServices = await materializeDeviceFlowLogins({
+<span class="ln">241</span>          sandbox: deps.sandbox,
+<span class="ln">242</span>          handle,
+<span class="ln">243</span>          keychain: deps.keychain,
+<span class="ln">244</span>          ownerId: restoreOwnerId,
+<span class="ln">245</span>          ...(quarantinedServices.length ? { excludeServices: quarantinedServices } : {}),
+<span class="ln">246</span>        });
+<span class="ln">247</span>        for (const service of restoredServices) {
+<span class="ln">248</span>          deps.credentialUsage?.record({
+<span class="ln">249</span>            slug: `keychain:${service}`,
+<span class="ln">250</span>            host: &quot;local&quot;,
+<span class="ln">251</span>            status: cutoverModeOf(service) === &quot;prefer_ephemeral&quot; ? &quot;legacy_retained&quot; : &quot;legacy_restored&quot;,
+<span class="ln">252</span>            scopeLabel: scopeId,
+<span class="ln">253</span>            principalId: actor.id,
+<span class="ln">254</span>          });
+<span class="ln">255</span>        }
+<span class="ln">256</span>        for (const [service, generation] of resetGenerations) {
+<span class="ln">257</span>          await deps.deviceFlowCutover?.markResidentReset(memoryScopeId, service, generation);
+<span class="ln">258</span>        }
+<span class="ln">259</span>      } catch (err) {
+<span class="ln">260</span>        deps.errors?.record({</pre></div><p><code>src/core/orchestrator/sandboxes.ts:200</code> 把 resolution.layers 传给 sandbox.provision，<code>src/core/orchestrator/sandboxes.ts:202</code> 同步 egress policy，<code>src/core/orchestrator/sandboxes.ts:209</code> 设置 AGENT_OUTBOX。随后 <code>src/core/orchestrator/sandboxes.ts:240</code> 恢复 device-flow logins，形成“scope workspace + credential + outbox”的 turn computer。</p><h3><span class="arr">▸</span>Skill materialization 用 hash 避免重复铺文件</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/skills/materialize.ts</span> · L44-86</span><span>TypeScript</span></div><pre class="code"><span class="ln">44</span>function indexHash(resolved: SkillResolution[]): string {
+<span class="ln">45</span>  const h = createHash(&quot;sha256&quot;);
+<span class="ln">46</span>  const entries = resolved
+<span class="ln">47</span>    .filter((r) =&gt; r.skill)
+<span class="ln">48</span>    .map((r) =&gt; `${r.skill!.manifest.name}\0${renderedBody(r)}`)
+<span class="ln">49</span>    .sort();
+<span class="ln">50</span>  for (const e of entries) {
+<span class="ln">51</span>    h.update(e);
+<span class="ln">52</span>    h.update(&quot;\n&quot;);
+<span class="ln">53</span>  }
+<span class="ln">54</span>  return h.digest(&quot;hex&quot;);
+<span class="ln">55</span>}
+<span class="ln">56</span>
+<span class="ln">57</span>function treeHash(resolution: SkillResolution, bundles: SkillBundle[]): string {
+<span class="ln">58</span>  const m = resolution.skill!.manifest;
+<span class="ln">59</span>  const files = [...(m.files ?? [])]
+<span class="ln">60</span>    .map((f) =&gt; `${f.path}\0${f.content}\0${f.executable === true ? &quot;1&quot; : &quot;0&quot;}`)
+<span class="ln">61</span>    .sort()
+<span class="ln">62</span>    .join(&quot;\0&quot;);
+<span class="ln">63</span>  const folded = [...bundles]
+<span class="ln">64</span>    .map((b) =&gt; b.hash)
+<span class="ln">65</span>    .sort()
+<span class="ln">66</span>    .join(&quot;\0&quot;);
+<span class="ln">67</span>  return createHash(&quot;sha256&quot;)
+<span class="ln">68</span>    .update(renderedBody(resolution))
+<span class="ln">69</span>    .update(&quot;\0&quot;)
+<span class="ln">70</span>    .update(files)
+<span class="ln">71</span>    .update(&quot;\0&quot;)
+<span class="ln">72</span>    .update(folded)
+<span class="ln">73</span>    .digest(&quot;hex&quot;);
+<span class="ln">74</span>}
+<span class="ln">75</span>
+<span class="ln">76</span>function packRoot(resolution: SkillResolution): string | null {
+<span class="ln">77</span>  return resolution.skill?.pack ? `${SKILL_PACKS_DIR}/${safeSkillDirName(resolution.skill.pack.packId)}` : null;
+<span class="ln">78</span>}
+<span class="ln">79</span>
+<span class="ln">80</span>function renderedBody(resolution: SkillResolution): string {
+<span class="ln">81</span>  const body = resolution.skill!.manifest.body;
+<span class="ln">82</span>  const root = packRoot(resolution);
+<span class="ln">83</span>  return root
+<span class="ln">84</span>    ? `${body}\n\n## Pack files\nResolve repository-relative shared-file paths against \`${root}/\`; pack files never overwrite the workspace root.`
+<span class="ln">85</span>    : body;
+<span class="ln">86</span>}</pre></div><p><code>src/skills/materialize.ts:44</code> 计算 indexHash，<code>src/skills/materialize.ts:57</code> 计算 treeHash，<code>src/skills/materialize.ts:80</code> 会把 pack root 提示追加到 rendered body。这个细节说明 QM 把 skill 当成可投影、可版本化的文件树，而不是每轮盲目复制目录。</p><h3><span class="arr">▸</span>Workspace path escape 被最小层拦住</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/workspace/workspace-store.ts</span> · L16-70</span><span>TypeScript</span></div><pre class="code"><span class="ln">16</span>function safeJoin(baseDir: string, relPath: string): string {
+<span class="ln">17</span>  const target = resolve(baseDir, relPath);
+<span class="ln">18</span>  const rel = relative(baseDir, target);
+<span class="ln">19</span>  if (rel.startsWith(&quot;..&quot;) || isAbsolute(rel)) {
+<span class="ln">20</span>    throw new Error(`path escapes workspace: ${relPath}`);
+<span class="ln">21</span>  }
+<span class="ln">22</span>  return target;
+<span class="ln">23</span>}
+<span class="ln">24</span>
+<span class="ln">25</span>export function createLocalWorkspaceStore(rootDir: string): WorkspaceStore {
+<span class="ln">26</span>  const base = resolve(rootDir, &quot;workspaces&quot;);
+<span class="ln">27</span>
+<span class="ln">28</span>  function scopeDir(scopeId: ScopeId): string {
+<span class="ln">29</span>    return join(base, scopeStorageKey(scopeId));
+<span class="ln">30</span>  }
+<span class="ln">31</span>
+<span class="ln">32</span>  const store: WorkspaceStore = {
+<span class="ln">33</span>    scopeDir,
+<span class="ln">34</span>    async ensureScope(scopeId) {
+<span class="ln">35</span>      await mkdir(scopeDir(scopeId), { recursive: true });
+<span class="ln">36</span>    },
+<span class="ln">37</span>    async read(scopeId, relPath) {
+<span class="ln">38</span>      const path = safeJoin(scopeDir(scopeId), relPath);
+<span class="ln">39</span>      try {
+<span class="ln">40</span>        return await readFile(path, &quot;utf8&quot;);
+<span class="ln">41</span>      } catch {
+<span class="ln">42</span>        return null;
+<span class="ln">43</span>      }
+<span class="ln">44</span>    },
+<span class="ln">45</span>    async readBytes(scopeId, relPath) {
+<span class="ln">46</span>      const path = safeJoin(scopeDir(scopeId), relPath);
+<span class="ln">47</span>      try {
+<span class="ln">48</span>        return await readFile(path);
+<span class="ln">49</span>      } catch {
+<span class="ln">50</span>        return null;
+<span class="ln">51</span>      }
+<span class="ln">52</span>    },
+<span class="ln">53</span>    async write(scopeId, relPath, data) {
+<span class="ln">54</span>      const path = safeJoin(scopeDir(scopeId), relPath);
+<span class="ln">55</span>      await mkdir(dirname(path), { recursive: true });
+<span class="ln">56</span>      await writeFile(path, data);
+<span class="ln">57</span>    },
+<span class="ln">58</span>    async remove(scopeId, relPath) {
+<span class="ln">59</span>      await rm(safeJoin(scopeDir(scopeId), relPath), { force: true });
+<span class="ln">60</span>    },
+<span class="ln">61</span>    async list(scopeId) {
+<span class="ln">62</span>      try {
+<span class="ln">63</span>        const entries = await readdir(scopeDir(scopeId), { recursive: true, withFileTypes: true });
+<span class="ln">64</span>        return entries.filter((e) =&gt; e.isFile()).map((e) =&gt; join(e.parentPath, e.name));
+<span class="ln">65</span>      } catch {
+<span class="ln">66</span>        return [];
+<span class="ln">67</span>      }
+<span class="ln">68</span>    },
+<span class="ln">69</span>  };
+<span class="ln">70</span>  return store;</pre></div><p><code>src/workspace/workspace-store.ts:16</code> 的 safeJoin 是很小但关键的底座：<code>src/workspace/workspace-store.ts:19</code> 拒绝向上跳出 workspace，<code>src/workspace/workspace-store.ts:53</code> 写入前创建父目录。多人 scope 和 Agent 写文件时，这类小函数比大口号更重要。</p><a class="deep-link" href="qm/qm-sandbox-skills.html">深度阅读 · sandbox、skills 与 credential broker</a></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · TESTS</div><h2 class="sec-title">测试覆盖的是权限语义，不只是函数返回值</h2><p>我最喜欢的测试证据在 cron scope shared：<code>test/cron-scope-shared.test.ts:36</code> 验证 scopeShared cron 会以 owner 身份运行但携带成员 audience，<code>test/cron-scope-shared.test.ts:70</code> 验证 owner 离开 managed group 后不能继续读，<code>test/cron-scope-shared.test.ts:100</code> 验证 scopeShared owner 离开当前 roster 会被禁用。</p><h3><span class="arr">▸</span>Scope shared 的正向测试</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">test/cron-scope-shared.test.ts</span> · L35-68</span><span>TypeScript</span></div><pre class="code"><span class="ln">35</span>describe(&quot;runTrigger: scopeShared unions the owner&#x27;s keychain into the scope run&quot;, () =&gt; {
+<span class="ln">36</span>  it(&quot;fires AS the owner, flags ownerKeychainUnion, carries the member audience, and delivers to the channel&quot;, async () =&gt; {
+<span class="ln">37</span>    const { deps, seen } = captureDeps();
+<span class="ln">38</span>    const out = await runTrigger(deps, {
+<span class="ln">39</span>      owner: &quot;U-carol&quot;,
+<span class="ln">40</span>      ownerScopeId: scopeId(&quot;channel&quot;, &quot;C-eng&quot;),
+<span class="ln">41</span>      input: &quot;compose&quot;,
+<span class="ln">42</span>      fireKey: &quot;ss1&quot;,
+<span class="ln">43</span>      surface: &quot;cron&quot;,
+<span class="ln">44</span>      runAs: &quot;scopeShared&quot;,
+<span class="ln">45</span>      members,
+<span class="ln">46</span>      destination: toChannel,
+<span class="ln">47</span>    });
+<span class="ln">48</span>    assert.equal(out.ran, true);
+<span class="ln">49</span>    assert.equal(seen.length, 1);
+<span class="ln">50</span>    const req = seen[0]!;
+<span class="ln">51</span>    assert.equal(req.ownerKeychainUnion, true, &quot;the fire flags the owner∪scope keychain union&quot;);
+<span class="ln">52</span>    assert.equal(req.actor.externalId, &quot;U-carol&quot;, &quot;runs as the owner, not a substituted scope member&quot;);
+<span class="ln">53</span>    assert.equal(req.conversation.kind, &quot;channel&quot;);
+<span class="ln">54</span>    assert.equal(req.conversation.audience?.length, 2);
+<span class="ln">55</span>    assert.equal((await deps.deliveries.pending(&quot;slack&quot;)).length, 1);
+<span class="ln">56</span>  });
+<span class="ln">57</span>
+<span class="ln">58</span>  it(&quot;an owner cron does NOT set the union flag&quot;, async () =&gt; {
+<span class="ln">59</span>    const { deps, seen } = captureDeps();
+<span class="ln">60</span>    await runTrigger(deps, {
+<span class="ln">61</span>      owner: &quot;U-carol&quot;,
+<span class="ln">62</span>      ownerScopeId: scopeId(&quot;personal&quot;, &quot;U-carol&quot;),
+<span class="ln">63</span>      input: &quot;x&quot;,
+<span class="ln">64</span>      fireKey: &quot;o1&quot;,
+<span class="ln">65</span>      surface: &quot;cron&quot;,
+<span class="ln">66</span>    });
+<span class="ln">67</span>    assert.equal(seen[0]!.ownerKeychainUnion, undefined);
+<span class="ln">68</span>  });</pre></div><p><code>test/cron-scope-shared.test.ts:51</code> 断言 ownerKeychainUnion 被设置，<code>test/cron-scope-shared.test.ts:52</code> 断言 actor 仍是 owner，<code>test/cron-scope-shared.test.ts:55</code> 断言 delivery 入队。这个组合正好覆盖“用 owner 凭据、发到共享 scope”的危险边界。</p><h3><span class="arr">▸</span>离开 roster 的反向测试</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">test/cron-scope-shared.test.ts</span> · L70-116</span><span>TypeScript</span></div><pre class="code"><span class="ln">70</span>  it(&quot;an owner-mode task cannot read a managed group after leaving its current roster&quot;, async () =&gt; {
+<span class="ln">71</span>    const { deps, seen } = captureDeps();
+<span class="ln">72</span>    deps.currentScopeMembers = async () =&gt; [members[1]!];
+<span class="ln">73</span>    const out = await runTrigger(deps, {
+<span class="ln">74</span>      owner: &quot;U-owner&quot;,
+<span class="ln">75</span>      ownerScopeId: scopeId(&quot;group&quot;, &quot;web-project-p1&quot;),
+<span class="ln">76</span>      input: &quot;x&quot;,
+<span class="ln">77</span>      fireKey: &quot;owner-revoked&quot;,
+<span class="ln">78</span>      surface: &quot;cron&quot;,
+<span class="ln">79</span>    });
+<span class="ln">80</span>    assert.equal(out.authzFailed, false);
+<span class="ln">81</span>    assert.equal(out.ran, true);
+<span class="ln">82</span>    assert.match(out.note ?? &quot;&quot;, /no longer a member/);
+<span class="ln">83</span>    assert.equal(seen.length, 0);
+<span class="ln">84</span>  });
+<span class="ln">85</span>
+<span class="ln">86</span>  it(&quot;a scopeFloor cron does NOT set the union flag (it runs at the scope floor, not the owner&#x27;s creds)&quot;, async () =&gt; {
+<span class="ln">87</span>    const { deps, seen } = captureDeps();
+<span class="ln">88</span>    await runTrigger(deps, {
+<span class="ln">89</span>      owner: &quot;U-carol&quot;,
+<span class="ln">90</span>      ownerScopeId: scopeId(&quot;channel&quot;, &quot;C-eng&quot;),
+<span class="ln">91</span>      input: &quot;x&quot;,
+<span class="ln">92</span>      fireKey: &quot;f1&quot;,
+<span class="ln">93</span>      surface: &quot;cron&quot;,
+<span class="ln">94</span>      runAs: &quot;scopeFloor&quot;,
+<span class="ln">95</span>      members,
+<span class="ln">96</span>    });
+<span class="ln">97</span>    assert.equal(seen[0]!.ownerKeychainUnion, undefined);
+<span class="ln">98</span>  });
+<span class="ln">99</span>
+<span class="ln">100</span>  it(&quot;disables scopeShared when its owner left the current roster&quot;, async () =&gt; {
+<span class="ln">101</span>    const { deps, seen } = captureDeps();
+<span class="ln">102</span>    deps.currentScopeMembers = async () =&gt; [members[1]!];
+<span class="ln">103</span>    const out = await runTrigger(deps, {
+<span class="ln">104</span>      owner: &quot;U-owner&quot;,
+<span class="ln">105</span>      ownerScopeId: scopeId(&quot;channel&quot;, &quot;C-eng&quot;),
+<span class="ln">106</span>      input: &quot;x&quot;,
+<span class="ln">107</span>      fireKey: &quot;ss-revoked&quot;,
+<span class="ln">108</span>      surface: &quot;cron&quot;,
+<span class="ln">109</span>      runAs: &quot;scopeShared&quot;,
+<span class="ln">110</span>      members,
+<span class="ln">111</span>    });
+<span class="ln">112</span>    assert.equal(out.authzFailed, true);
+<span class="ln">113</span>    assert.equal(out.ran, false);
+<span class="ln">114</span>    assert.match(out.note ?? &quot;&quot;, /no longer a current scope member/);
+<span class="ln">115</span>    assert.equal(seen.length, 0);
+<span class="ln">116</span>  });</pre></div><p><code>test/cron-scope-shared.test.ts:80</code> 和 <code>test/cron-scope-shared.test.ts:112</code> 分别覆盖 owner-mode 与 scopeShared 的拒绝路径。对一个 multiplayer agent harness 来说，这比单测 prompt formatting 更有价值，因为它证明权限跟成员资格变化联动。</p></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div><h2 class="sec-title">技术亮点</h2><h3><span class="arr">▸</span>多 harness 可替换，但不是任意可选</h3><p><code>src/harness/harness-router.ts:84</code> 用 adapters map 组合多个 harness，<code>src/harness/harness-router.ts:99</code> 发现 session 切换 harness 时会 reset prior 和 current session。这个设计比单纯 provider switch 更稳，能避免不同 runtime 共享一段脏 session 状态。</p><h3><span class="arr">▸</span>Run lease 是多实例部署的基本盘</h3><p><code>src/runs/worker.ts:167</code> releaseInFlight 前会再次 heartbeat，<code>src/runs/worker.ts:170</code> 才 releaseLease。这个顺序让 worker 停机、滚动升级和手动释放不会轻易释放别的进程已经接管的 run。</p><h3><span class="arr">▸</span>Skill 投影考虑 pack 和 stale cleanup</h3><p><code>src/skills/materialize.ts:222</code> 处理旧 marker，<code>src/skills/materialize.ts:237</code> 清理不再 active 的 skill name，<code>src/skills/materialize.ts:252</code> 重新 lay 当前 entries。这里能看出作者在处理长期 resident sandbox，而不只是一轮临时容器。</p></section>
+<section class="sec" id="section-6"><div class="sec-no">§ <b>06</b> · RISKS</div><h2 class="sec-title">风险与缺口</h2><h3><span class="arr">▸</span>复杂度已经接近平台级系统</h3><p><code>src/core/orchestrator.ts:129</code> 暴露 OrchestratorInput/Deps，<code>src/core/orchestrator.ts:189</code> 一次创建会绑定大量依赖。好处是能力完整，坏处是新贡献者很难只靠 README 找到行为入口。</p><h3><span class="arr">▸</span>凭据与 resident sandbox 需要更强运维纪律</h3><p><code>src/core/orchestrator/sandboxes.ts:158</code> 有 scrubOwnerAuthHandle，<code>src/core/orchestrator/sandboxes.ts:164</code> 会 removeDeviceFlowLogins，但任何 resident computer 体系都要求部署者理解备份、恢复、隔离和审计边界。</p><h3><span class="arr">▸</span>适合组织内部，不适合轻量个人玩具</h3><p><code>src/api/app-turn.ts:67</code> 到 <code>src/api/app-turn.ts:100</code> 的成员与 scope 检查说明它面向多人组织场景；如果只是单人本地 coding agent，QM 的控制面可能显得太重。</p><a class="deep-link" href="qm/qm-runtime-router.html">深度阅读 · runtime router</a><a class="deep-link" href="qm/qm-sandbox-skills.html">深度阅读 · sandbox skills</a></section>
+<div class="foot"><span>Generated · 2026-08-03</span><span>Source · <a href="https://github.com/yc-software/qm">yc-software/qm</a></span><span><a href="index.html">← 返回 Trending 索引</a></span><span><a href="qm.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}}),{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}})();</script></body></html>

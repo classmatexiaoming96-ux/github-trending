@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qm runtime router · 源码观测台</title><meta name="description" content="runtime routing and worker lease analysis">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#7fd7ff; --star-soft:#a9e8ff; --star-deep:#3c98c9; }
+.flow { white-space:pre; overflow:auto; font-family:var(--mono); font-size:12px; line-height:1.7; padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--panel); color:var(--text-2); }
+.source-note { color:var(--text-dim); font-family:var(--mono); font-size:12px; }
+</style></head><body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">qm<b>QM</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">qm<b>QM</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · Node/Fastify/Postgres</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>运行时路由</a></li><li><a href="#section-2"><span class="idx">02</span>租约 worker</a></li><li><a href="#section-3"><span class="idx">03</span>沙箱与技能</a></li><li><a href="#section-4"><span class="idx">04</span>测试证据</a></li><li><a href="#section-5"><span class="idx">05</span>亮点</a></li><li><a href="#section-6"><span class="idx">06</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★7,463 · 2026-07-29</div><div><a href="https://github.com/yc-software/qm" target="_blank">yc-software/qm</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">Runtime Router</div><h1 class="hero-title">qm <em>runtime router</em></h1><p class="hero-desc">这一页专拆 QM 如何从 Web turn 请求一路解析到具体 harness/model，并让 worker 用租约语义执行后台 run。</p></div><div><div class="flow">request.harness/model
+  │
+  ▼
+resolveRuntimeChoiceDurable
+  │ approved + provider availability
+  ▼
+harness adapter runTurn
+  │
+  ▼
+worker complete/fail run</div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">从请求到 harness 的硬边界</h2><p><code>src/api/app-turn.ts:127</code> 先定义 fallback harness，<code>src/api/app-turn.ts:136</code> 解析 org runtime，<code>src/api/app-turn.ts:141</code> 再解析目标 scope runtime。它不是把 UI 选项直接传给模型，而是先经过 durable config。</p><p><code>src/harness/harness-router.ts:63</code> 读取 approved harnesses，<code>src/harness/harness-router.ts:70</code> 构造同步 view 复用同一套 resolve 逻辑，这让 durable 和内存路径不会分叉。</p><h3><span class="arr">▸</span>RuntimeChoice 结构很小，语义很重</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/harness/harness-router.ts</span> · L7-54</span><span>TypeScript</span></div><pre class="code"><span class="ln">7</span>export interface RuntimeChoice {
+<span class="ln">8</span>  harnessId: HarnessId;
+<span class="ln">9</span>  modelId: string;
+<span class="ln">10</span>}
+<span class="ln">11</span>
+<span class="ln">12</span>export function resolveRuntimeChoice(
+<span class="ln">13</span>  config: Pick&lt;ScopedConfigStore, &quot;getApprovedHarnesses&quot; | &quot;getRuntimeSelection&quot; | &quot;getBaseModel&quot;&gt;,
+<span class="ln">14</span>  orgScopeId: ScopeId,
+<span class="ln">15</span>  scope: ScopeId,
+<span class="ln">16</span>  fallback: RuntimeChoice,
+<span class="ln">17</span>  requested?: Partial&lt;RuntimeChoice&gt;,
+<span class="ln">18</span>): RuntimeChoice {
+<span class="ln">19</span>  const approved = config.getApprovedHarnesses() ?? [fallback.harnessId];
+<span class="ln">20</span>  const orgStored = config.getRuntimeSelection(orgScopeId);
+<span class="ln">21</span>  const orgLegacy = config.getBaseModel(orgScopeId);
+<span class="ln">22</span>  const configuredOrg =
+<span class="ln">23</span>    orgStored &amp;&amp; isHarnessId(orgStored.harnessId)
+<span class="ln">24</span>      ? { harnessId: orgStored.harnessId, modelId: orgStored.modelId }
+<span class="ln">25</span>      : { harnessId: fallback.harnessId, modelId: orgLegacy ?? fallback.modelId };
+<span class="ln">26</span>  const firstApproved = approved.find(isHarnessId) ?? fallback.harnessId;
+<span class="ln">27</span>  const safeFallback =
+<span class="ln">28</span>    approved.includes(fallback.harnessId) &amp;&amp; modelSupportedByHarness(fallback.modelId, fallback.harnessId)
+<span class="ln">29</span>      ? fallback
+<span class="ln">30</span>      : { harnessId: firstApproved, modelId: defaultModelForHarness(firstApproved, fallback.modelId) };
+<span class="ln">31</span>  const org =
+<span class="ln">32</span>    approved.includes(configuredOrg.harnessId) &amp;&amp;
+<span class="ln">33</span>    modelSupportedByHarness(configuredOrg.modelId, configuredOrg.harnessId)
+<span class="ln">34</span>      ? configuredOrg
+<span class="ln">35</span>      : safeFallback;
+<span class="ln">36</span>  const scopedStored = scope === orgScopeId ? null : config.getRuntimeSelection(scope);
+<span class="ln">37</span>  const scopedLegacy = scope === orgScopeId ? null : config.getBaseModel(scope);
+<span class="ln">38</span>  let inherited = org;
+<span class="ln">39</span>  if (scopedStored &amp;&amp; isHarnessId(scopedStored.harnessId)) {
+<span class="ln">40</span>    inherited = { harnessId: scopedStored.harnessId, modelId: scopedStored.modelId };
+<span class="ln">41</span>  } else if (scopedLegacy) {
+<span class="ln">42</span>    inherited = { harnessId: fallback.harnessId, modelId: scopedLegacy };
+<span class="ln">43</span>  }
+<span class="ln">44</span>  const choice =
+<span class="ln">45</span>    requested?.harnessId || requested?.modelId
+<span class="ln">46</span>      ? { harnessId: requested.harnessId ?? inherited.harnessId, modelId: requested.modelId ?? inherited.modelId }
+<span class="ln">47</span>      : inherited;
+<span class="ln">48</span>  if (!approved.includes(choice.harnessId) || !modelSupportedByHarness(choice.modelId, choice.harnessId)) {
+<span class="ln">49</span>    if (requested?.harnessId || requested?.modelId)
+<span class="ln">50</span>      throw new NonRetryableTurnError(`runtime ${choice.harnessId}/${choice.modelId} is not approved`);
+<span class="ln">51</span>    return org;
+<span class="ln">52</span>  }
+<span class="ln">53</span>  return choice;
+<span class="ln">54</span>}</pre></div></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ROUTER</div><h2 class="sec-title">Adapter map 让多个 agent runtime 共存</h2><p><code>src/harness/harness-router.ts:84</code> 接收 adapters map，<code>src/harness/harness-router.ts:95</code> 在每个 turn 解析 choice，<code>src/harness/harness-router.ts:105</code> 把 harness/model 注入 runTurn。这个封装让 Codex、Claude、OpenCode、Pi 等 runtime 可以被同一层调度。</p><h3><span class="arr">▸</span>切换 harness 时主动 reset session</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/harness/harness-router.ts</span> · L84-116</span><span>TypeScript</span></div><pre class="code"><span class="ln">84</span>export function createHarnessRouter(
+<span class="ln">85</span>  adapters: ReadonlyMap&lt;HarnessId, Harness&gt;,
+<span class="ln">86</span>  utility: Harness,
+<span class="ln">87</span>  resolve: (input: HarnessTurnInput) =&gt; RuntimeChoice | Promise&lt;RuntimeChoice&gt;,
+<span class="ln">88</span>): Harness {
+<span class="ln">89</span>  const lastHarness = new Map&lt;string, HarnessId&gt;();
+<span class="ln">90</span>  return {
+<span class="ln">91</span>    profile: utility.profile,
+<span class="ln">92</span>    models: utility.models,
+<span class="ln">93</span>    tools: utility.tools,
+<span class="ln">94</span>    turns: {
+<span class="ln">95</span>      async runTurn(input) {
+<span class="ln">96</span>        const choice = await resolve(input);
+<span class="ln">97</span>        const adapter = adapters.get(choice.harnessId);
+<span class="ln">98</span>        if (!adapter) throw new Error(`harness ${choice.harnessId} is unavailable`);
+<span class="ln">99</span>        const prior = lastHarness.get(input.session.id);
+<span class="ln">100</span>        if (prior &amp;&amp; prior !== choice.harnessId) {
+<span class="ln">101</span>          await adapters.get(prior)?.turns.resetSession?.(input.session.id);
+<span class="ln">102</span>          await adapter.turns.resetSession?.(input.session.id);
+<span class="ln">103</span>        }
+<span class="ln">104</span>        lastHarness.set(input.session.id, choice.harnessId);
+<span class="ln">105</span>        return adapter.turns.runTurn({ ...input, harness: choice.harnessId, model: choice.modelId });
+<span class="ln">106</span>      },
+<span class="ln">107</span>      async resetSession(sessionId) {
+<span class="ln">108</span>        lastHarness.delete(sessionId);
+<span class="ln">109</span>        await Promise.all([...adapters.values()].map((adapter) =&gt; adapter.turns.resetSession?.(sessionId)));
+<span class="ln">110</span>      },
+<span class="ln">111</span>      async close() {
+<span class="ln">112</span>        await Promise.all([...new Set(adapters.values())].map((adapter) =&gt; adapter.turns.close?.()));
+<span class="ln">113</span>      },
+<span class="ln">114</span>    },
+<span class="ln">115</span>  };
+<span class="ln">116</span>}</pre></div><p><code>src/harness/harness-router.ts:99</code> 读取上一轮 harness，<code>src/harness/harness-router.ts:101</code> reset prior，<code>src/harness/harness-router.ts:102</code> reset current。这个小细节防止模型运行时之间共享不兼容的 session 状态。</p></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · WEB TURN</div><h2 class="sec-title">Web 入口同时检查成员、模型和 provider</h2><p><code>src/api/app-turn.ts:108</code> 处理 web thread，<code>src/api/app-turn.ts:116</code> 防止同一个 threadRef 被不同 scope 复用，<code>src/api/app-turn.ts:151</code> 拒绝非法 harness 字符串。这些都是模型调用前的系统边界。</p><h3><span class="arr">▸</span>Web turn runtime gate</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/api/app-turn.ts</span> · L122-190</span><span>TypeScript</span></div><pre class="code"><span class="ln">122</span>        const org = scopeId(&quot;org&quot;, orgIdOf());
+<span class="ln">123</span>        const targetScope =
+<span class="ln">124</span>          req.conversation.kind === &quot;dm&quot;
+<span class="ln">125</span>            ? scopeId(&quot;personal&quot;, actor.id)
+<span class="ln">126</span>            : scopeId(req.conversation.kind, req.conversation.channelRef ?? threadRef);
+<span class="ln">127</span>        const fallbackHarness = isHarnessId(deps.harnessId) ? deps.harnessId : &quot;pi&quot;;
+<span class="ln">128</span>        const runtimeFallback = deps.runtimeFallback ?? {
+<span class="ln">129</span>          harnessId: fallbackHarness,
+<span class="ln">130</span>          modelId: defaultModelForHarness(fallbackHarness),
+<span class="ln">131</span>        };
+<span class="ln">132</span>        let orgRuntime;
+<span class="ln">133</span>        let configuredRuntime;
+<span class="ln">134</span>        let runtime;
+<span class="ln">135</span>        try {
+<span class="ln">136</span>          orgRuntime = await resolveRuntimeChoiceDurable(deps.config, org, org, runtimeFallback);
+<span class="ln">137</span>          configuredRuntime =
+<span class="ln">138</span>            targetScope === org
+<span class="ln">139</span>              ? orgRuntime
+<span class="ln">140</span>              : await resolveRuntimeChoiceDurable(deps.config, org, targetScope, runtimeFallback);
+<span class="ln">141</span>          runtime =
+<span class="ln">142</span>            req.harness || req.model
+<span class="ln">143</span>              ? await resolveRuntimeChoiceDurable(deps.config, org, targetScope, runtimeFallback, {
+<span class="ln">144</span>                  ...(req.harness &amp;&amp; isHarnessId(req.harness) ? { harnessId: req.harness } : {}),
+<span class="ln">145</span>                  ...(req.model ? { modelId: req.model } : {}),
+<span class="ln">146</span>                })
+<span class="ln">147</span>              : configuredRuntime;
+<span class="ln">148</span>        } catch (error) {
+<span class="ln">149</span>          return { status: &quot;refused&quot;, reason: errMessage(error) };
+<span class="ln">150</span>        }
+<span class="ln">151</span>        if (req.harness &amp;&amp; !isHarnessId(req.harness)) {
+<span class="ln">152</span>          return { status: &quot;refused&quot;, reason: `runtime ${req.harness} is not approved` };
+<span class="ln">153</span>        }
+<span class="ln">154</span>        const configuredKeys = deps.providerKeys ??
+<span class="ln">155</span>          deps.modelProviders ?? { anthropic: false, openai: false, openrouter: false };
+<span class="ln">156</span>        let providers = deps.modelProviders;
+<span class="ln">157</span>        if (deps.modelCredentials) {
+<span class="ln">158</span>          providers = modelProviderAvailabilityFor(
+<span class="ln">159</span>            runtime.harnessId,
+<span class="ln">160</span>            configuredKeys,
+<span class="ln">161</span>            await deps.modelCredentials.availability(),
+<span class="ln">162</span>          );
+<span class="ln">163</span>        } else if (deps.providerKeys) {
+<span class="ln">164</span>          providers = modelProviderAvailabilityFor(runtime.harnessId, configuredKeys);
+<span class="ln">165</span>        }
+<span class="ln">166</span>        if (providers &amp;&amp; !modelServiceable(runtime.modelId, providers)) {
+<span class="ln">167</span>          return {
+<span class="ln">168</span>            status: &quot;refused&quot;,
+<span class="ln">169</span>            reason: &quot;that model isn&#x27;t available on this deployment (its provider isn&#x27;t configured)&quot;,
+<span class="ln">170</span>          };
+<span class="ln">171</span>        }
+<span class="ln">172</span>        const configuredWebuiModels = await deps.config.getWebuiModelsDurable(org);
+<span class="ln">173</span>        let enabledWebuiModels: string[] | null = null;
+<span class="ln">174</span>        if (configuredWebuiModels?.length) {
+<span class="ln">175</span>          enabledWebuiModels = [...new Set([...configuredWebuiModels, orgRuntime.modelId])];
+<span class="ln">176</span>        } else if (providers?.openrouter) {
+<span class="ln">177</span>          enabledWebuiModels = [
+<span class="ln">178</span>            ...new Set([
+<span class="ln">179</span>              ...selectableCatalogForHarness(
+<span class="ln">180</span>                await selectableModelCatalog(deps.modelCredentialFetch),
+<span class="ln">181</span>                runtime.harnessId,
+<span class="ln">182</span>              ).map((model) =&gt; model.id),
+<span class="ln">183</span>              ...(orgRuntime.harnessId === runtime.harnessId ? [orgRuntime.modelId] : []),
+<span class="ln">184</span>            ]),
+<span class="ln">185</span>          ];
+<span class="ln">186</span>        }
+<span class="ln">187</span>        const invalidModelOption =
+<span class="ln">188</span>          validateWebTurnModelOptions(req, enabledWebuiModels, providers) ??
+<span class="ln">189</span>          webTurnRuntimeModelRefusal(runtime.modelId, orgRuntime.modelId, configuredWebuiModels);
+<span class="ln">190</span>        if (invalidModelOption) return { status: &quot;refused&quot;, reason: invalidModelOption };</pre></div><p><code>src/api/app-turn.ts:154</code> 合并 provider keys，<code>src/api/app-turn.ts:157</code> 查询 model credential availability，<code>src/api/app-turn.ts:166</code> 拒绝 provider 未配置的模型。它把“用户想用哪个模型”和“部署真的能服务哪个模型”分开处理。</p></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · WORKER</div><h2 class="sec-title">Worker 把 runtime choice 放进可靠执行循环</h2><p><code>src/runs/worker.ts:59</code> 计算 queueMs，<code>src/runs/worker.ts:60</code> 调 orchestrator.handleTurn，<code>src/runs/worker.ts:71</code> complete run；异常路径在 <code>src/runs/worker.ts:75</code> fail 并设置 retry。</p><h3><span class="arr">▸</span>processRun 的 heartbeat/cancel 结构</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/runs/worker.ts</span> · L22-82</span><span>TypeScript</span></div><pre class="code"><span class="ln">22</span>export async function processRun(deps: ProcessDeps, run: Run, opts?: { background?: boolean }): Promise&lt;TurnResult&gt; {
+<span class="ln">23</span>  const token = run.leaseToken;
+<span class="ln">24</span>  if (token === null) throw new Error(`processRun called with an unleased run ${run.id}`);
+<span class="ln">25</span>  const intervalMs = deps.heartbeatIntervalMs ?? Math.max(1_000, Math.floor(deps.leaseTtlMs / 3));
+<span class="ln">26</span>  const cancel = new AbortController();
+<span class="ln">27</span>  let consecutiveLost = 0;
+<span class="ln">28</span>  let leaseLost = false;
+<span class="ln">29</span>  const beat = setInterval(() =&gt; {
+<span class="ln">30</span>    void deps.runs
+<span class="ln">31</span>      .heartbeat(run.id, token, deps.leaseTtlMs)
+<span class="ln">32</span>      .then((alive) =&gt; {
+<span class="ln">33</span>        if (alive) {
+<span class="ln">34</span>          consecutiveLost = 0;
+<span class="ln">35</span>          return;
+<span class="ln">36</span>        }
+<span class="ln">37</span>        consecutiveLost += 1;
+<span class="ln">38</span>        if (consecutiveLost &gt;= LEASE_LOST_CONSECUTIVE &amp;&amp; !leaseLost) {
+<span class="ln">39</span>          leaseLost = true;
+<span class="ln">40</span>          clearInterval(beat);
+<span class="ln">41</span>          console.warn(
+<span class="ln">42</span>            `[worker] run ${run.id} lost its lease after ${consecutiveLost} consecutive beats; cancelling the in-process turn`,
+<span class="ln">43</span>          );
+<span class="ln">44</span>          cancel.abort();
+<span class="ln">45</span>        }
+<span class="ln">46</span>      })
+<span class="ln">47</span>      .catch((err: unknown) =&gt; {
+<span class="ln">48</span>        consecutiveLost = 0;
+<span class="ln">49</span>        console.warn(`[worker] heartbeat failed for run ${run.id} (transient, ignored): ${errMessage(err)}`);
+<span class="ln">50</span>      });
+<span class="ln">51</span>  }, intervalMs);
+<span class="ln">52</span>  let beatStopped = false;
+<span class="ln">53</span>  const stopBeat = (): void =&gt; {
+<span class="ln">54</span>    if (beatStopped) return;
+<span class="ln">55</span>    beatStopped = true;
+<span class="ln">56</span>    clearInterval(beat);
+<span class="ln">57</span>  };
+<span class="ln">58</span>  try {
+<span class="ln">59</span>    const queueMs = run.startedAt !== null ? Math.max(0, run.startedAt - run.createdAt) : undefined;
+<span class="ln">60</span>    const result = await deps.orchestrator.handleTurn({
+<span class="ln">61</span>      ...run.request,
+<span class="ln">62</span>      origin: resolveTurnOrigin(run.request),
+<span class="ln">63</span>      runId: run.id,
+<span class="ln">64</span>      attempt: run.attempts,
+<span class="ln">65</span>      finalAttempt: errorParks(run, deps.runs.maxClaims),
+<span class="ln">66</span>      background: opts?.background ?? false,
+<span class="ln">67</span>      cancel: cancel.signal,
+<span class="ln">68</span>      ...(queueMs !== undefined ? { queueMs } : {}),
+<span class="ln">69</span>    });
+<span class="ln">70</span>    stopBeat();
+<span class="ln">71</span>    await deps.runs.complete(run.id, token, result);
+<span class="ln">72</span>    return result;
+<span class="ln">73</span>  } catch (err) {
+<span class="ln">74</span>    stopBeat();
+<span class="ln">75</span>    await deps.runs.fail(run.id, token, errMessage(err), {
+<span class="ln">76</span>      retry: !(err instanceof NonRetryableTurnError),
+<span class="ln">77</span>    });
+<span class="ln">78</span>    throw err;
+<span class="ln">79</span>  } finally {
+<span class="ln">80</span>    stopBeat();
+<span class="ln">81</span>  }
+<span class="ln">82</span>}</pre></div><p><code>src/runs/worker.ts:29</code> 的 heartbeat loop 和 <code>src/runs/worker.ts:44</code> 的 cancel.abort 让 lease 丢失能中止本地 turn。对后台自动化来说，这比“进程还活着就继续跑”安全得多。</p><h3><span class="arr">▸</span>claim loop 的退避和释放</h3><div class="code-wrap"><div class="code-bar"><span><span class="src">src/runs/worker.ts</span> · L101-187</span><span>TypeScript</span></div><pre class="code"><span class="ln">101</span>export function createWorker(deps: WorkerDeps): Worker {
+<span class="ln">102</span>  const workerId = deps.workerId ?? `w-${randomUUID().slice(0, 8)}`;
+<span class="ln">103</span>  const pollMs = deps.pollMs ?? 50;
+<span class="ln">104</span>  let stopped = false;
+<span class="ln">105</span>  let loopDone: Promise&lt;void&gt; | null = null;
+<span class="ln">106</span>  let inFlight: { runId: string; leaseToken: string; threadRef: string } | null = null;
+<span class="ln">107</span>  let releasedLeaseToken: string | null = null;
+<span class="ln">108</span>  let releasing: Promise&lt;void&gt; | null = null;
+<span class="ln">109</span>
+<span class="ln">110</span>  async function loop(): Promise&lt;void&gt; {
+<span class="ln">111</span>    let claimFailures = 0;
+<span class="ln">112</span>    while (!stopped) {
+<span class="ln">113</span>      if (deps.canClaim &amp;&amp; !deps.canClaim()) {
+<span class="ln">114</span>        await sleep(pollMs);
+<span class="ln">115</span>        continue;
+<span class="ln">116</span>      }
+<span class="ln">117</span>      let run: Run | null;
+<span class="ln">118</span>      try {
+<span class="ln">119</span>        run = await deps.runs.claim(workerId, deps.leaseTtlMs);
+<span class="ln">120</span>        claimFailures = 0;
+<span class="ln">121</span>      } catch (e) {
+<span class="ln">122</span>        claimFailures += 1;
+<span class="ln">123</span>        if (claimFailures &gt;= CLAIM_FAIL_CRASH_CONSECUTIVE) throw e;
+<span class="ln">124</span>        swallow(&quot;worker: claim failed (transient, retrying)&quot;, e);
+<span class="ln">125</span>        await sleep(Math.min(pollMs * 2 ** Math.min(claimFailures, 5), 5_000));
+<span class="ln">126</span>        continue;
+<span class="ln">127</span>      }
+<span class="ln">128</span>      if (!run) {
+<span class="ln">129</span>        await sleep(pollMs);
+<span class="ln">130</span>        continue;
+<span class="ln">131</span>      }
+<span class="ln">132</span>      if (stopped) {
+<span class="ln">133</span>        if (run.leaseToken !== null)
+<span class="ln">134</span>          await deps.runs
+<span class="ln">135</span>            .releaseLease(run.id, run.leaseToken)
+<span class="ln">136</span>            .catch((e) =&gt; swallow(&quot;worker: post-stop claim handback failed&quot;, e));
+<span class="ln">137</span>        break;
+<span class="ln">138</span>      }
+<span class="ln">139</span>      inFlight =
+<span class="ln">140</span>        run.leaseToken !== null ? { runId: run.id, leaseToken: run.leaseToken, threadRef: run.sessionId } : null;
+<span class="ln">141</span>      deps.onClaimed?.();
+<span class="ln">142</span>      try {
+<span class="ln">143</span>        await processRun(deps, run, { background: true });
+<span class="ln">144</span>      } catch (e) {
+<span class="ln">145</span>        swallow(&quot;worker: background run crashed&quot;, e);
+<span class="ln">146</span>      } finally {
+<span class="ln">147</span>        inFlight = null;
+<span class="ln">148</span>      }
+<span class="ln">149</span>    }
+<span class="ln">150</span>  }
+<span class="ln">151</span>
+<span class="ln">152</span>  return {
+<span class="ln">153</span>    start() {
+<span class="ln">154</span>      if (loopDone) return;
+<span class="ln">155</span>      stopped = false;
+<span class="ln">156</span>      loopDone = loop();
+<span class="ln">157</span>    },
+<span class="ln">158</span>    busy() {
+<span class="ln">159</span>      return inFlight !== null;
+<span class="ln">160</span>    },
+<span class="ln">161</span>    releaseInFlight() {
+<span class="ln">162</span>      const held = inFlight;
+<span class="ln">163</span>      if (!held || held.leaseToken === releasedLeaseToken) return Promise.resolve();
+<span class="ln">164</span>      if (releasing) return releasing;
+<span class="ln">165</span>      releasing = (async () =&gt; {
+<span class="ln">166</span>        try {
+<span class="ln">167</span>          if (await deps.runs.heartbeat(held.runId, held.leaseToken, deps.leaseTtlMs)) {
+<span class="ln">168</span>            const session = await deps.sessions.getByThread(held.threadRef);
+<span class="ln">169</span>            if (session) await deps.sessions.forceReleaseLease(session.id);
+<span class="ln">170</span>            await deps.runs.releaseLease(held.runId, held.leaseToken);
+<span class="ln">171</span>          }
+<span class="ln">172</span>          releasedLeaseToken = held.leaseToken;
+<span class="ln">173</span>        } catch (e) {
+<span class="ln">174</span>          swallow(&quot;worker: releaseInFlight failed&quot;, e);
+<span class="ln">175</span>        } finally {
+<span class="ln">176</span>          releasing = null;
+<span class="ln">177</span>        }
+<span class="ln">178</span>      })();
+<span class="ln">179</span>      return releasing;
+<span class="ln">180</span>    },
+<span class="ln">181</span>    async stop(drainMs = STOP_DRAIN_MS) {
+<span class="ln">182</span>      stopped = true;
+<span class="ln">183</span>      await Promise.race([loopDone, sleep(drainMs, { unref: true })]);
+<span class="ln">184</span>      loopDone = null;
+<span class="ln">185</span>    },
+<span class="ln">186</span>  };
+<span class="ln">187</span>}</pre></div><p><code>src/runs/worker.ts:119</code> claim，<code>src/runs/worker.ts:125</code> exponential backoff，<code>src/runs/worker.ts:161</code> releaseInFlight。三段合起来让 worker 更像队列消费者，而不是脆弱的定时轮询器。</p></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · EDGE</div><h2 class="sec-title">边界条件</h2><h3><span class="arr">▸</span>非法 runtime 是非重试错误</h3><p><code>src/harness/harness-router.ts:49</code> 在 requested runtime 非法时抛 NonRetryableTurnError，避免队列重复重试一个永远不会成功的用户选择。</p><h3><span class="arr">▸</span>Web thread 绑定 scope</h3><p><code>src/api/app-turn.ts:110</code> 读取 existing session，<code>src/api/app-turn.ts:116</code> 对比 claimed scope，能防止同一 browser thread 被拿来穿越 scope。</p></section><section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div><h2 class="sec-title">为什么这套路由值得学</h2><h3><span class="arr">▸</span>模型选择是治理对象</h3><p><code>src/api/app-turn.ts:172</code> 读取 Web UI 模型配置，<code>src/api/app-turn.ts:187</code> 验证请求选项，这让模型列表可以面向部署动态变化。</p></section><section class="sec" id="section-6"><div class="sec-no">§ <b>06</b> · RISKS</div><h2 class="sec-title">风险</h2><h3><span class="arr">▸</span>状态多，排障要靠可观测性</h3><p><code>src/runs/worker.ts:41</code> 只有 console.warn，真实生产中还需要把 lease lost、claim fail 和 runtime refusal 全部接到指标与审计。</p></section>
+<div class="foot"><span>Generated · 2026-08-03</span><span>Source · <a href="https://github.com/yc-software/qm">yc-software/qm</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span><span><a href="../qm.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}}),{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}})();</script></body></html>
