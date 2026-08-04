@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>队列租约与调度分流 · crm</title>
+<meta name="description" content="trycompai/crm 源码级深度解析" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#66d9a8; --star-soft:#95efc5; --star-deep:#33a06f; }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">crm<b>CRM</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">crm<b>CRM</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · Bun monorepo</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>任务队列</a></li><li><a href="#section-2"><span class="idx">02</span>调度运行时</a></li><li><a href="#section-3"><span class="idx">03</span>证据写入</a></li><li><a href="#section-4"><span class="idx">04</span>UI 与桥接</a></li><li><a href="#section-5"><span class="idx">05</span>测试</a></li><li><a href="#section-6"><span class="idx">06</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★3,379 · 2026-07-31</div><div><a href="https://github.com/trycompai/crm" target="_blank">trycompai/crm</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">队列租约与调度分流 <em>深度解析</em></h1><p class="hero-desc">这页只看 AgentTask 如何从 API 事件变成 Eve session，以及系统怎样避免重复领取、无限重试和丢失回调。</p></div><section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p><code>apps/api/src/agent/agent-trigger.service.ts:146</code> 只负责入队，<code>apps/agent/agent/lib/tasks.ts:28</code> 才负责领取，<code>apps/agent/agent/lib/dispatch.ts:132</code> 再把领取结果交给直接任务或研究 session。这是 CRM 里最核心的异步边界。</p><p>队列证据 1: <code>apps/agent/agent/lib/tasks.ts:28</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 2: <code>apps/agent/agent/lib/tasks.ts:41</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 3: <code>apps/agent/agent/lib/tasks.ts:47</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 4: <code>apps/agent/agent/lib/tasks.ts:50</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 5: <code>apps/agent/agent/lib/tasks.ts:55</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 6: <code>apps/agent/agent/lib/tasks.ts:62</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 7: <code>apps/agent/agent/lib/tasks.ts:67</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 8: <code>apps/agent/agent/lib/tasks.ts:81</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 9: <code>apps/agent/agent/lib/tasks.ts:120</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 10: <code>apps/agent/agent/lib/tasks.ts:129</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 11: <code>apps/agent/agent/lib/dispatch.ts:42</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 12: <code>apps/agent/agent/lib/dispatch.ts:93</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 13: <code>apps/agent/agent/lib/dispatch.ts:119</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 14: <code>apps/agent/agent/lib/dispatch.ts:132</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 15: <code>apps/agent/agent/schedules/dispatch.ts:5</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 16: <code>apps/agent/agent/channels/crm.ts:31</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 17: <code>apps/agent/agent/channels/crm.ts:73</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 18: <code>apps/agent/test/tasks.integration.spec.ts:69</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 19: <code>apps/agent/test/tasks.integration.spec.ts:111</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 20: <code>apps/agent/test/crm-token.spec.ts:15</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 21: <code>packages/db/src/agent-tasks.ts:22</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><p>队列证据 22: <code>packages/db/prisma/schema.prisma:312</code> 这一处把领取、租约、重试、认证或测试断言落到可读源码里；这些引用组合起来解释为什么多个调度器可以同时工作，却不会重复处理同一条 CRM 任务。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">apps/api/src/agent/agent-trigger.service.ts</span> · <code>apps/api/src/agent/agent-trigger.service.ts:146</code>-216</span><span>TypeScript</span></div><pre class="code"><span class="ln">146</span>	private async enqueue(task: {
+<span class="ln">147</span>		contactId?: string;
+<span class="ln">148</span>		companyId?: string;
+<span class="ln">149</span>		kind: string;
+<span class="ln">150</span>		reason: string;
+<span class="ln">151</span>		priority: number;
+<span class="ln">152</span>		budget: number;
+<span class="ln">153</span>	}): Promise&lt;void&gt; {
+<span class="ln">154</span>		try {
+<span class="ln">155</span>			const pending = await this.db.agentTask.findFirst({
+<span class="ln">156</span>				where: {
+<span class="ln">157</span>					kind: task.kind,
+<span class="ln">158</span>					finishedAt: null,
+<span class="ln">159</span>					...(task.contactId ? { contactId: task.contactId } : {}),
+<span class="ln">160</span>					...(task.companyId ? { companyId: task.companyId } : {}),
+<span class="ln">161</span>				},
+<span class="ln">162</span>				select: { id: true },
+<span class="ln">163</span>			});
+<span class="ln">164</span>
+<span class="ln">165</span>			if (pending) return;
+<span class="ln">166</span>
+<span class="ln">167</span>			await this.db.agentTask.create({
+<span class="ln">168</span>				data: {
+<span class="ln">169</span>					contactId: task.contactId ?? null,
+<span class="ln">170</span>					companyId: task.companyId ?? null,
+<span class="ln">171</span>					kind: task.kind,
+<span class="ln">172</span>					reason: task.reason,
+<span class="ln">173</span>					priority: task.priority,
+<span class="ln">174</span>					budget: task.budget,
+<span class="ln">175</span>					dueAt: new Date(),
+<span class="ln">176</span>				},
+<span class="ln">177</span>			});
+<span class="ln">178</span>
+<span class="ln">179</span>			this.logger.log({
+<span class="ln">180</span>				message: &quot;Agent task queued&quot;,
+<span class="ln">181</span>				kind: task.kind,
+<span class="ln">182</span>				contactId: task.contactId,
+<span class="ln">183</span>				companyId: task.companyId,
+<span class="ln">184</span>			});
+<span class="ln">185</span>
+<span class="ln">186</span>			this.poke();
+<span class="ln">187</span>		} catch (error) {
+<span class="ln">188</span>			this.logger.error(
+<span class="ln">189</span>				{ message: &quot;Could not queue agent task&quot;, kind: task.kind },
+<span class="ln">190</span>				error instanceof Error ? error.stack : String(error),
+<span class="ln">191</span>			);
+<span class="ln">192</span>		}
+<span class="ln">193</span>	}
+<span class="ln">194</span>
+<span class="ln">195</span>	private poke(): void {
+<span class="ln">196</span>		const agent = bridge();
+<span class="ln">197</span>		if (!agent) return;
+<span class="ln">198</span>
+<span class="ln">199</span>		const missed = (error: unknown) =&gt; {
+<span class="ln">200</span>			this.logger.debug({
+<span class="ln">201</span>				message: &quot;Agent poke did not land; the cron will pick this up&quot;,
+<span class="ln">202</span>				reason: error instanceof Error ? error.message : String(error),
+<span class="ln">203</span>			});
+<span class="ln">204</span>		};
+<span class="ln">205</span>
+<span class="ln">206</span>		try {
+<span class="ln">207</span>			void fetch(agent.url(&quot;/internal/crm/dispatch&quot;), {
+<span class="ln">208</span>				method: &quot;POST&quot;,
+<span class="ln">209</span>				headers: { authorization: `Bearer ${agent.secret}` },
+<span class="ln">210</span>				signal: AbortSignal.timeout(POKE_TIMEOUT_MS),
+<span class="ln">211</span>			}).catch(missed);
+<span class="ln">212</span>		} catch (error) {
+<span class="ln">213</span>			missed(error);
+<span class="ln">214</span>		}
+<span class="ln">215</span>	}
+<span class="ln">216</span>}</pre></div></section><section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>领取时写租约，而不是先读再抢</h3><p><code>apps/agent/agent/lib/tasks.ts:41</code> 使用 UPDATE...FROM 子查询，把 dueAt、leasedUntil、attempts 和 kind 过滤都放在数据库侧；<code>apps/agent/agent/lib/tasks.ts:55</code> 的 SKIP LOCKED 是多 dispatcher 安全的关键。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">apps/agent/agent/lib/tasks.ts</span> · <code>apps/agent/agent/lib/tasks.ts:28</code>-65</span><span>TypeScript</span></div><pre class="code"><span class="ln">28</span>export async function claimDue(
+<span class="ln">29</span>	limit: number,
+<span class="ln">30</span>	kinds: { only: readonly string[] } | { except: readonly string[] },
+<span class="ln">31</span>	leaseMs = LEASE_MS,
+<span class="ln">32</span>): Promise&lt;LeasedTask[]&gt; {
+<span class="ln">33</span>	const now = new Date();
+<span class="ln">34</span>	const until = new Date(now.getTime() + leaseMs);
+<span class="ln">35</span>
+<span class="ln">36</span>	const list = &quot;only&quot; in kinds ? kinds.only : kinds.except;
+<span class="ln">37</span>	if (&quot;only&quot; in kinds &amp;&amp; list.length === 0) return [];
+<span class="ln">38</span>
+<span class="ln">39</span>	const match = Prisma.sql`t2.kind ${&quot;only&quot; in kinds ? Prisma.sql`IN` : Prisma.sql`NOT IN`} (${Prisma.join(list)})`;
+<span class="ln">40</span>
+<span class="ln">41</span>	const claimed = await db.$queryRaw&lt;LeasedTask[]&gt;`
+<span class="ln">42</span>		UPDATE &quot;agentTask&quot; AS t
+<span class="ln">43</span>		SET &quot;leasedUntil&quot; = ${until},
+<span class="ln">44</span>			&quot;startedAt&quot; = COALESCE(t.&quot;startedAt&quot;, ${now}),
+<span class="ln">45</span>			&quot;attempts&quot; = t.&quot;attempts&quot; + 1
+<span class="ln">46</span>		FROM (
+<span class="ln">47</span>			SELECT t2.id FROM &quot;agentTask&quot; AS t2
+<span class="ln">48</span>			WHERE t2.&quot;finishedAt&quot; IS NULL
+<span class="ln">49</span>				AND t2.&quot;dueAt&quot; &lt;= ${now}
+<span class="ln">50</span>				AND (t2.&quot;leasedUntil&quot; IS NULL OR t2.&quot;leasedUntil&quot; &lt; ${now})
+<span class="ln">51</span>				AND t2.&quot;attempts&quot; &lt; ${MAX_ATTEMPTS}
+<span class="ln">52</span>				AND ${match}
+<span class="ln">53</span>			ORDER BY t2.&quot;priority&quot; DESC, t2.&quot;dueAt&quot; ASC
+<span class="ln">54</span>			LIMIT ${limit}
+<span class="ln">55</span>			FOR UPDATE SKIP LOCKED
+<span class="ln">56</span>		) AS due
+<span class="ln">57</span>		WHERE t.id = due.id
+<span class="ln">58</span>		RETURNING t.id, t.&quot;contactId&quot;, t.&quot;companyId&quot;, t.kind, t.reason,
+<span class="ln">59</span>			t.budget, t.attempts, t.priority, t.&quot;dueAt&quot;;
+<span class="ln">60</span>	`;
+<span class="ln">61</span>
+<span class="ln">62</span>	return claimed.sort(
+<span class="ln">63</span>		(a, b) =&gt; b.priority - a.priority || a.dueAt.getTime() - b.dueAt.getTime(),
+<span class="ln">64</span>	);
+<span class="ln">65</span>}</pre></div><h3><span class="arr">▸</span>直接 lane 与研究 lane 拆开预算</h3><p><code>apps/agent/agent/lib/dispatch.ts:42</code> 循环处理 brand/portrait 快任务，<code>apps/agent/agent/lib/dispatch.ts:93</code> 处理需要 session 的研究任务。这样 logo 和头像不会排在长研究后面，用户能更快看到可见字段变好。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">apps/agent/agent/lib/dispatch.ts</span> · <code>apps/agent/agent/lib/dispatch.ts:17</code>-137</span><span>TypeScript</span></div><pre class="code"><span class="ln">17</span>export const VISIBLE_BATCH = 60;
+<span class="ln">18</span>export const VISIBLE_CONCURRENCY = 6;
+<span class="ln">19</span>export const VISIBLE_LEASE_MS = 2 * 60_000;
+<span class="ln">20</span>
+<span class="ln">21</span>export const RESEARCH_BATCH = 12;
+<span class="ln">22</span>export const RESEARCH_LEASE_MS = 30 * 60_000;
+<span class="ln">23</span>
+<span class="ln">24</span>export async function retireAbandoned(): Promise&lt;void&gt; {
+<span class="ln">25</span>	let abandoned: TaskSubject[] = [];
+<span class="ln">26</span>
+<span class="ln">27</span>	try {
+<span class="ln">28</span>		abandoned = await retireExhausted();
+<span class="ln">29</span>	} catch {
+<span class="ln">30</span>		return;
+<span class="ln">31</span>	}
+<span class="ln">32</span>
+<span class="ln">33</span>	for (const task of abandoned) {
+<span class="ln">34</span>		await settle(
+<span class="ln">35</span>			task,
+<span class="ln">36</span>			EnrichmentStatus.FAILED,
+<span class="ln">37</span>			&quot;Research was attempted several times and never completed.&quot;,
+<span class="ln">38</span>		).catch(() =&gt; {});
+<span class="ln">39</span>	}
+<span class="ln">40</span>}
+<span class="ln">41</span>
+<span class="ln">42</span>export async function runVisibleLane(): Promise&lt;number&gt; {
+<span class="ln">43</span>	let handled = 0;
+<span class="ln">44</span>
+<span class="ln">45</span>	while (handled &lt; VISIBLE_BATCH) {
+<span class="ln">46</span>		const tasks = await claimDue(
+<span class="ln">47</span>			Math.min(VISIBLE_CONCURRENCY, VISIBLE_BATCH - handled),
+<span class="ln">48</span>			{ only: DIRECT_KINDS },
+<span class="ln">49</span>			VISIBLE_LEASE_MS,
+<span class="ln">50</span>		);
+<span class="ln">51</span>
+<span class="ln">52</span>		if (tasks.length === 0) break;
+<span class="ln">53</span>
+<span class="ln">54</span>		await runLimited(VISIBLE_CONCURRENCY, tasks, runDirect);
+<span class="ln">55</span>		handled += tasks.length;
+<span class="ln">56</span>	}
+<span class="ln">57</span>
+<span class="ln">58</span>	return handled;
+<span class="ln">59</span>}
+<span class="ln">60</span>
+<span class="ln">61</span>async function runDirect(task: LeasedTask): Promise&lt;void&gt; {
+<span class="ln">62</span>	try {
+<span class="ln">63</span>		if (task.kind === &quot;brand&quot; &amp;&amp; task.companyId) {
+<span class="ln">64</span>			const result = await runBrand({ companyId: task.companyId });
+<span class="ln">65</span>			if (result.retryable) return;
+<span class="ln">66</span>
+<span class="ln">67</span>			await completeTask(task.id, brandOutcome(result));
+<span class="ln">68</span>			return;
+<span class="ln">69</span>		}
+<span class="ln">70</span>
+<span class="ln">71</span>		if (task.kind === &quot;portrait&quot; &amp;&amp; task.contactId) {
+<span class="ln">72</span>			const portrait = await runPortrait({
+<span class="ln">73</span>				contactId: task.contactId,
+<span class="ln">74</span>				spend: () =&gt; ({ ok: true }),
+<span class="ln">75</span>			});
+<span class="ln">76</span>
+<span class="ln">77</span>			await completeTask(
+<span class="ln">78</span>				task.id,
+<span class="ln">79</span>				portrait.stored
+<span class="ln">80</span>					? `Picture stored from ${portrait.source}.`
+<span class="ln">81</span>					: (portrait.reason ?? &quot;No picture found.&quot;),
+<span class="ln">82</span>			);
+<span class="ln">83</span>			return;
+<span class="ln">84</span>		}
+<span class="ln">85</span>
+<span class="ln">86</span>		await completeTask(task.id, &quot;The record this names is gone.&quot;);
+<span class="ln">87</span>	} catch (error) {
+<span class="ln">88</span>		const reason = error instanceof Error ? error.message : String(error);
+<span class="ln">89</span>		await settle(task, EnrichmentStatus.FAILED, reason).catch(() =&gt; {});
+<span class="ln">90</span>	}
+<span class="ln">91</span>}
+<span class="ln">92</span>
+<span class="ln">93</span>export async function runResearchLane(
+<span class="ln">94</span>	start: (task: LeasedTask) =&gt; Promise&lt;{ id: string }&gt;,
+<span class="ln">95</span>): Promise&lt;number&gt; {
+<span class="ln">96</span>	const tasks = await claimDue(
+<span class="ln">97</span>		RESEARCH_BATCH,
+<span class="ln">98</span>		{ except: DIRECT_KINDS },
+<span class="ln">99</span>		RESEARCH_LEASE_MS,
+<span class="ln">100</span>	);
+<span class="ln">101</span>	if (tasks.length === 0) return 0;
+<span class="ln">102</span>
+<span class="ln">103</span>	await Promise.all(
+<span class="ln">104</span>		tasks.map(async (task) =&gt; {
+<span class="ln">105</span>			try {
+<span class="ln">106</span>				await markRunning(task);
+<span class="ln">107</span>				const session = await start(task);
+<span class="ln">108</span>				await noteSession(task.id, session.id);
+<span class="ln">109</span>			} catch (error) {
+<span class="ln">110</span>				const reason = error instanceof Error ? error.message : String(error);
+<span class="ln">111</span>				await settle(task, EnrichmentStatus.FAILED, reason).catch(() =&gt; {});
+<span class="ln">112</span>			}
+<span class="ln">113</span>		}),
+<span class="ln">114</span>	);
+<span class="ln">115</span>
+<span class="ln">116</span>	return tasks.length;
+<span class="ln">117</span>}
+<span class="ln">118</span>
+<span class="ln">119</span>export function taskAuth(task: LeasedTask, base: AppAuth = APP_AUTH): AppAuth {
+<span class="ln">120</span>	return {
+<span class="ln">121</span>		...base,
+<span class="ln">122</span>		attributes: {
+<span class="ln">123</span>			taskKind: task.kind,
+<span class="ln">124</span>			reason: task.reason,
+<span class="ln">125</span>			budget: String(task.budget),
+<span class="ln">126</span>			...(task.contactId ? { contactId: task.contactId } : {}),
+<span class="ln">127</span>			...(task.companyId ? { companyId: task.companyId } : {}),
+<span class="ln">128</span>		},
+<span class="ln">129</span>	};
+<span class="ln">130</span>}
+<span class="ln">131</span>
+<span class="ln">132</span>export const drainAll = collapsing(
+<span class="ln">133</span>	async (start: (task: LeasedTask) =&gt; Promise&lt;{ id: string }&gt;) =&gt; {
+<span class="ln">134</span>		await retireAbandoned();
+<span class="ln">135</span>		await Promise.all([runVisibleLane(), runResearchLane(start)]);
+<span class="ln">136</span>	},
+<span class="ln">137</span>);</pre></div><h3><span class="arr">▸</span>token marker 修复回调归属</h3><p><code>apps/agent/agent/channels/crm.ts:21</code> 用 lastIndexOf 找 task marker，测试 <code>apps/agent/test/crm-token.spec.ts:15</code> 保证历史双前缀 token 也能识别，避免 session 完成后无法 close AgentTask。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">apps/agent/agent/channels/crm.ts</span> · <code>apps/agent/agent/channels/crm.ts:17</code>-29</span><span>TypeScript</span></div><pre class="code"><span class="ln">17</span>export function taskToken(taskId: string): string {
+<span class="ln">18</span>	return `${TASK_MARKER}${taskId}`;
+<span class="ln">19</span>}
+<span class="ln">20</span>
+<span class="ln">21</span>export function taskFromToken(token: string | undefined): string | null {
+<span class="ln">22</span>	if (!token) return null;
+<span class="ln">23</span>
+<span class="ln">24</span>	const marker = token.lastIndexOf(TASK_MARKER);
+<span class="ln">25</span>	if (marker === -1) return null;
+<span class="ln">26</span>
+<span class="ln">27</span>	const id = token.slice(marker + TASK_MARKER.length);
+<span class="ln">28</span>	return id.length &gt; 0 ? id : null;
+<span class="ln">29</span>}</pre></div></section><section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><span class="flow-stage">business event</span> → AgentTriggerService.enqueue
+  → agentTask row due now
+  → claimDue leases with SKIP LOCKED
+  → dispatch lane selects direct vs research
+  → channel continuationToken returns completion/failure</div><p>流程里的每一步都有落库状态：<code>packages/db/prisma/schema.prisma:312</code> 保存任务，<code>apps/agent/agent/lib/tasks.ts:110</code> 保存 sessionId，<code>apps/agent/agent/channels/crm.ts:73</code> 监听 session.waiting 并 completeTask。</p></section><section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>apps/agent/agent/lib/tasks.ts:67</code> 退休耗尽任务，避免坏任务永远循环。</li><li><code>apps/api/src/agent/agent-trigger.service.ts:195</code> poke 失败只 debug，cron 仍会兜底。</li><li><code>apps/agent/test/tasks.integration.spec.ts:97</code> 验证租约未过期不会重复领取。</li></ul></section><p>共享数据库包给这条队列补上了跨 app 的类型锚点：<code>packages/db/src/agent-tasks.ts:1</code> 是 AgentTask 类型入口，<code>packages/db/src/agent-tasks.ts:14</code> 把 direct lane 任务固定成 brand 和 portrait，避免 API 层与调度器各自维护一套字符串约定。读源码时这能解释为什么 visible lane 可以批量处理，而研究 lane 必须进入会话。</p><p>Subject 建模也在共享包里收口，<code>packages/db/src/agent-tasks.ts:18</code> 到 <code>packages/db/src/agent-tasks.ts:22</code> 将任务对象限制在 company、contact、workspace 三类实体。这个限制对 CRM 很关键，因为重试、租约和 completion token 都必须知道结果应该写回哪类业务对象。</p><p>真正的运行时恢复能力来自任务表和客户端的组合：<code>packages/db/src/agent-tasks.ts:31</code> 提供类型导出，<code>packages/db/src/client.ts:55</code> 则是各进程共享 Prisma 访问的入口。只要任务状态已经落库，dispatcher 重启后仍然能通过 dueAt、leasedUntil 和 attempts 重新判断下一步，而不是依赖内存队列。</p><div class="foot"><span>Generated · 2026-08-04</span><span>Source · <a href="https://github.com/trycompai/crm">trycompai/crm</a></span><span><a href="index.html">← 返回 Trending 索引</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const setActive=el=>{links.forEach(a=>a.classList.remove('active'));if(el)map.get(el).classList.add('active');};const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting)setActive(e.target);});},{rootMargin:'-40% 0px -55% 0px',threshold:0});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:80},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#95efc5';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);};tick();}})();</script>
+</body></html>
