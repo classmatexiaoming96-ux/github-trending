@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ratchet · agent 规则遵循检查器 · 源码观测台</title>
+<meta name="description" content="0xwilliamortiz/ratchet 源码级深度解析 — 0xwilliamortiz/ratchet 源码级深度解析：Claude hooks、diff detector、baseline、ledger 与 complexity budget" />
+<meta property="og:title" content="ratchet · 源码观测台" />
+<meta property="og:description" content="0xwilliamortiz/ratchet 源码级深度解析：Claude hooks、diff detector、baseline、ledger 与 complexity budget" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #f97316;
+  --star-soft:  #fb923c;
+  --star-deep:  #c2410c;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">ratchet<b>Ratchet</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">ratchet<b>Ratchet</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">JavaScript · Node 20 · Claude plugin</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>Hook 驱动的闭环架构</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>Guard、detector 与 baseline 三件套</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从编辑事件到会话账本</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>验证路径与 doctor 自检</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>技术亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与边界</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★430 · 2026-07-31</div>
+      <div><a href="https://github.com/0xwilliamortiz/ratchet" target="_blank">0xwilliamortiz/ratchet</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">ratchet <em>agent 规则遵循检查器</em></h1>
+          <p class="hero-desc">Ratchet 把 coding agent 的“请保持简单”从提示词变成 PostToolUse 之后的可度量反馈：它读取本轮真实 diff，识别新增依赖、wrapper、YAGNI 抽象、重复符号和预算超限，再把结果回灌给正在工作的 agent。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 430</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">3.7K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">36</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">same day</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>Ratchet 的入口不是一个静态 linter，而是 Claude hook 事件链：<code>sources/ratchet/hooks/hooks.json:29</code> 定义 PostToolUse，<code>sources/ratchet/hooks/hooks.json:31</code> 把 matcher 限定在真实文件编辑工具，<code>sources/ratchet/hooks/hooks.json:35</code> 调用 guard 脚本。进入运行时后，<code>sources/ratchet/hooks/ratchet-guard.js:84</code> 读取 stdin payload，<code>sources/ratchet/hooks/ratchet-guard.js:89</code> 反推仓库根目录，<code>sources/ratchet/hooks/ratchet-guard.js:95</code> 解析当前模式和预算。这组入口说明它关心的是“本轮实际写了什么”，不是预先说服模型。</p>
+      <p>核心检测也很克制：<code>sources/ratchet/hooks/ratchet-guard.js:100</code> 从 payload 提取变更，<code>sources/ratchet/hooks/ratchet-guard.js:117</code> 调用 inspect，<code>sources/ratchet/hooks/ratchet-guard.js:121</code> 再用 baseline 过滤旧债。inspect 内部由 <code>sources/ratchet/hooks/lib/detect.js:279</code> 统一调度，<code>sources/ratchet/hooks/lib/detect.js:286</code> 到 <code>sources/ratchet/hooks/lib/detect.js:290</code> 依次跑 manifest dependency、模式规则、wrapper、抽象和重复符号。最后 <code>sources/ratchet/hooks/lib/detect.js:300</code> 排序，保证反馈先给确定性更高的问题。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">Claude hook → diff extraction → detector pipeline → baseline filter → session ledger → inline feedback。核心路径横跨 hooks.json、ratchet-guard.js、detect.js、baseline.js 和 state.js。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">Finding fingerprint、session budget、mark/ledger、symbol index。Ratchet 不是通用 linter，而是面向 agent session 的复杂度单向阀。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">符号索引在 README 中描述为冷启动数百毫秒、warm cache 约 4ms；源码上限通过 maxBuffer、maxBytes 和 3000 文件 cap 控制。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Claude Code plugin hooks、AGENTS.md/Skill/commands、Windows UI launcher、repo-local .ratchet state。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">Hook 驱动的闭环架构</h2>
+      <p>架构可以从 <code>sources/ratchet/hooks/hooks.json:1</code> 开始读：SessionStart 注入规则，UserPromptSubmit 接受模式切换，PostToolUse 才真正检查编辑。<code>sources/ratchet/hooks/hooks.json:43</code> 还覆盖 SubagentStart，<code>sources/ratchet/hooks/hooks.json:55</code> 在 Stop 阶段输出报告，所以它把一次 agent 会话拆成启动、提示、编辑、子代理、收尾五个触点。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">User prompt
+  -> Claude edit tool
+  -> PostToolUse hook
+  -> ratchet-guard.js
+  -> changesFrom(payload)
+  -> inspect(change)
+  -> baseline.filter()
+  -> session ledger
+  -> emit feedback or block strict mode</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p><div class="card"><div class="card-h">Hook wiring</div><div class="card-d"><code>sources/ratchet/hooks/hooks.json:29</code> PostToolUse 只匹配 Edit/MultiEdit/Write，所以 Ratchet 的检查点明确落在真实编辑之后。</div></div>
+<div class="card"><div class="card-h">Diff reader</div><div class="card-d"><code>sources/ratchet/hooks/ratchet-guard.js:45</code> Guard 先把 Claude hook payload 转成 change 对象，再按 manifest 与普通文件分流。</div></div>
+<div class="card"><div class="card-h">Detector engine</div><div class="card-d"><code>sources/ratchet/hooks/lib/detect.js:279</code> inspect() 把新增行、依赖、wrapper、YAGNI、重复符号和 suppress 行合并成有序 findings。</div></div>
+<div class="card"><div class="card-h">Session ledger</div><div class="card-d"><code>sources/ratchet/hooks/lib/state.js:24</code> session 记录新增行、新文件、依赖和已报告 finding，避免同一条反馈在长会话里刷屏。</div></div>
+<div class="card"><div class="card-h">Baseline store</div><div class="card-d"><code>sources/ratchet/hooks/lib/baseline.js:21</code> baseline 把既有债务 fingerprint 化，只让新引入的问题触发反馈。</div></div>
+<div class="card"><div class="card-h">CLI installer</div><div class="card-d"><code>sources/ratchet/bin/install.js:299</code> install() 写入 hook、初始化 mark、建立 baseline，并在 Windows 上尝试打开 UI。</div></div><p>Ratchet 的入口不是一个静态 linter，而是 Claude hook 事件链：<code>sources/ratchet/hooks/hooks.json:29</code> 定义 PostToolUse，<code>sources/ratchet/hooks/hooks.json:31</code> 把 matcher 限定在真实文件编辑工具，<code>sources/ratchet/hooks/hooks.json:35</code> 调用 guard 脚本。进入运行时后，<code>sources/ratchet/hooks/ratchet-guard.js:84</code> 读取 stdin payload，<code>sources/ratchet/hooks/ratchet-guard.js:89</code> 反推仓库根目录，<code>sources/ratchet/hooks/ratchet-guard.js:95</code> 解析当前模式和预算。这组入口说明它关心的是“本轮实际写了什么”，不是预先说服模型。</p><p>核心检测也很克制：<code>sources/ratchet/hooks/ratchet-guard.js:100</code> 从 payload 提取变更，<code>sources/ratchet/hooks/ratchet-guard.js:117</code> 调用 inspect，<code>sources/ratchet/hooks/ratchet-guard.js:121</code> 再用 baseline 过滤旧债。inspect 内部由 <code>sources/ratchet/hooks/lib/detect.js:279</code> 统一调度，<code>sources/ratchet/hooks/lib/detect.js:286</code> 到 <code>sources/ratchet/hooks/lib/detect.js:290</code> 依次跑 manifest dependency、模式规则、wrapper、抽象和重复符号。最后 <code>sources/ratchet/hooks/lib/detect.js:300</code> 排序，保证反馈先给确定性更高的问题。</p></p>
+      <div class="g3"></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/ratchet/hooks/lib/state.js</span> · L24-38</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln"> 24</span>function emptySession(sessionId, mode, root) {
+<span class="ln"> 25</span>  return {
+<span class="ln"> 26</span>    sessionId: sessionId || 'default',
+<span class="ln"> 27</span>    mode,
+<span class="ln"> 28</span>    root: root || '',
+<span class="ln"> 29</span>    startedAt: Date.now(),
+<span class="ln"> 30</span>    addedLines: 0,
+<span class="ln"> 31</span>    removedLines: 0,
+<span class="ln"> 32</span>    newFiles: [],
+<span class="ln"> 33</span>    touchedFiles: [],
+<span class="ln"> 34</span>    deps: [],
+<span class="ln"> 35</span>    findings: [],
+<span class="ln"> 36</span>    reported: [],
+<span class="ln"> 37</span>  };
+<span class="ln"> 38</span>}</pre>
+      </div>
+
+      <a class="deep-link" href="ratchet/ratchet-guard-loop.html">深度阅读 · Guard loop 如何把编辑变成反馈</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">Guard、detector 与 baseline 三件套</h2>
+
+      <h3><span class="arr">▸</span>ratchet-guard：编辑事件的主控制面</h3>
+      <p>Guard loop 的关键是把 hook payload 转为可度量 diff。<code>sources/ratchet/hooks/ratchet-guard.js:45</code> 从 tool_input 找到路径，<code>sources/ratchet/hooks/ratchet-guard.js:50</code> 对 manifest 强制读取整文件，<code>sources/ratchet/hooks/ratchet-guard.js:55</code> 兼容 MultiEdit，<code>sources/ratchet/hooks/ratchet-guard.js:60</code> 兼容 Write 内容。随后 <code>sources/ratchet/hooks/ratchet-guard.js:111</code> 遍历每个 change，<code>sources/ratchet/hooks/ratchet-guard.js:114</code> 记录新文件，<code>sources/ratchet/hooks/ratchet-guard.js:118</code> 与 <code>sources/ratchet/hooks/ratchet-guard.js:119</code> 累加新增和删除行。这不是全仓扫描，而是 session 粒度的行为账本。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/ratchet/hooks/ratchet-guard.js</span> · L84-158</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln"> 84</span>async function main() {
+<span class="ln"> 85</span>  const payload = await readStdin();
+<span class="ln"> 86</span>  if (!EDIT_TOOLS.has(payload.tool_name)) return;
+<span class="ln"> 87</span>  if (payload.tool_response &amp;&amp; payload.tool_response.error) return;
+<span class="ln"> 88</span>
+<span class="ln"> 89</span>  const root = repoRoot(payload.cwd || process.cwd());
+<span class="ln"> 90</span>  useRoot(root);
+<span class="ln"> 91</span>  const stored = readSession(payload.session_id);
+<span class="ln"> 92</span>  const mode = (stored &amp;&amp; normalizeMode(stored.mode)) || resolveMode(root);
+<span class="ln"> 93</span>  if (mode === 'off') return;
+<span class="ln"> 94</span>
+<span class="ln"> 95</span>  const budget = resolveBudget(mode, root);
+<span class="ln"> 96</span>  const session = stored || emptySession(payload.session_id, mode, root);
+<span class="ln"> 97</span>  session.mode = mode;
+<span class="ln"> 98</span>  session.removedLines = session.removedLines || 0;
+<span class="ln"> 99</span>
+<span class="ln">100</span>  const changes = changesFrom(payload, root);
+<span class="ln">101</span>  if (!changes.length) return;
+<span class="ln">102</span>
+<span class="ln">103</span>  const context = {
+<span class="ln">104</span>    root,
+<span class="ln">105</span>    symbols: buildIndex(root),
+<span class="ln">106</span>    countImplementations: (name) =&gt; countImplementations(root, name),
+<span class="ln">107</span>  };
+<span class="ln">108</span>  const accepted = baseline.read(root);
+<span class="ln">109</span>  const fresh = [];
+<span class="ln">110</span>
+<span class="ln">111</span>  for (const change of changes) {
+<span class="ln">112</span>    const relative = relativePosix(root, change.path);
+<span class="ln">113</span>    if (relative.startsWith('..') || isTestPath(relative)) continue;
+<span class="ln">114</span>    if (isNewFile(root, change.path, session)) session.newFiles.push(relative);
+<span class="ln">115</span>    if (!session.touchedFiles.includes(relative)) session.touchedFiles.push(relative);
+<span class="ln">116</span>
+<span class="ln">117</span>    const result = inspect(change, context);
+<span class="ln">118</span>    session.addedLines += result.added.length;
+<span class="ln">119</span>    session.removedLines += result.removed.length;
+<span class="ln">120</span>
+<span class="ln">121</span>    const surviving = baseline.filter(result.findings, accepted, () =&gt; relative);
+<span class="ln">122</span>    for (const finding of surviving) {
+<span class="ln">123</span>      if (finding.dep &amp;&amp; !session.deps.includes(finding.dep)) session.deps.push(finding.dep);
+<span class="ln">124</span>      const key = fingerprint(finding, relative);
+<span class="ln">125</span>      if (session.reported.includes(key)) continue;
+<span class="ln">126</span>      session.reported.push(key);
+<span class="ln">127</span>      finding.path = relative;
+<span class="ln">128</span>      session.findings.push(finding);
+<span class="ln">129</span>      fresh.push(finding);
+<span class="ln">130</span>    }
+<span class="ln">131</span>  }
+<span class="ln">132</span>
+<span class="ln">133</span>  const overruns = budget.enforce === 'silent' ? [] : budgetFindings(session, budget);
+<span class="ln">134</span>  writeSession(session);
+<span class="ln">135</span>
+<span class="ln">136</span>  const shown = [...fresh, ...overruns].slice(0, MAX_REPORTED);
+<span class="ln">137</span>  if (!shown.length) return;
+<span class="ln">138</span>
+<span class="ln">139</span>  const hidden = fresh.length + overruns.length - shown.length;
+<span class="ln">140</span>  const body =
+<span class="ln">141</span>    headline(session, budget, mode) +
+<span class="ln">142</span>    '\n\n' +
+<span class="ln">143</span>    alignedFindings(shown) +
+<span class="ln">144</span>    (hidden &gt; 0 ? '\n\n' + hidden + ' more not shown' : '');
+<span class="ln">145</span>
+<span class="ln">146</span>  const blocking =
+<span class="ln">147</span>    budget.enforce === 'block' &amp;&amp;
+<span class="ln">148</span>    (overruns.length &gt; 0 || fresh.some((finding) =&gt; finding.confidence === CERTAIN));
+<span class="ln">149</span>
+<span class="ln">150</span>  if (blocking) {
+<span class="ln">151</span>    block('PostToolUse', body + '\n\nStrict mode. Revert or shrink this change, or ask the user to raise the budget.');
+<span class="ln">152</span>    return;
+<span class="ln">153</span>  }
+<span class="ln">154</span>
+<span class="ln">155</span>  emit(
+<span class="ln">156</span>    'PostToolUse',
+<span class="ln">157</span>    body + '\n\nFix what applies, then continue. Wrong call? say so, or mark the line with: ratchet-ignore: reason'
+<span class="ln">158</span>  );</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>detect.js：小规则组合成 finding pipeline</h3>
+      <p>Detector 的设计更像“小而硬”的规则集合。<code>sources/ratchet/hooks/lib/changes.js:9</code> 用 before/after 的行池计算新增行，<code>sources/ratchet/hooks/lib/changes.js:25</code> 到 <code>sources/ratchet/hooks/lib/changes.js:33</code> 只把常见依赖 manifest 纳入确定性 dependency 检测。wrapper 检测从 <code>sources/ratchet/hooks/lib/detect.js:209</code> 开始，YAGNI 抽象从 <code>sources/ratchet/hooks/lib/detect.js:231</code> 开始，重复符号从 <code>sources/ratchet/hooks/lib/detect.js:250</code> 开始，fingerprint 在 <code>sources/ratchet/hooks/lib/detect.js:275</code> 把数字归一化，避免行号移动导致 baseline 失效。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/ratchet/hooks/lib/detect.js</span> · L279-343</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">279</span>function inspect(change, context = {}) {
+<span class="ln">280</span>  const added = addedLines(change.before, change.after);
+<span class="ln">281</span>  const removed = addedLines(change.after, change.before);
+<span class="ln">282</span>  if (!added.length &amp;&amp; !isManifest(change.path)) return { added: [], removed, findings: [] };
+<span class="ln">283</span>
+<span class="ln">284</span>  const suppressed = suppressedLines(change.after);
+<span class="ln">285</span>  const findings = [
+<span class="ln">286</span>    ...scanManifest(change),
+<span class="ln">287</span>    ...scanPatterns(change, added),
+<span class="ln">288</span>    ...scanWrappers(change, added),
+<span class="ln">289</span>    ...scanAbstractions(change, added, context),
+<span class="ln">290</span>    ...scanDuplicates(change, added, context),
+<span class="ln">291</span>  ].filter((finding) =&gt; !suppressed.has(finding.line));
+<span class="ln">292</span>
+<span class="ln">293</span>  const unique = new Map();
+<span class="ln">294</span>  for (const finding of findings) {
+<span class="ln">295</span>    const key = finding.tag + '|' + finding.what;
+<span class="ln">296</span>    const previous = unique.get(key);
+<span class="ln">297</span>    if (!previous || RANK[finding.confidence] &lt; RANK[previous.confidence]) unique.set(key, finding);
+<span class="ln">298</span>  }
+<span class="ln">299</span>
+<span class="ln">300</span>  const ordered = [...unique.values()].sort(
+<span class="ln">301</span>    (a, b) =&gt; RANK[a.confidence] - RANK[b.confidence] || a.line - b.line
+<span class="ln">302</span>  );
+<span class="ln">303</span>  return { added, removed, findings: ordered };
+<span class="ln">304</span>}
+<span class="ln">305</span>
+<span class="ln">306</span>function budgetFindings(session, budget) {
+<span class="ln">307</span>  if (!budget) return [];
+<span class="ln">308</span>  const findings = [];
+<span class="ln">309</span>  const net = session.addedLines - (session.removedLines || 0);
+<span class="ln">310</span>
+<span class="ln">311</span>  if (session.newFiles.length &gt; budget.newFiles) {
+<span class="ln">312</span>    findings.push({
+<span class="ln">313</span>      tag: 'budget', confidence: CERTAIN, path: '', line: 0,
+<span class="ln">314</span>      what: session.newFiles.length + ' new files, budget is ' + budget.newFiles,
+<span class="ln">315</span>      fix: 'fold the extras into files that already exist',
+<span class="ln">316</span>    });
+<span class="ln">317</span>  }
+<span class="ln">318</span>  if (session.deps.length &gt; budget.newDeps) {
+<span class="ln">319</span>    findings.push({
+<span class="ln">320</span>      tag: 'budget', confidence: CERTAIN, path: '', line: 0,
+<span class="ln">321</span>      what: session.deps.length + ' new dependencies, budget is ' + budget.newDeps,
+<span class="ln">322</span>      fix: 'drop ' + session.deps.slice(budget.newDeps).join(', '),
+<span class="ln">323</span>    });
+<span class="ln">324</span>  }
+<span class="ln">325</span>  if (net &gt; budget.addedLines) {
+<span class="ln">326</span>    findings.push({
+<span class="ln">327</span>      tag: 'budget', confidence: CERTAIN, path: '', line: 0,
+<span class="ln">328</span>      what: net + ' net added lines, budget is ' + budget.addedLines,
+<span class="ln">329</span>      fix: 'stop adding and start deleting, or raise the budget explicitly',
+<span class="ln">330</span>    });
+<span class="ln">331</span>  }
+<span class="ln">332</span>  return findings;
+<span class="ln">333</span>}
+<span class="ln">334</span>
+<span class="ln">335</span>function format(finding) {
+<span class="ln">336</span>  const where = finding.path ? finding.path + ':' + finding.line + ' ' : '';
+<span class="ln">337</span>  return where + finding.tag + ': ' + finding.what + '. ' + finding.fix + '.';
+<span class="ln">338</span>}
+<span class="ln">339</span>
+<span class="ln">340</span>module.exports = {
+<span class="ln">341</span>  CERTAIN, HEURISTIC, LIKELY, PATTERNS, RANK,
+<span class="ln">342</span>  budgetFindings, fingerprint, format, inspect, splitLines, suppressedLines,
+<span class="ln">343</span>};</pre>
+      </div>
+
+      <a class="deep-link" href="ratchet/ratchet-detector-baseline.html">深度阅读 · Detector 与 baseline 如何避免噪音</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从编辑事件到会话账本</h2>
+      <p>运行链路分两条：第一条是实时 guard，从 <code>sources/ratchet/hooks/ratchet-guard.js:84</code> 到 <code>sources/ratchet/hooks/ratchet-guard.js:158</code> 在编辑后回灌反馈；第二条是安装和审计，从 <code>sources/ratchet/bin/install.js:299</code> 到 <code>sources/ratchet/bin/install.js:355</code> 注册 hook、初始化 mark 和 baseline，再由 <code>sources/ratchet/bin/install.js:466</code> 与 <code>sources/ratchet/bin/install.js:487</code> 支持离线 audit/baseline。会话结束时 <code>sources/ratchet/hooks/ratchet-report.js:24</code> 汇总，<code>sources/ratchet/hooks/lib/state.js:132</code> 写 ledger，形成趋势记录。</p>
+
+      <h3><span class="arr">▸</span>实时编辑检查</h3>
+      <div class="flow">Edit/MultiEdit/Write
+  -> changesFrom()
+  -> addedLines()
+  -> inspect()
+  -> baseline.filter()
+  -> budgetFindings()
+  -> emit/block</div>
+
+      <h3><span class="arr">▸</span>安装、审计与趋势</h3>
+      <div class="flow">ratchet install
+  -> settings hooks merge
+  -> ensureMeasuring(mark)
+  -> ensureBaseline(audit existing)
+  -> session Stop
+  -> appendLedger()
+  -> ratchet report</div>
+
+      <a class="deep-link" href="ratchet/ratchet-detector-baseline.html">深度阅读 · Baseline、fingerprint 与 ledger 的配合</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">验证路径与 doctor 自检</h2>
+      <p>Ratchet 的验证入口分散在 CLI doctor、audit 和 report 中，适合先用源码确认行为，再运行 npm test 或 ratchet doctor 做端到端冒烟。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>这个仓库没有传统 tests 目录，但 CLI 内置 doctor 自测路径：<code>sources/ratchet/bin/install.js:586</code> 开始构造检查，<code>sources/ratchet/bin/install.js:623</code> 生成 wrapper 样例，<code>sources/ratchet/bin/install.js:637</code> 判断 session hook 是否注入规则，<code>sources/ratchet/bin/install.js:643</code> 生成重复符号样例，<code>sources/ratchet/bin/install.js:663</code> 检查 ledger 是否落盘。源码级阅读时要把 doctor 看成冒烟测试，把 README 的 115 tests 徽标当作待核验声明。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/../sources/ratchet/bin/install.js</span> · L586-664</span><span>JavaScript</span></div>
+        <pre class="code"><span class="ln">586</span>function doctor() {
+<span class="ln">587</span>  const root = projectRoot();
+<span class="ln">588</span>  let failed = false;
+<span class="ln">589</span>
+<span class="ln">590</span>  say(heading('environment'));
+<span class="ln">591</span>  say('');
+<span class="ln">592</span>  const major = Number(process.versions.node.split('.')[0]);
+<span class="ln">593</span>  line('node', process.versions.node, major &gt;= 20 ? 'good' : 'bad');
+<span class="ln">594</span>  if (major &lt; 20) failed = true;
+<span class="ln">595</span>  const hasGit = which('git');
+<span class="ln">596</span>  line('git', hasGit ? 'found' : 'missing, the measurement half will not run', hasGit ? 'good' : 'warn');
+<span class="ln">597</span>
+<span class="ln">598</span>  const projectSettings = path.join(root, '.claude', 'settings.json');
+<span class="ln">599</span>  const globalSettings = path.join(claudeDir(), 'settings.json');
+<span class="ln">600</span>  const installedHere = (readJsonStrict(projectSettings, null) || {}).hooks;
+<span class="ln">601</span>  const installedGlobally = (readJsonStrict(globalSettings, null) || {}).hooks;
+<span class="ln">602</span>  const scope = JSON.stringify(installedHere || {}).includes('ratchet-')
+<span class="ln">603</span>    ? 'project  ' + projectSettings
+<span class="ln">604</span>    : JSON.stringify(installedGlobally || {}).includes('ratchet-')
+<span class="ln">605</span>      ? 'global  ' + globalSettings
+<span class="ln">606</span>      : '';
+<span class="ln">607</span>  line('install', scope || 'not installed here, run: ratchet', scope ? 'good' : 'warn');
+<span class="ln">608</span>
+<span class="ln">609</span>  say('');
+<span class="ln">610</span>  say(heading('the loop, driven with real payloads'));
+<span class="ln">611</span>  say('');
+<span class="ln">612</span>
+<span class="ln">613</span>  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ratchet-doctor-'));
+<span class="ln">614</span>  const home = path.join(scratch, 'home');
+<span class="ln">615</span>  const env = { CLAUDE_CONFIG_DIR: home, RATCHET_MODE: 'guard' };
+<span class="ln">616</span>
+<span class="ln">617</span>  try {
+<span class="ln">618</span>    fs.mkdirSync(path.join(scratch, 'src'), { recursive: true });
+<span class="ln">619</span>    fs.mkdirSync(path.join(scratch, '.ratchet'), { recursive: true });
+<span class="ln">620</span>    fs.writeFileSync(path.join(scratch, 'package.json'), '{"name":"scratch","dependencies":{}}');
+<span class="ln">621</span>    fs.writeFileSync(
+<span class="ln">622</span>      path.join(scratch, 'src', 'time.js'),
+<span class="ln">623</span>      'export function formatDuration(ms) {\n  return ms + "ms";\n}\n'
+<span class="ln">624</span>    );
+<span class="ln">625</span>
+<span class="ln">626</span>    if (hasGit) {
+<span class="ln">627</span>      const git = (...args) =&gt; execFileSync('git', args, { cwd: scratch, stdio: 'ignore' });
+<span class="ln">628</span>      git('init', '-q');
+<span class="ln">629</span>      git('config', 'user.email', 'doctor@ratchet');
+<span class="ln">630</span>      git('config', 'user.name', 'doctor');
+<span class="ln">631</span>      git('add', '-A');
+<span class="ln">632</span>      git('commit', '-qm', 'init');
+<span class="ln">633</span>    }
+<span class="ln">634</span>
+<span class="ln">635</span>    const session = driveHook('ratchet-session.js', { session_id: 'doctor', cwd: scratch, source: 'startup' }, env);
+<span class="ln">636</span>    const ruleset = session.includes('RATCHET ACTIVE') &amp;&amp; session.includes('first rung');
+<span class="ln">637</span>    line('session hook', ruleset ? 'injected the ruleset and the budget' : 'no ruleset came back', ruleset ? 'good' : 'bad');
+<span class="ln">638</span>    if (!ruleset) failed = true;
+<span class="ln">639</span>
+<span class="ln">640</span>    const planted = [
+<span class="ln">641</span>      "import moment from 'moment';",
+<span class="ln">642</span>      '',
+<span class="ln">643</span>      'export function format_duration(ms) {',
+<span class="ln">644</span>      "  return ms + 'ms';",
+<span class="ln">645</span>      '}',
+<span class="ln">646</span>      '',
+<span class="ln">647</span>      'const snapshot = JSON.parse(JSON.stringify(state));',
+<span class="ln">648</span>      '',
+<span class="ln">649</span>    ].join('\n');
+<span class="ln">650</span>    fs.writeFileSync(path.join(scratch, 'src', 'report.js'), planted);
+<span class="ln">651</span>
+<span class="ln">652</span>    const guard = driveHook('ratchet-guard.js', {
+<span class="ln">653</span>      session_id: 'doctor',
+<span class="ln">654</span>      cwd: scratch,
+<span class="ln">655</span>      tool_name: 'Write',
+<span class="ln">656</span>      tool_input: { file_path: path.join(scratch, 'src', 'report.js'), content: planted },
+<span class="ln">657</span>    }, env);
+<span class="ln">658</span>    const tags = ['dep', 'native', 'exists'].filter((tag) =&gt; guard.includes(tag + ' '));
+<span class="ln">659</span>    line('guard hook', tags.length ? 'caught ' + tags.join(', ') + ' in a planted file' : 'caught nothing', tags.length &gt;= 2 ? 'good' : 'bad');
+<span class="ln">660</span>    if (tags.length &lt; 2) failed = true;
+<span class="ln">661</span>
+<span class="ln">662</span>    const report = driveHook('ratchet-report.js', { session_id: 'doctor', cwd: scratch }, env);
+<span class="ln">663</span>    const ledger = fs.existsSync(path.join(scratch, '.ratchet', 'ledger.jsonl'));
+<span class="ln">664</span>    line('report hook', report.includes('ratchet guard session') ? (ledger ? 'summarised and wrote a ledger row' : 'summarised, no ledger') : 'silent', report ? 'good' : 'bad');</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li><code>sources/ratchet/hooks/ratchet-guard.js:150</code> strict mode 只在预算超限或 certain finding 时 block，likely/heuristic 主要用于提醒，团队需要接受这个偏保守策略。</li><li><code>sources/ratchet/hooks/lib/detect.js:177</code> suppress 规则会同时跳过当前行和下一行，适合局部豁免，但如果滥用会让 ledger 变成形式主义。</li><li><code>sources/ratchet/hooks/lib/state.js:75</code> 依赖 git ls-files，未初始化仓库时只能注入规则，mark、ledger 和 audit 都会退化。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">技术亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">闭环位置精准</div><div class="card-d">它不是提前扫描全仓，而是在 <code>sources/ratchet/hooks/ratchet-guard.js:111</code> 针对本轮 edit payload 做检查，反馈仍在同一 agent session 内。</div></div><div class="card"><div class="card-h">Baseline 可迁移</div><div class="card-d"><code>sources/ratchet/hooks/lib/detect.js:275</code> 的 fingerprint 把数字归一，<code>sources/ratchet/hooks/lib/baseline.js:33</code> 只过滤已接受项，减少历史债务噪音。</div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">sources/ratchet/hooks/lib/changes.js</span> · L9-22</span><span>JavaScript</span></div><pre class="code"><span class="ln">  9</span>function addedLines(before, after) {
+<span class="ln"> 10</span>  const pool = new Map();
+<span class="ln"> 11</span>  for (const line of splitLines(before)) {
+<span class="ln"> 12</span>    const key = line.trim();
+<span class="ln"> 13</span>    pool.set(key, (pool.get(key) || 0) + 1);
+<span class="ln"> 14</span>  }
+<span class="ln"> 15</span>  return splitLines(after).reduce((added, line, index) =&gt; {
+<span class="ln"> 16</span>    const key = line.trim();
+<span class="ln"> 17</span>    if (!key) return added;
+<span class="ln"> 18</span>    const remaining = pool.get(key) || 0;
+<span class="ln"> 19</span>    if (remaining &gt; 0) pool.set(key, remaining - 1);
+<span class="ln"> 20</span>    else added.push({ line: index + 1, text: line });
+<span class="ln"> 21</span>    return added;
+<span class="ln"> 22</span>  }, []);</pre></div><div class="code-wrap"><div class="code-bar"><span><span class="src">sources/ratchet/hooks/lib/baseline.js</span> · L21-35</span><span>JavaScript</span></div><pre class="code"><span class="ln"> 21</span>function write(root, fingerprints, note) {
+<span class="ln"> 22</span>  const file = baselinePath(root);
+<span class="ln"> 23</span>  fs.mkdirSync(path.dirname(file), { recursive: true });
+<span class="ln"> 24</span>  const payload = {
+<span class="ln"> 25</span>    recordedAt: new Date().toISOString(),
+<span class="ln"> 26</span>    note: note || 'findings that predate the ratchet',
+<span class="ln"> 27</span>    accepted: [...new Set(fingerprints)].sort(),
+<span class="ln"> 28</span>  };
+<span class="ln"> 29</span>  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+<span class="ln"> 30</span>  return payload;
+<span class="ln"> 31</span>}
+<span class="ln"> 32</span>
+<span class="ln"> 33</span>function filter(findings, accepted, relativeFor) {
+<span class="ln"> 34</span>  if (!accepted || accepted.size === 0) return findings;
+<span class="ln"> 35</span>  return findings.filter((finding) =&gt; !accepted.has(fingerprint(finding, relativeFor(finding))));</pre></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>风险主要集中在 hook host 和启发式边界。<code>sources/ratchet/hooks/lib/host.js:12</code> 读取 stdin 有 timeout，异常时 guard 会静默退出；<code>sources/ratchet/hooks/ratchet-guard.js:161</code> 也选择 catch 后 exit 0，避免破坏主会话但可能吞掉工具故障。符号索引在 <code>sources/ratchet/hooks/lib/index-symbols.js:123</code> 做缓存，<code>sources/ratchet/hooks/lib/audit.js:36</code> 对大文件设 maxBytes；这些都是实用取舍，但也意味着 Ratchet 更适合增量治理，不适合替代完整静态分析。</p>
+      <div class="g2"><div class="card"><div class="card-h">启发式不是证明</div><div class="card-d"><code>sources/ratchet/hooks/lib/detect.js:200</code> 的 pattern scan 很适合即时反馈，但不能替代语言服务器和安全扫描器。</div></div><div class="card"><div class="card-h">Hook 故障偏静默</div><div class="card-d"><code>sources/ratchet/hooks/ratchet-guard.js:161</code> 选择失败不阻断会话，这对开发体验友好，但团队要用 doctor/report 发现 hook 健康问题。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-05</span>
+      <span>Source · <a href="https://github.com/0xwilliamortiz/ratchet">0xwilliamortiz/ratchet</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../ratchet.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
