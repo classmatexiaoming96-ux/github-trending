@@ -1,0 +1,615 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>导出与视觉 QA 管线 · open-kimi-ppt-skill</title><meta name="description" content="Binaryify/open-kimi-ppt-skill 源码级深度解析"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#7bdff2;--star-soft:#a6ecf5;--star-deep:#38a8c7;}
+.mini{font-family:var(--mono);font-size:11px;color:var(--text-faint)} .quote{border-left:3px solid var(--star);padding:12px 16px;background:var(--panel);color:var(--text-2);margin:16px 0} table.matrix{width:100%;border-collapse:collapse;margin:18px 0;border:1px solid var(--line)} .matrix th,.matrix td{border:1px solid var(--line);padding:10px 12px;text-align:left;color:var(--text-2);vertical-align:top} .matrix th{color:var(--text);background:rgba(255,255,255,.035)} </style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">open-kimi<b>PPT</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">open-kimi<b>PPT</b></div><div class="sub">export QA · detail</div></div><span class="nav-ver">JavaScript / Python · npm skill</span><nav><ul class="nav-list" id="navlist"><li><a href="#c0"><span class="idx">00</span>导入</a></li><li><a href="#c1"><span class="idx">01</span>核心实现</a></li><li><a href="#c2"><span class="idx">02</span>流程</a></li><li><a href="#c3"><span class="idx">03</span>边界</a></li><li><a href="#c4"><span class="idx">04</span>关联</a></li></ul></nav><div class="nav-foot"><div>Stars ★729 · 2026-08</div><div><a href="https://github.com/Binaryify/open-kimi-ppt-skill" target="_blank">Binaryify/open-kimi-ppt-skill</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">导出与视觉 QA 管线 <em>深度解析</em></h1><p class="hero-desc">这一页拆 Python 导出脚本：如何构建浏览器 payload，如何捕获 PPTX 下载，如何 patch transition，如何验证 ZIP，以及如何导出图片并拼接总览图用于多模态 QA。</p></div>
+<section class="sec" id="c0"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><h3><span class="arr">▸</span>图片导出复用 PPTX 导出底座</h3><p><code>scripts/export_images.py:26</code> 到 <code>scripts/export_images.py:38</code> 从 export_pptx 复用 HOST_TEMPLATE、BrowserSession、build_payload、find_download、find_manifest、serve 和 wait_for_export_dialog。也就是说，图片 QA 并不是第二套导出系统，而是在相同浏览器宿主上换一个导出格式。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_images.py</span> · L26-38</span><span>Python</span></div><pre class="code"><span class="ln">26</span>from export_pptx import (
+<span class="ln">27</span>    HOST_TEMPLATE,
+<span class="ln">28</span>    BrowserSession,
+<span class="ln">29</span>    ExportError,
+<span class="ln">30</span>    build_payload,
+<span class="ln">31</span>    ensure_agent_browser,
+<span class="ln">32</span>    find_download,
+<span class="ln">33</span>    find_manifest,
+<span class="ln">34</span>    log,
+<span class="ln">35</span>    ref_by_name,
+<span class="ln">36</span>    serve,
+<span class="ln">37</span>    wait_for_export_dialog,
+<span class="ln">38</span>)</pre></div></section>
+<section class="sec" id="c1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>payload 构造和资源嵌入</h3><p><code>scripts/export_pptx.py:132</code> 到 <code>scripts/export_pptx.py:148</code> 先定位唯一 .pptd manifest，<code>scripts/export_pptx.py:151</code> 读取 YAML mapping，<code>scripts/export_pptx.py:162</code> 确保 page 路径没有逃出项目目录。真正 payload 在 <code>scripts/export_pptx.py:196</code> 构造：读取 manifest、pages、title，再通过 <code>scripts/export_pptx.py:173</code> 构建 imageMap，把小于 20MiB 的本地图片转成 data URL。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_pptx.py</span> · L132-223</span><span>Python</span></div><pre class="code"><span class="ln">132</span>def find_manifest(source: Path) -&gt; Path:
+<span class="ln">133</span>    source = source.expanduser().resolve()
+<span class="ln">134</span>    if source.is_file():
+<span class="ln">135</span>        if source.suffix.lower() != &quot;.pptd&quot;:
+<span class="ln">136</span>            raise ExportError(f&quot;input must be a .pptd file or project directory: {source}&quot;)
+<span class="ln">137</span>        return source
+<span class="ln">138</span>    if not source.is_dir():
+<span class="ln">139</span>        raise ExportError(f&quot;input does not exist: {source}&quot;)
+<span class="ln">140</span>    manifests = sorted(source.rglob(&quot;*.pptd&quot;))
+<span class="ln">141</span>    if not manifests:
+<span class="ln">142</span>        raise ExportError(f&quot;no .pptd manifest found under: {source}&quot;)
+<span class="ln">143</span>    if len(manifests) &gt; 1:
+<span class="ln">144</span>        choices = &quot;\n  &quot;.join(str(path) for path in manifests[:20])
+<span class="ln">145</span>        raise ExportError(
+<span class="ln">146</span>            &quot;multiple .pptd manifests found; pass one manifest explicitly:\n  &quot; + choices
+<span class="ln">147</span>        )
+<span class="ln">148</span>    return manifests[0]
+<span class="ln">149</span>
+<span class="ln">150</span>
+<span class="ln">151</span>def read_yaml_mapping(path: Path) -&gt; Tuple[str, Dict[str, Any]]:
+<span class="ln">152</span>    text = path.read_text(encoding=&quot;utf-8&quot;)
+<span class="ln">153</span>    try:
+<span class="ln">154</span>        value = yaml.safe_load(text)
+<span class="ln">155</span>    except yaml.YAMLError as exc:
+<span class="ln">156</span>        raise ExportError(f&quot;invalid YAML in {path}: {exc}&quot;) from exc
+<span class="ln">157</span>    if not isinstance(value, dict):
+<span class="ln">158</span>        raise ExportError(f&quot;expected a YAML mapping in {path}&quot;)
+<span class="ln">159</span>    return text, value
+<span class="ln">160</span>
+<span class="ln">161</span>
+<span class="ln">162</span>def safe_project_path(root: Path, relative: str) -&gt; Path:
+<span class="ln">163</span>    if not isinstance(relative, str) or not relative.strip():
+<span class="ln">164</span>        raise ExportError(&quot;page path must be a non-empty string&quot;)
+<span class="ln">165</span>    candidate = (root / relative).resolve()
+<span class="ln">166</span>    try:
+<span class="ln">167</span>        candidate.relative_to(root)
+<span class="ln">168</span>    except ValueError as exc:
+<span class="ln">169</span>        raise ExportError(f&quot;project path escapes the PPTD directory: {relative}&quot;) from exc
+<span class="ln">170</span>    return candidate
+<span class="ln">171</span>
+<span class="ln">172</span>
+<span class="ln">173</span>def build_image_map(root: Path) -&gt; Dict[str, str]:
+<span class="ln">174</span>    image_map: Dict[str, str] = {}
+<span class="ln">175</span>    total = 0
+<span class="ln">176</span>    for path in sorted(root.rglob(&quot;*&quot;)):
+<span class="ln">177</span>        if not path.is_file() or path.suffix.lower() not in IMAGE_MIME:
+<span class="ln">178</span>            continue
+<span class="ln">179</span>        size = path.stat().st_size
+<span class="ln">180</span>        if size &gt; MAX_IMAGE_BYTES:
+<span class="ln">181</span>            log(f&quot;skip local image over 20 MiB: {path.relative_to(root)}&quot;)
+<span class="ln">182</span>            continue
+<span class="ln">183</span>        if total + size &gt; MAX_EMBEDDED_MEDIA_BYTES:
+<span class="ln">184</span>            raise ExportError(
+<span class="ln">185</span>                &quot;local image payload exceeds 200 MiB; reduce media size or use remote URLs&quot;
+<span class="ln">186</span>            )
+<span class="ln">187</span>        data = base64.b64encode(path.read_bytes()).decode(&quot;ascii&quot;)
+<span class="ln">188</span>        rel = path.relative_to(root).as_posix()
+<span class="ln">189</span>        image_map[rel] = f&quot;data:{IMAGE_MIME[path.suffix.lower()]};base64,{data}&quot;
+<span class="ln">190</span>        total += size
+<span class="ln">191</span>    if image_map:
+<span class="ln">192</span>        log(f&quot;prepared {len(image_map)} local image resource(s), {total} bytes&quot;)
+<span class="ln">193</span>    return image_map
+<span class="ln">194</span>
+<span class="ln">195</span>
+<span class="ln">196</span>def build_payload(manifest: Path) -&gt; Dict[str, Any]:
+<span class="ln">197</span>    manifest_text, manifest_data = read_yaml_mapping(manifest)
+<span class="ln">198</span>    if manifest_data.get(&quot;version&quot;) != &quot;v2&quot;:
+<span class="ln">199</span>        raise ExportError(&quot;local PPTX export currently requires PPTD version: v2&quot;)
+<span class="ln">200</span>    page_paths = manifest_data.get(&quot;pages&quot;)
+<span class="ln">201</span>    if not isinstance(page_paths, list) or not page_paths:
+<span class="ln">202</span>        raise ExportError(&quot;PPTD manifest must contain a non-empty pages list&quot;)
+<span class="ln">203</span>
+<span class="ln">204</span>    root = manifest.parent.resolve()
+<span class="ln">205</span>    pages: List[Dict[str, str]] = []
+<span class="ln">206</span>    for entry in page_paths:
+<span class="ln">207</span>        page_path = safe_project_path(root, entry)
+<span class="ln">208</span>        if not page_path.is_file():
+<span class="ln">209</span>            raise ExportError(f&quot;missing page file: {entry}&quot;)
+<span class="ln">210</span>        page_text, page_data = read_yaml_mapping(page_path)
+<span class="ln">211</span>        if not isinstance(page_data.get(&quot;elements&quot;), list):
+<span class="ln">212</span>            raise ExportError(f&quot;page elements must be an array: {entry}&quot;)
+<span class="ln">213</span>        pages.append({&quot;path&quot;: str(entry), &quot;content&quot;: page_text})
+<span class="ln">214</span>
+<span class="ln">215</span>    title = str(manifest_data.get(&quot;title&quot;) or manifest.stem)
+<span class="ln">216</span>    return {
+<span class="ln">217</span>        &quot;id&quot;: f&quot;local-export-{uuid.uuid4().hex}&quot;,
+<span class="ln">218</span>        &quot;title&quot;: title,
+<span class="ln">219</span>        &quot;manifestPath&quot;: manifest.name,
+<span class="ln">220</span>        &quot;manifestContent&quot;: manifest_text,
+<span class="ln">221</span>        &quot;pages&quot;: pages,
+<span class="ln">222</span>        &quot;imageMap&quot;: build_image_map(root),
+<span class="ln">223</span>    }</pre></div><h3><span class="arr">▸</span>下载捕获与 PPTX 校验</h3><p>浏览器会话由 <code>scripts/export_pptx.py:240</code> 封装，下载等待在 <code>scripts/export_pptx.py:345</code> 检查文件稳定和 accept 函数。PPTX 判断不是看扩展名，而是 <code>scripts/export_pptx.py:332</code> 打开 zip 并检查 ppt/presentation.xml 与 content type。最终 <code>scripts/export_pptx.py:462</code> 做 CRC、slide XML、transition 和字体部件校验。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_pptx.py</span> · L240-284</span><span>Python</span></div><pre class="code"><span class="ln">240</span>class BrowserSession:
+<span class="ln">241</span>    def __init__(self, executable: str, session: str, cwd: Path, download_dir: Path):
+<span class="ln">242</span>        self.executable = executable
+<span class="ln">243</span>        self.session = session
+<span class="ln">244</span>        self.cwd = cwd
+<span class="ln">245</span>        self.download_dir = download_dir
+<span class="ln">246</span>        self.env = os.environ.copy()
+<span class="ln">247</span>        self.env.setdefault(&quot;AGENT_BROWSER_DEFAULT_TIMEOUT&quot;, &quot;60000&quot;)
+<span class="ln">248</span>        self.env.setdefault(&quot;AGENT_BROWSER_IDLE_TIMEOUT_MS&quot;, &quot;180000&quot;)
+<span class="ln">249</span>
+<span class="ln">250</span>    def run(
+<span class="ln">251</span>        self,
+<span class="ln">252</span>        args: Sequence[str],
+<span class="ln">253</span>        *,
+<span class="ln">254</span>        timeout: int = 90,
+<span class="ln">255</span>        check: bool = True,
+<span class="ln">256</span>    ) -&gt; subprocess.CompletedProcess[str]:
+<span class="ln">257</span>        command = [self.executable, &quot;--session&quot;, self.session, *args]
+<span class="ln">258</span>        process = subprocess.run(
+<span class="ln">259</span>            command,
+<span class="ln">260</span>            cwd=self.cwd,
+<span class="ln">261</span>            env=self.env,
+<span class="ln">262</span>            text=True,
+<span class="ln">263</span>            stdout=subprocess.PIPE,
+<span class="ln">264</span>            stderr=subprocess.STDOUT,
+<span class="ln">265</span>            timeout=timeout,
+<span class="ln">266</span>        )
+<span class="ln">267</span>        if check and process.returncode != 0:
+<span class="ln">268</span>            raise ExportError(
+<span class="ln">269</span>                f&quot;agent-browser command failed ({process.returncode}): &quot;
+<span class="ln">270</span>                f&quot;{&#x27; &#x27;.join(args)}\n{process.stdout[-4000:]}&quot;
+<span class="ln">271</span>            )
+<span class="ln">272</span>        return process
+<span class="ln">273</span>
+<span class="ln">274</span>    def open(self, url: str) -&gt; None:
+<span class="ln">275</span>        self.run(
+<span class="ln">276</span>            [&quot;--download-path&quot;, str(self.download_dir), &quot;open&quot;, url], timeout=90
+<span class="ln">277</span>        )
+<span class="ln">278</span>
+<span class="ln">279</span>    def snapshot(self) -&gt; Dict[str, Any]:
+<span class="ln">280</span>        process = self.run([&quot;snapshot&quot;, &quot;-i&quot;, &quot;-C&quot;, &quot;--json&quot;])
+<span class="ln">281</span>        return json_result(process.stdout)
+<span class="ln">282</span>
+<span class="ln">283</span>    def close(self) -&gt; None:
+<span class="ln">284</span>        self.run([&quot;close&quot;], timeout=20, check=False)</pre></div><h3><span class="arr">▸</span>transition patch 放在 slide root 正确位置</h3><p><code>scripts/export_pptx.py:376</code> 先删除已有 transition，再在 <code>scripts/export_pptx.py:385</code> 到 <code>scripts/export_pptx.py:399</code> 找 cSld/clrMapOvr anchor 插入 fade。测试 <code>tests/test_export_pptx.py:36</code>、<code>tests/test_export_pptx.py:50</code> 和 <code>tests/test_export_pptx.py:63</code> 分别覆盖插入顺序、替换旧 transition 和 nested transition 重定位。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_pptx.py</span> · L376-399</span><span>Python</span></div><pre class="code"><span class="ln">376</span>def replace_transition(slide_xml: bytes, transition: str) -&gt; bytes:
+<span class="ln">377</span>    text = slide_xml.decode(&quot;utf-8&quot;)
+<span class="ln">378</span>    pattern = re.compile(
+<span class="ln">379</span>        r&quot;&lt;p:transition\b[^&gt;]*(?:/&gt;|&gt;.*?&lt;/p:transition&gt;)&quot;, re.DOTALL
+<span class="ln">380</span>    )
+<span class="ln">381</span>    text = pattern.sub(&quot;&quot;, text)
+<span class="ln">382</span>    if transition == &quot;none&quot;:
+<span class="ln">383</span>        return text.encode(&quot;utf-8&quot;)
+<span class="ln">384</span>
+<span class="ln">385</span>    # CT_Slide requires transition as a direct child after cSld/clrMapOvr and
+<span class="ln">386</span>    # before timing/extLst. Searching for the first p:extLst is incorrect:
+<span class="ln">387</span>    # shapes may contain their own nested extLst inside cSld, causing Office to
+<span class="ln">388</span>    # ignore a transition inserted there.
+<span class="ln">389</span>    color_map = re.search(
+<span class="ln">390</span>        r&quot;&lt;p:clrMapOvr\b[^&gt;]*(?:/&gt;|&gt;.*?&lt;/p:clrMapOvr&gt;)&quot;, text, re.DOTALL
+<span class="ln">391</span>    )
+<span class="ln">392</span>    common_slide = re.search(
+<span class="ln">393</span>        r&quot;&lt;p:cSld\b[^&gt;]*(?:/&gt;|&gt;.*?&lt;/p:cSld&gt;)&quot;, text, re.DOTALL
+<span class="ln">394</span>    )
+<span class="ln">395</span>    anchor = color_map or common_slide
+<span class="ln">396</span>    if anchor is None:
+<span class="ln">397</span>        raise ExportError(&quot;slide XML has no cSld/clrMapOvr insertion anchor&quot;)
+<span class="ln">398</span>    position = anchor.end()
+<span class="ln">399</span>    return (text[:position] + FADE_TRANSITION_XML + text[position:]).encode(&quot;utf-8&quot;)</pre></div></section>
+<section class="sec" id="c2"><div class="sec-no">§ <b>02</b> · FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><span class="flow-stage">find_manifest/build_payload</span>
+  <span class="flow-arr">↓</span> localhost export_host + payload.json
+<span class="flow-node">agent-browser opens Kimi editor</span>
+  <span class="flow-arr">↓</span> download PPTX or images ZIP
+<span class="flow-node">patch transition → verify ZIP / unzip images → stitch overview</span></div><p>PPTX 主流程在 <code>scripts/export_pptx.py:508</code> 到 <code>scripts/export_pptx.py:596</code>，图片 QA 主流程在 <code>scripts/export_images.py:293</code> 到 <code>scripts/export_images.py:383</code>。两者都先启动本地 HTTP host，再让 agent-browser 驱动 Kimi editor，区别只是一个下载 PPTX，一个用 CDP 选择图片格式后下载 ZIP。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_pptx.py</span> · L508-596</span><span>Python</span></div><pre class="code"><span class="ln">508</span>def export_pptx(
+<span class="ln">509</span>    source: Path,
+<span class="ln">510</span>    output: Path,
+<span class="ln">511</span>    transition: str,
+<span class="ln">512</span>    embed_fonts: bool,
+<span class="ln">513</span>    keep_download: bool = False,
+<span class="ln">514</span>    force: bool = False,
+<span class="ln">515</span>) -&gt; Dict[str, Any]:
+<span class="ln">516</span>    manifest = find_manifest(source)
+<span class="ln">517</span>    payload = build_payload(manifest)
+<span class="ln">518</span>    output = output.expanduser().resolve()
+<span class="ln">519</span>    output.parent.mkdir(parents=True, exist_ok=True)
+<span class="ln">520</span>    if output.exists() and not force:
+<span class="ln">521</span>        raise ExportError(f&quot;output already exists (pass --force to replace it): {output}&quot;)
+<span class="ln">522</span>    agent_browser = ensure_agent_browser()
+<span class="ln">523</span>
+<span class="ln">524</span>    log(f&quot;manifest: {manifest}&quot;)
+<span class="ln">525</span>    log(
+<span class="ln">526</span>        f&quot;defaults: transition={transition}, embed_fonts={&#x27;on&#x27; if embed_fonts else &#x27;off&#x27;}&quot;
+<span class="ln">527</span>    )
+<span class="ln">528</span>
+<span class="ln">529</span>    with tempfile.TemporaryDirectory(prefix=&quot;open-kimi-ppt-export-&quot;) as temp_name:
+<span class="ln">530</span>        temp_dir = Path(temp_name)
+<span class="ln">531</span>        download_dir = temp_dir / &quot;downloads&quot;
+<span class="ln">532</span>        download_dir.mkdir()
+<span class="ln">533</span>        shutil.copy2(HOST_TEMPLATE, temp_dir / HOST_TEMPLATE.name)
+<span class="ln">534</span>        (temp_dir / &quot;payload.json&quot;).write_text(
+<span class="ln">535</span>            json.dumps(payload, ensure_ascii=False), encoding=&quot;utf-8&quot;
+<span class="ln">536</span>        )
+<span class="ln">537</span>        server, thread, url = serve(temp_dir)
+<span class="ln">538</span>        session = f&quot;open-kimi-ppt-export-{os.getpid()}-{uuid.uuid4().hex[:8]}&quot;
+<span class="ln">539</span>        browser = BrowserSession(agent_browser, session, temp_dir, download_dir)
+<span class="ln">540</span>        try:
+<span class="ln">541</span>            log(&quot;opening the public Kimi slide editor&quot;)
+<span class="ln">542</span>            browser.open(url)
+<span class="ln">543</span>            browser.run(
+<span class="ln">544</span>                [
+<span class="ln">545</span>                    &quot;wait&quot;,
+<span class="ln">546</span>                    &quot;--fn&quot;,
+<span class="ln">547</span>                    &#x27;document.documentElement.dataset.deckStatus === &quot;ready&quot;&#x27;,
+<span class="ln">548</span>                ],
+<span class="ln">549</span>                timeout=120,
+<span class="ln">550</span>            )
+<span class="ln">551</span>            browser.run([&quot;set&quot;, &quot;viewport&quot;, &quot;1280&quot;, &quot;720&quot;])
+<span class="ln">552</span>            snapshot = browser.snapshot()
+<span class="ln">553</span>            export_ref = ref_by_name(snapshot, &quot;导出&quot;, &quot;button&quot;)
+<span class="ln">554</span>            browser.run([&quot;click&quot;, f&quot;@{export_ref}&quot;])
+<span class="ln">555</span>            dialog = wait_for_export_dialog(browser)
+<span class="ln">556</span>
+<span class="ln">557</span>            state = switch_state(dialog)
+<span class="ln">558</span>            if state is not None:
+<span class="ln">559</span>                switch_ref, checked, disabled = state
+<span class="ln">560</span>                if disabled and checked != embed_fonts:
+<span class="ln">561</span>                    log(&quot;warning: the official font switch is disabled for this deck&quot;)
+<span class="ln">562</span>                elif checked != embed_fonts:
+<span class="ln">563</span>                    browser.run([&quot;click&quot;, f&quot;@{switch_ref}&quot;])
+<span class="ln">564</span>                    dialog = wait_for_export_dialog(browser)
+<span class="ln">565</span>            elif embed_fonts:
+<span class="ln">566</span>                log(&quot;warning: the official export dialog exposed no font switch&quot;)
+<span class="ln">567</span>
+<span class="ln">568</span>            download_ref = ref_by_name(dialog, &quot;下载&quot;, &quot;button&quot;)
+<span class="ln">569</span>            log(&quot;generating PPTX in the browser&quot;)
+<span class="ln">570</span>            result = browser.run(
+<span class="ln">571</span>                [&quot;download&quot;, f&quot;@{download_ref}&quot;, str(temp_dir / &quot;browser-output.pptx&quot;)],
+<span class="ln">572</span>                timeout=180,
+<span class="ln">573</span>                check=False,
+<span class="ln">574</span>            )
+<span class="ln">575</span>            if result.returncode != 0:
+<span class="ln">576</span>                log(&quot;download capture reported a timeout; checking browser output files&quot;)
+<span class="ln">577</span>            downloaded = find_download((download_dir, temp_dir), timeout=90)
+<span class="ln">578</span>            shutil.copy2(downloaded, output)
+<span class="ln">579</span>            if keep_download:
+<span class="ln">580</span>                debug_copy = output.with_name(f&quot;{output.stem}.browser-raw.pptx&quot;)
+<span class="ln">581</span>                if debug_copy.exists() and not force:
+<span class="ln">582</span>                    raise ExportError(
+<span class="ln">583</span>                        f&quot;raw debug output already exists (pass --force): {debug_copy}&quot;
+<span class="ln">584</span>                    )
+<span class="ln">585</span>                shutil.copy2(downloaded, debug_copy)
+<span class="ln">586</span>        finally:
+<span class="ln">587</span>            browser.close()
+<span class="ln">588</span>            server.shutdown()
+<span class="ln">589</span>            server.server_close()
+<span class="ln">590</span>            thread.join(timeout=2)
+<span class="ln">591</span>
+<span class="ln">592</span>    slide_count = patch_transitions(output, transition)
+<span class="ln">593</span>    summary = verify_output(output, transition, embed_fonts)
+<span class="ln">594</span>    summary[&quot;transitionPatchedSlides&quot;] = slide_count
+<span class="ln">595</span>    summary[&quot;output&quot;] = str(output)
+<span class="ln">596</span>    return summary</pre></div></section>
+<section class="sec" id="c3"><div class="sec-no">§ <b>03</b> · EDGE</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>scripts/export_pptx.py:92</code> 检查 agent-browser，低于最低版本时 <code>scripts/export_pptx.py:109</code> 尝试安装最新版。</li><li><code>scripts/export_pptx.py:442</code> 使用临时 zip 写入并在 finally 中清理，避免损坏原输出。</li><li><code>scripts/export_images.py:68</code> 验证 ZIP 内确实包含图片，<code>scripts/export_images.py:86</code> 解压时只取图片文件名，避免目录结构污染输出。</li><li><code>scripts/export_images.py:183</code> 在需要 CDP 时自动补 websocket-client，同时 <code>scripts/export_images.py:227</code> 清除代理环境，避免 localhost CDP 走外部代理。</li></ul><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/export_images.py</span> · L86-152</span><span>Python</span></div><pre class="code"><span class="ln">86</span>def unzip_images(archive_path: Path, pages_dir: Path) -&gt; List[Path]:
+<span class="ln">87</span>    pages_dir.mkdir(parents=True, exist_ok=True)
+<span class="ln">88</span>    images: List[Path] = []
+<span class="ln">89</span>    with zipfile.ZipFile(archive_path) as archive:
+<span class="ln">90</span>        for info in archive.infolist():
+<span class="ln">91</span>            if info.is_dir() or Path(info.filename).suffix.lower() not in IMAGE_SUFFIXES:
+<span class="ln">92</span>                continue
+<span class="ln">93</span>            name = Path(info.filename).name
+<span class="ln">94</span>            if not name:
+<span class="ln">95</span>                continue
+<span class="ln">96</span>            target = pages_dir / name
+<span class="ln">97</span>            with archive.open(info) as source, target.open(&quot;wb&quot;) as out:
+<span class="ln">98</span>                shutil.copyfileobj(source, out)
+<span class="ln">99</span>            images.append(target)
+<span class="ln">100</span>    images.sort(key=page_sort_key)
+<span class="ln">101</span>    if not images:
+<span class="ln">102</span>        raise ExportError(f&quot;no page images found in: {archive_path}&quot;)
+<span class="ln">103</span>    return images
+<span class="ln">104</span>
+<span class="ln">105</span>
+<span class="ln">106</span>def label_font(image_font: Any) -&gt; Any:
+<span class="ln">107</span>    try:
+<span class="ln">108</span>        return image_font.load_default(size=18)
+<span class="ln">109</span>    except TypeError:  # older Pillow without the size argument
+<span class="ln">110</span>        return image_font.load_default()
+<span class="ln">111</span>
+<span class="ln">112</span>
+<span class="ln">113</span>def stitch_overview(
+<span class="ln">114</span>    images: Sequence[Path],
+<span class="ln">115</span>    output: Path,
+<span class="ln">116</span>    image_cls: Any,
+<span class="ln">117</span>    draw_cls: Any,
+<span class="ln">118</span>    image_font: Any,
+<span class="ln">119</span>) -&gt; Path:
+<span class="ln">120</span>    thumbs: List[Tuple[str, Any]] = []
+<span class="ln">121</span>    for index, path in enumerate(images, start=1):
+<span class="ln">122</span>        with image_cls.open(path) as opened:
+<span class="ln">123</span>            frame = opened.convert(&quot;RGB&quot;)
+<span class="ln">124</span>            ratio = OVERVIEW_THUMB_WIDTH / frame.width
+<span class="ln">125</span>            thumb = frame.resize(
+<span class="ln">126</span>                (OVERVIEW_THUMB_WIDTH, max(1, round(frame.height * ratio)))
+<span class="ln">127</span>            )
+<span class="ln">128</span>        thumbs.append((f&quot;P{index}&quot;, thumb))
+<span class="ln">129</span>
+<span class="ln">130</span>    columns = OVERVIEW_COLUMNS
+<span class="ln">131</span>    rows = math.ceil(len(thumbs) / columns)
+<span class="ln">132</span>    cell_height = OVERVIEW_LABEL_HEIGHT + max(thumb.height for _, thumb in thumbs)
+<span class="ln">133</span>    width = columns * OVERVIEW_THUMB_WIDTH + (columns + 1) * OVERVIEW_GAP
+<span class="ln">134</span>    height = rows * cell_height + (rows + 1) * OVERVIEW_GAP
+<span class="ln">135</span>
+<span class="ln">136</span>    overview = image_cls.new(&quot;RGB&quot;, (width, height), &quot;#e5e7eb&quot;)
+<span class="ln">137</span>    draw = draw_cls.Draw(overview)
+<span class="ln">138</span>    font = label_font(image_font)
+<span class="ln">139</span>    for position, (label, thumb) in enumerate(thumbs):
+<span class="ln">140</span>        column = position % columns
+<span class="ln">141</span>        row = position // columns
+<span class="ln">142</span>        x = OVERVIEW_GAP + column * (OVERVIEW_THUMB_WIDTH + OVERVIEW_GAP)
+<span class="ln">143</span>        y = OVERVIEW_GAP + row * (cell_height + OVERVIEW_GAP)
+<span class="ln">144</span>        draw.rectangle(
+<span class="ln">145</span>            (x, y, x + OVERVIEW_THUMB_WIDTH, y + OVERVIEW_LABEL_HEIGHT - 4),
+<span class="ln">146</span>            fill=&quot;#111827&quot;,
+<span class="ln">147</span>        )
+<span class="ln">148</span>        draw.text((x + 8, y + 5), label, fill=&quot;#ffffff&quot;, font=font)
+<span class="ln">149</span>        overview.paste(thumb, (x, y + OVERVIEW_LABEL_HEIGHT))
+<span class="ln">150</span>
+<span class="ln">151</span>    overview.save(output, &quot;JPEG&quot;, quality=85)
+<span class="ln">152</span>    return output</pre></div></section>
+<section class="sec" id="c4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">测试覆盖</div><div class="card-d">PPTX patch 的 zip 和 XML 行为由 <code>tests/test_export_pptx.py:75</code> 到 <code>tests/test_export_pptx.py:95</code> 覆盖。</div></div><div class="card"><div class="card-h">编辑器桥接</div><div class="card-d">导出 payload 来自同一 PPTD 项目，可回到 <code>lib/editor-app.js:330</code> 理解浏览器侧载入方式。</div></div></div></section><div class="foot"><span>Generated · 2026-08-06</span><span>Source · <a href="https://github.com/Binaryify/open-kimi-ppt-skill">Binaryify/open-kimi-ppt-skill</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}}),{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const s=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),v:Math.random()*0.02+.005}));function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;ctx.globalAlpha=p.a;ctx.fillStyle='#a6ecf5';ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick)}tick();}})();</script></body></html>

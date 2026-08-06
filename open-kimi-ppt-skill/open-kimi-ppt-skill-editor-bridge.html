@@ -1,0 +1,552 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>编辑器桥接与保存事务 · open-kimi-ppt-skill</title><meta name="description" content="Binaryify/open-kimi-ppt-skill 源码级深度解析"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#7bdff2;--star-soft:#a6ecf5;--star-deep:#38a8c7;}
+.mini{font-family:var(--mono);font-size:11px;color:var(--text-faint)} .quote{border-left:3px solid var(--star);padding:12px 16px;background:var(--panel);color:var(--text-2);margin:16px 0} table.matrix{width:100%;border-collapse:collapse;margin:18px 0;border:1px solid var(--line)} .matrix th,.matrix td{border:1px solid var(--line);padding:10px 12px;text-align:left;color:var(--text-2);vertical-align:top} .matrix th{color:var(--text);background:rgba(255,255,255,.035)} </style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">open-kimi<b>PPT</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">open-kimi<b>PPT</b></div><div class="sub">editor bridge · detail</div></div><span class="nav-ver">JavaScript / Python · npm skill</span><nav><ul class="nav-list" id="navlist"><li><a href="#c0"><span class="idx">00</span>导入</a></li><li><a href="#c1"><span class="idx">01</span>核心实现</a></li><li><a href="#c2"><span class="idx">02</span>流程</a></li><li><a href="#c3"><span class="idx">03</span>边界</a></li><li><a href="#c4"><span class="idx">04</span>关联</a></li></ul></nav><div class="nav-foot"><div>Stars ★729 · 2026-08</div><div><a href="https://github.com/Binaryify/open-kimi-ppt-skill" target="_blank">Binaryify/open-kimi-ppt-skill</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">编辑器桥接与保存事务 <em>深度解析</em></h1><p class="hero-desc">这一页专门拆 File System Access、PPTD manifest 载入、图片解析、远端 iframe RPC 和保存事务。核心问题是：怎样让远端编辑器能改本地 PPTD，同时不越权、不乱序、不吞错。</p></div>
+<section class="sec" id="c0"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><h3><span class="arr">▸</span>安全路径库是所有文件操作的入口</h3><p>编辑器 app 一开始从 <code>lib/editor-lib.js:1</code> 导入 normalizeRelativePath，并在 <code>lib/editor-app.js:2</code> 到 <code>lib/editor-app.js:8</code> 引入 assertWritableChangePath、dirname、extractPagePaths、joinDeckPath 等函数。这个导入链说明文件安全不是 UI 事件临时判断，而是所有 manifest、page、media、save change 的共同底座。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">lib/editor-app.js</span> · L1-9</span><span>JavaScript</span></div><pre class="code"><span class="ln">1</span>import {
+<span class="ln">2</span>  assertWritableChangePath,
+<span class="ln">3</span>  basename,
+<span class="ln">4</span>  dirname,
+<span class="ln">5</span>  extractPagePaths,
+<span class="ln">6</span>  joinDeckPath,
+<span class="ln">7</span>  normalizeRelativePath,
+<span class="ln">8</span>  titleFromManifest,
+<span class="ln">9</span>} from &quot;./lib.js&quot;;</pre></div></section>
+<section class="sec" id="c1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>文件夹索引与 manifest 选择</h3><p><code>lib/editor-app.js:266</code> 递归遍历 directoryHandle 并建立 fileIndex，<code>lib/editor-app.js:293</code> 在多个 .pptd 之间弹出选择。随后 <code>lib/editor-app.js:330</code> 读取 manifest，<code>lib/editor-app.js:332</code> 提取 pages，<code>lib/editor-app.js:336</code> 最多加载 500 页，<code>lib/editor-app.js:347</code> 取标题。这个流程把目录扫描、清单解析和 deck payload 构造清晰分层。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">lib/editor-app.js</span> · L266-360</span><span>JavaScript</span></div><pre class="code"><span class="ln">266</span>async function indexDirectory(directoryHandle) {
+<span class="ln">267</span>  const index = new Map();
+<span class="ln">268</span>  async function walk(handle, prefix = &quot;&quot;) {
+<span class="ln">269</span>    for await (const [name, entry] of handle.entries()) {
+<span class="ln">270</span>      if (name === &quot;.DS_Store&quot;) continue;
+<span class="ln">271</span>      const path = prefix ? `${prefix}/${name}` : name;
+<span class="ln">272</span>      if (entry.kind === &quot;directory&quot;) await walk(entry, path);
+<span class="ln">273</span>      else index.set(normalizeRelativePath(path), entry);
+<span class="ln">274</span>    }
+<span class="ln">275</span>  }
+<span class="ln">276</span>  await walk(directoryHandle);
+<span class="ln">277</span>  return index;
+<span class="ln">278</span>}
+<span class="ln">279</span>
+<span class="ln">280</span>function indexFallbackFiles(fileList) {
+<span class="ln">281</span>  const index = new Map();
+<span class="ln">282</span>  const files = [...fileList];
+<span class="ln">283</span>  const firstPath = files[0]?.webkitRelativePath || files[0]?.name || &quot;&quot;;
+<span class="ln">284</span>  const rootName = firstPath.includes(&quot;/&quot;) ? firstPath.split(&quot;/&quot;)[0] : &quot;&quot;;
+<span class="ln">285</span>  for (const file of files) {
+<span class="ln">286</span>    let path = file.webkitRelativePath || file.name;
+<span class="ln">287</span>    if (rootName &amp;&amp; path.startsWith(`${rootName}/`)) path = path.slice(rootName.length + 1);
+<span class="ln">288</span>    index.set(normalizeRelativePath(path), { kind: &quot;file&quot;, getFile: async () =&gt; file });
+<span class="ln">289</span>  }
+<span class="ln">290</span>  return index;
+<span class="ln">291</span>}
+<span class="ln">292</span>
+<span class="ln">293</span>async function chooseManifest(paths) {
+<span class="ln">294</span>  if (paths.length === 1) return paths[0];
+<span class="ln">295</span>  elements.deckOptions.replaceChildren();
+<span class="ln">296</span>  const choice = new Promise((resolve) =&gt; {
+<span class="ln">297</span>    for (const path of paths) {
+<span class="ln">298</span>      const button = document.createElement(&quot;button&quot;);
+<span class="ln">299</span>      button.className = &quot;deck-option&quot;;
+<span class="ln">300</span>      button.type = &quot;button&quot;;
+<span class="ln">301</span>      button.innerHTML = `&lt;span class=&quot;deck-file-icon&quot;&gt;P&lt;/span&gt;&lt;span&gt;&lt;strong&gt;&lt;/strong&gt;&lt;small&gt;&lt;/small&gt;&lt;/span&gt;&lt;span&gt;›&lt;/span&gt;`;
+<span class="ln">302</span>      button.querySelector(&quot;strong&quot;).textContent = basename(path);
+<span class="ln">303</span>      button.querySelector(&quot;small&quot;).textContent = path;
+<span class="ln">304</span>      button.addEventListener(&quot;click&quot;, () =&gt; {
+<span class="ln">305</span>        elements.deckDialog.close();
+<span class="ln">306</span>        resolve(path);
+<span class="ln">307</span>      });
+<span class="ln">308</span>      elements.deckOptions.append(button);
+<span class="ln">309</span>    }
+<span class="ln">310</span>    elements.deckDialog.addEventListener(
+<span class="ln">311</span>      &quot;close&quot;,
+<span class="ln">312</span>      () =&gt; {
+<span class="ln">313</span>        if (elements.deckDialog.returnValue === &quot;cancel&quot;) resolve(null);
+<span class="ln">314</span>      },
+<span class="ln">315</span>      { once: true },
+<span class="ln">316</span>    );
+<span class="ln">317</span>  });
+<span class="ln">318</span>  elements.deckDialog.showModal();
+<span class="ln">319</span>  return choice;
+<span class="ln">320</span>}
+<span class="ln">321</span>
+<span class="ln">322</span>async function textFromIndexedFile(path) {
+<span class="ln">323</span>  const entry = state.fileIndex.get(normalizeRelativePath(path));
+<span class="ln">324</span>  if (!entry) throw new Error(`找不到文件：${path}`);
+<span class="ln">325</span>  const file = await entry.getFile();
+<span class="ln">326</span>  if (file.size &gt; MAX_TEXT_BYTES) throw new Error(`文件超过 20 MiB：${path}`);
+<span class="ln">327</span>  return file.text();
+<span class="ln">328</span>}
+<span class="ln">329</span>
+<span class="ln">330</span>async function loadManifest(manifestPath, sourceLabel) {
+<span class="ln">331</span>  const manifestContent = await textFromIndexedFile(manifestPath);
+<span class="ln">332</span>  const pagePaths = extractPagePaths(manifestContent);
+<span class="ln">333</span>  const manifestDirectory = dirname(manifestPath);
+<span class="ln">334</span>  const pages = [];
+<span class="ln">335</span>  const missing = [];
+<span class="ln">336</span>  for (const pagePath of pagePaths.slice(0, 500)) {
+<span class="ln">337</span>    const indexedPath = joinDeckPath(manifestDirectory, pagePath);
+<span class="ln">338</span>    try {
+<span class="ln">339</span>      pages.push({ path: pagePath, content: await textFromIndexedFile(indexedPath) });
+<span class="ln">340</span>    } catch {
+<span class="ln">341</span>      missing.push(pagePath);
+<span class="ln">342</span>    }
+<span class="ln">343</span>  }
+<span class="ln">344</span>  if (pages.length === 0) throw new Error(&quot;.pptd 清单引用的页面均无法读取&quot;);
+<span class="ln">345</span>  if (missing.length) toast(`跳过 ${missing.length} 个无法读取的页面`, &quot;warning&quot;);
+<span class="ln">346</span>
+<span class="ln">347</span>  const fallbackTitle = basename(manifestPath).replace(/\.pptd$/i, &quot;&quot;);
+<span class="ln">348</span>  const title = titleFromManifest(manifestContent, fallbackTitle);
+<span class="ln">349</span>  await setDeck(
+<span class="ln">350</span>    {
+<span class="ln">351</span>      id: fallbackTitle,
+<span class="ln">352</span>      title,
+<span class="ln">353</span>      manifestPath,
+<span class="ln">354</span>      manifestContent,
+<span class="ln">355</span>      pages,
+<span class="ln">356</span>      basePath: manifestDirectory ? `${manifestDirectory}/` : &quot;&quot;,
+<span class="ln">357</span>      isCreate: true,
+<span class="ln">358</span>    },
+<span class="ln">359</span>    sourceLabel,
+<span class="ln">360</span>  );</pre></div><h3><span class="arr">▸</span>图片解析只返回 data URL 或空字符串</h3><p>图片资源解析在 <code>lib/editor-app.js:442</code> 先允许 data/http/blob，其他路径走 indexed file。<code>lib/editor-app.js:486</code> 到 <code>lib/editor-app.js:495</code> 读取文件并按 lastModified/size 缓存 data URL；<code>lib/editor-app.js:498</code> 会记录 miss 数量但返回空字符串而非中断整个 deck。这种降级适合编辑器预览，避免一张丢失图片阻断所有页面。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">lib/editor-app.js</span> · L442-503</span><span>JavaScript</span></div><pre class="code"><span class="ln">442</span>function resolveIndexedPath(requestedPath) {
+<span class="ln">443</span>  if (typeof requestedPath !== &quot;string&quot; || !requestedPath.trim()) return null;
+<span class="ln">444</span>  if (/^(?:data:image\/|https?:\/\/|blob:)/i.test(requestedPath)) return requestedPath;
+<span class="ln">445</span>  let candidate = requestedPath.replace(/^file:\/\/+/, &quot;&quot;).replaceAll(&quot;\\&quot;, &quot;/&quot;);
+<span class="ln">446</span>  try {
+<span class="ln">447</span>    candidate = decodeURIComponent(candidate);
+<span class="ln">448</span>  } catch {
+<span class="ln">449</span>    // Preserve literal percent signs.
+<span class="ln">450</span>  }
+<span class="ln">451</span>
+<span class="ln">452</span>  const directCandidates = [];
+<span class="ln">453</span>  try {
+<span class="ln">454</span>    directCandidates.push(normalizeRelativePath(candidate));
+<span class="ln">455</span>  } catch {
+<span class="ln">456</span>    const parts = candidate.split(&quot;/&quot;).filter(Boolean);
+<span class="ln">457</span>    for (let index = 0; index &lt; parts.length; index += 1) {
+<span class="ln">458</span>      try {
+<span class="ln">459</span>        directCandidates.push(normalizeRelativePath(parts.slice(index).join(&quot;/&quot;)));
+<span class="ln">460</span>      } catch {
+<span class="ln">461</span>        // Keep looking for a safe suffix.
+<span class="ln">462</span>      }
+<span class="ln">463</span>    }
+<span class="ln">464</span>  }
+<span class="ln">465</span>  try {
+<span class="ln">466</span>    directCandidates.push(joinDeckPath(state.manifestDirectory, candidate));
+<span class="ln">467</span>  } catch {
+<span class="ln">468</span>    // Absolute paths may still match a safe indexed suffix below.
+<span class="ln">469</span>  }
+<span class="ln">470</span>  for (const path of directCandidates) if (state.fileIndex.has(path)) return path;
+<span class="ln">471</span>  for (const path of state.fileIndex.keys()) {
+<span class="ln">472</span>    if (directCandidates.some((candidatePath) =&gt; path.endsWith(`/${candidatePath}`) || path === candidatePath)) return path;
+<span class="ln">473</span>  }
+<span class="ln">474</span>  return null;
+<span class="ln">475</span>}
+<span class="ln">476</span>
+<span class="ln">477</span>function fileToDataUrl(file) {
+<span class="ln">478</span>  return new Promise((resolve, reject) =&gt; {
+<span class="ln">479</span>    const reader = new FileReader();
+<span class="ln">480</span>    reader.addEventListener(&quot;load&quot;, () =&gt; resolve(String(reader.result)));
+<span class="ln">481</span>    reader.addEventListener(&quot;error&quot;, () =&gt; reject(reader.error || new Error(&quot;图片读取失败&quot;)));
+<span class="ln">482</span>    reader.readAsDataURL(file);
+<span class="ln">483</span>  });
+<span class="ln">484</span>}
+<span class="ln">485</span>
+<span class="ln">486</span>async function resolveImage(requestedPath) {
+<span class="ln">487</span>  if (/^(?:data:image\/|https?:\/\/|blob:)/i.test(requestedPath)) return requestedPath;
+<span class="ln">488</span>  const path = resolveIndexedPath(requestedPath);
+<span class="ln">489</span>  if (!path) return &quot;&quot;;
+<span class="ln">490</span>  const entry = state.fileIndex.get(path);
+<span class="ln">491</span>  const file = await entry.getFile();
+<span class="ln">492</span>  if (file.size &gt; MAX_IMAGE_BYTES) return &quot;&quot;;
+<span class="ln">493</span>  const cacheKey = `${path}:${file.lastModified}:${file.size}`;
+<span class="ln">494</span>  if (!state.imageCache.has(cacheKey)) state.imageCache.set(cacheKey, fileToDataUrl(file));
+<span class="ln">495</span>  return state.imageCache.get(cacheKey);
+<span class="ln">496</span>}
+<span class="ln">497</span>
+<span class="ln">498</span>async function getImages(payload = {}) {
+<span class="ln">499</span>  const paths = Array.isArray(payload.filePath) ? payload.filePath : [];
+<span class="ln">500</span>  const result = await Promise.all(paths.map((path) =&gt; resolveImage(path).catch(() =&gt; &quot;&quot;)));
+<span class="ln">501</span>  const misses = result.filter((value) =&gt; !value).length;
+<span class="ln">502</span>  if (misses) addActivity(`${paths.length} 张图片中有 ${misses} 张未找到`, &quot;warning&quot;);
+<span class="ln">503</span>  return result;</pre></div><h3><span class="arr">▸</span>保存事务具备备份和回滚</h3><p>保存路径的强约束来自 <code>lib/editor-app.js:556</code> 的 persistChanges。它在 <code>lib/editor-app.js:559</code> 限制一次最多 600 个变更，在 <code>lib/editor-app.js:561</code> 到 <code>lib/editor-app.js:567</code> 规范化变更，在 <code>lib/editor-app.js:587</code> 建立备份，失败时 <code>lib/editor-app.js:595</code> 回滚。外层 <code>lib/editor-app.js:606</code> 用 promise chain 让 onSave 串行执行，避免远端快速保存造成乱序写。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">lib/editor-app.js</span> · L506-604</span><span>JavaScript</span></div><pre class="code"><span class="ln">506</span>async function getHandleForPath(root, path, create = false) {
+<span class="ln">507</span>  const parts = normalizeRelativePath(path).split(&quot;/&quot;);
+<span class="ln">508</span>  const fileName = parts.pop();
+<span class="ln">509</span>  let directory = root;
+<span class="ln">510</span>  for (const part of parts) directory = await directory.getDirectoryHandle(part, { create });
+<span class="ln">511</span>  return { directory, fileName, file: await directory.getFileHandle(fileName, { create }) };
+<span class="ln">512</span>}
+<span class="ln">513</span>
+<span class="ln">514</span>async function readBackup(path) {
+<span class="ln">515</span>  try {
+<span class="ln">516</span>    const { file } = await getHandleForPath(state.directoryHandle, path, false);
+<span class="ln">517</span>    return { existed: true, bytes: await (await file.getFile()).arrayBuffer() };
+<span class="ln">518</span>  } catch (error) {
+<span class="ln">519</span>    if (error?.name === &quot;NotFoundError&quot;) return { existed: false, bytes: null };
+<span class="ln">520</span>    throw error;
+<span class="ln">521</span>  }
+<span class="ln">522</span>}
+<span class="ln">523</span>
+<span class="ln">524</span>async function writeFile(path, content) {
+<span class="ln">525</span>  const { file } = await getHandleForPath(state.directoryHandle, path, true);
+<span class="ln">526</span>  const writable = await file.createWritable();
+<span class="ln">527</span>  try {
+<span class="ln">528</span>    await writable.write(content);
+<span class="ln">529</span>  } finally {
+<span class="ln">530</span>    await writable.close();
+<span class="ln">531</span>  }
+<span class="ln">532</span>  state.fileIndex.set(path, file);
+<span class="ln">533</span>}
+<span class="ln">534</span>
+<span class="ln">535</span>async function deleteFile(path) {
+<span class="ln">536</span>  const parts = normalizeRelativePath(path).split(&quot;/&quot;);
+<span class="ln">537</span>  const fileName = parts.pop();
+<span class="ln">538</span>  let directory = state.directoryHandle;
+<span class="ln">539</span>  for (const part of parts) directory = await directory.getDirectoryHandle(part, { create: false });
+<span class="ln">540</span>  try {
+<span class="ln">541</span>    await directory.removeEntry(fileName);
+<span class="ln">542</span>  } catch (error) {
+<span class="ln">543</span>    if (error?.name !== &quot;NotFoundError&quot;) throw error;
+<span class="ln">544</span>  }
+<span class="ln">545</span>  state.fileIndex.delete(path);
+<span class="ln">546</span>}
+<span class="ln">547</span>
+<span class="ln">548</span>async function rollbackChanges(backups) {
+<span class="ln">549</span>  const entries = [...backups.entries()].reverse();
+<span class="ln">550</span>  for (const [path, backup] of entries) {
+<span class="ln">551</span>    if (backup.existed) await writeFile(path, backup.bytes);
+<span class="ln">552</span>    else await deleteFile(path);
+<span class="ln">553</span>  }
+<span class="ln">554</span>}
+<span class="ln">555</span>
+<span class="ln">556</span>async function persistChanges(payload = {}) {
+<span class="ln">557</span>  const changes = Array.isArray(payload.changes) ? payload.changes : [];
+<span class="ln">558</span>  if (changes.length === 0) return { fileContent: payload.fileContent, lastModifiedTime: Date.now() };
+<span class="ln">559</span>  if (changes.length &gt; MAX_CHANGE_COUNT) throw new Error(`一次保存不能超过 ${MAX_CHANGE_COUNT} 个文件`);
+<span class="ln">560</span>
+<span class="ln">561</span>  const normalized = changes.map((change) =&gt; {
+<span class="ln">562</span>    const path = assertWritableChangePath(state.manifestDirectory, change.path);
+<span class="ln">563</span>    const operation = change.operate === &quot;delete&quot; ? &quot;delete&quot; : &quot;put&quot;;
+<span class="ln">564</span>    const content = operation === &quot;put&quot; ? String(change.content ?? &quot;&quot;) : null;
+<span class="ln">565</span>    if (content &amp;&amp; new Blob([content]).size &gt; MAX_TEXT_BYTES) throw new Error(`保存内容超过 20 MiB：${path}`);
+<span class="ln">566</span>    return { path, operation, content };
+<span class="ln">567</span>  });
+<span class="ln">568</span>
+<span class="ln">569</span>  if (state.source === &quot;demo&quot;) {
+<span class="ln">570</span>    for (const change of normalized) {
+<span class="ln">571</span>      if (change.operation === &quot;delete&quot;) state.memoryFiles.delete(change.path);
+<span class="ln">572</span>      else state.memoryFiles.set(change.path, change.content);
+<span class="ln">573</span>    }
+<span class="ln">574</span>    setSaveState(&quot;刚刚保存到内存&quot;, &quot;memory&quot;);
+<span class="ln">575</span>    addActivity(`已在内存保存 ${normalized.length} 项变更`, &quot;success&quot;);
+<span class="ln">576</span>    return { fileContent: payload.fileContent, lastModifiedTime: Date.now() };
+<span class="ln">577</span>  }
+<span class="ln">578</span>
+<span class="ln">579</span>  if (state.readOnlyFallback || !state.directoryHandle) {
+<span class="ln">580</span>    throw new Error(&quot;当前是只读兼容模式，请用支持文件夹授权的 Chromium 浏览器打开&quot;);
+<span class="ln">581</span>  }
+<span class="ln">582</span>
+<span class="ln">583</span>  const permission = await state.directoryHandle.queryPermission({ mode: &quot;readwrite&quot; });
+<span class="ln">584</span>  if (permission !== &quot;granted&quot;) throw new Error(&quot;项目文件夹的写入权限已经失效&quot;);
+<span class="ln">585</span>
+<span class="ln">586</span>  setSaveState(&quot;正在保存…&quot;, &quot;saving&quot;);
+<span class="ln">587</span>  const backups = new Map();
+<span class="ln">588</span>  try {
+<span class="ln">589</span>    for (const change of normalized) backups.set(change.path, await readBackup(change.path));
+<span class="ln">590</span>    for (const change of normalized) {
+<span class="ln">591</span>      if (change.operation === &quot;delete&quot;) await deleteFile(change.path);
+<span class="ln">592</span>      else await writeFile(change.path, change.content);
+<span class="ln">593</span>    }
+<span class="ln">594</span>  } catch (error) {
+<span class="ln">595</span>    await rollbackChanges(backups).catch((rollbackError) =&gt; {
+<span class="ln">596</span>      addActivity(`回滚未完全成功：${rollbackError.message}`, &quot;error&quot;);
+<span class="ln">597</span>    });
+<span class="ln">598</span>    throw error;
+<span class="ln">599</span>  }
+<span class="ln">600</span>
+<span class="ln">601</span>  setSaveState(&quot;刚刚已保存&quot;, &quot;saved&quot;);
+<span class="ln">602</span>  addActivity(`已保存 ${normalized.length} 个文件变更`, &quot;success&quot;);
+<span class="ln">603</span>  return { fileContent: payload.fileContent, lastModifiedTime: Date.now() };
+<span class="ln">604</span>}</pre></div></section>
+<section class="sec" id="c2"><div class="sec-no">§ <b>02</b> · FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><span class="flow-stage">showDirectoryPicker</span>
+  <span class="flow-arr">↓</span> query/request readwrite permission
+<span class="flow-node">indexDirectory → chooseManifest → loadManifest</span>
+  <span class="flow-arr">↓</span> setPPTD to iframe
+<span class="flow-node">onSave → persistChanges → backup → write/delete → rollback on failure</span></div><p>这条流转从 <code>lib/editor-app.js:410</code> 的 pickDirectory 开始，经 <code>lib/editor-app.js:364</code> 申请授权，最后在 <code>lib/editor-app.js:237</code> 调用 remote.setPPTD。远端保存回调不会直接碰文件，而是进入 <code>lib/editor-app.js:606</code> 的 queue，再落到 <code>lib/editor-app.js:556</code> 的事务函数。</p></section>
+<section class="sec" id="c3"><div class="sec-no">§ <b>03</b> · EDGE</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li>路径逃逸由 <code>lib/editor-lib.js:14</code>、<code>lib/editor-lib.js:21</code> 和 <code>lib/editor-lib.js:25</code> 拦截，测试在 <code>tests/editor-lib.test.js:28</code> 覆盖。</li><li>非 Chromium 或无写权限场景进入只读 fallback，关键分支在 <code>lib/editor-app.js:385</code> 和 <code>lib/editor-app.js:397</code>。</li><li>RPC 失败时 <code>lib/editor-app.js:695</code> 设置 error 状态，并通过 <code>lib/editor-app.js:697</code> 给出公开资源可能变更的提示。</li></ul></section>
+<section class="sec" id="c4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">PPTD parser</div><div class="card-d">继续看 <code>lib/editor-lib.js:67</code> 与 <code>tests/editor-lib.test.js:21</code>，它们决定 manifest 兼容范围。</div></div><div class="card"><div class="card-h">导出管线</div><div class="card-d">保存后的 PPTD 进入 <code>scripts/export_pptx.py:196</code>，再由浏览器侧写出 PPTX。</div></div></div></section><div class="foot"><span>Generated · 2026-08-06</span><span>Source · <a href="https://github.com/Binaryify/open-kimi-ppt-skill">Binaryify/open-kimi-ppt-skill</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active');}}),{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const s=Array.from({length:70},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.3+.2,a:Math.random(),v:Math.random()*0.02+.005}));function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;ctx.globalAlpha=p.a;ctx.fillStyle='#a6ecf5';ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick)}tick();}})();</script></body></html>
