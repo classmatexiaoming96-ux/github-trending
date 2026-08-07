@@ -1,0 +1,497 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>OpenClaw 容器 Runner · 深度解析 · realreplicabench</title><meta name="description" content="Accio-org/RealReplicaBench 源码级深度解析"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root {--star:#7bdff2;--star-soft:#a8f0ff;--star-deep:#42a8b8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">RealReplica<b>Bench</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">RealReplica<b>Bench</b></div><div class="sub">OpenClaw 容器 Runner · nested detail</div></div><span class="nav-ver">Python · Docker/OpenClaw</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#architecture"><span class="idx">01</span>架构</a></li><li><a href="#modules"><span class="idx">02</span>模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risks"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★1,036 · 2026-08-02</div><div><a href="https://github.com/Accio-org/RealReplicaBench">Accio-org/RealReplicaBench</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero" id="overview"><div class="hero-eyebrow">Nested detail page</div><h1 class="hero-title">OpenClaw 容器 Runner <em>深度解析</em></h1><p class="hero-desc">OpenClaw harness 如何注入自主指令、provider config、视觉能力判断和状态归档。</p></div>
+<section class="sec" id="architecture"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>边界</em></h2><h3><span class="arr">▸</span>为什么这个模块是入口</h3><p>OpenClaw 容器 Runner 的关键不是单个函数，而是几组契约一起生效：<code>src/real_replica_bench/harnesses/openclaw/runner.py:64</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:78</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:120</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:128</code>。这些行分别描述任务定位、能力声明、评分或 harness 行为，因此改动其中任何一处都会改变 benchmark 的可比较性。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/harnesses/openclaw/runner.py</span> · L64-160</span><span>Python</span></div><pre class="code"><span class="ln">64</span># Autonomous-agent directive, prepended to every OpenClaw prompt in the most
+<span class="ln">65</span># prominent position. OpenClaw&#x27;s default framing is a conversational personal
+<span class="ln">66</span># assistant, and persona-forward models (notably GPT-5.6 Luna/Terra/Sol) latch
+<span class="ln">67</span># onto it — they open with a &quot;我刚上线，你希望怎么称呼我？&quot; self-introduction plus a
+<span class="ln">68</span># question, end the turn with zero tool calls, and since `openclaw agent
+<span class="ln">69</span># --message` is a single non-interactive invocation there is no user to answer →
+<span class="ln">70</span># the loop terminates and the task scores ~0. Reproduced on this runtime with
+<span class="ln">71</span># gpt-5.6-luna: one upstream call, zero tool calls, reward 0.
+<span class="ln">72</span>#
+<span class="ln">73</span># It carries NO task-specific or verifier-facing hints, and is applied uniformly
+<span class="ln">74</span># to every OpenClaw run so the cross-model comparison stays fair. Because it sits
+<span class="ln">75</span># on the scoring boundary — changing it moves every model&#x27;s starting line — it is
+<span class="ln">76</span># a module-level constant rather than an inline string: greppable, diffable in
+<span class="ln">77</span># review, and overridable in an A/B harness without editing this file.
+<span class="ln">78</span>OPENCLAW_AGENT_DIRECTIVE = (
+<span class="ln">79</span>    &quot;# 角色：自主任务执行 Agent\n\n&quot;
+<span class="ln">80</span>    &quot;你是一个自主运行的任务执行 agent，**不是**聊天助手。请**立即开始执行下面的任务**。\n&quot;
+<span class="ln">81</span>    &quot;- **不要**自我介绍、不要给自己取名字、不要询问「如何称呼你 / 我该怎么称呼你」、不要任何寒暄开场白。\n&quot;
+<span class="ln">82</span>    &quot;- 当前是**无人值守的单次执行**：没有人会回答你的任何反问，任何&quot;
+<span class="ln">83</span>    &quot;「等待用户确认 / 请用户提供」都会导致任务直接失败。\n&quot;
+<span class="ln">84</span>    &quot;- 直接调用工具（read / exec / browser 等）完成任务，把最终产物写到 `/task/outputs/`。&quot;
+<span class="ln">85</span>    &quot;遇到不确定的地方，基于任务描述做出最合理的假设并继续推进，不要停下来等待确认。\n\n&quot;
+<span class="ln">86</span>    &quot;---\n\n&quot;
+<span class="ln">87</span>)
+<span class="ln">88</span>
+<span class="ln">89</span># Vision-capable model substrings used by the OpenClaw set-image precheck.
+<span class="ln">90</span># Match is case-insensitive substring against the resolved primary model name
+<span class="ln">91</span># (which is what OpenClaw&#x27;s `models set-image` would otherwise be left set to
+<span class="ln">92</span># when --openclaw-image-model is not provided). Anything not in this list is
+<span class="ln">93</span># treated as non-vision and forces the user to pass --openclaw-image-model
+<span class="ln">94</span># explicitly. Adding a new model: add the lowercase substring.
+<span class="ln">95</span>_OPENCLAW_VISION_MODEL_SUBSTRINGS: tuple[str, ...] = (
+<span class="ln">96</span>    &quot;gemini-3-flash-preview&quot;,
+<span class="ln">97</span>    &quot;gemini-3.1-pro-preview&quot;,
+<span class="ln">98</span>    &quot;gemini-3.1-flash&quot;,
+<span class="ln">99</span>    &quot;gemini-3.5-flash&quot;,
+<span class="ln">100</span>    &quot;gemini-3.5-pro&quot;,
+<span class="ln">101</span>    &quot;claude&quot;,
+<span class="ln">102</span>    &quot;qwen-vl&quot;,
+<span class="ln">103</span>    &quot;qwen3.7-preview&quot;,
+<span class="ln">104</span>    &quot;qwen3.7-plus&quot;,  # multimodal GA (2026-06-01, DashScope + OpenRouter)
+<span class="ln">105</span>    # Substring covers the whole qwen3.8-max family. The -preview variant was
+<span class="ln">106</span>    # probed on DashScope (2026-07-26: image_url decoded, image_tokens billed);
+<span class="ln">107</span>    # the GA id is covered by the same entry rather than a second line.
+<span class="ln">108</span>    &quot;qwen3.8-max&quot;,
+<span class="ln">109</span>    &quot;qwen-latest-series&quot;,
+<span class="ln">110</span>    &quot;kimi-vl&quot;,
+<span class="ln">111</span>    &quot;glm-vl&quot;,
+<span class="ln">112</span>    &quot;gpt-5&quot;,
+<span class="ln">113</span>    &quot;gpt-5.5&quot;,
+<span class="ln">114</span>    &quot;gpt-5.2&quot;,
+<span class="ln">115</span>    &quot;gpt-4o&quot;,
+<span class="ln">116</span>    &quot;gpt-4-turbo&quot;,
+<span class="ln">117</span>)
+<span class="ln">118</span>
+<span class="ln">119</span>
+<span class="ln">120</span>def _openclaw_model_is_vision_capable(model: str) -&gt; bool:
+<span class="ln">121</span>    &quot;&quot;&quot;Heuristic substring match against a curated vision-capable list.&quot;&quot;&quot;
+<span class="ln">122</span>    if not model:
+<span class="ln">123</span>        return False
+<span class="ln">124</span>    lower = model.lower()
+<span class="ln">125</span>    return any(substr in lower for substr in _OPENCLAW_VISION_MODEL_SUBSTRINGS)
+<span class="ln">126</span>
+<span class="ln">127</span>
+<span class="ln">128</span>def _openclaw_is_relay_mode(args: argparse.Namespace) -&gt; bool:
+<span class="ln">129</span>    &quot;&quot;&quot;OpenClaw browser-driver mode dispatch by image tag.
+<span class="ln">130</span>
+<span class="ln">131</span>    The explicitly named legacy images (`commercecraftbench/openclaw:base-v1.3`
+<span class="ln">132</span>    and `commercecraftbench/openclaw:ccb-v1.3`) are built on an OpenClaw
+<span class="ln">133</span>    2026.3.x runtime base. That release ships a Chrome extension `Browser
+<span class="ln">134</span>    Relay` that we patch + attach via CDP.
+<span class="ln">135</span>    Profile name = `chrome-relay`, driver = `extension`, cdpUrl points
+<span class="ln">136</span>    at an in-process relay server.
+<span class="ln">137</span>
+<span class="ln">138</span>    v2026.5.22 dropped the extension entirely (`assets/chrome-extension/`
+<span class="ln">139</span>    removed, no `chrome-relay` profile in dist) and only supports two
+<span class="ln">140</span>    drivers — `openclaw` (managed) and `existing-session` (limited). The
+<span class="ln">141</span>    correct config for the upstream-entrypoint Chrome at 9222 is:
+<span class="ln">142</span>        driver=openclaw, attachOnly=true, cdpUrl=http://127.0.0.1:9222
+<span class="ln">143</span>    which yields `local-managed` capability (full snapshot+act+tabs) while
+<span class="ln">144</span>    re-using the noVNC-visible Chrome from the entrypoint. We previously
+<span class="ln">145</span>    used driver=existing-session, but that caps capabilities to
+<span class="ln">146</span>    `local-existing-session` (no selector targeting, no managed tabs) and
+<span class="ln">147</span>    triggers the &quot;user-style profile cannot use sandbox browser&quot; error.
+<span class="ln">148</span>
+<span class="ln">149</span>    Detection is deliberately opt-in for those two legacy tags. The public
+<span class="ln">150</span>    release pins the May image by digest, so looking for ``2026.5.22`` in the
+<span class="ln">151</span>    image string would misclassify the canonical digest as the March runtime.
+<span class="ln">152</span>    Current and custom images therefore use managed-attach mode by default.
+<span class="ln">153</span>    &quot;&quot;&quot;
+<span class="ln">154</span>    image = (getattr(args, &quot;image&quot;, &quot;&quot;) or &quot;&quot;).lower()
+<span class="ln">155</span>    legacy_tags = (
+<span class="ln">156</span>        &quot;commercecraftbench/openclaw:base-v1.3&quot;,
+<span class="ln">157</span>        &quot;commercecraftbench/openclaw:ccb-v1.3&quot;,
+<span class="ln">158</span>    )
+<span class="ln">159</span>    return any(tag in image for tag in legacy_tags)
+<span class="ln">160</span></pre></div></section>
+<section class="sec" id="modules"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>状态与输入如何被收束</h3><p>第二段源码展示了实现层的防漏设计：<code>src/real_replica_bench/harnesses/openclaw/runner.py:162</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:174</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:240</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:263</code>、<code>src/real_replica_bench/harnesses/openclaw/runner.py:280</code>。它不是为了让页面好看，而是把任务输入、运行时状态、模型协议和输出证据都保持在可审计范围内，方便后续报告复原。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/harnesses/openclaw/runner.py</span> · L162-237</span><span>Python</span></div><pre class="code"><span class="ln">162</span>def collect_openclaw_state_artifacts(container: str, agent_dir: Path) -&gt; dict[str, Any]:
+<span class="ln">163</span>    &quot;&quot;&quot;Tar /root/.openclaw/agents/main/ + copy /tmp/openclaw/openclaw-*.log
+<span class="ln">164</span>    out of the container into ``agent_dir`` for post-mortem inspection.
+<span class="ln">165</span>
+<span class="ln">166</span>    Mirrors the spirit of ``collect_accio_state_artifacts`` but the OpenClaw
+<span class="ln">167</span>    container is destroyed per-task, so there is no host-side cleanup pass.
+<span class="ln">168</span>    Returns a dict for the manifest / debug file.
+<span class="ln">169</span>    &quot;&quot;&quot;
+<span class="ln">170</span>    out: dict[str, Any] = {&quot;collected&quot;: False, &quot;files&quot;: [], &quot;openclaw_agents_present&quot;: False}
+<span class="ln">171</span>
+<span class="ln">172</span>    # 1. agents/main tarball — quick check first to avoid a noisy tar of a
+<span class="ln">173</span>    # missing path.
+<span class="ln">174</span>    probe = docker(
+<span class="ln">175</span>        &quot;exec&quot;, container, &quot;bash&quot;, &quot;-lc&quot;,
+<span class="ln">176</span>        &quot;test -d /root/.openclaw/agents/main &amp;&amp; echo yes || echo no&quot;,
+<span class="ln">177</span>        check=False, capture=True,
+<span class="ln">178</span>    )
+<span class="ln">179</span>    has_agents = (probe.stdout or &quot;&quot;).strip() == &quot;yes&quot;
+<span class="ln">180</span>    out[&quot;openclaw_agents_present&quot;] = has_agents
+<span class="ln">181</span>    if has_agents:
+<span class="ln">182</span>        tar_path = agent_dir / &quot;openclaw_state.tar.gz&quot;
+<span class="ln">183</span>        try:
+<span class="ln">184</span>            with tar_path.open(&quot;wb&quot;) as tf:
+<span class="ln">185</span>                proc = subprocess.run(
+<span class="ln">186</span>                    [
+<span class="ln">187</span>                        &quot;docker&quot;, &quot;exec&quot;, container, &quot;bash&quot;, &quot;-lc&quot;,
+<span class="ln">188</span>                        &quot;tar --exclude=main/agent/auth-profiles.json &quot;
+<span class="ln">189</span>                        &quot;--exclude=main/agent/credentials.json &quot;
+<span class="ln">190</span>                        &quot;-czf - -C /root/.openclaw/agents main&quot;,
+<span class="ln">191</span>                    ],
+<span class="ln">192</span>                    stdout=tf,
+<span class="ln">193</span>                    stderr=subprocess.PIPE,
+<span class="ln">194</span>                    check=False,
+<span class="ln">195</span>                )
+<span class="ln">196</span>            if proc.returncode == 0 and tar_path.is_file() and tar_path.stat().st_size &gt; 0:
+<span class="ln">197</span>                out[&quot;files&quot;].append(str(tar_path.relative_to(agent_dir)))
+<span class="ln">198</span>                # Untar locally for grep-ability.
+<span class="ln">199</span>                state_dir = agent_dir / &quot;openclaw_state&quot;
+<span class="ln">200</span>                state_dir.mkdir(parents=True, exist_ok=True)
+<span class="ln">201</span>                untar = subprocess.run(
+<span class="ln">202</span>                    [&quot;tar&quot;, &quot;-xzf&quot;, str(tar_path), &quot;-C&quot;, str(state_dir)],
+<span class="ln">203</span>                    capture_output=True, text=True, check=False,
+<span class="ln">204</span>                )
+<span class="ln">205</span>                if untar.returncode == 0:
+<span class="ln">206</span>                    out[&quot;files&quot;].append(str(state_dir.relative_to(agent_dir)) + &quot;/&quot;)
+<span class="ln">207</span>                else:
+<span class="ln">208</span>                    out[&quot;untar_error&quot;] = (untar.stderr or &quot;&quot;).strip()[:500]
+<span class="ln">209</span>            else:
+<span class="ln">210</span>                out[&quot;tar_error&quot;] = (proc.stderr.decode(&quot;utf-8&quot;, errors=&quot;replace&quot;) if isinstance(proc.stderr, bytes) else (proc.stderr or &quot;&quot;)).strip()[:500]
+<span class="ln">211</span>                if tar_path.is_file() and tar_path.stat().st_size == 0:
+<span class="ln">212</span>                    tar_path.unlink(missing_ok=True)
+<span class="ln">213</span>        except OSError as exc:
+<span class="ln">214</span>            out[&quot;tar_error&quot;] = str(exc)
+<span class="ln">215</span>
+<span class="ln">216</span>    # 2. OpenClaw runtime logs at /tmp/openclaw/openclaw-*.log. List first,
+<span class="ln">217</span>    # then docker cp each. Tolerate misses.
+<span class="ln">218</span>    list_proc = docker(
+<span class="ln">219</span>        &quot;exec&quot;, container, &quot;bash&quot;, &quot;-lc&quot;,
+<span class="ln">220</span>        &quot;ls -1 /tmp/openclaw/openclaw-*.log 2&gt;/dev/null || true&quot;,
+<span class="ln">221</span>        check=False, capture=True,
+<span class="ln">222</span>    )
+<span class="ln">223</span>    log_paths = [line.strip() for line in (list_proc.stdout or &quot;&quot;).splitlines() if line.strip()]
+<span class="ln">224</span>    if log_paths:
+<span class="ln">225</span>        runtime_dir = agent_dir / &quot;openclaw_runtime_logs&quot;
+<span class="ln">226</span>        runtime_dir.mkdir(parents=True, exist_ok=True)
+<span class="ln">227</span>        for remote_log in log_paths:
+<span class="ln">228</span>            local_dst = runtime_dir / Path(remote_log).name
+<span class="ln">229</span>            cp = docker(&quot;cp&quot;, f&quot;{container}:{remote_log}&quot;, str(local_dst), check=False, capture=True)
+<span class="ln">230</span>            if cp.returncode == 0 and local_dst.is_file():
+<span class="ln">231</span>                out[&quot;files&quot;].append(str(local_dst.relative_to(agent_dir)))
+<span class="ln">232</span>
+<span class="ln">233</span>    if out[&quot;files&quot;]:
+<span class="ln">234</span>        out[&quot;collected&quot;] = True
+<span class="ln">235</span>    elif not has_agents:
+<span class="ln">236</span>        out[&quot;reason&quot;] = &quot;openclaw_agents_dir_missing&quot;
+<span class="ln">237</span>    return out</pre></div><h3><span class="arr">▸</span>运行时细节如何暴露给调试</h3><p>第三段代码补上执行末端：<code>src/real_replica_bench/harnesses/openclaw/runner.py:64</code> 与 <code>src/real_replica_bench/harnesses/openclaw/runner.py:280</code> 附近的实现让失败不只表现为 pass/fail，还能回到日志、配置、工具调用和标准输出定位原因。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/harnesses/openclaw/runner.py</span> · L240-280</span><span>Python</span></div><pre class="code"><span class="ln">240</span>def _parse_openclaw_provider_headers(raw_headers: list[str]) -&gt; dict[str, str]:
+<span class="ln">241</span>    &quot;&quot;&quot;Parse repeated `--openclaw-provider-header KEY:VALUE` flags into a dict.
+<span class="ln">242</span>
+<span class="ln">243</span>    Only the FIRST colon is treated as the separator, so values that
+<span class="ln">244</span>    themselves contain ``:`` (URLs, times) round-trip verbatim.
+<span class="ln">245</span>    &quot;&quot;&quot;
+<span class="ln">246</span>    parsed: dict[str, str] = {}
+<span class="ln">247</span>    for raw in raw_headers or []:
+<span class="ln">248</span>        if &quot;:&quot; not in raw:
+<span class="ln">249</span>            raise SystemExit(
+<span class="ln">250</span>                f&quot;--openclaw-provider-header must be formatted &#x27;Key:Value&#x27; (got: {raw!r})&quot;
+<span class="ln">251</span>            )
+<span class="ln">252</span>        key, _, value = raw.partition(&quot;:&quot;)
+<span class="ln">253</span>        key = key.strip()
+<span class="ln">254</span>        value = value.strip()
+<span class="ln">255</span>        if not key:
+<span class="ln">256</span>            raise SystemExit(
+<span class="ln">257</span>                f&quot;--openclaw-provider-header has empty key (got: {raw!r})&quot;
+<span class="ln">258</span>            )
+<span class="ln">259</span>        parsed[key] = value
+<span class="ln">260</span>    return parsed
+<span class="ln">261</span>
+<span class="ln">262</span>
+<span class="ln">263</span>def _synthesize_openclaw_models_config(args: argparse.Namespace) -&gt; dict[str, Any]:
+<span class="ln">264</span>    &quot;&quot;&quot;Build a one-provider models_config JSON from --openclaw-* CLI flags.
+<span class="ln">265</span>
+<span class="ln">266</span>    Fires from `inject_openclaw_models_config` when the user passes
+<span class="ln">267</span>    ``--openclaw-api`` without also passing ``--openclaw-models-config``.
+<span class="ln">268</span>    The result has the same shape as a committed preset JSON — one entry in
+<span class="ln">269</span>    ``providers`` keyed by the model-id prefix — so the downstream
+<span class="ln">270</span>    injection path (docker cp + in-container merge into
+<span class="ln">271</span>    ``~/.openclaw/openclaw.json[&#x27;models&#x27;]``) is unchanged.
+<span class="ln">272</span>    &quot;&quot;&quot;
+<span class="ln">273</span>    api = args.openclaw_api
+<span class="ln">274</span>    base_url = getattr(args, &quot;openclaw_provider_base_url&quot;, None)
+<span class="ln">275</span>    if not base_url:
+<span class="ln">276</span>        raise SystemExit(
+<span class="ln">277</span>            &quot;--openclaw-provider-base-url is required when --openclaw-api is set.&quot;
+<span class="ln">278</span>        )
+<span class="ln">279</span>    model = args.openclaw_model or &quot;&quot;
+<span class="ln">280</span>    if &quot;/&quot; not in model:</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><span class="flow-stage">task config</span> <span class="flow-arr">→</span> contract object <span class="flow-arr">→</span> runtime materialization <span class="flow-arr">→</span> agent execution <span class="flow-arr">→</span> verifier/report</div><p>从这些源码行可以看到，RealReplicaBench 的流程不是把 Agent 输出丢给一个脚本评分，而是先构造可复现任务世界，再让 harness 运行，最后把 verifier、trajectory 和 report 合并成证据链。</p><p>OpenClaw 适配层的风险集中在容器边界：<code>src/real_replica_bench/harnesses/openclaw/runner.py:72</code> 注入自主执行指令，<code>src/real_replica_bench/harnesses/openclaw/runner.py:96</code> 组织 agent workspace，<code>src/real_replica_bench/harnesses/openclaw/runner.py:187</code> 抽取状态证据，<code>src/real_replica_bench/harnesses/openclaw/runner.py:256</code> 解析 provider header，<code>src/real_replica_bench/harnesses/openclaw/runner.py:274</code> 过滤空值配置。</p></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><h3><span class="arr">▸</span>失败在哪里会被放大</h3><ul><li>如果任务声明不完整，<code>src/real_replica_bench/harnesses/openclaw/runner.py:78</code> 附近的解析会提前中断，而不是让 Agent 在缺环境时跑出伪结果。</li><li>如果 mock 或 provider 配置漂移，<code>src/real_replica_bench/harnesses/openclaw/runner.py:120</code> 附近的检查会让问题在发布前暴露。</li><li>如果 Agent 只完成部分业务动作，最终分数会被 verifier 端硬门禁压成失败，需要回看 trajectory。</li></ul></section>
+<section class="sec" id="risks"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">回主页面</div><div class="card-d"><a href="../realreplicabench.html">realreplicabench.html</a></div></div><div class="card"><div class="card-h">相关子页</div><div class="card-d"><a href="realreplicabench-harness.html">Harness</a> · <a href="realreplicabench-verifier.html">Verifier</a> · <a href="realreplicabench-openclaw.html">OpenClaw</a></div></div></div></section><div class="foot"><span>Generated · 2026-08-07</span><span>Source · <a href="https://github.com/Accio-org/RealReplicaBench">Accio-org/RealReplicaBench</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#7bdff2';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)})()}})();</script></body></html>

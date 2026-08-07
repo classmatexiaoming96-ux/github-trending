@@ -1,0 +1,1037 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>realreplicabench · 真实副本 Agent Benchmark · 源码观测台</title><meta name="description" content="Accio-org/RealReplicaBench 源码级深度解析"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root {--star:#7bdff2;--star-soft:#a8f0ff;--star-deep:#42a8b8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">RealReplica<b>Bench</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">RealReplica<b>Bench</b></div><div class="sub">源码级架构解析 · benchmark/runtime/verifier</div></div><span class="nav-ver">Python · Docker/OpenClaw</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#architecture"><span class="idx">01</span>架构</a></li><li><a href="#modules"><span class="idx">02</span>模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risks"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★1,036 · 2026-08-02</div><div><a href="https://github.com/Accio-org/RealReplicaBench">Accio-org/RealReplicaBench</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">RealReplicaBench <em>真实副本 Agent Benchmark</em></h1><p class="hero-desc">RealReplicaBench 不是又一个静态问答集，而是把 Gmail、Shopify、Stripe、Alibaba、Google Trends、文件任务和 CLI mock 都包装成可复现实站副本，用来测长程 Agent 是否能在有状态环境里完成业务闭环。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 1,036</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">3.1K</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">107</div><div class="stat-lbl">Tasks</div></div><div class="stat"><div class="stat-num">2026-08-06</div><div class="stat-lbl">Last commit</div></div></div></div><div class="flow"><span class="flow-stage">collection.json</span> <span class="flow-arr">→</span> load_task(task_id) <span class="flow-arr">→</span> TaskSpec
+      <span class="flow-arr">→</span> public workspace copy + runtime mocks
+      <span class="flow-arr">→</span> OpenClaw / Accio harness run
+      <span class="flow-arr">→</span> verifier reward.json + trajectory.json
+      <span class="flow-arr">→</span> binary final reward + HTML report</div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>为什么值得拆</em></h2>
+<p>这个项目的核心价值在于把 benchmark 从“给模型一段题面”推进到“给 Agent 一个可运行工作场景”。入口脚本在 <code>scripts/run_realreplicabench.py:22</code> 找到仓库根目录，在 <code>scripts/run_realreplicabench.py:34</code> 约定 runs 输出目录，在 <code>scripts/run_realreplicabench.py:35</code> 绑定完整 collection；这三处说明它把任务集、运行产物和批量执行器作为同一个发布单元维护，而不是散落的示例脚本。</p>
+<p>真正的执行契约落在 TaskSpec：<code>src/real_replica_bench/cli.py:328</code>、<code>src/real_replica_bench/cli.py:340</code>、<code>src/real_replica_bench/cli.py:358</code>、<code>src/real_replica_bench/cli.py:415</code>、<code>src/real_replica_bench/cli.py:481</code>、<code>src/real_replica_bench/cli.py:494</code>。这些行把 task.toml、runtime_mocks、browser/vision 标签、verifier 超时和输出目录串起来，意味着每个任务不仅有自然语言描述，还有可判定的环境需求与评分入口。对长程 Agent 来说，这比单次 API benchmark 更接近生产故障排查和后台办公自动化。</p>
+<h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">Dataset collection → TaskSpec → Docker runtime → harness → verifier → report。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">TaskSpec、RuntimeMockConfig、binary reward、trajectory recovery。</div></div><div class="card"><div class="card-h">性能/精度数据</div><div class="card-d">发布校验固定 107 个任务，并按 text/browser/vision 切 collection。</div></div><div class="card"><div class="card-h">下游依赖</div><div class="card-d">Docker/OpenClaw、mock service、LLM judge provider configs。</div></div></div></section>
+<section class="sec" id="architecture"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">从 collection 到 TaskSpec 的<em>装配链</em></h2>
+<h3><span class="arr">▸</span>任务发现不是文件名匹配</h3><p>加载流程先在 <code>src/real_replica_bench/cli.py:328</code> 进入 load_task，再在 <code>src/real_replica_bench/cli.py:331</code> 检查直接路径，如果没有命中就从 <code>src/real_replica_bench/cli.py:332</code> 开始递归扫描 task.toml，并用 <code>src/real_replica_bench/cli.py:334</code> 的 task.id 匹配。这让 domain-organized 数据目录可以重排，而外部调用仍稳定使用任务 id。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/cli.py</span> · L328-358</span><span>Python</span></div><pre class="code"><span class="ln">328</span>def load_task(task_id: str) -&gt; TaskSpec:
+<span class="ln">329</span>    case_dir = DATASETS_DIR / task_id
+<span class="ln">330</span>    task_toml = case_dir / &quot;task.toml&quot;
+<span class="ln">331</span>    if not task_toml.is_file():
+<span class="ln">332</span>        for candidate in DATASETS_DIR.rglob(&quot;task.toml&quot;):
+<span class="ln">333</span>            cdata = tomllib.loads(candidate.read_text(encoding=&quot;utf-8&quot;))
+<span class="ln">334</span>            if cdata.get(&quot;task&quot;, {}).get(&quot;id&quot;) == task_id:
+<span class="ln">335</span>                case_dir = candidate.parent
+<span class="ln">336</span>                task_toml = candidate
+<span class="ln">337</span>                break
+<span class="ln">338</span>        else:
+<span class="ln">339</span>            raise SystemExit(f&quot;task not found: {task_id} (searched {DATASETS_DIR})&quot;)
+<span class="ln">340</span>    data = tomllib.loads(task_toml.read_text(encoding=&quot;utf-8&quot;))
+<span class="ln">341</span>    task = data.get(&quot;task&quot;, {})
+<span class="ln">342</span>    agent = data.get(&quot;agent&quot;, {})
+<span class="ln">343</span>    verifier = data.get(&quot;verifier&quot;, {})
+<span class="ln">344</span>    environment = data.get(&quot;environment&quot;, {})
+<span class="ln">345</span>    host_port_raw = environment.get(&quot;host_published_port&quot;)
+<span class="ln">346</span>    host_published_port: int | None = None
+<span class="ln">347</span>    if host_port_raw is not None:
+<span class="ln">348</span>        try:
+<span class="ln">349</span>            host_published_port = int(host_port_raw)
+<span class="ln">350</span>        except (TypeError, ValueError):
+<span class="ln">351</span>            raise SystemExit(
+<span class="ln">352</span>                f&quot;task {task_id}: [environment].host_published_port must be an integer, got {host_port_raw!r}&quot;
+<span class="ln">353</span>            )
+<span class="ln">354</span>        if host_published_port &lt;= 0 or host_published_port &gt; 65535:
+<span class="ln">355</span>            raise SystemExit(
+<span class="ln">356</span>                f&quot;task {task_id}: [environment].host_published_port out of range: {host_published_port}&quot;
+<span class="ln">357</span>            )
+<span class="ln">358</span>    runtime_mocks = _parse_runtime_mocks(task_id, environment)</pre></div>
+<h3><span class="arr">▸</span>环境声明会提升为运行时能力</h3><p>runtime mocks 在 <code>src/real_replica_bench/cli.py:358</code> 解析，端口在 <code>src/real_replica_bench/cli.py:360</code> 收集，隐式端口规则在 <code>src/real_replica_bench/cli.py:361</code> 到 <code>src/real_replica_bench/cli.py:362</code> 生效；这些判断决定任务是否能暴露 HTTP/CLI mock，也决定 early terminate 是否有可轮询服务。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/cli.py</span> · L358-434</span><span>Python</span></div><pre class="code"><span class="ln">358</span>    runtime_mocks = _parse_runtime_mocks(task_id, environment)
+<span class="ln">359</span>    implicit_host_port = None
+<span class="ln">360</span>    runtime_mock_ports = [mock.port for mock in runtime_mocks if mock.port is not None]
+<span class="ln">361</span>    if host_published_port is None and len(runtime_mock_ports) == 1:
+<span class="ln">362</span>        implicit_host_port = runtime_mock_ports[0]
+<span class="ln">363</span>    early_terminate: EarlyTerminate | None = None
+<span class="ln">364</span>    et_raw = environment.get(&quot;early_terminate&quot;)
+<span class="ln">365</span>    if et_raw is not None:
+<span class="ln">366</span>        if not isinstance(et_raw, dict):
+<span class="ln">367</span>            raise SystemExit(
+<span class="ln">368</span>                f&quot;task {task_id}: [environment.early_terminate] must be a table&quot;
+<span class="ln">369</span>            )
+<span class="ln">370</span>        required = (&quot;poll_path&quot;, &quot;match_kind&quot;, &quot;match_field&quot;, &quot;match_value&quot;)
+<span class="ln">371</span>        for key in required:
+<span class="ln">372</span>            if key not in et_raw:
+<span class="ln">373</span>                raise SystemExit(
+<span class="ln">374</span>                    f&quot;task {task_id}: [environment.early_terminate].{key} is required&quot;
+<span class="ln">375</span>                )
+<span class="ln">376</span>        match_kind = str(et_raw[&quot;match_kind&quot;])
+<span class="ln">377</span>        if match_kind != &quot;list_any_field_equals&quot;:
+<span class="ln">378</span>            raise SystemExit(
+<span class="ln">379</span>                f&quot;task {task_id}: unsupported early_terminate.match_kind {match_kind!r}&quot;
+<span class="ln">380</span>            )
+<span class="ln">381</span>        if host_published_port is None and implicit_host_port is None:
+<span class="ln">382</span>            raise SystemExit(
+<span class="ln">383</span>                f&quot;task {task_id}: early_terminate requires host_published_port or exactly one runtime mock port&quot;
+<span class="ln">384</span>            )
+<span class="ln">385</span>        early_terminate = EarlyTerminate(
+<span class="ln">386</span>            poll_path=str(et_raw[&quot;poll_path&quot;]),
+<span class="ln">387</span>            poll_interval_sec=float(et_raw.get(&quot;poll_interval_sec&quot;, 5)),
+<span class="ln">388</span>            match_kind=match_kind,
+<span class="ln">389</span>            match_field=str(et_raw[&quot;match_field&quot;]),
+<span class="ln">390</span>            match_value=str(et_raw[&quot;match_value&quot;]),
+<span class="ln">391</span>            kill_pattern=str(et_raw.get(&quot;kill_pattern&quot;, &quot;bun run runner.ts&quot;)),
+<span class="ln">392</span>        )
+<span class="ln">393</span>    output_file_early_terminate: OutputFileEarlyTerminate | None = None
+<span class="ln">394</span>    output_et_raw = environment.get(&quot;output_file_early_terminate&quot;)
+<span class="ln">395</span>    if output_et_raw is not None:
+<span class="ln">396</span>        if not isinstance(output_et_raw, dict):
+<span class="ln">397</span>            raise SystemExit(
+<span class="ln">398</span>                f&quot;task {task_id}: [environment.output_file_early_terminate] must be a table&quot;
+<span class="ln">399</span>            )
+<span class="ln">400</span>        output_path = str(output_et_raw.get(&quot;output_path&quot;) or &quot;&quot;)
+<span class="ln">401</span>        if not output_path.startswith(&quot;/&quot;):
+<span class="ln">402</span>            raise SystemExit(
+<span class="ln">403</span>                f&quot;task {task_id}: [environment.output_file_early_terminate].output_path must be an absolute path&quot;
+<span class="ln">404</span>            )
+<span class="ln">405</span>        output_file_early_terminate = OutputFileEarlyTerminate(
+<span class="ln">406</span>            output_path=output_path,
+<span class="ln">407</span>            poll_interval_sec=float(output_et_raw.get(&quot;poll_interval_sec&quot;, 2)),
+<span class="ln">408</span>            kill_pattern=str(output_et_raw.get(&quot;kill_pattern&quot;, &quot;bun run runner.ts&quot;)),
+<span class="ln">409</span>        )
+<span class="ln">410</span>    # Layout-aware default for the verifier entrypoint: the new layout uses
+<span class="ln">411</span>    # grader/run.sh, the old (frozen v2) layout uses test.sh. The task prompt file
+<span class="ln">412</span>    # is `task.md` in BOTH layouts. An explicit [task].entrypoint / [task].test in
+<span class="ln">413</span>    # task.toml always wins over the detected default.
+<span class="ln">414</span>    test_default = &quot;grader/run.sh&quot; if (case_dir / &quot;grader&quot; / &quot;run.sh&quot;).is_file() else &quot;test.sh&quot;
+<span class="ln">415</span>    return TaskSpec(
+<span class="ln">416</span>        task_id=str(task.get(&quot;id&quot;) or task_id),
+<span class="ln">417</span>        case_dir=case_dir,
+<span class="ln">418</span>        name=str(task.get(&quot;name&quot;) or task_id),
+<span class="ln">419</span>        language=str(task.get(&quot;language&quot;) or &quot;zh-CN&quot;),
+<span class="ln">420</span>        timeout_sec=int(agent.get(&quot;timeout_sec&quot;, 900)),
+<span class="ln">421</span>        max_actions=int(agent.get(&quot;max_actions&quot;, 6)),
+<span class="ln">422</span>        verifier_timeout_sec=int(verifier.get(&quot;timeout_sec&quot;, 120)),
+<span class="ln">423</span>        entrypoint=str(task.get(&quot;entrypoint&quot;) or &quot;task.md&quot;),
+<span class="ln">424</span>        test_script=str(task.get(&quot;test&quot;) or test_default),
+<span class="ln">425</span>        rubric=str(task.get(&quot;rubric&quot;) or &quot;rubric.json&quot;),
+<span class="ln">426</span>        private_dir=(case_dir / &quot;private&quot;) if (case_dir / &quot;private&quot;).is_dir() else None,
+<span class="ln">427</span>        mock_services=bool(environment.get(&quot;mock_services&quot;, False) or runtime_mocks),
+<span class="ln">428</span>        host_published_port=host_published_port,
+<span class="ln">429</span>        requires_browser=bool(environment.get(&quot;requires_browser&quot;, False)),
+<span class="ln">430</span>        requires_vision=bool(environment.get(&quot;requires_vision&quot;, False)),
+<span class="ln">431</span>        runtime_mocks=runtime_mocks,
+<span class="ln">432</span>        early_terminate=early_terminate,
+<span class="ln">433</span>        output_file_early_terminate=output_file_early_terminate,
+<span class="ln">434</span>    )</pre></div>
+<h3><span class="arr">▸</span>公开输入和评分材料被硬隔离</h3><p><code>src/real_replica_bench/cli.py:481</code> 到 <code>src/real_replica_bench/cli.py:510</code> 是安全边界：新布局只复制 workspace 和 task.md，grader、services、private、rubric、task.toml 都不进入 agent 可见目录。这个实现直接影响 benchmark 可信度，因为 Agent 不能靠读答案文件拿分。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/cli.py</span> · L481-539</span><span>Python</span></div><pre class="code"><span class="ln">481</span>def copy_public_task_dir(src: Path, dst: Path) -&gt; None:
+<span class="ln">482</span>    &quot;&quot;&quot;Copy the agent-visible task content, never exposing verifier-only data.
+<span class="ln">483</span>
+<span class="ln">484</span>    New layout (allowlist): the agent sees ONLY ``workspace/`` (its inputs) plus
+<span class="ln">485</span>    the task statement ``task.md``. Everything verifier-only — ``grader/``,
+<span class="ln">486</span>    ``services/`` (mock source), ``private/``, ``rubric.json``, ``task.toml`` —
+<span class="ln">487</span>    lives outside ``workspace/`` and is structurally excluded by not copying it.
+<span class="ln">488</span>    This replaces the old blocklist, where a mock/verifier filename missing from
+<span class="ln">489</span>    the ignore tuple would leak answers to the agent.
+<span class="ln">490</span>
+<span class="ln">491</span>    Old layout (frozen v2, no ``grader/``/``workspace/``): fall back to the
+<span class="ln">492</span>    historical blocklist over the whole task dir. Removed once v2 migrates (Phase 2).
+<span class="ln">493</span>    &quot;&quot;&quot;
+<span class="ln">494</span>    workspace = src / &quot;workspace&quot;
+<span class="ln">495</span>    # Detect the new layout by grader/ or workspace/ so browse-only tasks (no
+<span class="ln">496</span>    # agent inputs → no workspace/) still take the allowlist path instead of
+<span class="ln">497</span>    # falling through to the old blocklist (which would leak grader/ + services/).
+<span class="ln">498</span>    is_new_layout = (src / &quot;grader&quot;).is_dir() or workspace.is_dir()
+<span class="ln">499</span>    if is_new_layout:
+<span class="ln">500</span>        dst.mkdir(parents=True, exist_ok=True)
+<span class="ln">501</span>        if workspace.is_dir():
+<span class="ln">502</span>            shutil.copytree(
+<span class="ln">503</span>                workspace,
+<span class="ln">504</span>                dst / &quot;workspace&quot;,
+<span class="ln">505</span>                ignore=shutil.ignore_patterns(&quot;.DS_Store&quot;, &quot;__pycache__&quot;, &quot;*.pyc&quot;),
+<span class="ln">506</span>            )
+<span class="ln">507</span>        task_md = src / &quot;task.md&quot;
+<span class="ln">508</span>        if task_md.is_file():
+<span class="ln">509</span>            shutil.copy2(task_md, dst / &quot;task.md&quot;)
+<span class="ln">510</span>        return
+<span class="ln">511</span>    ignore = shutil.ignore_patterns(
+<span class="ln">512</span>        &quot;.DS_Store&quot;,
+<span class="ln">513</span>        &quot;fixtures&quot;,
+<span class="ln">514</span>        &quot;attachments&quot;,
+<span class="ln">515</span>        &quot;node_modules&quot;,
+<span class="ln">516</span>        &quot;private&quot;,
+<span class="ln">517</span>        &quot;__pycache__&quot;,
+<span class="ln">518</span>        &quot;*.pyc&quot;,
+<span class="ln">519</span>        &quot;rubric.json&quot;,
+<span class="ln">520</span>        &quot;test.sh&quot;,
+<span class="ln">521</span>        &quot;task.toml&quot;,
+<span class="ln">522</span>        &quot;source_metadata.json&quot;,
+<span class="ln">523</span>        &quot;REFERENCE_SOLUTION.py&quot;,
+<span class="ln">524</span>        &quot;_grader.py&quot;,
+<span class="ln">525</span>        &quot;host_deps.txt&quot;,
+<span class="ln">526</span>        &quot;package.json&quot;,
+<span class="ln">527</span>        &quot;package-lock.json&quot;,
+<span class="ln">528</span>        &quot;start_mock_services.sh&quot;,
+<span class="ln">529</span>        &quot;mock*.py&quot;,
+<span class="ln">530</span>        &quot;mock*.js&quot;,
+<span class="ln">531</span>        &quot;*server.py&quot;,
+<span class="ln">532</span>        &quot;*server.js&quot;,
+<span class="ln">533</span>        &quot;*.mjs&quot;,
+<span class="ln">534</span>        &quot;verify*.py&quot;,
+<span class="ln">535</span>        &quot;INPUTS_TO_BUILD.md&quot;,
+<span class="ln">536</span>        &quot;ASSET_INVENTORY.md&quot;,
+<span class="ln">537</span>        &quot;EXPECTED_BEHAVIOR.md&quot;,
+<span class="ln">538</span>    )
+<span class="ln">539</span>    shutil.copytree(src, dst, ignore=ignore)</pre></div>
+<a class="deep-link" href="realreplicabench/realreplicabench-harness.html">深度阅读 · Harness 装配链</a></section>
+<section class="sec" id="modules"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">核心模块：运行器、mock、评分</h2>
+<h3><span class="arr">▸</span>批量运行脚本保留轻量配置解析</h3><p><code>scripts/run_realreplicabench.py:48</code> 到 <code>scripts/run_realreplicabench.py:79</code> 手写 scalar parser，<code>scripts/run_realreplicabench.py:82</code> 到 <code>scripts/run_realreplicabench.py:138</code> 解析 YAML 子集。这不是通用 YAML，而是为了 run config 在未安装依赖时仍能被 release 脚本和 smoke 命令读取。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/scripts/run_realreplicabench.py</span> · L48-138</span><span>Python</span></div><pre class="code"><span class="ln">48</span>def parse_scalar(value: str) -&gt; Any:
+<span class="ln">49</span>    value = value.strip()
+<span class="ln">50</span>    # Strip inline comments (` # ...`) outside of quotes. YAML treats `#`
+<span class="ln">51</span>    # preceded by whitespace as a comment; without this our custom subset
+<span class="ln">52</span>    # parser silently glued the comment onto the value, breaking numeric coercion.
+<span class="ln">53</span>    if value and not (value.startswith(&#x27;&quot;&#x27;) or value.startswith(&quot;&#x27;&quot;)):
+<span class="ln">54</span>        hash_idx = value.find(&quot; #&quot;)
+<span class="ln">55</span>        if hash_idx != -1:
+<span class="ln">56</span>            value = value[:hash_idx].rstrip()
+<span class="ln">57</span>    if value in {&quot;&quot;, &quot;null&quot;, &quot;~&quot;}:
+<span class="ln">58</span>        return None
+<span class="ln">59</span>    if value in {&quot;true&quot;, &quot;True&quot;}:
+<span class="ln">60</span>        return True
+<span class="ln">61</span>    if value in {&quot;false&quot;, &quot;False&quot;}:
+<span class="ln">62</span>        return False
+<span class="ln">63</span>    if value.startswith(&#x27;&quot;&#x27;) and value.endswith(&#x27;&quot;&#x27;):
+<span class="ln">64</span>        return value[1:-1].replace(&#x27;\\&quot;&#x27;, &#x27;&quot;&#x27;)
+<span class="ln">65</span>    if value.startswith(&quot;&#x27;&quot;) and value.endswith(&quot;&#x27;&quot;):
+<span class="ln">66</span>        return value[1:-1].replace(&quot;&#x27;&#x27;&quot;, &quot;&#x27;&quot;)
+<span class="ln">67</span>    if value.startswith(&quot;[&quot;) and value.endswith(&quot;]&quot;):
+<span class="ln">68</span>        inner = value[1:-1].strip()
+<span class="ln">69</span>        if not inner:
+<span class="ln">70</span>            return []
+<span class="ln">71</span>        return [parse_scalar(part.strip()) for part in inner.split(&quot;,&quot;)]
+<span class="ln">72</span>    try:
+<span class="ln">73</span>        return int(value)
+<span class="ln">74</span>    except ValueError:
+<span class="ln">75</span>        pass
+<span class="ln">76</span>    try:
+<span class="ln">77</span>        return float(value)
+<span class="ln">78</span>    except ValueError:
+<span class="ln">79</span>        return value
+<span class="ln">80</span>
+<span class="ln">81</span>
+<span class="ln">82</span>def load_yaml_subset(path: Path) -&gt; dict[str, Any]:
+<span class="ln">83</span>    if not path.is_file():
+<span class="ln">84</span>        raise SystemExit(f&quot;config file not found: {path}&quot;)
+<span class="ln">85</span>    root: dict[str, Any] = {}
+<span class="ln">86</span>    stack: list[tuple[int, Any]] = [(-1, root)]
+<span class="ln">87</span>    last_key_at_indent: dict[int, tuple[Any, str]] = {}
+<span class="ln">88</span>    for raw_line in path.read_text(encoding=&quot;utf-8&quot;).splitlines():
+<span class="ln">89</span>        if not raw_line.strip() or raw_line.lstrip().startswith(&quot;#&quot;):
+<span class="ln">90</span>            continue
+<span class="ln">91</span>        indent = len(raw_line) - len(raw_line.lstrip(&quot; &quot;))
+<span class="ln">92</span>        line = raw_line.strip()
+<span class="ln">93</span>        parent = stack[-1][1]
+<span class="ln">94</span>        if line.startswith(&quot;- &quot;):
+<span class="ln">95</span>            while stack and indent &lt; stack[-1][0]:
+<span class="ln">96</span>                stack.pop()
+<span class="ln">97</span>            parent = stack[-1][1]
+<span class="ln">98</span>            if not isinstance(parent, list):
+<span class="ln">99</span>                grand_parent, key = last_key_at_indent.get(indent, (None, None))
+<span class="ln">100</span>                if grand_parent is None:
+<span class="ln">101</span>                    raise SystemExit(f&quot;invalid yaml list item: {raw_line}&quot;)
+<span class="ln">102</span>                if isinstance(grand_parent.get(key), list):
+<span class="ln">103</span>                    parent = grand_parent[key]
+<span class="ln">104</span>                else:
+<span class="ln">105</span>                    parent = []
+<span class="ln">106</span>                    grand_parent[key] = parent
+<span class="ln">107</span>                if not stack or stack[-1][1] is not parent:
+<span class="ln">108</span>                    stack.append((indent, parent))
+<span class="ln">109</span>            item_text = line[2:].strip()
+<span class="ln">110</span>            if not item_text:
+<span class="ln">111</span>                item: Any = {}
+<span class="ln">112</span>                parent.append(item)
+<span class="ln">113</span>                stack.append((indent, item))
+<span class="ln">114</span>            elif &quot;: &quot; in item_text:
+<span class="ln">115</span>                key, value = item_text.split(&quot;:&quot;, 1)
+<span class="ln">116</span>                item = {key.strip(): parse_scalar(value)}
+<span class="ln">117</span>                parent.append(item)
+<span class="ln">118</span>                stack.append((indent, item))
+<span class="ln">119</span>            else:
+<span class="ln">120</span>                parent.append(parse_scalar(item_text))
+<span class="ln">121</span>            continue
+<span class="ln">122</span>        while stack and indent &lt;= stack[-1][0]:
+<span class="ln">123</span>            stack.pop()
+<span class="ln">124</span>        parent = stack[-1][1]
+<span class="ln">125</span>        if &quot;:&quot; not in line:
+<span class="ln">126</span>            raise SystemExit(f&quot;invalid yaml line: {raw_line}&quot;)
+<span class="ln">127</span>        if not isinstance(parent, dict):
+<span class="ln">128</span>            raise SystemExit(f&quot;invalid yaml mapping line under list: {raw_line}&quot;)
+<span class="ln">129</span>        key, value = line.split(&quot;:&quot;, 1)
+<span class="ln">130</span>        key = key.strip()
+<span class="ln">131</span>        value = value.strip()
+<span class="ln">132</span>        if value:
+<span class="ln">133</span>            parent[key] = parse_scalar(value)
+<span class="ln">134</span>        else:
+<span class="ln">135</span>            parent[key] = {}
+<span class="ln">136</span>            last_key_at_indent[indent + 2] = (parent, key)
+<span class="ln">137</span>            stack.append((indent, parent[key]))
+<span class="ln">138</span>    return root</pre></div>
+<h3><span class="arr">▸</span>mock service 同时支持 HTTP 与 CLI 形态</h3><p>mock 源复制在 <code>src/real_replica_bench/cli.py:620</code> 处理，CLI bridge 注入在 <code>src/real_replica_bench/cli.py:632</code> 到 <code>src/real_replica_bench/cli.py:636</code>，容器内 wrapper 则在 <code>src/real_replica_bench/cli.py:760</code> 开始安装。这说明项目把“真实工具”视为 benchmark 的一等公民。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/cli.py</span> · L620-636</span><span>Python</span></div><pre class="code"><span class="ln">620</span>def copy_runtime_mock_sources(runtime_mocks: tuple[RuntimeMockConfig, ...], dst: Path) -&gt; None:
+<span class="ln">621</span>    if not runtime_mocks:
+<span class="ln">622</span>        return
+<span class="ln">623</span>    copyable = [mock for mock in runtime_mocks if not _runtime_mock_uses_baked_source(mock)]
+<span class="ln">624</span>    if not copyable:
+<span class="ln">625</span>        return
+<span class="ln">626</span>    dst.mkdir(parents=True, exist_ok=True)
+<span class="ln">627</span>    for mock in copyable:
+<span class="ln">628</span>        target = dst / mock.name
+<span class="ln">629</span>        if target.exists():
+<span class="ln">630</span>            shutil.rmtree(target)
+<span class="ln">631</span>        shutil.copytree(mock.source_dir, target, ignore=_runtime_mock_ignore(mock))
+<span class="ln">632</span>    if any(mock.kind == &quot;cli&quot; for mock in copyable):
+<span class="ln">633</span>        bridge_src = PROJECT_ROOT / &quot;real_replica_bench&quot; / &quot;mock_services&quot; / &quot;bench_bridge.py&quot;
+<span class="ln">634</span>        if not bridge_src.is_file():
+<span class="ln">635</span>            raise SystemExit(f&quot;CLI runtime mocks require missing bench bridge: {bridge_src}&quot;)
+<span class="ln">636</span>        shutil.copy2(bridge_src, dst / &quot;bench_bridge.py&quot;)</pre></div>
+<h3><span class="arr">▸</span>奖励不是连续分数，而是全检查通过</h3><p>reward.py 在 <code>src/real_replica_bench/reward.py:118</code> 进入 binary reward，<code>src/real_replica_bench/reward.py:157</code> 识别 v2 schema，<code>src/real_replica_bench/reward.py:179</code> 要求所有检查通过且 verifier 完成，最后在 <code>src/real_replica_bench/reward.py:241</code> 到 <code>src/real_replica_bench/reward.py:243</code> 把 reward 压成 0/1。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/reward.py</span> · L118-245</span><span>Python</span></div><pre class="code"><span class="ln">118</span>def build_binary_final_reward(
+<span class="ln">119</span>    reward: dict[str, Any],
+<span class="ln">120</span>    *,
+<span class="ln">121</span>    verifier_exit: int,
+<span class="ln">122</span>    agent_exec_returncode: int | None,
+<span class="ln">123</span>    agent_early_terminated: bool = False,
+<span class="ln">124</span>) -&gt; dict[str, Any]:
+<span class="ln">125</span>    &quot;&quot;&quot;Convert raw verifier output into the comparable benchmark final reward.
+<span class="ln">126</span>
+<span class="ln">127</span>    ``verifier/reward.json`` may keep continuous diagnostic scores. The
+<span class="ln">128</span>    externally comparable final reward is binary: every required validation
+<span class="ln">129</span>    check must pass, otherwise reward/score are 0.
+<span class="ln">130</span>    &quot;&quot;&quot;
+<span class="ln">131</span>    final_reward = dict(reward)
+<span class="ln">132</span>    raw_score = _score_or_none(reward.get(&quot;raw_score&quot;))
+<span class="ln">133</span>    raw_reward = _score_or_none(reward.get(&quot;raw_reward&quot;))
+<span class="ln">134</span>    if raw_score is None:
+<span class="ln">135</span>        raw_score = _score_or_none(reward.get(&quot;score&quot;, reward.get(&quot;reward&quot;)))
+<span class="ln">136</span>    if raw_reward is None:
+<span class="ln">137</span>        raw_reward = _score_or_none(reward.get(&quot;reward&quot;, reward.get(&quot;score&quot;)))
+<span class="ln">138</span>    raw_passed = bool(reward.get(&quot;passed&quot;))
+<span class="ln">139</span>
+<span class="ln">140</span>    verifier_completed = verifier_exit in (0, 6)
+<span class="ln">141</span>    verifier_passed = raw_passed and verifier_completed
+<span class="ln">142</span>    agent_execution_passed = (
+<span class="ln">143</span>        agent_exec_returncode in (0, None)
+<span class="ln">144</span>        or agent_early_terminated
+<span class="ln">145</span>        or verifier_passed
+<span class="ln">146</span>    )
+<span class="ln">147</span>    if agent_exec_returncode in (0, None) or agent_early_terminated:
+<span class="ln">148</span>        agent_execution_reason = &quot;agent process completed successfully&quot;
+<span class="ln">149</span>    elif verifier_passed:
+<span class="ln">150</span>        agent_execution_reason = (
+<span class="ln">151</span>            f&quot;agent_exec_returncode={agent_exec_returncode}; verifier passed, &quot;
+<span class="ln">152</span>            &quot;treating agent process status as diagnostic&quot;
+<span class="ln">153</span>        )
+<span class="ln">154</span>    else:
+<span class="ln">155</span>        agent_execution_reason = f&quot;agent_exec_returncode={agent_exec_returncode}&quot;
+<span class="ln">156</span>
+<span class="ln">157</span>    if _is_v2_reward_schema(reward):
+<span class="ln">158</span>        # v2: the raw test.sh check list IS the source of truth. We do NOT
+<span class="ln">159</span>        # add framework meta-checks (agent_execution / verifier_completed /
+<span class="ln">160</span>        # script_verifier_or_llm) on top — those gated v1 scoring and made
+<span class="ln">161</span>        # every report show &quot;x/3&quot; regardless of how many real checks the
+<span class="ln">162</span>        # task had. Binary passed simply requires every raw check to pass
+<span class="ln">163</span>        # AND the verifier to have completed (so the raw data is trustable).
+<span class="ln">164</span>        # An agent crash typically leaves outputs missing and trips raw
+<span class="ln">165</span>        # checks naturally, so we don&#x27;t gate on agent_execution explicitly.
+<span class="ln">166</span>        breakdown = reward.get(&quot;checks_breakdown&quot;)
+<span class="ln">167</span>        checks = [
+<span class="ln">168</span>            {
+<span class="ln">169</span>                &quot;id&quot;: c.get(&quot;id&quot;),
+<span class="ln">170</span>                &quot;passed&quot;: bool(c.get(&quot;passed&quot;)),
+<span class="ln">171</span>                &quot;reason&quot;: c.get(&quot;reason&quot;),
+<span class="ln">172</span>                &quot;check_type&quot;: c.get(&quot;check_type&quot;),
+<span class="ln">173</span>            }
+<span class="ln">174</span>            for c in (breakdown if isinstance(breakdown, list) else [])
+<span class="ln">175</span>            if isinstance(c, dict)
+<span class="ln">176</span>        ]
+<span class="ln">177</span>        passed_checks = sum(1 for c in checks if c.get(&quot;passed&quot;))
+<span class="ln">178</span>        total_checks = len(checks)
+<span class="ln">179</span>        all_passed = total_checks &gt; 0 and passed_checks == total_checks and verifier_completed
+<span class="ln">180</span>        check_ratio = round(passed_checks / total_checks, 4) if total_checks else 0.0
+<span class="ln">181</span>        raw_score = check_ratio
+<span class="ln">182</span>        raw_reward = check_ratio
+<span class="ln">183</span>        raw_passed = total_checks &gt; 0 and passed_checks == total_checks
+<span class="ln">184</span>        llm_check = None
+<span class="ln">185</span>    else:
+<span class="ln">186</span>        checks = [
+<span class="ln">187</span>            {
+<span class="ln">188</span>                &quot;id&quot;: &quot;agent_execution&quot;,
+<span class="ln">189</span>                &quot;passed&quot;: agent_execution_passed,
+<span class="ln">190</span>                &quot;reason&quot;: agent_execution_reason,
+<span class="ln">191</span>            },
+<span class="ln">192</span>            {
+<span class="ln">193</span>                &quot;id&quot;: &quot;verifier_completed&quot;,
+<span class="ln">194</span>                &quot;passed&quot;: verifier_completed,
+<span class="ln">195</span>                &quot;reason&quot;: f&quot;verifier_exit={verifier_exit}&quot;,
+<span class="ln">196</span>            },
+<span class="ln">197</span>        ]
+<span class="ln">198</span>        llm_check = _llm_rubric_check(reward, raw_score)
+<span class="ln">199</span>        if llm_check is not None:
+<span class="ln">200</span>            checks.append(llm_check)
+<span class="ln">201</span>        else:
+<span class="ln">202</span>            checks.append(_script_verifier_check(reward, raw_score, raw_passed))
+<span class="ln">203</span>        checks.extend(_explicit_validation_checks(reward))
+<span class="ln">204</span>        hard_checks = reward.get(&quot;hard_checks&quot;)
+<span class="ln">205</span>        if isinstance(hard_checks, dict) and &quot;passable&quot; in hard_checks:
+<span class="ln">206</span>            checks.append(
+<span class="ln">207</span>                {
+<span class="ln">208</span>                    &quot;id&quot;: &quot;hard_checks_passable&quot;,
+<span class="ln">209</span>                    &quot;passed&quot;: bool(hard_checks.get(&quot;passable&quot;)),
+<span class="ln">210</span>                    &quot;score&quot;: hard_checks.get(&quot;score&quot;),
+<span class="ln">211</span>                    &quot;reason&quot;: &quot;; &quot;.join(str(item) for item in hard_checks.get(&quot;cap_reasons&quot;, []) or []),
+<span class="ln">212</span>                }
+<span class="ln">213</span>            )
+<span class="ln">214</span>        passed_checks = sum(1 for check in checks if check.get(&quot;passed&quot;))
+<span class="ln">215</span>        total_checks = len(checks)
+<span class="ln">216</span>        all_passed = total_checks &gt; 0 and passed_checks == total_checks
+<span class="ln">217</span>
+<span class="ln">218</span>    final_reward[&quot;raw_reward&quot;] = raw_reward
+<span class="ln">219</span>    final_reward[&quot;raw_score&quot;] = raw_score
+<span class="ln">220</span>    final_reward[&quot;raw_passed&quot;] = raw_passed
+<span class="ln">221</span>    if llm_check is not None:
+<span class="ln">222</span>        final_reward[&quot;llm_rubric_score&quot;] = llm_check.get(&quot;score&quot;)
+<span class="ln">223</span>        final_reward[&quot;llm_rubric_threshold&quot;] = llm_check.get(&quot;threshold&quot;)
+<span class="ln">224</span>        final_reward[&quot;llm_rubric_passed&quot;] = llm_check.get(&quot;passed&quot;)
+<span class="ln">225</span>    final_reward[&quot;reward_mode&quot;] = &quot;binary_all_checks&quot;
+<span class="ln">226</span>    final_reward[&quot;validation_checks&quot;] = checks
+<span class="ln">227</span>    final_reward[&quot;check_summary&quot;] = {
+<span class="ln">228</span>        &quot;total&quot;: total_checks,
+<span class="ln">229</span>        &quot;passed&quot;: passed_checks,
+<span class="ln">230</span>        &quot;failed&quot;: total_checks - passed_checks,
+<span class="ln">231</span>        &quot;all_passed&quot;: all_passed,
+<span class="ln">232</span>    }
+<span class="ln">233</span>    final_reward[&quot;framework_signals&quot;] = {
+<span class="ln">234</span>        &quot;agent_execution_passed&quot;: agent_execution_passed,
+<span class="ln">235</span>        &quot;agent_execution_reason&quot;: agent_execution_reason,
+<span class="ln">236</span>        &quot;verifier_completed&quot;: verifier_completed,
+<span class="ln">237</span>        &quot;verifier_exit&quot;: verifier_exit,
+<span class="ln">238</span>        &quot;agent_exec_returncode&quot;: agent_exec_returncode,
+<span class="ln">239</span>        &quot;agent_early_terminated&quot;: agent_early_terminated,
+<span class="ln">240</span>    }
+<span class="ln">241</span>    final_reward[&quot;passed&quot;] = all_passed
+<span class="ln">242</span>    final_reward[&quot;reward&quot;] = 1.0 if all_passed else 0.0
+<span class="ln">243</span>    final_reward[&quot;score&quot;] = final_reward[&quot;reward&quot;]
+<span class="ln">244</span>    final_reward.setdefault(&quot;verifier_exit&quot;, verifier_exit)
+<span class="ln">245</span>    return final_reward</pre></div>
+<a class="deep-link" href="realreplicabench/realreplicabench-verifier.html">深度阅读 · Verifier 与二值奖励</a></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">运行流程：从 Agent 输出到可审计轨迹</h2>
+<h3><span class="arr">▸</span>Prompt 先声明工作目录契约</h3><p>prompt 组装在 <code>src/real_replica_bench/prompts.py:18</code> 读取 task.md，并在 <code>src/real_replica_bench/prompts.py:23</code> 到 <code>src/real_replica_bench/prompts.py:32</code> 注入输入目录、标准工作目录和 outputs 目录。这种固定路径约定让不同 harness 的产物归档可比较。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/prompts.py</span> · L18-40</span><span>Python</span></div><pre class="code"><span class="ln">18</span>def build_task_prompt(spec: TaskSpec) -&gt; str:
+<span class="ln">19</span>    prompt = (spec.case_dir / spec.entrypoint).read_text(encoding=&quot;utf-8&quot;)
+<span class="ln">20</span>    remote_workdir = REMOTE_WORKSPACE_ROOT
+<span class="ln">21</span>    # New layout exposes inputs under workspace/; old layout flattens them into
+<span class="ln">22</span>    # the workdir root.
+<span class="ln">23</span>    remote_input_dir = (
+<span class="ln">24</span>        f&quot;{remote_workdir}/workspace&quot; if (spec.case_dir / &quot;workspace&quot;).is_dir() else remote_workdir
+<span class="ln">25</span>    )
+<span class="ln">26</span>    remote_output_dir = f&quot;{remote_workdir}/outputs&quot;
+<span class="ln">27</span>    workspace_contract = (
+<span class="ln">28</span>        &quot;本次工作的标准目录约定：\n&quot;
+<span class="ln">29</span>        f&quot;- 任务输入目录：`{remote_input_dir}`。\n&quot;
+<span class="ln">30</span>        f&quot;- 标准工作目录：`{remote_workdir}`。\n&quot;
+<span class="ln">31</span>        f&quot;- 标准产物目录：`{remote_output_dir}`。\n&quot;
+<span class="ln">32</span>        &quot;- 如需创建或修改任何本地文件，请在标准工作目录内完成，并把最终文件保存到标准产物目录。\n&quot;
+<span class="ln">33</span>        &quot;- 不要把最终产物只保存在 `/tmp`、桌面、下载目录或其它临时路径；这些路径不会作为标准结果归档。\n\n&quot;
+<span class="ln">34</span>    )
+<span class="ln">35</span>    if spec.runtime_mocks and &quot;/mcp&quot; in prompt:
+<span class="ln">36</span>        workspace_contract += (
+<span class="ln">37</span>            &quot;MCP 工具约定：`accio-mcp-cli` 不可用；如任务要求使用本地 `/mcp` endpoint，&quot;
+<span class="ln">38</span>            &quot;请直接用 `curl` 或等价命令发送 JSON-RPC `tools/list` / `tools/call` 请求。\n\n&quot;
+<span class="ln">39</span>        )
+<span class="ln">40</span>    return workspace_contract + prompt</pre></div>
+<h3><span class="arr">▸</span>OpenClaw runner 明确禁止聊天式停顿</h3><p>OpenClaw harness 在 <code>src/real_replica_bench/harnesses/openclaw/runner.py:64</code> 定义自主执行指令，并在 <code>src/real_replica_bench/harnesses/openclaw/runner.py:78</code> 到 <code>src/real_replica_bench/harnesses/openclaw/runner.py:87</code> 要求模型不要寒暄、不要反问、直接写 outputs。这是长程 unattended benchmark 的关键护栏。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/harnesses/openclaw/runner.py</span> · L64-87</span><span>Python</span></div><pre class="code"><span class="ln">64</span># Autonomous-agent directive, prepended to every OpenClaw prompt in the most
+<span class="ln">65</span># prominent position. OpenClaw&#x27;s default framing is a conversational personal
+<span class="ln">66</span># assistant, and persona-forward models (notably GPT-5.6 Luna/Terra/Sol) latch
+<span class="ln">67</span># onto it — they open with a &quot;我刚上线，你希望怎么称呼我？&quot; self-introduction plus a
+<span class="ln">68</span># question, end the turn with zero tool calls, and since `openclaw agent
+<span class="ln">69</span># --message` is a single non-interactive invocation there is no user to answer →
+<span class="ln">70</span># the loop terminates and the task scores ~0. Reproduced on this runtime with
+<span class="ln">71</span># gpt-5.6-luna: one upstream call, zero tool calls, reward 0.
+<span class="ln">72</span>#
+<span class="ln">73</span># It carries NO task-specific or verifier-facing hints, and is applied uniformly
+<span class="ln">74</span># to every OpenClaw run so the cross-model comparison stays fair. Because it sits
+<span class="ln">75</span># on the scoring boundary — changing it moves every model&#x27;s starting line — it is
+<span class="ln">76</span># a module-level constant rather than an inline string: greppable, diffable in
+<span class="ln">77</span># review, and overridable in an A/B harness without editing this file.
+<span class="ln">78</span>OPENCLAW_AGENT_DIRECTIVE = (
+<span class="ln">79</span>    &quot;# 角色：自主任务执行 Agent\n\n&quot;
+<span class="ln">80</span>    &quot;你是一个自主运行的任务执行 agent，**不是**聊天助手。请**立即开始执行下面的任务**。\n&quot;
+<span class="ln">81</span>    &quot;- **不要**自我介绍、不要给自己取名字、不要询问「如何称呼你 / 我该怎么称呼你」、不要任何寒暄开场白。\n&quot;
+<span class="ln">82</span>    &quot;- 当前是**无人值守的单次执行**：没有人会回答你的任何反问，任何&quot;
+<span class="ln">83</span>    &quot;「等待用户确认 / 请用户提供」都会导致任务直接失败。\n&quot;
+<span class="ln">84</span>    &quot;- 直接调用工具（read / exec / browser 等）完成任务，把最终产物写到 `/task/outputs/`。&quot;
+<span class="ln">85</span>    &quot;遇到不确定的地方，基于任务描述做出最合理的假设并继续推进，不要停下来等待确认。\n\n&quot;
+<span class="ln">86</span>    &quot;---\n\n&quot;
+<span class="ln">87</span>)</pre></div>
+<h3><span class="arr">▸</span>轨迹恢复把多 harness 产物标准化</h3><p>trajectory.py 从 <code>src/real_replica_bench/trajectory.py:116</code> 支持 Accio state，从 <code>src/real_replica_bench/trajectory.py:227</code> 支持 OpenClaw chat.jsonl，并用 <code>src/real_replica_bench/trajectory.py:194</code> 到 <code>src/real_replica_bench/trajectory.py:203</code> 去重工具调用、工具结果和消息。这让报告能比较不同 Agent 的操作行为。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/real_replica_bench/trajectory.py</span> · L116-218</span><span>Python</span></div><pre class="code"><span class="ln">116</span>def recover_trajectory_from_accio_state(agent_dir: Path) -&gt; dict[str, Any]:
+<span class="ln">117</span>    state_dir = agent_dir / &quot;accio_state&quot;
+<span class="ln">118</span>    if not state_dir.exists():
+<span class="ln">119</span>        return {}
+<span class="ln">120</span>    jsonl_files = sorted(state_dir.rglob(&quot;*.jsonl&quot;))
+<span class="ln">121</span>    tool_calls: list[Any] = []
+<span class="ln">122</span>    tool_results: list[Any] = []
+<span class="ln">123</span>    tool_progress: list[Any] = []
+<span class="ln">124</span>    messages: list[dict[str, Any]] = []
+<span class="ln">125</span>    response_chunks: list[str] = []
+<span class="ln">126</span>    response_chunk_seen: set[str] = set()
+<span class="ln">127</span>    usage_records: list[Any] = []
+<span class="ln">128</span>    source_files: list[str] = []
+<span class="ln">129</span>
+<span class="ln">130</span>    for path in jsonl_files:
+<span class="ln">131</span>        source_files.append(str(path.relative_to(agent_dir)))
+<span class="ln">132</span>        for line_no, line in enumerate(path.read_text(encoding=&quot;utf-8&quot;, errors=&quot;replace&quot;).splitlines(), start=1):
+<span class="ln">133</span>            item = _safe_json_loads(line.strip())
+<span class="ln">134</span>            if not isinstance(item, dict):
+<span class="ln">135</span>                continue
+<span class="ln">136</span>
+<span class="ln">137</span>            raw_calls = item.get(&quot;toolCalls&quot;) or item.get(&quot;tool_calls&quot;) or []
+<span class="ln">138</span>            if isinstance(raw_calls, list):
+<span class="ln">139</span>                for call in raw_calls:
+<span class="ln">140</span>                    if isinstance(call, dict):
+<span class="ln">141</span>                        tool_calls.append({**_sanitize_tool_call(call), &quot;_source&quot;: f&quot;{path.relative_to(agent_dir)}:{line_no}&quot;})
+<span class="ln">142</span>
+<span class="ln">143</span>            progress = item.get(&quot;toolProgress&quot;) or item.get(&quot;tool_progress&quot;)
+<span class="ln">144</span>            for progress_item in _flatten_tool_progress(progress):
+<span class="ln">145</span>                if isinstance(progress_item, dict):
+<span class="ln">146</span>                    tool_progress.append({**progress_item, &quot;_source&quot;: f&quot;{path.relative_to(agent_dir)}:{line_no}&quot;})
+<span class="ln">147</span>
+<span class="ln">148</span>            metadata = item.get(&quot;metadata&quot;)
+<span class="ln">149</span>            if isinstance(metadata, dict) and isinstance(metadata.get(&quot;usage&quot;), dict):
+<span class="ln">150</span>                usage_records.append(metadata[&quot;usage&quot;])
+<span class="ln">151</span>
+<span class="ln">152</span>            role = item.get(&quot;role&quot;)
+<span class="ln">153</span>            message_type = item.get(&quot;messageType&quot;) or item.get(&quot;message_type&quot;)
+<span class="ln">154</span>            content = item.get(&quot;content&quot;)
+<span class="ln">155</span>            if role == &quot;assistant&quot; and isinstance(content, str) and content.strip():
+<span class="ln">156</span>                chunk = content.strip()
+<span class="ln">157</span>                if chunk not in response_chunk_seen:
+<span class="ln">158</span>                    response_chunk_seen.add(chunk)
+<span class="ln">159</span>                    response_chunks.append(chunk)
+<span class="ln">160</span>            if role == &quot;tool&quot; or message_type == &quot;tool_result&quot;:
+<span class="ln">161</span>                result = {
+<span class="ln">162</span>                    &quot;toolCallId&quot;: item.get(&quot;toolCallId&quot;) or item.get(&quot;tool_call_id&quot;),
+<span class="ln">163</span>                    &quot;toolName&quot;: item.get(&quot;name&quot;),
+<span class="ln">164</span>                    &quot;content&quot;: content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+<span class="ln">165</span>                    &quot;_source&quot;: f&quot;{path.relative_to(agent_dir)}:{line_no}&quot;,
+<span class="ln">166</span>                }
+<span class="ln">167</span>                tool_results.append(result)
+<span class="ln">168</span>                if isinstance(content, str) and &quot;&lt;task_result&gt;&quot; in content:
+<span class="ln">169</span>                    chunk = content.strip()
+<span class="ln">170</span>                    if chunk not in response_chunk_seen:
+<span class="ln">171</span>                        response_chunk_seen.add(chunk)
+<span class="ln">172</span>                        response_chunks.append(chunk)
+<span class="ln">173</span>
+<span class="ln">174</span>            if role in {&quot;assistant&quot;, &quot;tool&quot;, &quot;user&quot;} or message_type:
+<span class="ln">175</span>                preview = content if isinstance(content, str) else &quot;&quot;
+<span class="ln">176</span>                messages.append(
+<span class="ln">177</span>                    {
+<span class="ln">178</span>                        &quot;role&quot;: role,
+<span class="ln">179</span>                        &quot;message_type&quot;: message_type,
+<span class="ln">180</span>                        &quot;tool_name&quot;: item.get(&quot;name&quot;),
+<span class="ln">181</span>                        &quot;tool_call_count&quot;: len(raw_calls) if isinstance(raw_calls, list) else 0,
+<span class="ln">182</span>                        &quot;content_preview&quot;: preview[:4000],
+<span class="ln">183</span>                        &quot;timestamp&quot;: item.get(&quot;timestamp&quot;) or item.get(&quot;ts&quot;),
+<span class="ln">184</span>                        &quot;_source&quot;: f&quot;{path.relative_to(agent_dir)}:{line_no}&quot;,
+<span class="ln">185</span>                    }
+<span class="ln">186</span>                )
+<span class="ln">187</span>
+<span class="ln">188</span>    usage: dict[str, int] = {}
+<span class="ln">189</span>    for record in usage_records:
+<span class="ln">190</span>        for key, value in record.items():
+<span class="ln">191</span>            if isinstance(value, int):
+<span class="ln">192</span>                usage[key] = usage.get(key, 0) + value
+<span class="ln">193</span>
+<span class="ln">194</span>    tool_calls, duplicate_tool_calls = _dedupe_sequence(tool_calls, _tool_call_key)
+<span class="ln">195</span>    tool_results, duplicate_tool_results = _dedupe_sequence(tool_results, _tool_result_key)
+<span class="ln">196</span>    tool_progress, duplicate_tool_progress = _dedupe_sequence(tool_progress, _progress_key)
+<span class="ln">197</span>    messages, duplicate_messages = _dedupe_sequence(messages, _message_key)
+<span class="ln">198</span>    duplicate_counts = {
+<span class="ln">199</span>        &quot;tool_calls&quot;: duplicate_tool_calls,
+<span class="ln">200</span>        &quot;tool_results&quot;: duplicate_tool_results,
+<span class="ln">201</span>        &quot;tool_progress&quot;: duplicate_tool_progress,
+<span class="ln">202</span>        &quot;messages&quot;: duplicate_messages,
+<span class="ln">203</span>    }
+<span class="ln">204</span>
+<span class="ln">205</span>    if not any([tool_calls, tool_results, tool_progress, messages, response_chunks]):
+<span class="ln">206</span>        return {}
+<span class="ln">207</span>    return {
+<span class="ln">208</span>        &quot;source&quot;: &quot;accio_state&quot;,
+<span class="ln">209</span>        &quot;recovered_from_accio_state&quot;: True,
+<span class="ln">210</span>        &quot;recovered_source_files&quot;: source_files,
+<span class="ln">211</span>        &quot;deduplicated_recovery_items&quot;: duplicate_counts,
+<span class="ln">212</span>        &quot;response_text&quot;: &quot;\n\n&quot;.join(response_chunks)[-60000:],
+<span class="ln">213</span>        &quot;tool_calls&quot;: tool_calls,
+<span class="ln">214</span>        &quot;tool_results&quot;: tool_results,
+<span class="ln">215</span>        &quot;tool_progress&quot;: tool_progress,
+<span class="ln">216</span>        &quot;messages&quot;: messages,
+<span class="ln">217</span>        &quot;usage&quot;: usage,
+<span class="ln">218</span>    }</pre></div>
+<a class="deep-link" href="realreplicabench/realreplicabench-openclaw.html">深度阅读 · OpenClaw 容器 Runner</a></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>04</b> · TESTS</div><h2 class="sec-title">发布验证覆盖了什么</h2>
+<h3><span class="arr">▸</span>release validator 校验任务集合完整性</h3><p>发布脚本在 <code>scripts/validate_release.py:17</code> 固定 107 个任务，在 <code>scripts/validate_release.py:23</code> 到 <code>scripts/validate_release.py:30</code> 固定四个 collection，并在 <code>scripts/validate_release.py:130</code> 到 <code>scripts/validate_release.py:183</code> 检查 task.toml、grader/run.sh、rubric 和 modality 切分互不重叠。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/scripts/validate_release.py</span> · L122-192</span><span>Python</span></div><pre class="code"><span class="ln">122</span>def validate_tasks(check: Validation) -&gt; None:
+<span class="ln">123</span>    task_by_id: dict[str, Path] = {}
+<span class="ln">124</span>    modality_ids: dict[str, set[str]] = {
+<span class="ln">125</span>        &quot;text_only&quot;: set(),
+<span class="ln">126</span>        &quot;browser_textcapable&quot;: set(),
+<span class="ln">127</span>        &quot;vision&quot;: set(),
+<span class="ln">128</span>    }
+<span class="ln">129</span>
+<span class="ln">130</span>    for task_toml in sorted(DATASETS.rglob(&quot;task.toml&quot;)):
+<span class="ln">131</span>        payload = tomllib.loads(task_toml.read_text(encoding=&quot;utf-8&quot;))
+<span class="ln">132</span>        task = payload.get(&quot;task&quot;) or {}
+<span class="ln">133</span>        environment = payload.get(&quot;environment&quot;) or {}
+<span class="ln">134</span>        task_id = task.get(&quot;id&quot;)
+<span class="ln">135</span>        rel = task_toml.parent.relative_to(ROOT)
+<span class="ln">136</span>        check.require(isinstance(task_id, str) and bool(task_id), f&quot;{rel}: missing [task].id&quot;)
+<span class="ln">137</span>        if not isinstance(task_id, str) or not task_id:
+<span class="ln">138</span>            continue
+<span class="ln">139</span>        check.require(task_id not in task_by_id, f&quot;duplicate task id: {task_id}&quot;)
+<span class="ln">140</span>        task_by_id[task_id] = task_toml.parent
+<span class="ln">141</span>
+<span class="ln">142</span>        for required in (&quot;task.md&quot;, &quot;rubric.json&quot;, &quot;grader/run.sh&quot;):
+<span class="ln">143</span>            check.require((task_toml.parent / required).is_file(), f&quot;{rel}: missing {required}&quot;)
+<span class="ln">144</span>
+<span class="ln">145</span>        check.require(
+<span class="ln">146</span>            environment.get(&quot;base_images&quot;) == [PINNED_RUNTIME],
+<span class="ln">147</span>            f&quot;{rel}: [environment].base_images must contain only the public pinned runtime&quot;,
+<span class="ln">148</span>        )
+<span class="ln">149</span>
+<span class="ln">150</span>        if bool(environment.get(&quot;requires_vision&quot;, False)):
+<span class="ln">151</span>            modality = &quot;vision&quot;
+<span class="ln">152</span>        elif bool(environment.get(&quot;requires_browser&quot;, False)):
+<span class="ln">153</span>            modality = &quot;browser_textcapable&quot;
+<span class="ln">154</span>        else:
+<span class="ln">155</span>            modality = &quot;text_only&quot;
+<span class="ln">156</span>        modality_ids[modality].add(task_id)
+<span class="ln">157</span>
+<span class="ln">158</span>    all_ids = load_collection(COLLECTIONS[&quot;all&quot;])
+<span class="ln">159</span>    check.require(
+<span class="ln">160</span>        len(all_ids) == EXPECTED_TASK_COUNT,
+<span class="ln">161</span>        f&quot;full collection has {len(all_ids)} tasks; expected {EXPECTED_TASK_COUNT}&quot;,
+<span class="ln">162</span>    )
+<span class="ln">163</span>    check.require(len(all_ids) == len(set(all_ids)), &quot;full collection contains duplicate task ids&quot;)
+<span class="ln">164</span>    check.require(
+<span class="ln">165</span>        set(all_ids) == set(task_by_id),
+<span class="ln">166</span>        &quot;full collection and discovered task.toml ids differ&quot;,
+<span class="ln">167</span>    )
+<span class="ln">168</span>
+<span class="ln">169</span>    for modality, expected_ids in modality_ids.items():
+<span class="ln">170</span>        actual = load_collection(COLLECTIONS[modality])
+<span class="ln">171</span>        check.require(len(actual) == len(set(actual)), f&quot;{modality} collection contains duplicates&quot;)
+<span class="ln">172</span>        check.require(
+<span class="ln">173</span>            set(actual) == expected_ids,
+<span class="ln">174</span>            f&quot;{modality} collection does not match task.toml modality declarations&quot;,
+<span class="ln">175</span>        )
+<span class="ln">176</span>
+<span class="ln">177</span>    union = set().union(*modality_ids.values())
+<span class="ln">178</span>    total_memberships = sum(len(items) for items in modality_ids.values())
+<span class="ln">179</span>    check.require(union == set(all_ids), &quot;modality collections do not cover the full collection&quot;)
+<span class="ln">180</span>    check.require(
+<span class="ln">181</span>        total_memberships == len(union),
+<span class="ln">182</span>        &quot;modality collections overlap; every task must belong to exactly one slice&quot;,
+<span class="ln">183</span>    )
+<span class="ln">184</span>
+<span class="ln">185</span>    counts = {name: len(ids) for name, ids in modality_ids.items()}
+<span class="ln">186</span>    print(
+<span class="ln">187</span>        &quot;tasks:&quot;
+<span class="ln">188</span>        f&quot; all={len(all_ids)}&quot;
+<span class="ln">189</span>        f&quot; text_only={counts[&#x27;text_only&#x27;]}&quot;
+<span class="ln">190</span>        f&quot; browser_textcapable={counts[&#x27;browser_textcapable&#x27;]}&quot;
+<span class="ln">191</span>        f&quot; vision={counts[&#x27;vision&#x27;]}&quot;
+<span class="ln">192</span>    )</pre></div>
+<h3><span class="arr">▸</span>Public API tests 锁住 provider wire format</h3><p>测试在 <code>tests/test_public_api.py:129</code> 验证 Gemini native protocol，在 <code>tests/test_public_api.py:161</code> 验证 OpenAI Responses 多模态输入，在 <code>tests/test_public_api.py:200</code> 到 <code>tests/test_public_api.py:239</code> 锁住公开 provider config 的 API 版本和 baseUrl，避免 benchmark 发布后 wire format 漂移。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/tests/test_public_api.py</span> · L129-239</span><span>Python</span></div><pre class="code"><span class="ln">129</span>class PublicJudgeApiTests(unittest.TestCase):
+<span class="ln">130</span>    def test_gemini_native_protocol_and_versioned_base_url(self) -&gt; None:
+<span class="ln">131</span>        response = {
+<span class="ln">132</span>            &quot;candidates&quot;: [{&quot;content&quot;: {&quot;parts&quot;: [{&quot;text&quot;: json.dumps(JUDGMENT)}]}}]
+<span class="ln">133</span>        }
+<span class="ln">134</span>        with _FakeEndpoint(response) as endpoint:
+<span class="ln">135</span>            result = gemini_judge(
+<span class="ln">136</span>                JudgeConfig(
+<span class="ln">137</span>                    provider=&quot;gemini&quot;,
+<span class="ln">138</span>                    model=&quot;gemini-3.1-pro-preview&quot;,
+<span class="ln">139</span>                    api_key=&quot;test-gemini-key&quot;,
+<span class="ln">140</span>                    base_url=f&quot;{endpoint.base_url}/v1beta&quot;,
+<span class="ln">141</span>                ),
+<span class="ln">142</span>                &quot;grade this&quot;,
+<span class="ln">143</span>            )
+<span class="ln">144</span>
+<span class="ln">145</span>        self.assertTrue(result[&quot;passed&quot;])
+<span class="ln">146</span>        self.assertEqual(len(endpoint.requests), 1)
+<span class="ln">147</span>        request = endpoint.requests[0]
+<span class="ln">148</span>        self.assertEqual(
+<span class="ln">149</span>            request[&quot;path&quot;],
+<span class="ln">150</span>            &quot;/v1beta/models/gemini-3.1-pro-preview:generateContent&quot;,
+<span class="ln">151</span>        )
+<span class="ln">152</span>        headers = {str(k).lower(): v for k, v in request[&quot;headers&quot;].items()}  # type: ignore[union-attr]
+<span class="ln">153</span>        self.assertEqual(headers[&quot;x-goog-api-key&quot;], &quot;test-gemini-key&quot;)
+<span class="ln">154</span>        body = request[&quot;body&quot;]
+<span class="ln">155</span>        self.assertEqual(body[&quot;contents&quot;][0][&quot;parts&quot;][0][&quot;text&quot;], &quot;grade this&quot;)  # type: ignore[index]
+<span class="ln">156</span>        self.assertEqual(
+<span class="ln">157</span>            body[&quot;generationConfig&quot;][&quot;responseMimeType&quot;],  # type: ignore[index]
+<span class="ln">158</span>            &quot;application/json&quot;,
+<span class="ln">159</span>        )
+<span class="ln">160</span>
+<span class="ln">161</span>    def test_openai_responses_protocol_and_multimodal_input(self) -&gt; None:
+<span class="ln">162</span>        with _FakeEndpoint({&quot;output_text&quot;: json.dumps(JUDGMENT)}) as endpoint:
+<span class="ln">163</span>            result = openai_judge(
+<span class="ln">164</span>                JudgeConfig(
+<span class="ln">165</span>                    provider=&quot;openai&quot;,
+<span class="ln">166</span>                    model=&quot;test-model&quot;,
+<span class="ln">167</span>                    api_key=&quot;test-openai-key&quot;,
+<span class="ln">168</span>                    base_url=f&quot;{endpoint.base_url}/v1&quot;,
+<span class="ln">169</span>                ),
+<span class="ln">170</span>                &quot;grade this&quot;,
+<span class="ln">171</span>                [
+<span class="ln">172</span>                    {&quot;text&quot;: &quot;artifact image&quot;},
+<span class="ln">173</span>                    {
+<span class="ln">174</span>                        &quot;inlineData&quot;: {
+<span class="ln">175</span>                            &quot;mimeType&quot;: &quot;image/png&quot;,
+<span class="ln">176</span>                            &quot;data&quot;: &quot;aGVsbG8=&quot;,
+<span class="ln">177</span>                        }
+<span class="ln">178</span>                    },
+<span class="ln">179</span>                ],
+<span class="ln">180</span>            )
+<span class="ln">181</span>
+<span class="ln">182</span>        self.assertTrue(result[&quot;passed&quot;])
+<span class="ln">183</span>        request = endpoint.requests[0]
+<span class="ln">184</span>        self.assertEqual(request[&quot;path&quot;], &quot;/v1/responses&quot;)
+<span class="ln">185</span>        headers = {str(k).lower(): v for k, v in request[&quot;headers&quot;].items()}  # type: ignore[union-attr]
+<span class="ln">186</span>        self.assertEqual(headers[&quot;authorization&quot;], &quot;Bearer test-openai-key&quot;)
+<span class="ln">187</span>        body = request[&quot;body&quot;]
+<span class="ln">188</span>        user_content = body[&quot;input&quot;][1][&quot;content&quot;]  # type: ignore[index]
+<span class="ln">189</span>        self.assertEqual(user_content[0], {&quot;type&quot;: &quot;input_text&quot;, &quot;text&quot;: &quot;grade this&quot;})
+<span class="ln">190</span>        self.assertEqual(user_content[1], {&quot;type&quot;: &quot;input_text&quot;, &quot;text&quot;: &quot;artifact image&quot;})
+<span class="ln">191</span>        self.assertEqual(
+<span class="ln">192</span>            user_content[2],
+<span class="ln">193</span>            {
+<span class="ln">194</span>                &quot;type&quot;: &quot;input_image&quot;,
+<span class="ln">195</span>                &quot;image_url&quot;: &quot;data:image/png;base64,aGVsbG8=&quot;,
+<span class="ln">196</span>            },
+<span class="ln">197</span>        )
+<span class="ln">198</span>
+<span class="ln">199</span>
+<span class="ln">200</span>class PublicHarnessContractTests(unittest.TestCase):
+<span class="ln">201</span>    def test_public_native_provider_configs_pin_api_versions(self) -&gt; None:
+<span class="ln">202</span>        config_root = Path(__file__).resolve().parents[1] / &quot;configs&quot;
+<span class="ln">203</span>        for name in (
+<span class="ln">204</span>            &quot;realreplicabench_native_google_direct_models.json&quot;,
+<span class="ln">205</span>            &quot;realreplicabench_native_google_models.json&quot;,
+<span class="ln">206</span>        ):
+<span class="ln">207</span>            payload = json.loads((config_root / name).read_text(encoding=&quot;utf-8&quot;))
+<span class="ln">208</span>            self.assertEqual(
+<span class="ln">209</span>                payload[&quot;providers&quot;][&quot;google&quot;][&quot;baseUrl&quot;],
+<span class="ln">210</span>                &quot;https://generativelanguage.googleapis.com/v1beta&quot;,
+<span class="ln">211</span>            )
+<span class="ln">212</span>        qwen = json.loads(
+<span class="ln">213</span>            (config_root / &quot;realreplicabench_qwen37plus_native_models.json&quot;).read_text(
+<span class="ln">214</span>                encoding=&quot;utf-8&quot;
+<span class="ln">215</span>            )
+<span class="ln">216</span>        )
+<span class="ln">217</span>        self.assertEqual(
+<span class="ln">218</span>            qwen[&quot;providers&quot;][&quot;qwen&quot;][&quot;baseUrl&quot;],
+<span class="ln">219</span>            &quot;https://dashscope-intl.aliyuncs.com/compatible-mode/v1&quot;,
+<span class="ln">220</span>        )
+<span class="ln">221</span>
+<span class="ln">222</span>    def test_byo_endpoint_preset_configs_pin_wire_formats(self) -&gt; None:
+<span class="ln">223</span>        # Each BYO-endpoint preset is a starter template for a distinct
+<span class="ln">224</span>        # wire format the OpenClaw runtime speaks natively. A future edit
+<span class="ln">225</span>        # that breaks any of these contracts (wrong `api` enum, wrong
+<span class="ln">226</span>        # default baseUrl, dropped anthropic-version header) should trip
+<span class="ln">227</span>        # this test rather than silently ship a broken preset.
+<span class="ln">228</span>        config_root = Path(__file__).resolve().parents[1] / &quot;configs&quot;
+<span class="ln">229</span>
+<span class="ln">230</span>        openai_chat = json.loads(
+<span class="ln">231</span>            (config_root / &quot;realreplicabench_openai_chat_models.json&quot;).read_text(
+<span class="ln">232</span>                encoding=&quot;utf-8&quot;
+<span class="ln">233</span>            )
+<span class="ln">234</span>        )
+<span class="ln">235</span>        self.assertEqual(openai_chat[&quot;providers&quot;][&quot;openai&quot;][&quot;api&quot;], &quot;openai-completions&quot;)
+<span class="ln">236</span>        self.assertEqual(
+<span class="ln">237</span>            openai_chat[&quot;providers&quot;][&quot;openai&quot;][&quot;baseUrl&quot;],
+<span class="ln">238</span>            &quot;https://api.openai.com/v1&quot;,
+<span class="ln">239</span>        )</pre></div></section>
+<section class="sec" id="risks"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">亮点之外的<em>风险</em></h2>
+<h3><span class="arr">▸</span>Docker 与 mock 复杂度是复现门槛</h3><p>项目的可信度来自环境逼真，但 <code>src/real_replica_bench/cli.py:878</code> 之后的 mock setup、<code>src/real_replica_bench/cli.py:906</code> 的容器检查和 <code>src/real_replica_bench/cli.py:949</code> 的权限收紧都意味着本地复现比普通 benchmark 更重，CI 和用户机器需要稳定 Docker 基础设施。</p>
+<h3><span class="arr">▸</span>二值奖励减少刷分空间，也降低诊断分辨率</h3><p><code>src/real_replica_bench/reward.py:179</code> 的 all_passed 规则很严格，适合比较最终任务完成率；但当 Agent 在 12 个检查里只错一个字段时，<code>src/real_replica_bench/reward.py:241</code> 到 <code>src/real_replica_bench/reward.py:243</code> 仍会给 0 分，因此调试阶段必须回看 checks_breakdown 和 trajectory。</p>
+<div class="g2"><div class="card"><div class="card-h">最值得借鉴</div><div class="card-d">公开输入 allowlist、runtime mock 隔离、trajectory 标准化。</div></div><div class="card"><div class="card-h">合并前关注</div><div class="card-d">任务数量持续增加时，collection 与 modality 校验是否仍覆盖全量。</div></div></div></section>
+<div class="foot"><span>Generated · 2026-08-07</span><span>Source · <a href="https://github.com/Accio-org/RealReplicaBench">Accio-org/RealReplicaBench</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#7bdff2';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)})()}})();</script></body></html>
