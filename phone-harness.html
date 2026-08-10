@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>phone-harness · 真实 iPhone 控制 harness · 源码观测台</title>
+<meta name="description" content="ShawnPana/phone-harness 源码级深度解析 — ShawnPana/phone-harness 源码级深度解析：iPhone Mirroring、Vision OCR、Quartz CGEvent 与 Agent 安全边界" />
+<meta property="og:title" content="phone-harness · 源码观测台" />
+<meta property="og:description" content="ShawnPana/phone-harness 源码级深度解析：iPhone Mirroring、Vision OCR、Quartz CGEvent 与 Agent 安全边界" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #6ee7b7;
+  --star-soft:  #9ff3d2;
+  --star-deep:  #2fa36e;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">phone-harness<b>Harness</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">phone-harness<b>Harness</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python · PyObjC · macOS Sequoia</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>iPhone Mirroring 作为传输层</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>OCR、手势与连接状态三组核心模块</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从截图到点击，再到滚动收集</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>Doctor 与运行时验证</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>为什么这个小项目值得拆</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险、边界与可改进处</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★942 · 2026-08-07</div>
+      <div><a href="https://github.com/ShawnPana/phone-harness" target="_blank">ShawnPana/phone-harness</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">phone-harness <em>真实 iPhone 控制 harness</em></h1>
+          <p class="hero-desc">phone-harness 用 macOS iPhone Mirroring 窗口做真实手机传输层：<code>src/phone_harness/helpers.py:31</code>、<code>src/phone_harness/helpers.py:45</code>、<code>src/phone_harness/mirror.py:91</code>、<code>src/phone_harness/ocr.py:19</code> 串起连接检查、截图、OCR 和 HID 事件，让 agent 能看见并操作用户的 iPhone，同时把需要物理确认的连接步骤留给用户。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 942</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">793</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">43</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-08-07</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow">agent script
+  ↓ phone-harness stdin
+helpers namespace
+  ↓ capture + OCR
+iPhone Mirroring window
+  ↓ Quartz CGEvent
+real iPhone UI</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>这个项目的架构取舍很直接：不跑 Appium、不装 WebDriverAgent、不越狱，而是把 Apple 已经提供的 iPhone Mirroring 当成视频与输入通道。<code>src/phone_harness/helpers.py:31</code>、<code>src/phone_harness/helpers.py:45</code>、<code>src/phone_harness/mirror.py:91</code>、<code>src/phone_harness/ocr.py:19</code> 分别对应状态闸门、用户连接边界、窗口截图和 OCR 坐标换算，说明作者把“能操作手机”和“不能替用户完成物理连接”分得很清楚。</p>
+      <p>源码规模只有约 793 行，但完整闭环存在：CLI 在 <code>src/phone_harness/run.py:16</code>、<code>src/phone_harness/run.py:30</code>、<code>src/phone_harness/run.py:36</code> 读取 stdin 并注入 helper；镜像层在 <code>src/phone_harness/mirror.py:24</code>、<code>src/phone_harness/mirror.py:91</code>、<code>src/phone_harness/mirror.py:133</code> 负责窗口、截图和点击；滚动与等待逻辑在 <code>src/phone_harness/helpers.py:174</code>、<code>src/phone_harness/helpers.py:316</code>、<code>src/phone_harness/helpers.py:332</code> 处理移动判断、稳定等待和 agent helper 注入。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">无 daemon 的本地 CLI harness：每次命令重新发现窗口、截图、OCR、发事件，失败时通过异常把控制权交回用户。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">全局屏幕点坐标 + Vision OCR 文本框 + Quartz HID 事件 + agent-workspace 可编辑 helper。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">没有 benchmark；关键经验写在源码注释里，例如滚动重叠阈值 0.6、稳定等待 2.5s、window capture 失败后回退区域截图。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">适合 iOS-only app、手机号/2FA、本机 App 视觉测试；不适合可通过网页/API 完成的任务。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">iPhone Mirroring 作为传输层</h2>
+      <p>架构起点是窗口发现而不是设备协议。<code>src/phone_harness/mirror.py:14</code>、<code>src/phone_harness/mirror.py:24</code>、<code>src/phone_harness/mirror.py:33</code> 锁定系统 iPhone Mirroring 应用和主窗口，<code>src/phone_harness/mirror.py:48</code>、<code>src/phone_harness/mirror.py:60</code>、<code>src/phone_harness/helpers.py:45</code> 进一步保证 agent 只在已连接、可见、用户已授权的状态下行动。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">agent code</span>
+  <span class="flow-arr">→</span> phone-harness stdin
+  <span class="flow-arr">→</span> helpers namespace
+  <span class="flow-arr">→</span> connection_state / ensure_mirroring
+  <span class="flow-arr">→</span> screencapture + Vision OCR
+  <span class="flow-arr">→</span> Quartz CGEvent tap / key / scroll
+  <span class="flow-arr">→</span> screenshot again for verification</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>模块边界清晰：<code>src/phone_harness/run.py:21</code>、<code>src/phone_harness/run.py:24</code>、<code>src/phone_harness/run.py:33</code> 管 CLI 分流，<code>src/phone_harness/mirror.py:84</code>、<code>src/phone_harness/mirror.py:123</code>、<code>src/phone_harness/mirror.py:198</code> 管 capture/input，<code>src/phone_harness/helpers.py:89</code>、<code>src/phone_harness/helpers.py:239</code>、<code>src/phone_harness/helpers.py:300</code> 提供 agent 可用的读屏、列表和导航原语。</p>
+      <div class="g3"><div class="card"><div class="card-h">连接状态闸门</div><div class="card-d">核心判断集中在 <code>src/phone_harness/helpers.py:31</code>、<code>src/phone_harness/helpers.py:53</code>、<code>src/phone_harness/helpers.py:66</code>，它先看 App、窗口和 OCR 文案，再明确把 blocked 状态交还给用户处理。</div></div><div class="card"><div class="card-h">Mirroring 传输层</div><div class="card-d"><code>src/phone_harness/mirror.py:24</code>、<code>src/phone_harness/mirror.py:48</code>、<code>src/phone_harness/mirror.py:91</code> 说明它直接枚举 macOS 窗口、激活前台并截图，没有 WebDriverAgent 或后台 daemon。</div></div><div class="card"><div class="card-h">Vision OCR 元素树</div><div class="card-d"><code>src/phone_harness/ocr.py:19</code>、<code>src/phone_harness/ocr.py:34</code>、<code>src/phone_harness/ocr.py:48</code> 把 Vision 归一化坐标换算成全局屏幕点，输出可直接 tap 的文本框。</div></div><div class="card"><div class="card-h">滚动收集器</div><div class="card-d"><code>src/phone_harness/helpers.py:174</code>、<code>src/phone_harness/helpers.py:206</code>、<code>src/phone_harness/helpers.py:239</code> 不是靠解析器是否发现新行判断结束，而是用 OCR 文本重叠判断屏幕是否真的移动。</div></div><div class="card"><div class="card-h">诊断命令</div><div class="card-d"><code>src/phone_harness/admin.py:16</code>、<code>src/phone_harness/admin.py:24</code>、<code>src/phone_harness/admin.py:51</code> 把 PyObjC、辅助功能、录屏权限、窗口和 OCR 都串成 doctor 阶梯。</div></div><div class="card"><div class="card-h">Agent 可编辑层</div><div class="card-d"><code>src/phone_harness/helpers.py:332</code>、<code>agent-workspace/agent_helpers.py:9</code>、<code>agent-workspace/agent_helpers.py:21</code> 让任务特定 helper 自动注入运行命名空间，核心库保持小而稳定。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/phone_harness/helpers.py</span> · L31-42</span><span>Python</span></div>
+        <pre class="code"><span class="ln">31</span>def connection_state():
+<span class="ln">32</span>    &quot;&quot;&quot;&#x27;ready&#x27; | &#x27;blocked&#x27; | &#x27;no-window&#x27; | &#x27;not-running&#x27;.
+<span class="ln">33</span>
+<span class="ln">34</span>    &#x27;blocked&#x27; means a connect / &#x27;iPhone in Use&#x27; / paused interstitial is on
+<span class="ln">35</span>    screen. Cheap to call; use it to decide whether to proceed.&quot;&quot;&quot;
+<span class="ln">36</span>    if mirror.running_app() is None:
+<span class="ln">37</span>        return &quot;not-running&quot;
+<span class="ln">38</span>    if mirror.find_window() is None:
+<span class="ln">39</span>        return &quot;no-window&quot;
+<span class="ln">40</span>    path, win = mirror.capture()  # window exists, so this won&#x27;t launch anything
+<span class="ln">41</span>    texts = &quot; &quot;.join(o[&quot;text&quot;] for o in _ocr.recognize(path, win)).lower()
+<span class="ln">42</span>    return &quot;blocked&quot; if any(m in texts for m in _BLOCKED_MARKERS) else &quot;ready&quot;</pre>
+      </div>
+
+      <a class="deep-link" href="phone-harness/phone-harness-transport.html">深度阅读 · Mirroring 传输层与输入事件</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">OCR、手势与连接状态三组核心模块</h2>
+
+      <h3><span class="arr">▸</span>连接状态：先识别 blocked，再拒绝越权</h3>
+      <p>连接判断不是简单 find_window。<code>src/phone_harness/helpers.py:31</code>、<code>src/phone_harness/helpers.py:36</code>、<code>src/phone_harness/helpers.py:40</code>、<code>src/phone_harness/helpers.py:42</code> 先判断 App 是否运行、窗口是否存在，再用 OCR 读取 connect / iPhone in Use 等文案；<code>src/phone_harness/helpers.py:45</code>、<code>src/phone_harness/helpers.py:53</code>、<code>src/phone_harness/helpers.py:66</code> 把 blocked 状态转成面向用户的错误，明确 agent 不会代替用户恢复连接。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/phone_harness/helpers.py</span> · L45-70</span><span>Python</span></div>
+        <pre class="code"><span class="ln">45</span>def ensure_mirroring():
+<span class="ln">46</span>    &quot;&quot;&quot;Return the mirroring window if the phone is connected and ready.
+<span class="ln">47</span>
+<span class="ln">48</span>    Never launches the app, taps Connect/Continue, or polls to reconnect —
+<span class="ln">49</span>    resuming mirroring is physical and only the user can do it. If the session
+<span class="ln">50</span>    isn&#x27;t ready, raises with instructions for the user. STOP and relay that
+<span class="ln">51</span>    message; do not try to tap through the connect screen yourself.
+<span class="ln">52</span>    &quot;&quot;&quot;
+<span class="ln">53</span>    state = connection_state()
+<span class="ln">54</span>    if state == &quot;ready&quot;:
+<span class="ln">55</span>        mirror.activate()
+<span class="ln">56</span>        return mirror.find_window()
+<span class="ln">57</span>    if state == &quot;not-running&quot;:
+<span class="ln">58</span>        raise RuntimeError(
+<span class="ln">59</span>            &quot;iPhone Mirroring isn&#x27;t running. Please open the iPhone Mirroring &quot;
+<span class="ln">60</span>            &quot;app and connect your phone, then retry — reconnecting is physical, &quot;
+<span class="ln">61</span>            &quot;so I can&#x27;t do it for you.&quot;)
+<span class="ln">62</span>    if state == &quot;no-window&quot;:
+<span class="ln">63</span>        raise RuntimeError(
+<span class="ln">64</span>            &quot;iPhone Mirroring is open but no phone is connected. Please connect &quot;
+<span class="ln">65</span>            &quot;your phone in the app, then retry.&quot;)
+<span class="ln">66</span>    raise RuntimeError(
+<span class="ln">67</span>        &quot;iPhone Mirroring is not connected — it&#x27;s showing a connect / &#x27;iPhone &quot;
+<span class="ln">68</span>        &quot;in Use&#x27; screen. This needs you: open iPhone Mirroring and connect the &quot;
+<span class="ln">69</span>        &quot;phone, and if it says &#x27;iPhone in Use&#x27;, LOCK your iPhone so mirroring &quot;
+<span class="ln">70</span>        &quot;can resume. Then retry. I will not tap Connect for you.&quot;)</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>截图与 OCR：把视频窗口变成可点击文本树</h3>
+      <p>窗口截图在 <code>src/phone_harness/mirror.py:91</code>、<code>src/phone_harness/mirror.py:105</code>、<code>src/phone_harness/mirror.py:112</code>、<code>src/phone_harness/mirror.py:118</code> 先尝试 window capture，再回退区域 capture；OCR 在 <code>src/phone_harness/ocr.py:19</code>、<code>src/phone_harness/ocr.py:34</code>、<code>src/phone_harness/ocr.py:48</code>、<code>src/phone_harness/ocr.py:51</code> 把 Vision 结果转为屏幕点，所以上层 tap_text 可以直接点中心。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/phone_harness/ocr.py</span> · L19-56</span><span>Python</span></div>
+        <pre class="code"><span class="ln">19</span>def recognize(path, window):
+<span class="ln">20</span>    &quot;&quot;&quot;OCR a capture of `window` ({x, y, w, h} screen points).
+<span class="ln">21</span>
+<span class="ln">22</span>    Returns [{text, confidence, x, y, w, h}] where (x, y) is the box center in
+<span class="ln">23</span>    screen points — pass straight to tap(). Vision&#x27;s normalized boxes have a
+<span class="ln">24</span>    bottom-left origin; screen points have a top-left origin, hence the flip.
+<span class="ln">25</span>    &quot;&quot;&quot;
+<span class="ln">26</span>    handler = Vision.VNImageRequestHandler.alloc().initWithURL_options_(
+<span class="ln">27</span>        NSURL.fileURLWithPath_(path), {})
+<span class="ln">28</span>    request = Vision.VNRecognizeTextRequest.alloc().init()
+<span class="ln">29</span>    request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
+<span class="ln">30</span>    ok, err = handler.performRequests_error_([request], None)
+<span class="ln">31</span>    if not ok:
+<span class="ln">32</span>        raise RuntimeError(f&quot;Vision OCR failed: {err}&quot;)
+<span class="ln">33</span>
+<span class="ln">34</span>    img_w, img_h = image_size(path)
+<span class="ln">35</span>    sx = window[&quot;w&quot;] / img_w  # image px -&gt; screen points
+<span class="ln">36</span>    sy = window[&quot;h&quot;] / img_h
+<span class="ln">37</span>
+<span class="ln">38</span>    out = []
+<span class="ln">39</span>    for obs in request.results() or []:
+<span class="ln">40</span>        cand = obs.topCandidates_(1)
+<span class="ln">41</span>        if not cand:
+<span class="ln">42</span>            continue
+<span class="ln">43</span>        bb = obs.boundingBox()
+<span class="ln">44</span>        px = bb.origin.x * img_w
+<span class="ln">45</span>        py_top = (1.0 - bb.origin.y - bb.size.height) * img_h
+<span class="ln">46</span>        pw = bb.size.width * img_w
+<span class="ln">47</span>        ph = bb.size.height * img_h
+<span class="ln">48</span>        out.append({
+<span class="ln">49</span>            &quot;text&quot;: str(cand[0].string()),
+<span class="ln">50</span>            &quot;confidence&quot;: round(float(cand[0].confidence()), 3),
+<span class="ln">51</span>            &quot;x&quot;: round(window[&quot;x&quot;] + (px + pw / 2) * sx, 1),
+<span class="ln">52</span>            &quot;y&quot;: round(window[&quot;y&quot;] + (py_top + ph / 2) * sy, 1),
+<span class="ln">53</span>            &quot;w&quot;: round(pw * sx, 1),
+<span class="ln">54</span>            &quot;h&quot;: round(ph * sy, 1),
+<span class="ln">55</span>        })
+<span class="ln">56</span>    return out</pre>
+      </div>
+
+      <a class="deep-link" href="phone-harness/phone-harness-scrolling.html">深度阅读 · 滚动、稳定等待与列表收集</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从截图到点击，再到滚动收集</h2>
+      <p>真实手机控制的难点在反馈闭环，而不是单次点击。<code>src/phone_harness/helpers.py:105</code>、<code>src/phone_harness/helpers.py:123</code>、<code>src/phone_harness/helpers.py:139</code>、<code>src/phone_harness/helpers.py:316</code> 把文本点击、方向滑动、wheel scroll 和稳定等待组合起来；<code>src/phone_harness/helpers.py:174</code>、<code>src/phone_harness/helpers.py:206</code>、<code>src/phone_harness/helpers.py:239</code> 再用文本集合重叠判断列表是否真的前进。</p>
+
+      <h3><span class="arr">▸</span>一次点击动作如何闭环</h3>
+      <div class="flow">find_text(query)
+  → ocr() captures window
+  → choose hit center
+  → mirror.tap(x,y)
+  → wait_stable()
+  → screenshot / ocr verify</div>
+
+      <h3><span class="arr">▸</span>列表遍历如何避免误判结束</h3>
+      <div class="flow">_content_texts() before
+  → scroll_screen() wheel event
+  → wait until OCR set settles
+  → overlap(before, after)
+  → moved? ingest items : stale += 1
+  → end_after stale screens = reached-end</div>
+
+      <a class="deep-link" href="phone-harness/phone-harness-doctor.html">深度阅读 · Doctor、权限阶梯与 agent helper</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">Doctor 与运行时验证</h2>
+      <p>验证路径主要依赖 doctor 与运行时自检。<code>src/phone_harness/admin.py:12</code>、<code>src/phone_harness/admin.py:16</code>、<code>src/phone_harness/admin.py:24</code>、<code>src/phone_harness/admin.py:30</code> 先检查 PyObjC、Accessibility 和 Screen Recording；<code>src/phone_harness/admin.py:43</code>、<code>src/phone_harness/admin.py:51</code>、<code>src/phone_harness/admin.py:60</code> 再检查窗口、截图和 OCR。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>仓库没有 tests 目录，实际验收被集中进 doctor 和小型 CLI 演示：<code>src/phone_harness/admin.py:55</code>、<code>src/phone_harness/admin.py:60</code>、<code>src/phone_harness/admin.py:65</code> 确认 capture/OCR 是否可用，<code>src/phone_harness/run.py:21</code>、<code>src/phone_harness/run.py:24</code>、<code>src/phone_harness/run.py:28</code>、<code>src/phone_harness/run.py:36</code> 确认命令入口能分流 doctor、skill 和 stdin 执行。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/phone_harness/admin.py</span> · L12-22</span><span>Python</span></div>
+        <pre class="code"><span class="ln">12</span>def run_doctor():
+<span class="ln">13</span>    print(&quot;phone-harness doctor\n&quot;)
+<span class="ln">14</span>    ok = True
+<span class="ln">15</span>
+<span class="ln">16</span>    try:
+<span class="ln">17</span>        import Quartz, Vision, AppKit  # noqa: F401
+<span class="ln">18</span>        ok &amp;= _check(&quot;pyobjc frameworks (Quartz, Vision, AppKit)&quot;, True)
+<span class="ln">19</span>    except ImportError as e:
+<span class="ln">20</span>        _check(&quot;pyobjc frameworks&quot;, False,
+<span class="ln">21</span>               f&quot;pip install pyobjc-framework-Quartz pyobjc-framework-Vision ({e})&quot;)
+<span class="ln">22</span>        return 1</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>连接暂停或 iPhone in Use 时，<code>src/phone_harness/helpers.py:66</code> 直接要求用户锁屏/连接，不让 agent 乱点。</li><li>window capture 失败时，<code>src/phone_harness/mirror.py:112</code> 回退到区域截图，降低合成窗口不可截图的概率。</li><li>列表结束需要两次以上不移动确认，<code>src/phone_harness/helpers.py:280</code> 避免 lazy-load 和 OCR 漏行导致提前停止。</li><li>无法通过 keycode 输入的字符在 <code>src/phone_harness/mirror.py:251</code> 抛错，避免静默丢字。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">为什么这个小项目值得拆</h2>
+      <div class="g2"><div class="card"><div class="card-h">亮点一：不替用户连接手机</div><div class="card-d">最关键的安全设计在 <code>src/phone_harness/helpers.py:45</code>、<code>src/phone_harness/helpers.py:57</code>、<code>src/phone_harness/helpers.py:66</code>：未运行、无窗口、连接暂停都会抛出给用户看的错误，而不是让 agent 去点 Connect。</div></div><div class="card"><div class="card-h">亮点二：用 OCR 当作贫血 DOM</div><div class="card-d"><code>src/phone_harness/ocr.py:26</code>、<code>src/phone_harness/ocr.py:39</code>、<code>src/phone_harness/ocr.py:51</code> 让每个可见文本带置信度与中心点，足以支撑 tap_text、find_text 和滚动解析。</div></div><div class="card"><div class="card-h">补充代码块 · CLI 注入</div><div class="card-d"><div class="code-wrap"><div class="code-bar"><span><span class="src">src/phone_harness/run.py</span> · src/phone_harness/run.py:30-36</span><span>Python</span></div><pre class="code"><span class="ln">30</span>    code = sys.stdin.read()
+<span class="ln">31</span>    if not code.strip():
+<span class="ln">32</span>        sys.exit(USAGE)
+<span class="ln">33</span>    from . import helpers
+<span class="ln">34</span>    g = {k: v for k, v in vars(helpers).items() if not k.startswith(&quot;_&quot;)}
+<span class="ln">35</span>    g[&quot;__name__&quot;] = &quot;__main__&quot;
+<span class="ln">36</span>    exec(code, g)</pre></div></div></div><div class="card"><div class="card-h">补充代码块 · 图像尺寸</div><div class="card-d"><div class="code-wrap"><div class="code-bar"><span><span class="src">src/phone_harness/ocr.py</span> · src/phone_harness/ocr.py:11-16</span><span>Python</span></div><pre class="code"><span class="ln">11</span>def image_size(path):
+<span class="ln">12</span>    src = Quartz.CGImageSourceCreateWithURL(NSURL.fileURLWithPath_(path), None)
+<span class="ln">13</span>    if src is None:
+<span class="ln">14</span>        raise RuntimeError(f&quot;cannot read image {path}&quot;)
+<span class="ln">15</span>    props = Quartz.CGImageSourceCopyPropertiesAtIndex(src, 0, None)
+<span class="ln">16</span>    return int(props[&quot;PixelWidth&quot;]), int(props[&quot;PixelHeight&quot;])</pre></div></div></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>这个项目的边界同样清楚：它没有尝试绕过系统权限，也没有把视频流伪装成完整 DOM。<code>src/phone_harness/helpers.py:48</code>、<code>src/phone_harness/mirror.py:5</code>、<code>src/phone_harness/ocr.py:3</code>、<code>src/phone_harness/mirror.py:216</code> 说明它接受 iPhone Mirroring 的限制，然后用截图、OCR、HID keycode 和用户确认建立可审计的最小闭环。</p>
+      <div class="g2"><div class="card"><div class="card-h">物理连接仍是瓶颈</div><div class="card-d"><code>src/phone_harness/helpers.py:24</code>、<code>src/phone_harness/helpers.py:67</code>、<code>src/phone_harness/mirror.py:60</code> 已经写明 mirroring 断开后只能让用户介入；这不是 bug，而是产品边界。</div></div><div class="card"><div class="card-h">OCR 不是语义树</div><div class="card-d"><code>src/phone_harness/helpers.py:89</code>、<code>src/phone_harness/helpers.py:105</code>、<code>src/phone_harness/ocr.py:48</code> 支持按文字点击，但无标签图标、复杂布局和个人内容仍需要截图确认与人工约束。</div></div><div class="card"><div class="card-h">输入覆盖有限</div><div class="card-d"><code>src/phone_harness/mirror.py:198</code>、<code>src/phone_harness/mirror.py:242</code>、<code>src/phone_harness/mirror.py:251</code> 使用 US keycode 逐字符输入，不支持的字符会抛错，emoji、多语言输入和系统键盘状态都要额外处理。</div></div><div class="card"><div class="card-h">没有测试目录</div><div class="card-d">仓库更像一个小型系统工具，验证主要依赖 <code>src/phone_harness/admin.py:12</code>、<code>src/phone_harness/admin.py:65</code>、<code>src/phone_harness/mirror.py:84</code> 的 doctor 与运行时截图，不是常规 pytest 覆盖。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-10</span>
+      <span>Source · <a href="https://github.com/ShawnPana/phone-harness">ShawnPana/phone-harness</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../phone-harness.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
