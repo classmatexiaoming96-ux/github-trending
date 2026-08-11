@@ -1,0 +1,660 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>calldiff callgraph · 深度解析</title><meta name="description" content="tanishqkancharla/calldiff 源码级深度解析"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#e6a15a;--star-soft:#f2c07f;--star-deep:#b97834;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">call<b>diff</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">call<b>diff</b></div><div class="sub">深度解析</div></div><span class="nav-ver">TypeScript · npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#arch"><span class="idx">01</span>架构</a></li><li><a href="#core"><span class="idx">02</span>核心模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risk"><span class="idx">05</span>边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★302 · 2026-08-07</div><div><a href="https://github.com/tanishqkancharla/calldiff" target="_blank">tanishqkancharla/calldiff</a></div><div><a href="../calldiff.html">← 返回主页面</a></div></div></aside><main class="main">
+<div class="hero" id="overview"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">调用树展开与结构 diff <em>深度解析</em></h1><p class="hero-desc">这一页拆 calltree / infer / diff：从 FunctionIndex 递归展开，到反向边推断受影响入口，再用 LCS 对齐前后调用树。</p></div>
+<section class="sec" id="arch"><div class="sec-no">§ <b>01</b> · CALL TREE</div><h2 class="sec-title">调用树先解决<em>递归展开</em></h2><h3><span class="arr">▸</span>display label 与 loc 分离</h3><p><code>src/calltree.ts:5</code> 用 FunctionIndex 拿展示 label，找不到时才补一个 key()；<code>src/calltree.ts:58</code> 则区分根节点定义位置和子节点调用位置。这一差异让 --locs 输出符合 LSP Call Hierarchy 的 fromRanges 思路。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/calltree.ts</span> · L5-45</span><span>TypeScript</span></div><pre class="code"><span class="ln">5</span>function displayCallLabel(key: string, index: FunctionIndex): string {
+<span class="ln">6</span>  const info = index.get(key);
+<span class="ln">7</span>  if (info) return info.label;
+<span class="ln">8</span>  return key.includes(&quot;(&quot;) ? key : `${key}()`;
+<span class="ln">9</span>}
+<span class="ln">10</span>
+<span class="ln">11</span>function expandSteps(
+<span class="ln">12</span>  steps: CallStep[],
+<span class="ln">13</span>  index: FunctionIndex,
+<span class="ln">14</span>  depth: number,
+<span class="ln">15</span>  maxDepth: number,
+<span class="ln">16</span>  visiting: Set&lt;string&gt;,
+<span class="ln">17</span>): CallNode[] {
+<span class="ln">18</span>  return steps.map((step) =&gt; {
+<span class="ln">19</span>    if (step.type === &quot;branch&quot;) {
+<span class="ln">20</span>      return {
+<span class="ln">21</span>        key: step.key,
+<span class="ln">22</span>        label: step.label,
+<span class="ln">23</span>        kind: &quot;branch&quot; as const,
+<span class="ln">24</span>        ...pickLoc(step),
+<span class="ln">25</span>        children: expandSteps(
+<span class="ln">26</span>          step.children,
+<span class="ln">27</span>          index,
+<span class="ln">28</span>          depth,
+<span class="ln">29</span>          maxDepth,
+<span class="ln">30</span>          visiting,
+<span class="ln">31</span>        ),
+<span class="ln">32</span>      };
+<span class="ln">33</span>    }
+<span class="ln">34</span>    return expandCall(
+<span class="ln">35</span>      step.key,
+<span class="ln">36</span>      index,
+<span class="ln">37</span>      depth,
+<span class="ln">38</span>      maxDepth,
+<span class="ln">39</span>      visiting,
+<span class="ln">40</span>      step.children,
+<span class="ln">41</span>      step,
+<span class="ln">42</span>    );
+<span class="ln">43</span>  });
+<span class="ln">44</span>}
+<span class="ln">45</span></pre></div><h3><span class="arr">▸</span>visiting 防止循环展开</h3><p><code>src/calltree.ts:72</code> 发现当前 key 已在 visiting 中时，会返回带循环标记的节点；<code>src/calltree.ts:86</code> 到 <code>src/calltree.ts:93</code> 则只在进入函数体时 add/delete。这个设计避免递归函数把 CLI 输出拖成无限树。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/calltree.ts</span> · L46-113</span><span>TypeScript</span></div><pre class="code"><span class="ln">46</span>function expandCall(
+<span class="ln">47</span>  key: string,
+<span class="ln">48</span>  index: FunctionIndex,
+<span class="ln">49</span>  depth: number,
+<span class="ln">50</span>  maxDepth: number,
+<span class="ln">51</span>  visiting: Set&lt;string&gt;,
+<span class="ln">52</span>  inlineChildren?: CallStep[],
+<span class="ln">53</span>  callSite?: { file?: string; line?: number; endLine?: number },
+<span class="ln">54</span>): CallNode {
+<span class="ln">55</span>  const label = displayCallLabel(key, index);
+<span class="ln">56</span>  const info = index.get(key);
+<span class="ln">57</span>
+<span class="ln">58</span>  // Root uses the definition start line; every other node uses the call-site in the parent.
+<span class="ln">59</span>  const loc =
+<span class="ln">60</span>    depth === 0 &amp;&amp; info?.line != null
+<span class="ln">61</span>      ? pickLoc({ file: info.file, line: info.line })
+<span class="ln">62</span>      : pickLoc(callSite);
+<span class="ln">63</span>
+<span class="ln">64</span>  if (depth &gt;= maxDepth) {
+<span class="ln">65</span>    return { key, label, kind: &quot;call&quot;, ...loc, children: [] };
+<span class="ln">66</span>  }
+<span class="ln">67</span>
+<span class="ln">68</span>  if (!info &amp;&amp; !inlineChildren?.length) {
+<span class="ln">69</span>    return { key, label, kind: &quot;call&quot;, ...loc, children: [] };
+<span class="ln">70</span>  }
+<span class="ln">71</span>
+<span class="ln">72</span>  if (info &amp;&amp; visiting.has(key)) {
+<span class="ln">73</span>    // Still expand call-site JSX children; they are not a re-entry into `key`&#x27;s body.
+<span class="ln">74</span>    const callSiteChildren = inlineChildren?.length
+<span class="ln">75</span>      ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+<span class="ln">76</span>      : [];
+<span class="ln">77</span>    return {
+<span class="ln">78</span>      key,
+<span class="ln">79</span>      label: `${label} ⇄`,
+<span class="ln">80</span>      kind: &quot;call&quot;,
+<span class="ln">81</span>      ...loc,
+<span class="ln">82</span>      children: callSiteChildren,
+<span class="ln">83</span>    };
+<span class="ln">84</span>  }
+<span class="ln">85</span>
+<span class="ln">86</span>  if (info) visiting.add(key);
+<span class="ln">87</span>  const bodyChildren = info
+<span class="ln">88</span>    ? expandSteps(info.steps, index, depth + 1, maxDepth, visiting)
+<span class="ln">89</span>    : [];
+<span class="ln">90</span>  const callSiteChildren = inlineChildren?.length
+<span class="ln">91</span>    ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+<span class="ln">92</span>    : [];
+<span class="ln">93</span>  if (info) visiting.delete(key);
+<span class="ln">94</span>
+<span class="ln">95</span>  return {
+<span class="ln">96</span>    key,
+<span class="ln">97</span>    label,
+<span class="ln">98</span>    kind: &quot;call&quot;,
+<span class="ln">99</span>    ...loc,
+<span class="ln">100</span>    children: [...bodyChildren, ...callSiteChildren],
+<span class="ln">101</span>  };
+<span class="ln">102</span>}
+<span class="ln">103</span>
+<span class="ln">104</span>/**
+<span class="ln">105</span> * Expand a function into a nested call tree by following known definitions.
+<span class="ln">106</span> */
+<span class="ln">107</span>export function buildCallTree(
+<span class="ln">108</span>  entryKey: string,
+<span class="ln">109</span>  index: FunctionIndex,
+<span class="ln">110</span>  maxDepth: number,
+<span class="ln">111</span>): CallNode {
+<span class="ln">112</span>  const resolved = resolveEntry(entryKey, index) ?? entryKey;
+<span class="ln">113</span>  return expandCall(resolved, index, 0, maxDepth, new Set());</pre></div></section>
+<section class="sec" id="core"><div class="sec-no">§ <b>02</b> · INFER</div><h2 class="sec-title">入口推断从<em>反向边</em>开始</h2><h3><span class="arr">▸</span>findAffected 把变化向调用者传播</h3><p><code>src/infer.ts:12</code> 构建 callee→callers 反向边，<code>src/infer.ts:28</code> 从 before/after 函数 shape 变化出发，用 BFS 传播到上游调用者。这样即使底层 helper 改了，<code>src/infer.ts:80</code> 也能推断真正值得展示的 exported entrypoint。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/infer.ts</span> · L12-63</span><span>TypeScript</span></div><pre class="code"><span class="ln">12</span>function addReverseEdges(
+<span class="ln">13</span>  reverse: Map&lt;string, Set&lt;string&gt;&gt;,
+<span class="ln">14</span>  index: FunctionIndex,
+<span class="ln">15</span>): void {
+<span class="ln">16</span>  for (const [caller, fn] of index) {
+<span class="ln">17</span>    for (const callee of flattenCallKeys(fn.steps)) {
+<span class="ln">18</span>      let callers = reverse.get(callee);
+<span class="ln">19</span>      if (!callers) {
+<span class="ln">20</span>        callers = new Set();
+<span class="ln">21</span>        reverse.set(callee, callers);
+<span class="ln">22</span>      }
+<span class="ln">23</span>      callers.add(caller);
+<span class="ln">24</span>    }
+<span class="ln">25</span>  }
+<span class="ln">26</span>}
+<span class="ln">27</span>
+<span class="ln">28</span>function findAffected(
+<span class="ln">29</span>  before: FunctionIndex,
+<span class="ln">30</span>  after: FunctionIndex,
+<span class="ln">31</span>  maxDepth: number,
+<span class="ln">32</span>): Set&lt;string&gt; {
+<span class="ln">33</span>  const keys = new Set([...before.keys(), ...after.keys()]);
+<span class="ln">34</span>  const reverse = new Map&lt;string, Set&lt;string&gt;&gt;();
+<span class="ln">35</span>  addReverseEdges(reverse, before);
+<span class="ln">36</span>  addReverseEdges(reverse, after);
+<span class="ln">37</span>
+<span class="ln">38</span>  const distance = new Map&lt;string, number&gt;();
+<span class="ln">39</span>  const queue: string[] = [];
+<span class="ln">40</span>
+<span class="ln">41</span>  for (const key of keys) {
+<span class="ln">42</span>    if (functionShape(before.get(key)) === functionShape(after.get(key))) {
+<span class="ln">43</span>      continue;
+<span class="ln">44</span>    }
+<span class="ln">45</span>    distance.set(key, 0);
+<span class="ln">46</span>    queue.push(key);
+<span class="ln">47</span>  }
+<span class="ln">48</span>
+<span class="ln">49</span>  for (let i = 0; i &lt; queue.length; i += 1) {
+<span class="ln">50</span>    const callee = queue[i]!;
+<span class="ln">51</span>    const nextDistance = distance.get(callee)! + 1;
+<span class="ln">52</span>    if (nextDistance &gt; maxDepth) continue;
+<span class="ln">53</span>
+<span class="ln">54</span>    for (const caller of reverse.get(callee) ?? []) {
+<span class="ln">55</span>      const previous = distance.get(caller);
+<span class="ln">56</span>      if (previous !== undefined &amp;&amp; previous &lt;= nextDistance) continue;
+<span class="ln">57</span>      distance.set(caller, nextDistance);
+<span class="ln">58</span>      queue.push(caller);
+<span class="ln">59</span>    }
+<span class="ln">60</span>  }
+<span class="ln">61</span>
+<span class="ln">62</span>  return new Set(distance.keys());
+<span class="ln">63</span>}</pre></div><h3><span class="arr">▸</span>explicit entry 优先，fallback 再兜底</h3><p><code>src/infer.ts:86</code> 明确用户指定 entry 时不再猜；没有 entry 时，<code>src/infer.ts:96</code> 优先筛 affected exported 函数，<code>src/infer.ts:105</code> 才回退到非 exported 受影响函数。这个顺序让输出更像 review summary，而不是内部 helper 清单。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/infer.ts</span> · L80-108</span><span>TypeScript</span></div><pre class="code"><span class="ln">80</span>export function inferEntries(
+<span class="ln">81</span>  before: FunctionIndex,
+<span class="ln">82</span>  after: FunctionIndex,
+<span class="ln">83</span>  explicit: string[],
+<span class="ln">84</span>  maxDepth: number,
+<span class="ln">85</span>): string[] {
+<span class="ln">86</span>  if (explicit.length &gt; 0) {
+<span class="ln">87</span>    const entries: string[] = [];
+<span class="ln">88</span>    for (const entry of explicit) {
+<span class="ln">89</span>      const key = resolveEntry(entry, after) ?? resolveEntry(entry, before);
+<span class="ln">90</span>      if (!key) throw new Error(`Entrypoint not found: ${entry}`);
+<span class="ln">91</span>      if (!entries.includes(key)) entries.push(key);
+<span class="ln">92</span>    }
+<span class="ln">93</span>    return entries;
+<span class="ln">94</span>  }
+<span class="ln">95</span>
+<span class="ln">96</span>  const affected = [...findAffected(before, after, maxDepth)].filter(
+<span class="ln">97</span>    (key) =&gt; !key.startsWith(&quot;new &quot;),
+<span class="ln">98</span>  );
+<span class="ln">99</span>  const exported = affected.filter((key) =&gt;
+<span class="ln">100</span>    Boolean(before.get(key)?.exported || after.get(key)?.exported),
+<span class="ln">101</span>  );
+<span class="ln">102</span>  const entries = changedKeys(exported, before, after, maxDepth);
+<span class="ln">103</span>  if (entries.length &gt; 0) return entries;
+<span class="ln">104</span>
+<span class="ln">105</span>  const checked = new Set(exported);
+<span class="ln">106</span>  const fallback = affected.filter((key) =&gt; !checked.has(key));
+<span class="ln">107</span>  return changedKeys(fallback, before, after, maxDepth);
+<span class="ln">108</span>}</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>03</b> · DIFF</div><h2 class="sec-title">结构 diff 如何保持可读顺序</h2><h3><span class="arr">▸</span>LCS 对齐 children</h3><p><code>src/diff.ts:62</code> 建 dp 表，<code>src/diff.ts:82</code> 之后按 before/after key 走 LCS。相同节点递归 diff，不同节点标 added/removed；这让 refactor 后的新树顺序被保留，同时仍能显示删除的旧调用。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/diff.ts</span> · L1-109</span><span>TypeScript</span></div><pre class="code"><span class="ln">1</span>import { pickLoc } from &quot;./loc.js&quot;;
+<span class="ln">2</span>import type { CallNode, DiffNode } from &quot;./types.js&quot;;
+<span class="ln">3</span>
+<span class="ln">4</span>/**
+<span class="ln">5</span> * Structural tree diff keyed by call identity.
+<span class="ln">6</span> * Children are aligned with LCS so output order stays close to the &quot;after&quot; tree.
+<span class="ln">7</span> */
+<span class="ln">8</span>export function diffTrees(before: CallNode, after: CallNode): DiffNode {
+<span class="ln">9</span>  return diffNode(before, after);
+<span class="ln">10</span>}
+<span class="ln">11</span>
+<span class="ln">12</span>function diffNode(before: CallNode | null, after: CallNode | null): DiffNode {
+<span class="ln">13</span>  if (before &amp;&amp; after) {
+<span class="ln">14</span>    return {
+<span class="ln">15</span>      key: after.key,
+<span class="ln">16</span>      label: after.label,
+<span class="ln">17</span>      kind: after.kind ?? before.kind,
+<span class="ln">18</span>      ...pickLoc(after.file ? after : before),
+<span class="ln">19</span>      status: &quot;same&quot;,
+<span class="ln">20</span>      children: diffChildren(before.children, after.children),
+<span class="ln">21</span>    };
+<span class="ln">22</span>  }
+<span class="ln">23</span>
+<span class="ln">24</span>  if (after) {
+<span class="ln">25</span>    return {
+<span class="ln">26</span>      key: after.key,
+<span class="ln">27</span>      label: after.label,
+<span class="ln">28</span>      kind: after.kind,
+<span class="ln">29</span>      ...pickLoc(after),
+<span class="ln">30</span>      status: &quot;added&quot;,
+<span class="ln">31</span>      children: after.children.map(markTree(&quot;added&quot;)),
+<span class="ln">32</span>    };
+<span class="ln">33</span>  }
+<span class="ln">34</span>
+<span class="ln">35</span>  if (before) {
+<span class="ln">36</span>    return {
+<span class="ln">37</span>      key: before.key,
+<span class="ln">38</span>      label: before.label,
+<span class="ln">39</span>      kind: before.kind,
+<span class="ln">40</span>      ...pickLoc(before),
+<span class="ln">41</span>      status: &quot;removed&quot;,
+<span class="ln">42</span>      children: before.children.map(markTree(&quot;removed&quot;)),
+<span class="ln">43</span>    };
+<span class="ln">44</span>  }
+<span class="ln">45</span>
+<span class="ln">46</span>  throw new Error(&quot;diffNode called with no trees&quot;);
+<span class="ln">47</span>}
+<span class="ln">48</span>
+<span class="ln">49</span>function markTree(status: &quot;added&quot; | &quot;removed&quot;) {
+<span class="ln">50</span>  return function mark(node: CallNode): DiffNode {
+<span class="ln">51</span>    return {
+<span class="ln">52</span>      key: node.key,
+<span class="ln">53</span>      label: node.label,
+<span class="ln">54</span>      kind: node.kind,
+<span class="ln">55</span>      ...pickLoc(node),
+<span class="ln">56</span>      status,
+<span class="ln">57</span>      children: node.children.map(mark),
+<span class="ln">58</span>    };
+<span class="ln">59</span>  };
+<span class="ln">60</span>}
+<span class="ln">61</span>
+<span class="ln">62</span>function diffChildren(before: CallNode[], after: CallNode[]): DiffNode[] {
+<span class="ln">63</span>  const n = before.length;
+<span class="ln">64</span>  const m = after.length;
+<span class="ln">65</span>  const dp: number[][] = Array.from({ length: n + 1 }, () =&gt;
+<span class="ln">66</span>    Array.from({ length: m + 1 }, () =&gt; 0),
+<span class="ln">67</span>  );
+<span class="ln">68</span>
+<span class="ln">69</span>  for (let i = n - 1; i &gt;= 0; i--) {
+<span class="ln">70</span>    for (let j = m - 1; j &gt;= 0; j--) {
+<span class="ln">71</span>      if (before[i]!.key === after[j]!.key) {
+<span class="ln">72</span>        dp[i]![j] = dp[i + 1]![j + 1]! + 1;
+<span class="ln">73</span>      } else {
+<span class="ln">74</span>        dp[i]![j] = Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+<span class="ln">75</span>      }
+<span class="ln">76</span>    }
+<span class="ln">77</span>  }
+<span class="ln">78</span>
+<span class="ln">79</span>  const result: DiffNode[] = [];
+<span class="ln">80</span>  let i = 0;
+<span class="ln">81</span>  let j = 0;
+<span class="ln">82</span>  while (i &lt; n &amp;&amp; j &lt; m) {
+<span class="ln">83</span>    if (before[i]!.key === after[j]!.key) {
+<span class="ln">84</span>      result.push(diffNode(before[i]!, after[j]!));
+<span class="ln">85</span>      i += 1;
+<span class="ln">86</span>      j += 1;
+<span class="ln">87</span>    } else if (dp[i + 1]![j]! &gt;= dp[i]![j + 1]!) {
+<span class="ln">88</span>      result.push(diffNode(before[i]!, null));
+<span class="ln">89</span>      i += 1;
+<span class="ln">90</span>    } else {
+<span class="ln">91</span>      result.push(diffNode(null, after[j]!));
+<span class="ln">92</span>      j += 1;
+<span class="ln">93</span>    }
+<span class="ln">94</span>  }
+<span class="ln">95</span>  while (i &lt; n) {
+<span class="ln">96</span>    result.push(diffNode(before[i]!, null));
+<span class="ln">97</span>    i += 1;
+<span class="ln">98</span>  }
+<span class="ln">99</span>  while (j &lt; m) {
+<span class="ln">100</span>    result.push(diffNode(null, after[j]!));
+<span class="ln">101</span>    j += 1;
+<span class="ln">102</span>  }
+<span class="ln">103</span>  return result;
+<span class="ln">104</span>}
+<span class="ln">105</span>
+<span class="ln">106</span>export function treeHasChanges(node: DiffNode): boolean {
+<span class="ln">107</span>  if (node.status !== &quot;same&quot;) return true;
+<span class="ln">108</span>  return node.children.some(treeHasChanges);
+<span class="ln">109</span>}</pre></div><div class="flow">Function shape changed → affected entries → build before tree + after tree → diffChildren(LCS) → render +/- ASCII</div></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>04</b> · TESTS</div><h2 class="sec-title">测试直接覆盖输出形状</h2><h3><span class="arr">▸</span>helper refactor 样例</h3><p><code>test/callstack-diff.test.ts:3</code> 的测试非常贴近产品定位：原来三个调用被重构到 PiService.getServices，期望输出同时显示删除的旧子调用和新增 helper 的嵌套结构。它验证了 <code>src/diff.ts:49</code> 的 markTree 与 <code>src/render.ts:121</code> 的 renderDiff 能正确配合。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">test/callstack-diff.test.ts</span> · L3-67</span><span>TypeScript</span></div><pre class="code"><span class="ln">3</span>test(&quot;refactors calls into a helper, preserves if/else branch labels&quot;, ({
+<span class="ln">4</span>  expectCallstack,
+<span class="ln">5</span>}) =&gt; {
+<span class="ln">6</span>  expectCallstack(
+<span class="ln">7</span>    `
+<span class="ln">8</span>      export class PiService {
+<span class="ln">9</span>        static createAgentSession(options: { sessionId?: string }) {
+<span class="ln">10</span>    -     AuthStorage.create();
+<span class="ln">11</span>    -     new ModelRegistry();
+<span class="ln">12</span>    -     createCodingTools();
+<span class="ln">13</span>    +     const services = PiService.getServices();
+<span class="ln">14</span>    +     services.boot();
+<span class="ln">15</span>          if (!options.sessionId) {
+<span class="ln">16</span>            SessionManager.create();
+<span class="ln">17</span>          } else {
+<span class="ln">18</span>            SessionManager.open(options.sessionId);
+<span class="ln">19</span>          }
+<span class="ln">20</span>        }
+<span class="ln">21</span>    +
+<span class="ln">22</span>    +   static getServices() {
+<span class="ln">23</span>    +     SettingsManager.create();
+<span class="ln">24</span>    +     AuthStorage.create();
+<span class="ln">25</span>    +     new ModelRegistry();
+<span class="ln">26</span>    +     createCodingTools();
+<span class="ln">27</span>    +     return { boot() {} };
+<span class="ln">28</span>    +   }
+<span class="ln">29</span>      }
+<span class="ln">30</span>
+<span class="ln">31</span>      class AuthStorage {
+<span class="ln">32</span>        static create() {}
+<span class="ln">33</span>      }
+<span class="ln">34</span>
+<span class="ln">35</span>      class ModelRegistry {
+<span class="ln">36</span>        constructor() {}
+<span class="ln">37</span>      }
+<span class="ln">38</span>
+<span class="ln">39</span>      class SessionManager {
+<span class="ln">40</span>        static create() {}
+<span class="ln">41</span>        static open(_id: string) {}
+<span class="ln">42</span>      }
+<span class="ln">43</span>    +
+<span class="ln">44</span>    + class SettingsManager {
+<span class="ln">45</span>    +   static create() {}
+<span class="ln">46</span>    + }
+<span class="ln">47</span>
+<span class="ln">48</span>      function createCodingTools() {}
+<span class="ln">49</span>    `,
+<span class="ln">50</span>    &quot;PiService.createAgentSession&quot;,
+<span class="ln">51</span>  ).toEqual(`
+<span class="ln">52</span>      PiService.createAgentSession(options)
+<span class="ln">53</span>    - ├─ AuthStorage.create()
+<span class="ln">54</span>    - ├─ new ModelRegistry()
+<span class="ln">55</span>    - ├─ createCodingTools()
+<span class="ln">56</span>    + ├─ PiService.getServices()
+<span class="ln">57</span>    + │  ├─ SettingsManager.create()
+<span class="ln">58</span>    + │  ├─ AuthStorage.create()
+<span class="ln">59</span>    + │  ├─ new ModelRegistry()
+<span class="ln">60</span>    + │  └─ createCodingTools()
+<span class="ln">61</span>    + ├─ services.boot()
+<span class="ln">62</span>      ├─ if (!options.sessionId)
+<span class="ln">63</span>         └─ SessionManager.create()
+<span class="ln">64</span>      └─ else
+<span class="ln">65</span>         └─ SessionManager.open(_id)
+<span class="ln">66</span>  `);
+<span class="ln">67</span>});</pre></div></section>
+<section class="sec" id="risk"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">图模型边界</h2><h3><span class="arr">▸</span>key 冲突和动态派发</h3><p><code>src/extract.ts:92</code> 的 buildIndex 以 key 去重，<code>src/calltree.ts:125</code> 在多个后缀匹配时排序取一个。这个策略简单稳定，但跨文件同名函数、interface dispatch 或动态对象方法仍可能被简化。</p><p>另一个取舍在 entry 推断：<code>src/infer.ts:41</code> 从所有 key 比较函数 shape，<code>src/infer.ts:49</code> 用队列向上游扩散，<code>src/infer.ts:96</code> 再过滤掉 new constructor，<code>src/infer.ts:102</code> 最终只保留确实有树变化的 entry。它偏向 review 摘要，而不是完整 call graph dump。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/extract.ts</span> · L92-107</span><span>TypeScript</span></div><pre class="code"><span class="ln">92</span>export function buildIndex(functions: FunctionInfo[]): FunctionIndex {
+<span class="ln">93</span>  const index: FunctionIndex = new Map();
+<span class="ln">94</span>  for (const fn of functions) {
+<span class="ln">95</span>    if (!index.has(fn.key)) {
+<span class="ln">96</span>      index.set(fn.key, fn);
+<span class="ln">97</span>    }
+<span class="ln">98</span>    if (fn.key.endsWith(&quot;.constructor&quot;)) {
+<span class="ln">99</span>      const className = fn.key.slice(0, -&quot;.constructor&quot;.length);
+<span class="ln">100</span>      const newKey = `new ${className}`;
+<span class="ln">101</span>      if (!index.has(newKey)) {
+<span class="ln">102</span>        index.set(newKey, { ...fn, key: newKey, label: `new ${className}()` });
+<span class="ln">103</span>      }
+<span class="ln">104</span>    }
+<span class="ln">105</span>  }
+<span class="ln">106</span>  return index;
+<span class="ln">107</span>}</pre></div></section>
+<div class="foot"><span>Generated · 2026-08-11</span><span>Source · <a href="https://github.com/tanishqkancharla/calldiff">tanishqkancharla/calldiff</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));const a=map.get(e.target);if(a)a.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#f2c07f';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script></body></html>

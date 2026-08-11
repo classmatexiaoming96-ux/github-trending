@@ -1,0 +1,738 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>calldiff parser · 深度解析</title><meta name="description" content="tanishqkancharla/calldiff 源码级深度解析"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#e6a15a;--star-soft:#f2c07f;--star-deep:#b97834;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">call<b>diff</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">call<b>diff</b></div><div class="sub">深度解析</div></div><span class="nav-ver">TypeScript · npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#arch"><span class="idx">01</span>架构</a></li><li><a href="#core"><span class="idx">02</span>核心模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risk"><span class="idx">05</span>边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★302 · 2026-08-07</div><div><a href="https://github.com/tanishqkancharla/calldiff" target="_blank">tanishqkancharla/calldiff</a></div><div><a href="../calldiff.html">← 返回主页面</a></div></div></aside><main class="main">
+<div class="hero" id="overview"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">AST 提取与语言 registry <em>深度解析</em></h1><p class="hero-desc">这一页拆解 calldiff 如何从文件扩展名进入 Tree-sitter grammar，再把不同语言统一成 FunctionInfo 和 CallStep。</p></div>
+<section class="sec" id="arch"><div class="sec-no">§ <b>01</b> · REGISTRY</div><h2 class="sec-title">语言注册表先解决<em>路由</em></h2><h3><span class="arr">▸</span>扩展名到 extractor</h3><p><code>src/languages/registry.ts:28</code> 把 TypeScript、Python、Go、Rust 等 extractor 组成数组，<code>src/languages/registry.ts:54</code> 再构造 extension map，<code>src/languages/registry.ts:69</code> 的 detectLanguage 因此只需要按 extname 查表。这个设计让 <code>src/extract.ts:34</code> 不必包含任何语言分支。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/registry.ts</span> · L28-78</span><span>TypeScript</span></div><pre class="code"><span class="ln">28</span>const extractors: LanguageExtractor[] = [
+<span class="ln">29</span>  typescriptExtractor,
+<span class="ln">30</span>  typescriptreactExtractor,
+<span class="ln">31</span>  javascriptExtractor,
+<span class="ln">32</span>  javascriptreactExtractor,
+<span class="ln">33</span>  pythonExtractor,
+<span class="ln">34</span>  goExtractor,
+<span class="ln">35</span>  rustExtractor,
+<span class="ln">36</span>  javaExtractor,
+<span class="ln">37</span>  rubyExtractor,
+<span class="ln">38</span>  cExtractor,
+<span class="ln">39</span>  cppExtractor,
+<span class="ln">40</span>  csharpExtractor,
+<span class="ln">41</span>  phpExtractor,
+<span class="ln">42</span>  kotlinExtractor,
+<span class="ln">43</span>  swiftExtractor,
+<span class="ln">44</span>  scalaExtractor,
+<span class="ln">45</span>  luaExtractor,
+<span class="ln">46</span>  elixirExtractor,
+<span class="ln">47</span>  bashExtractor,
+<span class="ln">48</span>  haskellExtractor,
+<span class="ln">49</span>  zigExtractor,
+<span class="ln">50</span>  solidityExtractor,
+<span class="ln">51</span>  ocamlExtractor,
+<span class="ln">52</span>];
+<span class="ln">53</span>
+<span class="ln">54</span>const byExtension = new Map&lt;string, LanguageExtractor&gt;();
+<span class="ln">55</span>for (const extractor of extractors) {
+<span class="ln">56</span>  for (const ext of extractor.extensions) {
+<span class="ln">57</span>    byExtension.set(ext.toLowerCase(), extractor);
+<span class="ln">58</span>  }
+<span class="ln">59</span>}
+<span class="ln">60</span>
+<span class="ln">61</span>export function listSupportedExtensions(): string[] {
+<span class="ln">62</span>  return [...byExtension.keys()].sort();
+<span class="ln">63</span>}
+<span class="ln">64</span>
+<span class="ln">65</span>export function listSupportedLanguages(): string[] {
+<span class="ln">66</span>  return extractors.map((e) =&gt; e.id);
+<span class="ln">67</span>}
+<span class="ln">68</span>
+<span class="ln">69</span>export function detectLanguage(file: string): LanguageExtractor | null {
+<span class="ln">70</span>  const ext = extname(file).toLowerCase();
+<span class="ln">71</span>  return byExtension.get(ext) ?? null;
+<span class="ln">72</span>}
+<span class="ln">73</span>
+<span class="ln">74</span>export function getExtractor(id: string): LanguageExtractor | null {
+<span class="ln">75</span>  return extractors.find((e) =&gt; e.id === id) ?? null;
+<span class="ln">76</span>}
+<span class="ln">77</span>
+<span class="ln">78</span>export { extractors };</pre></div><h3><span class="arr">▸</span>grammar cache 处理 native 包差异</h3><p><code>src/languages/grammars.ts:104</code> 先尝试本地依赖，失败后落到 <code>src/languages/grammars.ts:128</code> 的 cache 目录，并在 <code>src/languages/grammars.ts:132</code> 用 npm install 拉 grammar。<code>src/languages/grammars.ts:92</code> 的 INSTALL_SPEC 则说明某些 grammar 需要 pin 版本才能稳定 require。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/grammars.ts</span> · L92-154</span><span>TypeScript</span></div><pre class="code"><span class="ln">92</span>/** Packages that need a pinned install spec (latest breaks createRequire). */
+<span class="ln">93</span>const INSTALL_SPEC: Record&lt;string, string&gt; = {
+<span class="ln">94</span>  &quot;tree-sitter-c-sharp&quot;: &quot;tree-sitter-c-sharp@0.23.1&quot;,
+<span class="ln">95</span>  // 0.4+ is ESM-with-TLA; 0.2.0 is CJS and loads via createRequire.
+<span class="ln">96</span>  &quot;@tree-sitter-grammars/tree-sitter-lua&quot;:
+<span class="ln">97</span>    &quot;@tree-sitter-grammars/tree-sitter-lua@0.2.0&quot;,
+<span class="ln">98</span>};
+<span class="ln">99</span>
+<span class="ln">100</span>/**
+<span class="ln">101</span> * Install an npm grammar package into the shared cache if missing, then require it.
+<span class="ln">102</span> * Reuses the cache across CLI invocations.
+<span class="ln">103</span> */
+<span class="ln">104</span>export function loadGrammarPackage(npmPackage: string): GrammarModule {
+<span class="ln">105</span>  // Prefer the app&#x27;s own dependency when present (e.g. tree-sitter-typescript).
+<span class="ln">106</span>  try {
+<span class="ln">107</span>    const localRequire = createRequire(import.meta.url);
+<span class="ln">108</span>    try {
+<span class="ln">109</span>      return localRequire(npmPackage) as GrammarModule;
+<span class="ln">110</span>    } catch (err) {
+<span class="ln">111</span>      const code = (err as NodeJS.ErrnoException)?.code;
+<span class="ln">112</span>      const msg = err instanceof Error ? err.message : String(err);
+<span class="ln">113</span>      if (
+<span class="ln">114</span>        code === &quot;ERR_REQUIRE_ASYNC_MODULE&quot; ||
+<span class="ln">115</span>        msg.includes(&quot;top-level await&quot;)
+<span class="ln">116</span>      ) {
+<span class="ln">117</span>        const entry = localRequire.resolve(npmPackage);
+<span class="ln">118</span>        const packageRoot = join(entry, &quot;..&quot;, &quot;..&quot;);
+<span class="ln">119</span>        const binding = loadNativeBinding(packageRoot);
+<span class="ln">120</span>        if (binding) return binding;
+<span class="ln">121</span>      }
+<span class="ln">122</span>      throw err;
+<span class="ln">123</span>    }
+<span class="ln">124</span>  } catch {
+<span class="ln">125</span>    // fall through to cache
+<span class="ln">126</span>  }
+<span class="ln">127</span>
+<span class="ln">128</span>  const cacheDir = grammarCacheDir();
+<span class="ln">129</span>  if (!packageInstalled(cacheDir, npmPackage)) {
+<span class="ln">130</span>    ensureCachePackageJson(cacheDir);
+<span class="ln">131</span>    const installSpec = INSTALL_SPEC[npmPackage] ?? npmPackage;
+<span class="ln">132</span>    execFileSync(
+<span class="ln">133</span>      &quot;npm&quot;,
+<span class="ln">134</span>      [
+<span class="ln">135</span>        &quot;install&quot;,
+<span class="ln">136</span>        &quot;--prefix&quot;,
+<span class="ln">137</span>        cacheDir,
+<span class="ln">138</span>        &quot;--no-save&quot;,
+<span class="ln">139</span>        &quot;--no-fund&quot;,
+<span class="ln">140</span>        &quot;--no-audit&quot;,
+<span class="ln">141</span>        &quot;--legacy-peer-deps&quot;,
+<span class="ln">142</span>        installSpec,
+<span class="ln">143</span>      ],
+<span class="ln">144</span>      {
+<span class="ln">145</span>        stdio: [&quot;ignore&quot;, &quot;pipe&quot;, &quot;pipe&quot;],
+<span class="ln">146</span>        env: process.env,
+<span class="ln">147</span>      },
+<span class="ln">148</span>    );
+<span class="ln">149</span>  }
+<span class="ln">150</span>
+<span class="ln">151</span>  const require = createRequire(join(cacheDir, &quot;package.json&quot;));
+<span class="ln">152</span>  const packageRoot = join(cacheDir, &quot;node_modules&quot;, npmPackage);
+<span class="ln">153</span>  return requireGrammar(require, npmPackage, packageRoot);
+<span class="ln">154</span>}</pre></div></section>
+<section class="sec" id="core"><div class="sec-no">§ <b>02</b> · TYPESCRIPT</div><h2 class="sec-title">TypeScript extractor 的<em>语义取舍</em></h2><h3><span class="arr">▸</span>calleeKey 决定调用身份</h3><p><code>src/languages/typescript.ts:76</code> 的 calleeKey 是调用图质量的核心：identifier 直接返回函数名，this.method 会被归到当前 class，object.property 会生成 object.property。<code>src/languages/typescript.ts:84</code> 明确跳过 subscript expression，这避免把动态 key 误判成稳定调用。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/typescript.ts</span> · L76-107</span><span>TypeScript</span></div><pre class="code"><span class="ln">76</span>function calleeKey(node: SyntaxNode, className: string | null): string | null {
+<span class="ln">77</span>  if (node.type === &quot;identifier&quot;) return node.text;
+<span class="ln">78</span>  if (node.type === &quot;this&quot;) return className;
+<span class="ln">79</span>
+<span class="ln">80</span>  if (
+<span class="ln">81</span>    node.type === &quot;member_expression&quot; ||
+<span class="ln">82</span>    node.type === &quot;subscript_expression&quot;
+<span class="ln">83</span>  ) {
+<span class="ln">84</span>    if (node.type === &quot;subscript_expression&quot;) return null;
+<span class="ln">85</span>
+<span class="ln">86</span>    const object = node.namedChild(0);
+<span class="ln">87</span>    const property =
+<span class="ln">88</span>      namedChildren(node).find(
+<span class="ln">89</span>        (c) =&gt;
+<span class="ln">90</span>          c.type === &quot;property_identifier&quot; ||
+<span class="ln">91</span>          c.type === &quot;private_property_identifier&quot;,
+<span class="ln">92</span>      ) ?? null;
+<span class="ln">93</span>    if (!object || !property) return null;
+<span class="ln">94</span>
+<span class="ln">95</span>    const propName = property.text;
+<span class="ln">96</span>    if (object.type === &quot;this&quot; &amp;&amp; className) {
+<span class="ln">97</span>      return `${className}.${propName}`;
+<span class="ln">98</span>    }
+<span class="ln">99</span>    if (object.type === &quot;identifier&quot;) {
+<span class="ln">100</span>      return `${object.text}.${propName}`;
+<span class="ln">101</span>    }
+<span class="ln">102</span>    if (className) return `${className}.${propName}`;
+<span class="ln">103</span>    return propName;
+<span class="ln">104</span>  }
+<span class="ln">105</span>
+<span class="ln">106</span>  return null;
+<span class="ln">107</span>}</pre></div><h3><span class="arr">▸</span>分支变成 CallStep，不被扁平化</h3><p><code>src/languages/typescript.ts:160</code> 识别 if_statement，<code>src/languages/typescript.ts:174</code> 写入 branch step，并在 <code>src/languages/typescript.ts:184</code> 到 <code>src/languages/typescript.ts:220</code> 保留 else-if / else 链。这样 render 时才知道这些是互斥路径，而不是连续调用。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/typescript.ts</span> · L160-222</span><span>TypeScript</span></div><pre class="code"><span class="ln">160</span>    if (type === &quot;if_statement&quot;) {
+<span class="ln">161</span>      const test =
+<span class="ln">162</span>        childByType(node, &quot;parenthesized_expression&quot;) ??
+<span class="ln">163</span>        namedChildren(node).find((c) =&gt; c.type !== &quot;else_clause&quot;) ??
+<span class="ln">164</span>        null;
+<span class="ln">165</span>      const kids = namedChildren(node);
+<span class="ln">166</span>      const consequent =
+<span class="ln">167</span>        kids.find(
+<span class="ln">168</span>          (c) =&gt;
+<span class="ln">169</span>            c.type !== &quot;parenthesized_expression&quot; &amp;&amp; c.type !== &quot;else_clause&quot;,
+<span class="ln">170</span>        ) ?? null;
+<span class="ln">171</span>      const elseClause = childByType(node, &quot;else_clause&quot;);
+<span class="ln">172</span>      const cond = test ? condText(test) : &quot;&quot;;
+<span class="ln">173</span>
+<span class="ln">174</span>      steps.push({
+<span class="ln">175</span>        type: &quot;branch&quot;,
+<span class="ln">176</span>        key: branchKey(&quot;if&quot;, cond),
+<span class="ln">177</span>        label: test ? `if (${condText(test)})` : &quot;if&quot;,
+<span class="ln">178</span>        ...locFromNode(file, test ?? node),
+<span class="ln">179</span>        children: consequent
+<span class="ln">180</span>          ? collectStatements(file, statementsOf(consequent), className)
+<span class="ln">181</span>          : [],
+<span class="ln">182</span>      });
+<span class="ln">183</span>
+<span class="ln">184</span>      let current = elseClause;
+<span class="ln">185</span>      while (current) {
+<span class="ln">186</span>        const inner = current.namedChild(0);
+<span class="ln">187</span>        if (!inner) break;
+<span class="ln">188</span>
+<span class="ln">189</span>        if (inner.type === &quot;if_statement&quot;) {
+<span class="ln">190</span>          const elseTest =
+<span class="ln">191</span>            childByType(inner, &quot;parenthesized_expression&quot;) ?? null;
+<span class="ln">192</span>          const elseKids = namedChildren(inner);
+<span class="ln">193</span>          const elseConsequent =
+<span class="ln">194</span>            elseKids.find(
+<span class="ln">195</span>              (c) =&gt;
+<span class="ln">196</span>                c.type !== &quot;parenthesized_expression&quot; &amp;&amp;
+<span class="ln">197</span>                c.type !== &quot;else_clause&quot;,
+<span class="ln">198</span>            ) ?? null;
+<span class="ln">199</span>          const elseCond = elseTest ? condText(elseTest) : &quot;&quot;;
+<span class="ln">200</span>          steps.push({
+<span class="ln">201</span>            type: &quot;branch&quot;,
+<span class="ln">202</span>            key: branchKey(&quot;else-if&quot;, elseCond),
+<span class="ln">203</span>            label: elseTest ? `else if (${condText(elseTest)})` : &quot;else if&quot;,
+<span class="ln">204</span>            ...locFromNode(file, elseTest ?? current),
+<span class="ln">205</span>            children: elseConsequent
+<span class="ln">206</span>              ? collectStatements(file, statementsOf(elseConsequent), className)
+<span class="ln">207</span>              : [],
+<span class="ln">208</span>          });
+<span class="ln">209</span>          current = childByType(inner, &quot;else_clause&quot;);
+<span class="ln">210</span>          continue;
+<span class="ln">211</span>        }
+<span class="ln">212</span>
+<span class="ln">213</span>        steps.push({
+<span class="ln">214</span>          type: &quot;branch&quot;,
+<span class="ln">215</span>          key: branchKey(&quot;else&quot;, &quot;&quot;),
+<span class="ln">216</span>          label: &quot;else&quot;,
+<span class="ln">217</span>          ...locFromNode(file, current),
+<span class="ln">218</span>          children: collectStatements(file, statementsOf(inner), className),
+<span class="ln">219</span>        });
+<span class="ln">220</span>        break;
+<span class="ln">221</span>      }
+<span class="ln">222</span>      return;</pre></div><h3><span class="arr">▸</span>JSX 组件也作为调用处理</h3><p><code>src/languages/typescript.ts:109</code> 把 PascalCase JSX 和 member expression 当成组件调用，<code>src/languages/typescript.ts:239</code> 到 <code>src/languages/typescript.ts:276</code> 还会把 attribute 和 children 里的调用挂到组件节点下面。这让 React/TSX 的 UI flow 可以进入同一个 call tree。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/typescript.ts</span> · L239-310</span><span>TypeScript</span></div><pre class="code"><span class="ln">239</span>    } else if (type === &quot;jsx_element&quot;) {
+<span class="ln">240</span>      const opening = childByType(node, &quot;jsx_opening_element&quot;);
+<span class="ln">241</span>      const childNodes = namedChildren(node).filter(
+<span class="ln">242</span>        (c) =&gt;
+<span class="ln">243</span>          c.type !== &quot;jsx_opening_element&quot; &amp;&amp; c.type !== &quot;jsx_closing_element&quot;,
+<span class="ln">244</span>      );
+<span class="ln">245</span>      const fromAttrs: CallStep[] = [];
+<span class="ln">246</span>      if (opening) {
+<span class="ln">247</span>        for (const attr of namedChildren(opening)) {
+<span class="ln">248</span>          if (
+<span class="ln">249</span>            attr.type === &quot;jsx_attribute&quot; ||
+<span class="ln">250</span>            attr.type === &quot;jsx_expression&quot;
+<span class="ln">251</span>          ) {
+<span class="ln">252</span>            fromAttrs.push(...collectStatements(file, [attr], className));
+<span class="ln">253</span>          }
+<span class="ln">254</span>        }
+<span class="ln">255</span>      }
+<span class="ln">256</span>      const nested = [
+<span class="ln">257</span>        ...fromAttrs,
+<span class="ln">258</span>        ...collectStatements(file, childNodes, className),
+<span class="ln">259</span>      ];
+<span class="ln">260</span>      if (opening) {
+<span class="ln">261</span>        const key = jsxCalleeKey(opening);
+<span class="ln">262</span>        if (key) {
+<span class="ln">263</span>          if (nested.length &gt; 0) {
+<span class="ln">264</span>            steps.push({
+<span class="ln">265</span>              type: &quot;call&quot;,
+<span class="ln">266</span>              key,
+<span class="ln">267</span>              ...locFromNode(file, opening),
+<span class="ln">268</span>              children: nested,
+<span class="ln">269</span>            });
+<span class="ln">270</span>          } else {
+<span class="ln">271</span>            addCall(key, opening);
+<span class="ln">272</span>          }
+<span class="ln">273</span>          return;
+<span class="ln">274</span>        }
+<span class="ln">275</span>      }
+<span class="ln">276</span>      for (const step of nested) steps.push(step);
+<span class="ln">277</span>      return;
+<span class="ln">278</span>    } else if (type === &quot;jsx_self_closing_element&quot;) {
+<span class="ln">279</span>      const attrNodes = namedChildren(node).filter(
+<span class="ln">280</span>        (c) =&gt; c.type === &quot;jsx_attribute&quot; || c.type === &quot;jsx_expression&quot;,
+<span class="ln">281</span>      );
+<span class="ln">282</span>      const nested = collectStatements(file, attrNodes, className);
+<span class="ln">283</span>      const key = jsxCalleeKey(node);
+<span class="ln">284</span>      if (key) {
+<span class="ln">285</span>        if (nested.length &gt; 0) {
+<span class="ln">286</span>          steps.push({
+<span class="ln">287</span>            type: &quot;call&quot;,
+<span class="ln">288</span>            key,
+<span class="ln">289</span>            ...locFromNode(file, node),
+<span class="ln">290</span>            children: nested,
+<span class="ln">291</span>          });
+<span class="ln">292</span>        } else {
+<span class="ln">293</span>          addCall(key, node);
+<span class="ln">294</span>        }
+<span class="ln">295</span>      } else {
+<span class="ln">296</span>        for (const step of nested) steps.push(step);
+<span class="ln">297</span>      }
+<span class="ln">298</span>      return;
+<span class="ln">299</span>    }
+<span class="ln">300</span>
+<span class="ln">301</span>    for (const child of namedChildren(node)) {
+<span class="ln">302</span>      walkExpr(child);
+<span class="ln">303</span>    }
+<span class="ln">304</span>  };
+<span class="ln">305</span>
+<span class="ln">306</span>  for (const stmt of statements) {
+<span class="ln">307</span>    walkExpr(stmt);
+<span class="ln">308</span>  }
+<span class="ln">309</span>
+<span class="ln">310</span>  return steps;</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>03</b> · CONTRACT</div><h2 class="sec-title">统一输出契约</h2><div class="flow">file extension → extractor → grammar → FunctionInfo[] → FunctionIndex → CallNode tree</div><p><code>src/languages/typescript.ts:325</code> 的 functionFromParts 统一填充 key、label、steps 和 exported，<code>src/languages/typescript.ts:388</code> 的 handleClass 则把 method、constructor、public field arrow function 映射到同一套 FunctionInfo。这个收敛点保证 <code>src/calltree.ts:107</code> 可以不区分函数来源。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/languages/typescript.ts</span> · L325-454</span><span>TypeScript</span></div><pre class="code"><span class="ln">325</span>function functionFromParts(
+<span class="ln">326</span>  file: string,
+<span class="ln">327</span>  key: string,
+<span class="ln">328</span>  label: string,
+<span class="ln">329</span>  params: SyntaxNode | null,
+<span class="ln">330</span>  body: SyntaxNode | null,
+<span class="ln">331</span>  exported: boolean,
+<span class="ln">332</span>  start: number,
+<span class="ln">333</span>  end: number,
+<span class="ln">334</span>  className: string | null,
+<span class="ln">335</span>): FunctionInfo {
+<span class="ln">336</span>  const paramsLabel = getParamsLabel(params);
+<span class="ln">337</span>  return {
+<span class="ln">338</span>    key,
+<span class="ln">339</span>    label: `${label}${paramsLabel}`,
+<span class="ln">340</span>    file,
+<span class="ln">341</span>    steps: collectStepsFromBody(file, body, className),
+<span class="ln">342</span>    exported,
+<span class="ln">343</span>    start,
+<span class="ln">344</span>    end,
+<span class="ln">345</span>  };
+<span class="ln">346</span>}
+<span class="ln">347</span>
+<span class="ln">348</span>function handleFunctionNode(
+<span class="ln">349</span>  file: string,
+<span class="ln">350</span>  node: SyntaxNode,
+<span class="ln">351</span>  name: string | null,
+<span class="ln">352</span>  exported: boolean,
+<span class="ln">353</span>  className: string | null,
+<span class="ln">354</span>  functions: FunctionInfo[],
+<span class="ln">355</span>) {
+<span class="ln">356</span>  if (!name) return;
+<span class="ln">357</span>  const key = className ? `${className}.${name}` : name;
+<span class="ln">358</span>  const params = childByType(node, &quot;formal_parameters&quot;);
+<span class="ln">359</span>  const body =
+<span class="ln">360</span>    childByType(node, &quot;statement_block&quot;) ??
+<span class="ln">361</span>    namedChildren(node).find(
+<span class="ln">362</span>      (c) =&gt;
+<span class="ln">363</span>        c.type !== &quot;formal_parameters&quot; &amp;&amp;
+<span class="ln">364</span>        c.type !== &quot;type_parameters&quot; &amp;&amp;
+<span class="ln">365</span>        c.type !== &quot;type_annotation&quot; &amp;&amp;
+<span class="ln">366</span>        c.type !== &quot;identifier&quot; &amp;&amp;
+<span class="ln">367</span>        c.type !== &quot;accessibility_modifier&quot; &amp;&amp;
+<span class="ln">368</span>        c.type !== &quot;async&quot; &amp;&amp;
+<span class="ln">369</span>        c.type !== &quot;readonly&quot;,
+<span class="ln">370</span>    ) ??
+<span class="ln">371</span>    null;
+<span class="ln">372</span>
+<span class="ln">373</span>  functions.push(
+<span class="ln">374</span>    functionFromParts(
+<span class="ln">375</span>      file,
+<span class="ln">376</span>      key,
+<span class="ln">377</span>      key,
+<span class="ln">378</span>      params,
+<span class="ln">379</span>      body,
+<span class="ln">380</span>      exported,
+<span class="ln">381</span>      node.startIndex,
+<span class="ln">382</span>      node.endIndex,
+<span class="ln">383</span>      className,
+<span class="ln">384</span>    ),
+<span class="ln">385</span>  );
+<span class="ln">386</span>}
+<span class="ln">387</span>
+<span class="ln">388</span>function handleClass(
+<span class="ln">389</span>  file: string,
+<span class="ln">390</span>  node: SyntaxNode,
+<span class="ln">391</span>  exported: boolean,
+<span class="ln">392</span>  functions: FunctionInfo[],
+<span class="ln">393</span>) {
+<span class="ln">394</span>  const nameNode =
+<span class="ln">395</span>    childByType(node, &quot;type_identifier&quot;) ?? childByType(node, &quot;identifier&quot;);
+<span class="ln">396</span>  const className = nameNode?.text ?? null;
+<span class="ln">397</span>  if (!className) return;
+<span class="ln">398</span>
+<span class="ln">399</span>  const body = childByType(node, &quot;class_body&quot;);
+<span class="ln">400</span>  if (!body) return;
+<span class="ln">401</span>
+<span class="ln">402</span>  for (const element of namedChildren(body)) {
+<span class="ln">403</span>    if (element.type === &quot;method_definition&quot;) {
+<span class="ln">404</span>      const keyNode =
+<span class="ln">405</span>        childByType(element, &quot;property_identifier&quot;) ??
+<span class="ln">406</span>        childByType(element, &quot;private_property_identifier&quot;) ??
+<span class="ln">407</span>        childByType(element, &quot;computed_property_name&quot;);
+<span class="ln">408</span>      const methodName = keyNode?.text ?? null;
+<span class="ln">409</span>      const isConstructor = methodName === &quot;constructor&quot;;
+<span class="ln">410</span>      if (!methodName) continue;
+<span class="ln">411</span>
+<span class="ln">412</span>      const accessibility = childByType(element, &quot;accessibility_modifier&quot;);
+<span class="ln">413</span>      const methodExported = exported || accessibility?.text === &quot;public&quot;;
+<span class="ln">414</span>
+<span class="ln">415</span>      const params = childByType(element, &quot;formal_parameters&quot;);
+<span class="ln">416</span>      const fnBody = childByType(element, &quot;statement_block&quot;);
+<span class="ln">417</span>      const key = isConstructor
+<span class="ln">418</span>        ? `${className}.constructor`
+<span class="ln">419</span>        : `${className}.${methodName}`;
+<span class="ln">420</span>      const label = isConstructor ? `new ${className}()` : key;
+<span class="ln">421</span>
+<span class="ln">422</span>      functions.push(
+<span class="ln">423</span>        functionFromParts(
+<span class="ln">424</span>          file,
+<span class="ln">425</span>          key,
+<span class="ln">426</span>          label,
+<span class="ln">427</span>          params,
+<span class="ln">428</span>          fnBody,
+<span class="ln">429</span>          methodExported,
+<span class="ln">430</span>          element.startIndex,
+<span class="ln">431</span>          element.endIndex,
+<span class="ln">432</span>          className,
+<span class="ln">433</span>        ),
+<span class="ln">434</span>      );
+<span class="ln">435</span>    }
+<span class="ln">436</span>
+<span class="ln">437</span>    if (element.type === &quot;public_field_definition&quot;) {
+<span class="ln">438</span>      const keyNode = childByType(element, &quot;property_identifier&quot;);
+<span class="ln">439</span>      const value =
+<span class="ln">440</span>        childByType(element, &quot;arrow_function&quot;) ??
+<span class="ln">441</span>        childByType(element, &quot;function_expression&quot;);
+<span class="ln">442</span>      if (keyNode &amp;&amp; value) {
+<span class="ln">443</span>        handleFunctionNode(
+<span class="ln">444</span>          file,
+<span class="ln">445</span>          value,
+<span class="ln">446</span>          keyNode.text,
+<span class="ln">447</span>          exported,
+<span class="ln">448</span>          className,
+<span class="ln">449</span>          functions,
+<span class="ln">450</span>        );
+<span class="ln">451</span>      }
+<span class="ln">452</span>    }
+<span class="ln">453</span>  }
+<span class="ln">454</span>}</pre></div></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>04</b> · TESTS</div><h2 class="sec-title">测试如何压住 extractor 边界</h2><h3><span class="arr">▸</span>private 与 class field</h3><p><code>test/callstack-diff.test.ts:188</code> 证明 private method 会进入调用树，<code>test/callstack-diff.test.ts:212</code> 证明 class field arrow function 也能被跟踪。它们分别对应 <code>src/languages/typescript.ts:404</code> 的 private_property_identifier 和 <code>src/languages/typescript.ts:437</code> 的 public_field_definition 分支。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">test/callstack-diff.test.ts</span> · L188-234</span><span>TypeScript</span></div><pre class="code"><span class="ln">188</span>test(&quot;indexes and expands #private methods&quot;, ({ expectCallstack }) =&gt; {
+<span class="ln">189</span>  expectCallstack(
+<span class="ln">190</span>    `
+<span class="ln">191</span>      export class Vault {
+<span class="ln">192</span>        open() {
+<span class="ln">193</span>          this.#unlock();
+<span class="ln">194</span>        }
+<span class="ln">195</span>        #unlock() {
+<span class="ln">196</span>          prep();
+<span class="ln">197</span>    +     audit();
+<span class="ln">198</span>        }
+<span class="ln">199</span>      }
+<span class="ln">200</span>      function prep() {}
+<span class="ln">201</span>    + function audit() {}
+<span class="ln">202</span>    `,
+<span class="ln">203</span>    &quot;Vault.open&quot;,
+<span class="ln">204</span>  ).toEqual(`
+<span class="ln">205</span>      Vault.open()
+<span class="ln">206</span>      └─ Vault.#unlock()
+<span class="ln">207</span>         ├─ prep()
+<span class="ln">208</span>    +    └─ audit()
+<span class="ln">209</span>  `);
+<span class="ln">210</span>});
+<span class="ln">211</span>
+<span class="ln">212</span>test(&quot;follows class field arrow functions&quot;, ({ expectCallstack }) =&gt; {
+<span class="ln">213</span>  expectCallstack(
+<span class="ln">214</span>    `
+<span class="ln">215</span>      export class Runner {
+<span class="ln">216</span>        start() {
+<span class="ln">217</span>          this.helper();
+<span class="ln">218</span>        }
+<span class="ln">219</span>        helper = () =&gt; {
+<span class="ln">220</span>          work();
+<span class="ln">221</span>    +     extra();
+<span class="ln">222</span>        };
+<span class="ln">223</span>      }
+<span class="ln">224</span>      function work() {}
+<span class="ln">225</span>    + function extra() {}
+<span class="ln">226</span>    `,
+<span class="ln">227</span>    &quot;Runner.start&quot;,
+<span class="ln">228</span>  ).toEqual(`
+<span class="ln">229</span>      Runner.start()
+<span class="ln">230</span>      └─ Runner.helper()
+<span class="ln">231</span>         ├─ work()
+<span class="ln">232</span>    +    └─ extra()
+<span class="ln">233</span>  `);
+<span class="ln">234</span>});</pre></div></section>
+<section class="sec" id="risk"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">Extractor 的边界</h2><h3><span class="arr">▸</span>动态调用仍是盲区</h3><p><code>src/languages/typescript.ts:84</code> 跳过 subscript expression 是正确的保守选择，但也意味着 registry[ name ]()、依赖注入容器和框架装饰器不会被完整展开。这个工具适合 review call flow，不适合替代类型系统。</p></section>
+<div class="foot"><span>Generated · 2026-08-11</span><span>Source · <a href="https://github.com/tanishqkancharla/calldiff">tanishqkancharla/calldiff</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));const a=map.get(e.target);if(a)a.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#f2c07f';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script></body></html>

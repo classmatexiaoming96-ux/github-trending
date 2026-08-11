@@ -1,0 +1,722 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>calldiff git runner · 深度解析</title><meta name="description" content="tanishqkancharla/calldiff 源码级深度解析"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#e6a15a;--star-soft:#f2c07f;--star-deep:#b97834;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">call<b>diff</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">call<b>diff</b></div><div class="sub">深度解析</div></div><span class="nav-ver">TypeScript · npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#arch"><span class="idx">01</span>架构</a></li><li><a href="#core"><span class="idx">02</span>核心模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risk"><span class="idx">05</span>边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★302 · 2026-08-07</div><div><a href="https://github.com/tanishqkancharla/calldiff" target="_blank">tanishqkancharla/calldiff</a></div><div><a href="../calldiff.html">← 返回主页面</a></div></div></aside><main class="main">
+<div class="hero" id="overview"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Git 快照与命令运行器 <em>深度解析</em></h1><p class="hero-desc">这一页拆 git.ts 和 run.ts：calldiff 如何把 HEAD、worktree、commit、路径过滤和 blob 批量读取整理成统一快照。</p></div>
+<section class="sec" id="arch"><div class="sec-no">§ <b>01</b> · SNAPSHOT</div><h2 class="sec-title">先把 git 参数<em>归一化</em></h2><h3><span class="arr">▸</span>diff defaults 与路径歧义</h3><p><code>src/git.ts:33</code> 定义 from/to 快照默认值，<code>src/git.ts:71</code> 的 resolveDiffSnapshotsAndPaths 处理“一个 positional 到底是 ref 还是 path”的歧义。<code>src/git.ts:81</code> 先判 commit，<code>src/git.ts:85</code> 再判磁盘路径，符合 README 里的 git-diff shaped 语义。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/git.ts</span> · L33-109</span><span>TypeScript</span></div><pre class="code"><span class="ln">33</span>export function resolveSnapshots(
+<span class="ln">34</span>  from: string | undefined,
+<span class="ln">35</span>  to: string | undefined,
+<span class="ln">36</span>): { from: Snapshot; to: Snapshot } {
+<span class="ln">37</span>  // git-diff defaults: no args → HEAD vs worktree; one arg → that vs worktree
+<span class="ln">38</span>  const left: Snapshot = {
+<span class="ln">39</span>    kind: &quot;commit&quot;,
+<span class="ln">40</span>    ref: from ?? &quot;HEAD&quot;,
+<span class="ln">41</span>  };
+<span class="ln">42</span>  const right: Snapshot =
+<span class="ln">43</span>    to === undefined
+<span class="ln">44</span>      ? { kind: &quot;worktree&quot;, ref: &quot;WORKTREE&quot; }
+<span class="ln">45</span>      : { kind: &quot;commit&quot;, ref: to };
+<span class="ln">46</span>  return { from: left, to: right };
+<span class="ln">47</span>}
+<span class="ln">48</span>
+<span class="ln">49</span>function isCommitRef(cwd: string, ref: string): boolean {
+<span class="ln">50</span>  try {
+<span class="ln">51</span>    git(cwd, [&quot;rev-parse&quot;, &quot;--verify&quot;, `${ref}^{commit}`]);
+<span class="ln">52</span>    return true;
+<span class="ln">53</span>  } catch {
+<span class="ln">54</span>    return false;
+<span class="ln">55</span>  }
+<span class="ln">56</span>}
+<span class="ln">57</span>
+<span class="ln">58</span>function isPathOnDisk(cwd: string, value: string): boolean {
+<span class="ln">59</span>  return existsSync(resolve(cwd, value));
+<span class="ln">60</span>}
+<span class="ln">61</span>
+<span class="ln">62</span>/**
+<span class="ln">63</span> * Resolve diff from/to/paths with git-diff defaults, treating on-disk path
+<span class="ln">64</span> * positionals as path filters when they are not valid git refs.
+<span class="ln">65</span> *
+<span class="ln">66</span> * Examples:
+<span class="ln">67</span> * - `diff main src` → main vs worktree, paths=[src]
+<span class="ln">68</span> * - `diff main feature src` → main vs feature, paths=[src]
+<span class="ln">69</span> * - `diff src` → HEAD vs worktree, paths=[src]
+<span class="ln">70</span> */
+<span class="ln">71</span>export function resolveDiffSnapshotsAndPaths(
+<span class="ln">72</span>  cwd: string,
+<span class="ln">73</span>  from: string | undefined,
+<span class="ln">74</span>  to: string | undefined,
+<span class="ln">75</span>  paths: string[],
+<span class="ln">76</span>): { from: Snapshot; to: Snapshot; paths: string[] } {
+<span class="ln">77</span>  if (from === undefined &amp;&amp; to === undefined) {
+<span class="ln">78</span>    return { ...resolveSnapshots(undefined, undefined), paths };
+<span class="ln">79</span>  }
+<span class="ln">80</span>
+<span class="ln">81</span>  if (from !== undefined &amp;&amp; to === undefined) {
+<span class="ln">82</span>    if (isCommitRef(cwd, from)) {
+<span class="ln">83</span>      return { ...resolveSnapshots(from, undefined), paths };
+<span class="ln">84</span>    }
+<span class="ln">85</span>    if (isPathOnDisk(cwd, from)) {
+<span class="ln">86</span>      return { ...resolveSnapshots(undefined, undefined), paths: [from, ...paths] };
+<span class="ln">87</span>    }
+<span class="ln">88</span>    throw new Error(`Unknown git ref: ${from}`);
+<span class="ln">89</span>  }
+<span class="ln">90</span>
+<span class="ln">91</span>  if (from !== undefined &amp;&amp; to !== undefined) {
+<span class="ln">92</span>    if (!isCommitRef(cwd, from)) {
+<span class="ln">93</span>      throw new Error(`Unknown git ref: ${from}`);
+<span class="ln">94</span>    }
+<span class="ln">95</span>    if (isCommitRef(cwd, to)) {
+<span class="ln">96</span>      return { ...resolveSnapshots(from, to), paths };
+<span class="ln">97</span>    }
+<span class="ln">98</span>    if (isPathOnDisk(cwd, to)) {
+<span class="ln">99</span>      return {
+<span class="ln">100</span>        ...resolveSnapshots(from, undefined),
+<span class="ln">101</span>        paths: [to, ...paths],
+<span class="ln">102</span>      };
+<span class="ln">103</span>    }
+<span class="ln">104</span>    throw new Error(`Unknown git ref: ${to}`);
+<span class="ln">105</span>  }
+<span class="ln">106</span>
+<span class="ln">107</span>  // to without from shouldn&#x27;t happen via CLI positionals, but honor options.
+<span class="ln">108</span>  return { ...resolveSnapshots(from, to), paths };
+<span class="ln">109</span>}</pre></div><h3><span class="arr">▸</span>tree/reach 只需要一个 snapshot</h3><p><code>src/git.ts:111</code> 之后是单快照解析；<code>src/git.ts:124</code> 允许 tree/reach 的第一个 positional 被解释成 ref，也允许不是 ref 但存在于磁盘时被解释成 path filter。这个细节让命令行体验和 diff 保持一致。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/git.ts</span> · L111-155</span><span>TypeScript</span></div><pre class="code"><span class="ln">111</span>/** Single snapshot for `calldiff tree` / `reach` — no ref → working tree. */
+<span class="ln">112</span>export function resolveSnapshot(ref: string | undefined): Snapshot {
+<span class="ln">113</span>  if (ref === undefined) {
+<span class="ln">114</span>    return { kind: &quot;worktree&quot;, ref: &quot;WORKTREE&quot; };
+<span class="ln">115</span>  }
+<span class="ln">116</span>  return { kind: &quot;commit&quot;, ref };
+<span class="ln">117</span>}
+<span class="ln">118</span>
+<span class="ln">119</span>/**
+<span class="ln">120</span> * Resolve optional ref + path filters for tree/reach.
+<span class="ln">121</span> * A lone positional that isn&#x27;t a git ref but exists on disk is treated as a
+<span class="ln">122</span> * path filter on the working tree (`calldiff tree -e foo src/lib`).
+<span class="ln">123</span> */
+<span class="ln">124</span>export function resolveSnapshotAndPaths(
+<span class="ln">125</span>  cwd: string,
+<span class="ln">126</span>  ref: string | undefined,
+<span class="ln">127</span>  paths: string[],
+<span class="ln">128</span>): { snapshot: Snapshot; paths: string[] } {
+<span class="ln">129</span>  if (ref === undefined) {
+<span class="ln">130</span>    return { snapshot: resolveSnapshot(undefined), paths };
+<span class="ln">131</span>  }
+<span class="ln">132</span>
+<span class="ln">133</span>  try {
+<span class="ln">134</span>    git(cwd, [&quot;rev-parse&quot;, &quot;--verify&quot;, `${ref}^{commit}`]);
+<span class="ln">135</span>    return { snapshot: resolveSnapshot(ref), paths };
+<span class="ln">136</span>  } catch {
+<span class="ln">137</span>    const abs = resolve(cwd, ref);
+<span class="ln">138</span>    if (existsSync(abs)) {
+<span class="ln">139</span>      return {
+<span class="ln">140</span>        snapshot: resolveSnapshot(undefined),
+<span class="ln">141</span>        paths: [ref, ...paths],
+<span class="ln">142</span>      };
+<span class="ln">143</span>    }
+<span class="ln">144</span>    throw new Error(`Unknown git ref: ${ref}`);
+<span class="ln">145</span>  }
+<span class="ln">146</span>}
+<span class="ln">147</span>
+<span class="ln">148</span>export function verifyCommit(cwd: string, ref: string): void {
+<span class="ln">149</span>  try {
+<span class="ln">150</span>    git(cwd, [&quot;rev-parse&quot;, &quot;--verify&quot;, `${ref}^{commit}`]);
+<span class="ln">151</span>  } catch {
+<span class="ln">152</span>    throw new Error(`Unknown git ref: ${ref}`);
+<span class="ln">153</span>  }
+<span class="ln">154</span>}
+<span class="ln">155</span></pre></div></section>
+<section class="sec" id="core"><div class="sec-no">§ <b>02</b> · FILES</div><h2 class="sec-title">文件枚举与 blob 读取</h2><h3><span class="arr">▸</span>只纳入支持扩展名</h3><p><code>src/git.ts:156</code> 用 registry 暴露的扩展名集合判断 source file，<code>src/git.ts:181</code> 从工作区 git ls-files 读取 tracked + untracked 文件，<code>src/git.ts:199</code> 从 commit ls-tree 读取 blob metadata。这个选择确保 before/after 快照都走同一套过滤逻辑。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/git.ts</span> · L156-228</span><span>TypeScript</span></div><pre class="code"><span class="ln">156</span>const SOURCE_EXT = new Set(listSupportedExtensions());
+<span class="ln">157</span>
+<span class="ln">158</span>function isSourceFile(path: string): boolean {
+<span class="ln">159</span>  const lower = path.toLowerCase();
+<span class="ln">160</span>  if (lower.endsWith(&quot;.d.ts&quot;)) return false;
+<span class="ln">161</span>  const dot = lower.lastIndexOf(&quot;.&quot;);
+<span class="ln">162</span>  if (dot &lt; 0) return false;
+<span class="ln">163</span>  return SOURCE_EXT.has(lower.slice(dot));
+<span class="ln">164</span>}
+<span class="ln">165</span>
+<span class="ln">166</span>export interface SnapshotFile {
+<span class="ln">167</span>  path: string;
+<span class="ln">168</span>  /** Git blob metadata. Worktree files do not have it. */
+<span class="ln">169</span>  oid?: string;
+<span class="ln">170</span>  size?: number;
+<span class="ln">171</span>}
+<span class="ln">172</span>
+<span class="ln">173</span>function isRegularFile(path: string): boolean {
+<span class="ln">174</span>  try {
+<span class="ln">175</span>    return lstatSync(path).isFile();
+<span class="ln">176</span>  } catch {
+<span class="ln">177</span>    return false;
+<span class="ln">178</span>  }
+<span class="ln">179</span>}
+<span class="ln">180</span>
+<span class="ln">181</span>function listWorktreeFiles(cwd: string): SnapshotFile[] {
+<span class="ln">182</span>  const output = git(cwd, [
+<span class="ln">183</span>    &quot;ls-files&quot;,
+<span class="ln">184</span>    &quot;-z&quot;,
+<span class="ln">185</span>    &quot;--cached&quot;,
+<span class="ln">186</span>    &quot;--others&quot;,
+<span class="ln">187</span>    &quot;--exclude-standard&quot;,
+<span class="ln">188</span>  ]);
+<span class="ln">189</span>
+<span class="ln">190</span>  return output
+<span class="ln">191</span>    .split(&quot;\0&quot;)
+<span class="ln">192</span>    .filter(
+<span class="ln">193</span>      (path) =&gt;
+<span class="ln">194</span>        path &amp;&amp; isSourceFile(path) &amp;&amp; isRegularFile(resolve(cwd, path)),
+<span class="ln">195</span>    )
+<span class="ln">196</span>    .map((path) =&gt; ({ path }));
+<span class="ln">197</span>}
+<span class="ln">198</span>
+<span class="ln">199</span>function listCommitFiles(cwd: string, ref: string): SnapshotFile[] {
+<span class="ln">200</span>  const output = git(cwd, [&quot;ls-tree&quot;, &quot;-r&quot;, &quot;-z&quot;, &quot;-l&quot;, ref]);
+<span class="ln">201</span>  const files: SnapshotFile[] = [];
+<span class="ln">202</span>
+<span class="ln">203</span>  for (const record of output.split(&quot;\0&quot;)) {
+<span class="ln">204</span>    if (!record) continue;
+<span class="ln">205</span>
+<span class="ln">206</span>    const tab = record.indexOf(&quot;\t&quot;);
+<span class="ln">207</span>    if (tab &lt; 0) continue;
+<span class="ln">208</span>
+<span class="ln">209</span>    const [mode, type, oid, sizeText] = record
+<span class="ln">210</span>      .slice(0, tab)
+<span class="ln">211</span>      .trim()
+<span class="ln">212</span>      .split(/\s+/);
+<span class="ln">213</span>    const path = record.slice(tab + 1);
+<span class="ln">214</span>    const regular = mode === &quot;100644&quot; || mode === &quot;100755&quot;;
+<span class="ln">215</span>    const size = Number(sizeText);
+<span class="ln">216</span>    if (
+<span class="ln">217</span>      regular &amp;&amp;
+<span class="ln">218</span>      type === &quot;blob&quot; &amp;&amp;
+<span class="ln">219</span>      oid &amp;&amp;
+<span class="ln">220</span>      Number.isInteger(size) &amp;&amp;
+<span class="ln">221</span>      isSourceFile(path)
+<span class="ln">222</span>    ) {
+<span class="ln">223</span>      files.push({ path, oid, size });
+<span class="ln">224</span>    }
+<span class="ln">225</span>  }
+<span class="ln">226</span>
+<span class="ln">227</span>  return files;
+<span class="ln">228</span>}</pre></div><h3><span class="arr">▸</span>commit blob 批量读取</h3><p><code>src/git.ts:274</code> 设置 32MB batch，<code>src/git.ts:278</code> 对 oid 去重分块，<code>src/git.ts:302</code> 用 git cat-file --batch 一次性读多个 blob。这比逐文件 git show 更适合大仓库和多语言扫描。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/git.ts</span> · L274-344</span><span>TypeScript</span></div><pre class="code"><span class="ln">274</span>const BATCH_BYTES = 32 * 1024 * 1024;
+<span class="ln">275</span>
+<span class="ln">276</span>type Blob = { oid: string; size: number };
+<span class="ln">277</span>
+<span class="ln">278</span>function chunkBlobs(files: SnapshotFile[]): Blob[][] {
+<span class="ln">279</span>  const unique = new Map&lt;string, number&gt;();
+<span class="ln">280</span>  for (const file of files) {
+<span class="ln">281</span>    if (file.oid &amp;&amp; file.size !== undefined &amp;&amp; !unique.has(file.oid)) {
+<span class="ln">282</span>      unique.set(file.oid, file.size);
+<span class="ln">283</span>    }
+<span class="ln">284</span>  }
+<span class="ln">285</span>
+<span class="ln">286</span>  const chunks: Blob[][] = [];
+<span class="ln">287</span>  let chunk: Blob[] = [];
+<span class="ln">288</span>  let bytes = 0;
+<span class="ln">289</span>  for (const [oid, size] of unique) {
+<span class="ln">290</span>    if (chunk.length &gt; 0 &amp;&amp; bytes + size &gt; BATCH_BYTES) {
+<span class="ln">291</span>      chunks.push(chunk);
+<span class="ln">292</span>      chunk = [];
+<span class="ln">293</span>      bytes = 0;
+<span class="ln">294</span>    }
+<span class="ln">295</span>    chunk.push({ oid, size });
+<span class="ln">296</span>    bytes += size;
+<span class="ln">297</span>  }
+<span class="ln">298</span>  if (chunk.length &gt; 0) chunks.push(chunk);
+<span class="ln">299</span>  return chunks;
+<span class="ln">300</span>}
+<span class="ln">301</span>
+<span class="ln">302</span>function readBlobBatch(cwd: string, batch: Blob[]): Map&lt;string, string&gt; {
+<span class="ln">303</span>  const input = Buffer.from(`${batch.map((blob) =&gt; blob.oid).join(&quot;\n&quot;)}\n`);
+<span class="ln">304</span>  const bytes = batch.reduce((total, blob) =&gt; total + blob.size, 0);
+<span class="ln">305</span>  const maxBuffer = bytes + batch.length * 128 + 1024;
+<span class="ln">306</span>  const output = gitBuffer(cwd, [&quot;cat-file&quot;, &quot;--batch&quot;], input, maxBuffer);
+<span class="ln">307</span>  const blobs = new Map&lt;string, string&gt;();
+<span class="ln">308</span>  let offset = 0;
+<span class="ln">309</span>
+<span class="ln">310</span>  while (offset &lt; output.length) {
+<span class="ln">311</span>    const headerEnd = output.indexOf(0x0a, offset);
+<span class="ln">312</span>    if (headerEnd &lt; 0) throw new Error(&quot;Invalid git cat-file response&quot;);
+<span class="ln">313</span>
+<span class="ln">314</span>    const header = output.subarray(offset, headerEnd).toString(&quot;ascii&quot;);
+<span class="ln">315</span>    const [oid, type, sizeText] = header.split(&quot; &quot;);
+<span class="ln">316</span>    const size = Number(sizeText);
+<span class="ln">317</span>    if (!oid || type !== &quot;blob&quot; || !Number.isInteger(size)) {
+<span class="ln">318</span>      throw new Error(`Invalid git cat-file header: ${header}`);
+<span class="ln">319</span>    }
+<span class="ln">320</span>
+<span class="ln">321</span>    const contentStart = headerEnd + 1;
+<span class="ln">322</span>    const contentEnd = contentStart + size;
+<span class="ln">323</span>    if (contentEnd &gt;= output.length) {
+<span class="ln">324</span>      throw new Error(`Truncated git blob: ${oid}`);
+<span class="ln">325</span>    }
+<span class="ln">326</span>
+<span class="ln">327</span>    blobs.set(oid, output.subarray(contentStart, contentEnd).toString(&quot;utf8&quot;));
+<span class="ln">328</span>    offset = contentEnd + 1;
+<span class="ln">329</span>  }
+<span class="ln">330</span>
+<span class="ln">331</span>  return blobs;
+<span class="ln">332</span>}
+<span class="ln">333</span>
+<span class="ln">334</span>export function visitCommitBlobs(
+<span class="ln">335</span>  cwd: string,
+<span class="ln">336</span>  files: SnapshotFile[],
+<span class="ln">337</span>  visit: (oid: string, source: string) =&gt; void,
+<span class="ln">338</span>): void {
+<span class="ln">339</span>  for (const batch of chunkBlobs(files)) {
+<span class="ln">340</span>    for (const [oid, source] of readBlobBatch(cwd, batch)) {
+<span class="ln">341</span>      visit(oid, source);
+<span class="ln">342</span>    }
+<span class="ln">343</span>  }
+<span class="ln">344</span>}</pre></div></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>03</b> · RUNNER</div><h2 class="sec-title">run.ts 如何复用快照能力</h2><h3><span class="arr">▸</span>loadIndex 是唯一入口</h3><p><code>src/run.ts:64</code> 的 loadIndex 先调用 <code>src/git.ts:242</code> 获取 SnapshotFile，再按 snapshot.kind 分派到 <code>src/git.ts:346</code> 的工作区读取或 <code>src/git.ts:334</code> 的 commit blob 访问。调用方 diff/tree/reach 都只拿 FunctionIndex，不直接碰 git。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/run.ts</span> · L64-103</span><span>TypeScript</span></div><pre class="code"><span class="ln">64</span>function loadIndex(
+<span class="ln">65</span>  cwd: string,
+<span class="ln">66</span>  snapshot: Snapshot,
+<span class="ln">67</span>  pathFilters: string[],
+<span class="ln">68</span>  cache: ExtractionCache = new Map(),
+<span class="ln">69</span>): FunctionIndex {
+<span class="ln">70</span>  const files = listSnapshotFiles(cwd, snapshot, pathFilters);
+<span class="ln">71</span>  const extracted = new Map&lt;string, FunctionInfo[]&gt;();
+<span class="ln">72</span>  const extract = (file: SnapshotFile, source: string): void =&gt; {
+<span class="ln">73</span>    try {
+<span class="ln">74</span>      extracted.set(file.path, extractCached(file.path, source, cache));
+<span class="ln">75</span>    } catch (error) {
+<span class="ln">76</span>      const message = error instanceof Error ? error.message : String(error);
+<span class="ln">77</span>      console.error(
+<span class="ln">78</span>        `warn: failed to parse ${file.path} @ ${snapshot.ref}: ${message}`,
+<span class="ln">79</span>      );
+<span class="ln">80</span>    }
+<span class="ln">81</span>  };
+<span class="ln">82</span>
+<span class="ln">83</span>  if (snapshot.kind === &quot;worktree&quot;) {
+<span class="ln">84</span>    visitWorktreeFiles(cwd, files, extract);
+<span class="ln">85</span>  } else {
+<span class="ln">86</span>    const filesByOid = new Map&lt;string, SnapshotFile[]&gt;();
+<span class="ln">87</span>    for (const file of files) {
+<span class="ln">88</span>      if (!file.oid) continue;
+<span class="ln">89</span>      const matches = filesByOid.get(file.oid) ?? [];
+<span class="ln">90</span>      matches.push(file);
+<span class="ln">91</span>      filesByOid.set(file.oid, matches);
+<span class="ln">92</span>    }
+<span class="ln">93</span>    visitCommitBlobs(cwd, files, (oid, source) =&gt; {
+<span class="ln">94</span>      for (const file of filesByOid.get(oid) ?? []) extract(file, source);
+<span class="ln">95</span>    });
+<span class="ln">96</span>  }
+<span class="ln">97</span>
+<span class="ln">98</span>  const functions: FunctionInfo[] = [];
+<span class="ln">99</span>  for (const file of files) {
+<span class="ln">100</span>    functions.push(...(extracted.get(file.path) ?? []));
+<span class="ln">101</span>  }
+<span class="ln">102</span>  return buildIndex(functions);
+<span class="ln">103</span>}</pre></div><h3><span class="arr">▸</span>CLI 错误边界在命令层</h3><p><code>src/cli.ts:175</code> 的 diff command 捕获 runDiff 异常并包装成 DIFF_FAILED，<code>src/cli.ts:238</code> 的 tree command 也在命令层处理 MISSING_ENTRY 和 TREE_FAILED。run 层抛具体错误，CLI 层负责用户可读的 exit code。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/cli.ts</span> · L175-260</span><span>TypeScript</span></div><pre class="code"><span class="ln">175</span>    run(c) {
+<span class="ln">176</span>      const entries = entriesFromOption(c.options.entry);
+<span class="ln">177</span>      let result: DiffResult;
+<span class="ln">178</span>      try {
+<span class="ln">179</span>        result = runDiff({
+<span class="ln">180</span>          from: c.options.from ?? c.args.from,
+<span class="ln">181</span>          to: c.options.to ?? c.args.to,
+<span class="ln">182</span>          entries,
+<span class="ln">183</span>          paths: c.args.paths,
+<span class="ln">184</span>          maxDepth: c.options.maxDepth,
+<span class="ln">185</span>          locs: c.options.locs,
+<span class="ln">186</span>          color: !c.formatExplicit &amp;&amp; !c.agent,
+<span class="ln">187</span>        });
+<span class="ln">188</span>      } catch (error) {
+<span class="ln">189</span>        return c.error({
+<span class="ln">190</span>          code: &quot;DIFF_FAILED&quot;,
+<span class="ln">191</span>          message: error instanceof Error ? error.message : String(error),
+<span class="ln">192</span>          exitCode: 1,
+<span class="ln">193</span>        });
+<span class="ln">194</span>      }
+<span class="ln">195</span>
+<span class="ln">196</span>      const cta =
+<span class="ln">197</span>        result.trees.length &gt; 0
+<span class="ln">198</span>          ? {
+<span class="ln">199</span>              cta: {
+<span class="ln">200</span>                commands: result.trees.slice(0, 3).map((t) =&gt; ({
+<span class="ln">201</span>                  command: &quot;tree&quot;,
+<span class="ln">202</span>                  options: { entry: t.entry },
+<span class="ln">203</span>                  description: `View full call tree for ${t.entry}`,
+<span class="ln">204</span>                })),
+<span class="ln">205</span>              },
+<span class="ln">206</span>            }
+<span class="ln">207</span>          : undefined;
+<span class="ln">208</span>
+<span class="ln">209</span>      return emitAsciiOrData(c, result, cta);
+<span class="ln">210</span>    },
+<span class="ln">211</span>  })
+<span class="ln">212</span>  .command(&quot;tree&quot;, {
+<span class="ln">213</span>    description: &quot;View a call tree (no diff) for one or more entrypoints&quot;,
+<span class="ln">214</span>    args: z.object({
+<span class="ln">215</span>      ref: z
+<span class="ln">216</span>        .string()
+<span class="ln">217</span>        .optional()
+<span class="ln">218</span>        .describe(&quot;Git ref (default: working tree)&quot;),
+<span class="ln">219</span>      paths: pathsArg,
+<span class="ln">220</span>    }),
+<span class="ln">221</span>    options: z.object({
+<span class="ln">222</span>      entry: entryOption,
+<span class="ln">223</span>      maxDepth: maxDepthOption,
+<span class="ln">224</span>      locs: locsOption,
+<span class="ln">225</span>    }),
+<span class="ln">226</span>    alias: { entry: &quot;e&quot; },
+<span class="ln">227</span>    examples: [
+<span class="ln">228</span>      {
+<span class="ln">229</span>        description: &quot;Tree from working tree&quot;,
+<span class="ln">230</span>        options: { entry: &quot;createAgentSession&quot; },
+<span class="ln">231</span>      },
+<span class="ln">232</span>      {
+<span class="ln">233</span>        description: &quot;Tree from a commit&quot;,
+<span class="ln">234</span>        args: { ref: &quot;HEAD&quot; },
+<span class="ln">235</span>        options: { entry: &quot;PiService.createAgentSession&quot; },
+<span class="ln">236</span>      },
+<span class="ln">237</span>    ],
+<span class="ln">238</span>    run(c) {
+<span class="ln">239</span>      const entries = entriesFromOption(c.options.entry) ?? [];
+<span class="ln">240</span>      if (entries.length === 0) {
+<span class="ln">241</span>        return c.error({
+<span class="ln">242</span>          code: &quot;MISSING_ENTRY&quot;,
+<span class="ln">243</span>          message: &quot;calldiff tree requires --entry / -e&quot;,
+<span class="ln">244</span>          exitCode: 2,
+<span class="ln">245</span>        });
+<span class="ln">246</span>      }
+<span class="ln">247</span>
+<span class="ln">248</span>      try {
+<span class="ln">249</span>        const result = runTree({
+<span class="ln">250</span>          ref: c.args.ref,
+<span class="ln">251</span>          entries,
+<span class="ln">252</span>          paths: c.args.paths,
+<span class="ln">253</span>          maxDepth: c.options.maxDepth,
+<span class="ln">254</span>          locs: c.options.locs,
+<span class="ln">255</span>          color: !c.formatExplicit &amp;&amp; !c.agent,
+<span class="ln">256</span>        });
+<span class="ln">257</span>        return emitAsciiOrData(c, result);
+<span class="ln">258</span>      } catch (error) {
+<span class="ln">259</span>        return c.error({
+<span class="ln">260</span>          code: &quot;TREE_FAILED&quot;,</pre></div></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>04</b> · OUTPUT</div><h2 class="sec-title">输出策略照顾人和 Agent</h2><h3><span class="arr">▸</span>ASCII fast path 与 structured format</h3><p><code>src/cli.ts:73</code> 的 emitAsciiOrData 让默认输出直接写 stdout，避免 incur 在附 CTA 时包一层对象；但 <code>src/cli.ts:89</code> 又在 explicit format 时返回结构化结果。这个细节让人类终端和 agent JSON 消费都能用同一套 command。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/cli.ts</span> · L73-98</span><span>TypeScript</span></div><pre class="code"><span class="ln">73</span>/**
+<span class="ln">74</span> * Default: classic ASCII (TTY + pipes) with optional CTAs.
+<span class="ln">75</span> * `--format` / `--json`: structured envelope for agents.
+<span class="ln">76</span> *
+<span class="ln">77</span> * The ASCII path writes to stdout itself so that piped output stays raw text
+<span class="ln">78</span> * (incur wraps a scalar payload as `{ data, cta }` once a CTA is attached).
+<span class="ln">79</span> * `--token-count` / `--token-limit` / `--token-offset` act on what a command
+<span class="ln">80</span> * *returns*, though, so under those flags we hand the ASCII back to incur and
+<span class="ln">81</span> * let it do the counting and slicing. The CTA is dropped there on purpose: it
+<span class="ln">82</span> * keeps the counted output exactly the tree the user asked about.
+<span class="ln">83</span> */
+<span class="ln">84</span>function emitAsciiOrData(
+<span class="ln">85</span>  c: EmitContext,
+<span class="ln">86</span>  result: DiffResult | TreeResult | ReachResult,
+<span class="ln">87</span>  cta?: CtaMeta,
+<span class="ln">88</span>): unknown {
+<span class="ln">89</span>  if (!c.formatExplicit) {
+<span class="ln">90</span>    if (tokenFlagActive) return result.ascii;
+<span class="ln">91</span>    process.stdout.write(
+<span class="ln">92</span>      result.ascii.endsWith(&quot;\n&quot;) ? result.ascii : `${result.ascii}\n`,
+<span class="ln">93</span>    );
+<span class="ln">94</span>    if (cta) return c.ok({}, cta);
+<span class="ln">95</span>    return;
+<span class="ln">96</span>  }
+<span class="ln">97</span>  return result;
+<span class="ln">98</span>}</pre></div></section>
+<section class="sec" id="risk"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">运行器边界</h2><h3><span class="arr">▸</span>依赖本地 git 与语法包</h3><p><code>src/git.ts:7</code> 的 gitBuffer 依赖本机 git，<code>src/languages/grammars.ts:132</code> 在缺 grammar 时还会 npm install。离线环境需要提前准备 grammar cache，否则首次运行多语言项目会把网络和 native module 问题暴露给用户。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/git.ts</span> · L7-31</span><span>TypeScript</span></div><pre class="code"><span class="ln">7</span>function gitBuffer(
+<span class="ln">8</span>  cwd: string,
+<span class="ln">9</span>  args: string[],
+<span class="ln">10</span>  input?: Buffer,
+<span class="ln">11</span>  maxBuffer = 64 * 1024 * 1024,
+<span class="ln">12</span>): Buffer {
+<span class="ln">13</span>  return execFileSync(&quot;git&quot;, args, {
+<span class="ln">14</span>    cwd,
+<span class="ln">15</span>    input,
+<span class="ln">16</span>    maxBuffer,
+<span class="ln">17</span>    stdio: [&quot;pipe&quot;, &quot;pipe&quot;, &quot;pipe&quot;],
+<span class="ln">18</span>  });
+<span class="ln">19</span>}
+<span class="ln">20</span>
+<span class="ln">21</span>function git(cwd: string, args: string[]): string {
+<span class="ln">22</span>  return gitBuffer(cwd, args).toString(&quot;utf8&quot;);
+<span class="ln">23</span>}
+<span class="ln">24</span>
+<span class="ln">25</span>export function assertGitRepo(cwd: string): void {
+<span class="ln">26</span>  try {
+<span class="ln">27</span>    git(cwd, [&quot;rev-parse&quot;, &quot;--is-inside-work-tree&quot;]);
+<span class="ln">28</span>  } catch {
+<span class="ln">29</span>    throw new Error(`Not a git repository: ${cwd}`);
+<span class="ln">30</span>  }
+<span class="ln">31</span>}</pre></div></section>
+<div class="foot"><span>Generated · 2026-08-11</span><span>Source · <a href="https://github.com/tanishqkancharla/calldiff">tanishqkancharla/calldiff</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));const a=map.get(e.target);if(a)a.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#f2c07f';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script></body></html>

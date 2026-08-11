@@ -1,0 +1,711 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>calldiff · 源码观测台</title><meta name="description" content="tanishqkancharla/calldiff 源码级深度解析"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }:root{--star:#e6a15a;--star-soft:#f2c07f;--star-deep:#b97834;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">call<b>diff</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">call<b>diff</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · npm CLI</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#arch"><span class="idx">01</span>架构</a></li><li><a href="#core"><span class="idx">02</span>核心模块</a></li><li><a href="#flow"><span class="idx">03</span>流程</a></li><li><a href="#tests"><span class="idx">04</span>验证</a></li><li><a href="#risk"><span class="idx">05</span>边界</a></li></ul></nav><div class="nav-foot"><div>Stars ★302 · 2026-08-07</div><div><a href="https://github.com/tanishqkancharla/calldiff" target="_blank">tanishqkancharla/calldiff</a></div><div><a href="index.html">← 全部分析</a></div></div></aside><main class="main">
+<div class="hero" id="overview"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">calldiff <em>给 Agentic Review 看调用流变化</em></h1><p class="hero-desc">calldiff 把 git diff 的文本变化提升成 who-calls-whom 的调用栈差异，适合审查 AI agent 改动后的控制流重排。它不是语言服务器，而是用 Tree-sitter 做跨语言 AST 提取，再把函数体中的调用、分支和 JSX 组件组织成可 diff 的树。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 302</div><div class="stat-lbl">Stars</div></div><div class="stat"><div class="stat-num">85</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">22</div><div class="stat-lbl">Languages</div></div><div class="stat"><div class="stat-num">2026-08-10</div><div class="stat-lbl">Last commit</div></div></div></div><div><div class="flow">git snapshot
+  → list source files
+  → Tree-sitter extractor
+  → FunctionIndex
+  → call tree / reach path
+  → ASCII + JSON output</div></div></div></div>
+<section class="sec" id="arch"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">从 CLI 到调用树的<em>六段管线</em></h2><p>入口层在 <code>src/cli.ts:119</code> 定义 incur CLI，并把 diff/tree/reach 三个命令都收束到 <code>src/run.ts:143</code>、<code>src/run.ts:228</code> 和 <code>src/run.ts:271</code>。这个分层让命令参数、输出格式、CTA 和 token slicing 保持在 CLI 层，而真正的源码读取、索引构建和树渲染留给 run 层。</p><h3><span class="arr">▸</span>系统拓扑</h3><div class="flow">CLI args
+  ├─ diff → resolve git snapshots → load before/after indexes → infer entries → diff trees
+  ├─ tree → resolve one snapshot → load index → expand entry tree
+  └─ reach → resolve one snapshot → load index → collect paths to target</div><h3><span class="arr">▸</span>模块清单</h3><p><code>src/git.ts:181</code> 和 <code>src/git.ts:199</code> 负责枚举工作区与 commit 文件；<code>src/extract.ts:30</code> 用语言 registry 加载 extractor；<code>src/calltree.ts:107</code> 展开递归调用树；<code>src/diff.ts:62</code> 用 LCS 对齐子节点；<code>src/render.ts:47</code> 把树变成 CLI 可读的 ASCII。</p><div class="g3"><div class="card"><div class="card-h">CLI</div><div class="card-d">incur 命令、格式选择、CTA 与 token flags。</div></div><div class="card"><div class="card-h">Git snapshot</div><div class="card-d">工作区、commit、路径过滤和 blob 批量读取。</div></div><div class="card"><div class="card-h">AST extractors</div><div class="card-d">每种语言输出统一 FunctionInfo / CallStep。</div></div></div><h3><span class="arr">▸</span>类型契约</h3><p><code>src/types.ts:12</code> 把展开后的节点固定为 CallNode，<code>src/types.ts:29</code> 则把函数体中的原始动作表达成 CallStep。这个二段模型很重要：extractor 只负责“函数内发生了哪些调用或分支”，calltree 层再决定如何沿 FunctionIndex 继续展开。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/types.ts</span> · L1-79</span><span>TypeScript</span></div><pre class="code"><span class="ln">1</span>export type CallNodeKind = &quot;call&quot; | &quot;branch&quot;;
+<span class="ln">2</span>
+<span class="ln">3</span>/** Source location as shown in editors: `file:line` or `file:line-line`. */
+<span class="ln">4</span>export interface SourceLoc {
+<span class="ln">5</span>  file: string;
+<span class="ln">6</span>  /** 1-based start line */
+<span class="ln">7</span>  line: number;
+<span class="ln">8</span>  /** 1-based end line when the span covers multiple lines */
+<span class="ln">9</span>  endLine?: number;
+<span class="ln">10</span>}
+<span class="ln">11</span>
+<span class="ln">12</span>export interface CallNode {
+<span class="ln">13</span>  /** Stable identity used for matching across versions, e.g. &quot;PiService.createAgentSession&quot; */
+<span class="ln">14</span>  key: string;
+<span class="ln">15</span>  /** Display label, e.g. &quot;PiService.createAgentSession&quot; or &quot;if (!options.sessionId)&quot; */
+<span class="ln">16</span>  label: string;
+<span class="ln">17</span>  /** Branches omit the continuing │ rail so arms read as alternate paths */
+<span class="ln">18</span>  kind?: CallNodeKind;
+<span class="ln">19</span>  /**
+<span class="ln">20</span>   * Root: definition location. Children: call-site (or branch keyword) in the parent.
+<span class="ln">21</span>   * Matching/diff keys ignore these fields.
+<span class="ln">22</span>   */
+<span class="ln">23</span>  file?: string;
+<span class="ln">24</span>  line?: number;
+<span class="ln">25</span>  endLine?: number;
+<span class="ln">26</span>  children: CallNode[];
+<span class="ln">27</span>}
+<span class="ln">28</span>
+<span class="ln">29</span>/** One step in a function body: a call, or a conditional branch with nested steps. */
+<span class="ln">30</span>export type CallStep =
+<span class="ln">31</span>  | {
+<span class="ln">32</span>      type: &quot;call&quot;;
+<span class="ln">33</span>      key: string;
+<span class="ln">34</span>      /** Call-expression span in the caller file. */
+<span class="ln">35</span>      file?: string;
+<span class="ln">36</span>      line?: number;
+<span class="ln">37</span>      endLine?: number;
+<span class="ln">38</span>      /** Inline children (e.g. JSX component children at the call site). */
+<span class="ln">39</span>      children?: CallStep[];
+<span class="ln">40</span>    }
+<span class="ln">41</span>  | {
+<span class="ln">42</span>      type: &quot;branch&quot;;
+<span class="ln">43</span>      key: string;
+<span class="ln">44</span>      label: string;
+<span class="ln">45</span>      /** Branch keyword / condition span. */
+<span class="ln">46</span>      file?: string;
+<span class="ln">47</span>      line?: number;
+<span class="ln">48</span>      endLine?: number;
+<span class="ln">49</span>      children: CallStep[];
+<span class="ln">50</span>    };
+<span class="ln">51</span>
+<span class="ln">52</span>export type DiffStatus = &quot;same&quot; | &quot;added&quot; | &quot;removed&quot;;
+<span class="ln">53</span>
+<span class="ln">54</span>export interface DiffNode {
+<span class="ln">55</span>  key: string;
+<span class="ln">56</span>  label: string;
+<span class="ln">57</span>  status: DiffStatus;
+<span class="ln">58</span>  kind?: CallNodeKind;
+<span class="ln">59</span>  file?: string;
+<span class="ln">60</span>  line?: number;
+<span class="ln">61</span>  endLine?: number;
+<span class="ln">62</span>  children: DiffNode[];
+<span class="ln">63</span>}
+<span class="ln">64</span>
+<span class="ln">65</span>export interface FunctionInfo {
+<span class="ln">66</span>  /** Stable key: &quot;foo&quot; or &quot;ClassName.method&quot; or &quot;ClassName.constructor&quot; */
+<span class="ln">67</span>  key: string;
+<span class="ln">68</span>  label: string;
+<span class="ln">69</span>  file: string;
+<span class="ln">70</span>  /** Ordered body steps (calls + if/else branches) */
+<span class="ln">71</span>  steps: CallStep[];
+<span class="ln">72</span>  exported: boolean;
+<span class="ln">73</span>  /** Source span for change detection */
+<span class="ln">74</span>  start: number;
+<span class="ln">75</span>  end: number;
+<span class="ln">76</span>  /** 1-based definition line (derived from start/end + source) */
+<span class="ln">77</span>  line?: number;
+<span class="ln">78</span>  endLine?: number;
+<span class="ln">79</span>}</pre></div><a class="deep-link" href="calldiff/calldiff-parser.html">深度阅读 · AST 提取与语言 registry</a></section>
+<section class="sec" id="core"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">核心模块的<em>职责边界</em></h2><h3><span class="arr">▸</span>run.ts 是编排器，不直接理解语法</h3><p><code>src/run.ts:64</code> 的 loadIndex 只拿文件列表和 source，调用 <code>src/extract.ts:53</code> 的缓存提取，然后通过 <code>src/extract.ts:92</code> 生成 FunctionIndex。它不关心 TypeScript、Python 或 Rust 的 AST 细节，因此新增语言不会污染 diff/tree/reach 主流程。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/run.ts</span> · L64-103</span><span>TypeScript</span></div><pre class="code"><span class="ln">64</span>function loadIndex(
+<span class="ln">65</span>  cwd: string,
+<span class="ln">66</span>  snapshot: Snapshot,
+<span class="ln">67</span>  pathFilters: string[],
+<span class="ln">68</span>  cache: ExtractionCache = new Map(),
+<span class="ln">69</span>): FunctionIndex {
+<span class="ln">70</span>  const files = listSnapshotFiles(cwd, snapshot, pathFilters);
+<span class="ln">71</span>  const extracted = new Map&lt;string, FunctionInfo[]&gt;();
+<span class="ln">72</span>  const extract = (file: SnapshotFile, source: string): void =&gt; {
+<span class="ln">73</span>    try {
+<span class="ln">74</span>      extracted.set(file.path, extractCached(file.path, source, cache));
+<span class="ln">75</span>    } catch (error) {
+<span class="ln">76</span>      const message = error instanceof Error ? error.message : String(error);
+<span class="ln">77</span>      console.error(
+<span class="ln">78</span>        `warn: failed to parse ${file.path} @ ${snapshot.ref}: ${message}`,
+<span class="ln">79</span>      );
+<span class="ln">80</span>    }
+<span class="ln">81</span>  };
+<span class="ln">82</span>
+<span class="ln">83</span>  if (snapshot.kind === &quot;worktree&quot;) {
+<span class="ln">84</span>    visitWorktreeFiles(cwd, files, extract);
+<span class="ln">85</span>  } else {
+<span class="ln">86</span>    const filesByOid = new Map&lt;string, SnapshotFile[]&gt;();
+<span class="ln">87</span>    for (const file of files) {
+<span class="ln">88</span>      if (!file.oid) continue;
+<span class="ln">89</span>      const matches = filesByOid.get(file.oid) ?? [];
+<span class="ln">90</span>      matches.push(file);
+<span class="ln">91</span>      filesByOid.set(file.oid, matches);
+<span class="ln">92</span>    }
+<span class="ln">93</span>    visitCommitBlobs(cwd, files, (oid, source) =&gt; {
+<span class="ln">94</span>      for (const file of filesByOid.get(oid) ?? []) extract(file, source);
+<span class="ln">95</span>    });
+<span class="ln">96</span>  }
+<span class="ln">97</span>
+<span class="ln">98</span>  const functions: FunctionInfo[] = [];
+<span class="ln">99</span>  for (const file of files) {
+<span class="ln">100</span>    functions.push(...(extracted.get(file.path) ?? []));
+<span class="ln">101</span>  }
+<span class="ln">102</span>  return buildIndex(functions);
+<span class="ln">103</span>}</pre></div><h3><span class="arr">▸</span>calltree.ts 处理递归、循环和 call-site 位置</h3><p><code>src/calltree.ts:46</code> 的 expandCall 负责从 key 找到 FunctionInfo，根节点使用定义位置，子节点使用调用点位置；<code>src/calltree.ts:72</code> 用 visiting 集合阻止递归无限展开，并且保留 JSX inline children 的展开能力。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/calltree.ts</span> · L46-113</span><span>TypeScript</span></div><pre class="code"><span class="ln">46</span>function expandCall(
+<span class="ln">47</span>  key: string,
+<span class="ln">48</span>  index: FunctionIndex,
+<span class="ln">49</span>  depth: number,
+<span class="ln">50</span>  maxDepth: number,
+<span class="ln">51</span>  visiting: Set&lt;string&gt;,
+<span class="ln">52</span>  inlineChildren?: CallStep[],
+<span class="ln">53</span>  callSite?: { file?: string; line?: number; endLine?: number },
+<span class="ln">54</span>): CallNode {
+<span class="ln">55</span>  const label = displayCallLabel(key, index);
+<span class="ln">56</span>  const info = index.get(key);
+<span class="ln">57</span>
+<span class="ln">58</span>  // Root uses the definition start line; every other node uses the call-site in the parent.
+<span class="ln">59</span>  const loc =
+<span class="ln">60</span>    depth === 0 &amp;&amp; info?.line != null
+<span class="ln">61</span>      ? pickLoc({ file: info.file, line: info.line })
+<span class="ln">62</span>      : pickLoc(callSite);
+<span class="ln">63</span>
+<span class="ln">64</span>  if (depth &gt;= maxDepth) {
+<span class="ln">65</span>    return { key, label, kind: &quot;call&quot;, ...loc, children: [] };
+<span class="ln">66</span>  }
+<span class="ln">67</span>
+<span class="ln">68</span>  if (!info &amp;&amp; !inlineChildren?.length) {
+<span class="ln">69</span>    return { key, label, kind: &quot;call&quot;, ...loc, children: [] };
+<span class="ln">70</span>  }
+<span class="ln">71</span>
+<span class="ln">72</span>  if (info &amp;&amp; visiting.has(key)) {
+<span class="ln">73</span>    // Still expand call-site JSX children; they are not a re-entry into `key`&#x27;s body.
+<span class="ln">74</span>    const callSiteChildren = inlineChildren?.length
+<span class="ln">75</span>      ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+<span class="ln">76</span>      : [];
+<span class="ln">77</span>    return {
+<span class="ln">78</span>      key,
+<span class="ln">79</span>      label: `${label} ⇄`,
+<span class="ln">80</span>      kind: &quot;call&quot;,
+<span class="ln">81</span>      ...loc,
+<span class="ln">82</span>      children: callSiteChildren,
+<span class="ln">83</span>    };
+<span class="ln">84</span>  }
+<span class="ln">85</span>
+<span class="ln">86</span>  if (info) visiting.add(key);
+<span class="ln">87</span>  const bodyChildren = info
+<span class="ln">88</span>    ? expandSteps(info.steps, index, depth + 1, maxDepth, visiting)
+<span class="ln">89</span>    : [];
+<span class="ln">90</span>  const callSiteChildren = inlineChildren?.length
+<span class="ln">91</span>    ? expandSteps(inlineChildren, index, depth + 1, maxDepth, visiting)
+<span class="ln">92</span>    : [];
+<span class="ln">93</span>  if (info) visiting.delete(key);
+<span class="ln">94</span>
+<span class="ln">95</span>  return {
+<span class="ln">96</span>    key,
+<span class="ln">97</span>    label,
+<span class="ln">98</span>    kind: &quot;call&quot;,
+<span class="ln">99</span>    ...loc,
+<span class="ln">100</span>    children: [...bodyChildren, ...callSiteChildren],
+<span class="ln">101</span>  };
+<span class="ln">102</span>}
+<span class="ln">103</span>
+<span class="ln">104</span>/**
+<span class="ln">105</span> * Expand a function into a nested call tree by following known definitions.
+<span class="ln">106</span> */
+<span class="ln">107</span>export function buildCallTree(
+<span class="ln">108</span>  entryKey: string,
+<span class="ln">109</span>  index: FunctionIndex,
+<span class="ln">110</span>  maxDepth: number,
+<span class="ln">111</span>): CallNode {
+<span class="ln">112</span>  const resolved = resolveEntry(entryKey, index) ?? entryKey;
+<span class="ln">113</span>  return expandCall(resolved, index, 0, maxDepth, new Set());</pre></div><h3><span class="arr">▸</span>diff.ts 用 LCS 保持 after 树顺序</h3><p><code>src/diff.ts:62</code> 对 before/after children 做最长公共子序列对齐，而不是简单按 key map 合并；这让新增、删除和移动后的输出尽量贴近“after”调用顺序，适合代码 review 时顺着新控制流阅读。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/diff.ts</span> · L62-109</span><span>TypeScript</span></div><pre class="code"><span class="ln">62</span>function diffChildren(before: CallNode[], after: CallNode[]): DiffNode[] {
+<span class="ln">63</span>  const n = before.length;
+<span class="ln">64</span>  const m = after.length;
+<span class="ln">65</span>  const dp: number[][] = Array.from({ length: n + 1 }, () =&gt;
+<span class="ln">66</span>    Array.from({ length: m + 1 }, () =&gt; 0),
+<span class="ln">67</span>  );
+<span class="ln">68</span>
+<span class="ln">69</span>  for (let i = n - 1; i &gt;= 0; i--) {
+<span class="ln">70</span>    for (let j = m - 1; j &gt;= 0; j--) {
+<span class="ln">71</span>      if (before[i]!.key === after[j]!.key) {
+<span class="ln">72</span>        dp[i]![j] = dp[i + 1]![j + 1]! + 1;
+<span class="ln">73</span>      } else {
+<span class="ln">74</span>        dp[i]![j] = Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+<span class="ln">75</span>      }
+<span class="ln">76</span>    }
+<span class="ln">77</span>  }
+<span class="ln">78</span>
+<span class="ln">79</span>  const result: DiffNode[] = [];
+<span class="ln">80</span>  let i = 0;
+<span class="ln">81</span>  let j = 0;
+<span class="ln">82</span>  while (i &lt; n &amp;&amp; j &lt; m) {
+<span class="ln">83</span>    if (before[i]!.key === after[j]!.key) {
+<span class="ln">84</span>      result.push(diffNode(before[i]!, after[j]!));
+<span class="ln">85</span>      i += 1;
+<span class="ln">86</span>      j += 1;
+<span class="ln">87</span>    } else if (dp[i + 1]![j]! &gt;= dp[i]![j + 1]!) {
+<span class="ln">88</span>      result.push(diffNode(before[i]!, null));
+<span class="ln">89</span>      i += 1;
+<span class="ln">90</span>    } else {
+<span class="ln">91</span>      result.push(diffNode(null, after[j]!));
+<span class="ln">92</span>      j += 1;
+<span class="ln">93</span>    }
+<span class="ln">94</span>  }
+<span class="ln">95</span>  while (i &lt; n) {
+<span class="ln">96</span>    result.push(diffNode(before[i]!, null));
+<span class="ln">97</span>    i += 1;
+<span class="ln">98</span>  }
+<span class="ln">99</span>  while (j &lt; m) {
+<span class="ln">100</span>    result.push(diffNode(null, after[j]!));
+<span class="ln">101</span>    j += 1;
+<span class="ln">102</span>  }
+<span class="ln">103</span>  return result;
+<span class="ln">104</span>}
+<span class="ln">105</span>
+<span class="ln">106</span>export function treeHasChanges(node: DiffNode): boolean {
+<span class="ln">107</span>  if (node.status !== &quot;same&quot;) return true;
+<span class="ln">108</span>  return node.children.some(treeHasChanges);
+<span class="ln">109</span>}</pre></div><a class="deep-link" href="calldiff/calldiff-callgraph.html">深度阅读 · 调用树展开与结构 diff</a></section>
+<section class="sec" id="flow"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">三种命令共享同一套<em>索引能力</em></h2><h3><span class="arr">▸</span>diff：两棵索引树比较</h3><p><code>src/run.ts:143</code> 的 runDiff 先解析 from/to 快照，再分别通过 <code>src/run.ts:166</code> 和 <code>src/run.ts:167</code> 加载 before/after 索引。之后 <code>src/infer.ts:80</code> 会从受影响函数反推 exported entrypoints，最后 <code>src/infer.ts:110</code> 对每个 entry 调用 diffEntry。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/run.ts</span> · L143-225</span><span>TypeScript</span></div><pre class="code"><span class="ln">143</span>export function runDiff(options: DiffRunOptions = {}): DiffResult {
+<span class="ln">144</span>  const cwd = options.cwd ?? process.cwd();
+<span class="ln">145</span>  const maxDepth = options.maxDepth ?? 12;
+<span class="ln">146</span>  const entriesOpt = options.entries ?? [];
+<span class="ln">147</span>  const color = options.color !== false;
+<span class="ln">148</span>  const locs = options.locs === true;
+<span class="ln">149</span>
+<span class="ln">150</span>  assertGitRepo(cwd);
+<span class="ln">151</span>
+<span class="ln">152</span>  const {
+<span class="ln">153</span>    from,
+<span class="ln">154</span>    to,
+<span class="ln">155</span>    paths: resolvedPaths,
+<span class="ln">156</span>  } = resolveDiffSnapshotsAndPaths(
+<span class="ln">157</span>    cwd,
+<span class="ln">158</span>    options.from,
+<span class="ln">159</span>    options.to,
+<span class="ln">160</span>    options.paths ?? [],
+<span class="ln">161</span>  );
+<span class="ln">162</span>  if (from.kind === &quot;commit&quot;) verifyCommit(cwd, from.ref);
+<span class="ln">163</span>  if (to.kind === &quot;commit&quot;) verifyCommit(cwd, to.ref);
+<span class="ln">164</span>
+<span class="ln">165</span>  const extractionCache: ExtractionCache = new Map();
+<span class="ln">166</span>  const before = loadIndex(cwd, from, resolvedPaths, extractionCache);
+<span class="ln">167</span>  const after = loadIndex(cwd, to, resolvedPaths, extractionCache);
+<span class="ln">168</span>  extractionCache.clear();
+<span class="ln">169</span>
+<span class="ln">170</span>  const entries = inferEntries(before, after, entriesOpt, maxDepth);
+<span class="ln">171</span>
+<span class="ln">172</span>  const fromLabel = describeSnapshot(from);
+<span class="ln">173</span>  const toLabel = describeSnapshot(to);
+<span class="ln">174</span>
+<span class="ln">175</span>  if (entries.length === 0) {
+<span class="ln">176</span>    const message = `No callstack changes between ${fromLabel} and ${toLabel}.`;
+<span class="ln">177</span>    return {
+<span class="ln">178</span>      mode: &quot;diff&quot;,
+<span class="ln">179</span>      from: fromLabel,
+<span class="ln">180</span>      to: toLabel,
+<span class="ln">181</span>      message,
+<span class="ln">182</span>      trees: [],
+<span class="ln">183</span>      ascii: message,
+<span class="ln">184</span>    };
+<span class="ln">185</span>  }
+<span class="ln">186</span>
+<span class="ln">187</span>  const trees: DiffResult[&quot;trees&quot;] = [];
+<span class="ln">188</span>  const asciiParts: string[] = [
+<span class="ln">189</span>    `calldiff diff ${fromLabel} → ${toLabel}`,
+<span class="ln">190</span>    &quot;&quot;,
+<span class="ln">191</span>  ];
+<span class="ln">192</span>
+<span class="ln">193</span>  for (const entry of entries) {
+<span class="ln">194</span>    const diff = diffEntry(entry, before, after, maxDepth);
+<span class="ln">195</span>    if (!diff) continue;
+<span class="ln">196</span>    const ascii = renderDiff(diff, { color, locs });
+<span class="ln">197</span>    trees.push({
+<span class="ln">198</span>      entry,
+<span class="ln">199</span>      ascii: renderDiff(diff, { color: false, locs }),
+<span class="ln">200</span>      tree: serializeDiffNode(diff),
+<span class="ln">201</span>    });
+<span class="ln">202</span>    if (asciiParts.length &gt; 2) asciiParts.push(&quot;&quot;);
+<span class="ln">203</span>    asciiParts.push(ascii);
+<span class="ln">204</span>  }
+<span class="ln">205</span>
+<span class="ln">206</span>  if (trees.length === 0) {
+<span class="ln">207</span>    const message = &quot;No callstack changes for inferred entrypoints.&quot;;
+<span class="ln">208</span>    return {
+<span class="ln">209</span>      mode: &quot;diff&quot;,
+<span class="ln">210</span>      from: fromLabel,
+<span class="ln">211</span>      to: toLabel,
+<span class="ln">212</span>      message,
+<span class="ln">213</span>      trees: [],
+<span class="ln">214</span>      ascii: `${asciiParts[0]}\n\n${message}`,
+<span class="ln">215</span>    };
+<span class="ln">216</span>  }
+<span class="ln">217</span>
+<span class="ln">218</span>  return {
+<span class="ln">219</span>    mode: &quot;diff&quot;,
+<span class="ln">220</span>    from: fromLabel,
+<span class="ln">221</span>    to: toLabel,
+<span class="ln">222</span>    trees,
+<span class="ln">223</span>    ascii: asciiParts.join(&quot;\n&quot;),
+<span class="ln">224</span>  };
+<span class="ln">225</span>}</pre></div><h3><span class="arr">▸</span>tree：单快照展开</h3><p><code>src/run.ts:228</code> 的 runTree 更直，只有一个 snapshot：<code>src/run.ts:236</code> 解析 ref/path，<code>src/run.ts:243</code> 加载索引，<code>src/run.ts:251</code> 对 entry 展开调用树。它是用户定位某个入口全量调用关系的基础命令。</p><h3><span class="arr">▸</span>reach：从入口到目标的路径查询</h3><p><code>src/run.ts:271</code> 的 runReach 复用单快照索引，但多一步 <code>src/run.ts:288</code> 解析 target，再由 <code>src/reach.ts:66</code> 展开 entry tree 并收集命中的 root-to-target 路径。这个命令对“某次改动是否仍能触达副作用函数”很有用。</p><a class="deep-link" href="calldiff/calldiff-git-runner.html">深度阅读 · Git 快照与命令运行器</a></section>
+<section class="sec" id="tests"><div class="sec-no">§ <b>04</b> · TESTS</div><h2 class="sec-title">测试覆盖围绕<em>调用语义</em>而不是 UI</h2><h3><span class="arr">▸</span>分支、private method、class field 都有断言</h3><p>测试里最有价值的是把期望输出写成 ASCII 树。<code>test/callstack-diff.test.ts:3</code> 覆盖 helper refactor 和 if/else 标签，<code>test/callstack-diff.test.ts:188</code> 覆盖 private method，<code>test/callstack-diff.test.ts:212</code> 覆盖 class field arrow function，这些都直接对应 extractor 的边界。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">test/callstack-diff.test.ts</span> · L3-67</span><span>TypeScript</span></div><pre class="code"><span class="ln">3</span>test(&quot;refactors calls into a helper, preserves if/else branch labels&quot;, ({
+<span class="ln">4</span>  expectCallstack,
+<span class="ln">5</span>}) =&gt; {
+<span class="ln">6</span>  expectCallstack(
+<span class="ln">7</span>    `
+<span class="ln">8</span>      export class PiService {
+<span class="ln">9</span>        static createAgentSession(options: { sessionId?: string }) {
+<span class="ln">10</span>    -     AuthStorage.create();
+<span class="ln">11</span>    -     new ModelRegistry();
+<span class="ln">12</span>    -     createCodingTools();
+<span class="ln">13</span>    +     const services = PiService.getServices();
+<span class="ln">14</span>    +     services.boot();
+<span class="ln">15</span>          if (!options.sessionId) {
+<span class="ln">16</span>            SessionManager.create();
+<span class="ln">17</span>          } else {
+<span class="ln">18</span>            SessionManager.open(options.sessionId);
+<span class="ln">19</span>          }
+<span class="ln">20</span>        }
+<span class="ln">21</span>    +
+<span class="ln">22</span>    +   static getServices() {
+<span class="ln">23</span>    +     SettingsManager.create();
+<span class="ln">24</span>    +     AuthStorage.create();
+<span class="ln">25</span>    +     new ModelRegistry();
+<span class="ln">26</span>    +     createCodingTools();
+<span class="ln">27</span>    +     return { boot() {} };
+<span class="ln">28</span>    +   }
+<span class="ln">29</span>      }
+<span class="ln">30</span>
+<span class="ln">31</span>      class AuthStorage {
+<span class="ln">32</span>        static create() {}
+<span class="ln">33</span>      }
+<span class="ln">34</span>
+<span class="ln">35</span>      class ModelRegistry {
+<span class="ln">36</span>        constructor() {}
+<span class="ln">37</span>      }
+<span class="ln">38</span>
+<span class="ln">39</span>      class SessionManager {
+<span class="ln">40</span>        static create() {}
+<span class="ln">41</span>        static open(_id: string) {}
+<span class="ln">42</span>      }
+<span class="ln">43</span>    +
+<span class="ln">44</span>    + class SettingsManager {
+<span class="ln">45</span>    +   static create() {}
+<span class="ln">46</span>    + }
+<span class="ln">47</span>
+<span class="ln">48</span>      function createCodingTools() {}
+<span class="ln">49</span>    `,
+<span class="ln">50</span>    &quot;PiService.createAgentSession&quot;,
+<span class="ln">51</span>  ).toEqual(`
+<span class="ln">52</span>      PiService.createAgentSession(options)
+<span class="ln">53</span>    - ├─ AuthStorage.create()
+<span class="ln">54</span>    - ├─ new ModelRegistry()
+<span class="ln">55</span>    - ├─ createCodingTools()
+<span class="ln">56</span>    + ├─ PiService.getServices()
+<span class="ln">57</span>    + │  ├─ SettingsManager.create()
+<span class="ln">58</span>    + │  ├─ AuthStorage.create()
+<span class="ln">59</span>    + │  ├─ new ModelRegistry()
+<span class="ln">60</span>    + │  └─ createCodingTools()
+<span class="ln">61</span>    + ├─ services.boot()
+<span class="ln">62</span>      ├─ if (!options.sessionId)
+<span class="ln">63</span>         └─ SessionManager.create()
+<span class="ln">64</span>      └─ else
+<span class="ln">65</span>         └─ SessionManager.open(_id)
+<span class="ln">66</span>  `);
+<span class="ln">67</span>});</pre></div><h3><span class="arr">▸</span>reach 单独验证多路径</h3><p><code>test/reach.test.ts:52</code> 断言同一个 target 可以从 if 分支和主路径各出现一次；这说明 reach 不是只返回第一个命中，而是要保留 alternate branch 下的所有可达路径。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">test/reach.test.ts</span> · L51-90</span><span>TypeScript</span></div><pre class="code"><span class="ln">51</span>describe(&quot;reach paths&quot;, () =&gt; {
+<span class="ln">52</span>  test(&quot;finds every path from entry to target across branches&quot;, () =&gt; {
+<span class="ln">53</span>    const index = indexOf(source);
+<span class="ln">54</span>    const paths = findReachPaths(&quot;runCheckout&quot;, &quot;sendEmail&quot;, index, 12);
+<span class="ln">55</span>    const ascii = paths.map((p) =&gt;
+<span class="ln">56</span>      renderTree(p, { color: false, locs: false }),
+<span class="ln">57</span>    );
+<span class="ln">58</span>
+<span class="ln">59</span>    expect(ascii).toEqual([
+<span class="ln">60</span>      [
+<span class="ln">61</span>        &quot;runCheckout()&quot;,
+<span class="ln">62</span>        &quot;└─ if (!reserved)&quot;,
+<span class="ln">63</span>        &quot;   └─ notifyCustomer()&quot;,
+<span class="ln">64</span>        &quot;      └─ sendEmail()&quot;,
+<span class="ln">65</span>      ].join(&quot;\n&quot;),
+<span class="ln">66</span>      [
+<span class="ln">67</span>        &quot;runCheckout()&quot;,
+<span class="ln">68</span>        &quot;└─ notifyCustomer()&quot;,
+<span class="ln">69</span>        &quot;   └─ sendEmail()&quot;,
+<span class="ln">70</span>      ].join(&quot;\n&quot;),
+<span class="ln">71</span>    ]);
+<span class="ln">72</span>  });
+<span class="ln">73</span>
+<span class="ln">74</span>  test(&quot;finds a single deep path to a leaf helper&quot;, () =&gt; {
+<span class="ln">75</span>    const index = indexOf(source);
+<span class="ln">76</span>    const paths = findReachPaths(&quot;runCheckout&quot;, &quot;capture&quot;, index, 12);
+<span class="ln">77</span>    expect(paths).toHaveLength(1);
+<span class="ln">78</span>    expect(renderTree(paths[0]!, { color: false, locs: false })).toBe(
+<span class="ln">79</span>      [
+<span class="ln">80</span>        &quot;runCheckout()&quot;,
+<span class="ln">81</span>        &quot;└─ PaymentGateway.charge()&quot;,
+<span class="ln">82</span>        &quot;   └─ capture()&quot;,
+<span class="ln">83</span>      ].join(&quot;\n&quot;),
+<span class="ln">84</span>    );
+<span class="ln">85</span>  });
+<span class="ln">86</span>
+<span class="ln">87</span>  test(&quot;returns empty when target is unreachable&quot;, () =&gt; {
+<span class="ln">88</span>    const index = indexOf(source);
+<span class="ln">89</span>    expect(findReachPaths(&quot;runCheckout&quot;, &quot;missing&quot;, index, 12)).toEqual([]);
+<span class="ln">90</span>  });</pre></div></section>
+<section class="sec" id="risk"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">技术亮点之外，<em>仍要看清</em>边界</h2><h3><span class="arr">▸</span>AST 不是类型系统</h3><p><code>src/languages/typescript.ts:76</code> 的 calleeKey 主要基于 identifier/member expression 推断调用 key；这能覆盖大量静态调用，但动态属性、依赖注入和运行时多态不会像 LSP 或类型检查器那样精确。README 也明确这是 syntactic AST-based 工具。</p><p>具体到 TypeScript，<code>src/languages/typescript.ts:84</code> 放弃 subscript expression，<code>src/languages/typescript.ts:96</code> 才把 this.method 归到 class，<code>src/languages/typescript.ts:99</code> 处理 object.property，<code>src/languages/typescript.ts:102</code> 又在 className 存在时做保守回退。这个策略稳，但不能恢复真正的运行时接收者。</p><h3><span class="arr">▸</span>语言数量带来维护压力</h3><p><code>src/languages/registry.ts:28</code> 一次注册 22 种 extractor，优势是覆盖广；代价是每种语言的语法边界都要靠测试守住。<code>src/languages/grammars.ts:92</code> 还需要为个别 grammar pin 安装规格，说明 native grammar 生态本身也会带来兼容成本。</p><p>运行时依赖同样不轻：<code>src/languages/grammars.ts:104</code> 会加载 grammar 包，<code>src/languages/grammars.ts:128</code> 决定 cache 目录，<code>src/languages/grammars.ts:132</code> 可能触发 npm install，<code>src/languages/grammars.ts:151</code> 再从 cache package.json 创建 require。离线环境要提前预热这些 grammar。</p><h3><span class="arr">▸</span>适合 review 辅助，不适合当唯一真相</h3><p>calldiff 的强项是让 agentic review 快速看到调用流变化。最终判断仍要结合真实类型信息、测试和运行行为；尤其是 <code>src/git.ts:156</code> 的 isSourceFile 只按扩展名纳入文件，生成代码、配置驱动和框架魔法不会完整进入调用图。</p><p>快照层也有边界：<code>src/git.ts:181</code> 读取工作区 tracked 和 untracked 文件，<code>src/git.ts:199</code> 读取 commit 树，<code>src/git.ts:230</code> 做路径过滤，<code>src/git.ts:242</code> 返回 SnapshotFile 列表。它看的是 Git 视角下的源文件，不会自动理解构建产物或框架生成的隐式调用。</p></section>
+<div class="foot"><span>Generated · 2026-08-11</span><span>Source · <a href="https://github.com/tanishqkancharla/calldiff">tanishqkancharla/calldiff</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));const a=map.get(e.target);if(a)a.classList.add('active');}});},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));(function tick(){ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#f2c07f';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);})();}})();</script></body></html>
