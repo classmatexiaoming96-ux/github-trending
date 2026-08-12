@@ -1,0 +1,350 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>MCP 工具注册 · mcp-server 深度解析</title><meta name="description" content="逐段拆解 sv-number-mcp 如何把国家、服务、号码和验证码变成 Agent 可调用工具。"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root {--star:#4fc3b1;--star-soft:#87ead9;--star-deep:#2a8d82;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">mcp<b>server</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">mcp<b>server</b></div><div class="sub">tools · 深度解析</div></div><span class="nav-ver">TypeScript</span><nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li><li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界与失败</a></li><li><a href="#related"><span class="idx">04</span>关联模块</a></li></ul></nav><div class="nav-foot"><div><a href="../mcp-server.html">← 返回 mcp-server 主页面</a></div><div><a href="../index.html">全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">MCP 工具注册 <em>深度解析</em></h1><p class="hero-desc">逐段拆解 sv-number-mcp 如何把国家、服务、号码和验证码变成 Agent 可调用工具。</p></div><section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>MCP 工具注册页从 server 初始化开始：<code>src/index.ts:11</code> 负责其中一个检查点；<code>src/index.ts:12</code> 负责其中一个检查点；<code>src/index.ts:13</code> 负责其中一个检查点；<code>src/index.ts:15</code> 负责其中一个检查点；<code>src/index.ts:16</code> 负责其中一个检查点；<code>src/index.ts:20</code> 负责其中一个检查点；<code>src/index.ts:24</code> 把 SDK、stdio transport、zod、API helper 和 TOTP helper 接起来，说明所有工具都跑在同一个 Node 进程里。<code>src/index.ts:26</code> 负责其中一个检查点；<code>src/index.ts:29</code> 负责其中一个检查点；<code>src/index.ts:31</code> 的 text/failure 封装让每个工具返回相同 MCP content 结构。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/index.ts</span> · L9-28</span><span>TypeScript</span></div><pre class="code"><span class="ln">9</span>import { readFileSync } from &quot;node:fs&quot;;
+<span class="ln">10</span>
+<span class="ln">11</span>import { McpServer } from &quot;@modelcontextprotocol/sdk/server/mcp.js&quot;;
+<span class="ln">12</span>import { StdioServerTransport } from &quot;@modelcontextprotocol/sdk/server/stdio.js&quot;;
+<span class="ln">13</span>import { z } from &quot;zod&quot;;
+<span class="ln">14</span>
+<span class="ln">15</span>import { ApiError, call, expect, json, pollSeconds } from &quot;./api.js&quot;;
+<span class="ln">16</span>import { totp } from &quot;./totp.js&quot;;
+<span class="ln">17</span>
+<span class="ln">18</span>// Версия берётся из пакета, а не вписывается сюда: вписанная разошлась с package.json
+<span class="ln">19</span>// и сервер представлялся клиентам чужим номером версии.
+<span class="ln">20</span>const { version } = JSON.parse(
+<span class="ln">21</span>  readFileSync(new URL(&quot;../package.json&quot;, import.meta.url), &quot;utf8&quot;),
+<span class="ln">22</span>) as { version: string };
+<span class="ln">23</span>
+<span class="ln">24</span>const server = new McpServer({ name: &quot;sv-number&quot;, version });
+<span class="ln">25</span>
+<span class="ln">26</span>const text = (value: unknown) =&gt; ({
+<span class="ln">27</span>  content: [{ type: &quot;text&quot; as const, text: typeof value === &quot;string&quot; ? value : JSON.stringify(value, null, 2) }],
+<span class="ln">28</span>});</pre></div></section><section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>目录查询工具</h3><p>list_countries 与 list_services 的区别在于前者只过滤国家名，后者要帮 Agent 从域名或站点名找到任意服务 code。<code>src/index.ts:51</code> 负责其中一个检查点；<code>src/index.ts:57</code> 负责其中一个检查点；<code>src/index.ts:59</code> 负责其中一个检查点；<code>src/index.ts:62</code> 负责其中一个检查点；<code>src/index.ts:107</code> 负责其中一个检查点；<code>src/index.ts:122</code> 负责其中一个检查点；<code>src/index.ts:123</code> 负责其中一个检查点；<code>src/index.ts:130</code> 负责其中一个检查点；<code>src/index.ts:133</code> 负责其中一个检查点；<code>src/index.ts:136</code> 显示服务查询会保留 notInList fallback，并按 rank 与库存排序。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/index.ts</span> · L51-67</span><span>TypeScript</span></div><pre class="code"><span class="ln">51</span>server.tool(
+<span class="ln">52</span>  &quot;list_countries&quot;,
+<span class="ln">53</span>  &quot;Every country the numbers can come from, with its id and operators. Use the id in order_number.&quot;,
+<span class="ln">54</span>  { search: z.string().optional().describe(&quot;Filter by country name, case-insensitive&quot;) },
+<span class="ln">55</span>  async ({ search }) =&gt; {
+<span class="ln">56</span>    try {
+<span class="ln">57</span>      const countries = await json&lt;Array&lt;{ id: number; name: string; operators: Record&lt;string, string&gt; }&gt;&gt;(
+<span class="ln">58</span>        &quot;getCountryAndOperators&quot;);
+<span class="ln">59</span>      const found = search
+<span class="ln">60</span>        ? countries.filter((c) =&gt; c.name.toLowerCase().includes(search.toLowerCase()))
+<span class="ln">61</span>        : countries;
+<span class="ln">62</span>      return text(found.map((c) =&gt; ({ id: c.id, name: c.name, operators: Object.keys(c.operators) })));
+<span class="ln">63</span>    } catch (error) {
+<span class="ln">64</span>      return failure(error);
+<span class="ln">65</span>    }
+<span class="ln">66</span>  },
+<span class="ln">67</span>);</pre></div><h3><span class="arr">▸</span>统一 text/failure 返回</h3><p><code>src/index.ts:26</code> 统一成功响应，<code>src/index.ts:29</code> 统一失败响应，<code>src/index.ts:31</code> 用 isError 告诉 MCP client 这是工具错误；这让每个工具 handler 可以专注业务状态。</p><h3><span class="arr">▸</span>服务匹配排序</h3><p>短查询是 Agent 常见问题：用户可能输入 x、discord.com 或 LinkedIn。<code>src/index.ts:71</code> 负责其中一个检查点；<code>src/index.ts:74</code> 负责其中一个检查点；<code>src/index.ts:79</code> 负责其中一个检查点；<code>src/index.ts:81</code> 负责其中一个检查点；<code>src/index.ts:82</code> 负责其中一个检查点；<code>src/index.ts:87</code> 负责其中一个检查点；<code>src/index.ts:90</code> 负责其中一个检查点；<code>src/index.ts:92</code> 负责其中一个检查点；<code>src/index.ts:94</code> 负责其中一个检查点；<code>src/index.ts:96</code> 负责其中一个检查点；<code>src/index.ts:100</code> 负责其中一个检查点；<code>src/index.ts:104</code> 用 bareName、wholeWord 和 rank 分层排序，避免 x 匹配到 Maxim 这类误选。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/index.ts</span> · L71-105</span><span>TypeScript</span></div><pre class="code"><span class="ln">71</span>// The catalogue is written in site names, an agent usually holds a URL: &quot;discord.com&quot; has to
+<span class="ln">72</span>// find &quot;Discord&quot;. Strip what the URL adds around the name and keep the raw query as well,
+<span class="ln">73</span>// because a few entries spell the domain out (&quot;X.com (Twitter)&quot;).
+<span class="ln">74</span>const bareName = (query: string) =&gt;
+<span class="ln">75</span>  query.toLowerCase().trim()
+<span class="ln">76</span>    .replace(/^[a-z]+:\/\//, &quot;&quot;).replace(/^www\./, &quot;&quot;)
+<span class="ln">77</span>    .replace(/\/.*$/, &quot;&quot;).replace(/\.[a-z]{2,}$/, &quot;&quot;);
+<span class="ln">78</span>
+<span class="ln">79</span>// A short query lands inside unrelated names: &quot;x&quot; sits in the middle of &quot;Maxim&quot;. Matching the
+<span class="ln">80</span>// whole word first keeps those below the site the agent actually asked for.
+<span class="ln">81</span>const escapeRe = (value: string) =&gt; value.replace(/[.*+?^${}()|[\]\\]/g, &quot;\\$&amp;&quot;);
+<span class="ln">82</span>const wholeWord = (name: string, needle: string) =&gt;
+<span class="ln">83</span>  needle.length &gt; 0 &amp;&amp; new RegExp(`(^|[^a-z0-9])${escapeRe(needle)}([^a-z0-9]|$)`).test(name);
+<span class="ln">84</span>
+<span class="ln">85</span>// Lower is better. Ranking matters because a short query matches dozens of names and the
+<span class="ln">86</span>// agent picks the first thing it reads.
+<span class="ln">87</span>const rank = (service: Service, query: string, bare: string) =&gt; {
+<span class="ln">88</span>  const id = service.id.toLowerCase();
+<span class="ln">89</span>  const name = service.name.toLowerCase();
+<span class="ln">90</span>  if (id === query || id === bare) return 0;
+<span class="ln">91</span>  if (name === query || name === bare) return 1;
+<span class="ln">92</span>  if (wholeWord(name, query)) return 2;
+<span class="ln">93</span>  if (wholeWord(name, bare)) return 3;
+<span class="ln">94</span>  if (name.includes(query)) return 4;
+<span class="ln">95</span>  if (name.startsWith(bare)) return 5;
+<span class="ln">96</span>  if (name.includes(bare)) return 6;
+<span class="ln">97</span>  return -1;
+<span class="ln">98</span>};
+<span class="ln">99</span>
+<span class="ln">100</span>const view = (service: Service) =&gt; {
+<span class="ln">101</span>  // the API sends 0 where it has no statistics, which is not the same as &quot;nothing arrives&quot;
+<span class="ln">102</span>  const measured = Number(service.deliverability ?? 0);
+<span class="ln">103</span>  return { service: service.id, name: service.name, price: service.price,
+<span class="ln">104</span>           online: service.quantity, deliveredPercent: measured &gt; 0 ? measured : null };
+<span class="ln">105</span>};</pre></div></section><section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">list_services(search) → bareName → rank → view(price, online, deliveredPercent) → order_number(service,country)</div><p>目录到下单的桥接点在 <code>src/index.ts:117</code> 负责其中一个检查点；<code>src/index.ts:118</code> 负责其中一个检查点；<code>src/index.ts:124</code> 负责其中一个检查点；<code>src/index.ts:125</code> 负责其中一个检查点；<code>src/index.ts:129</code> 负责其中一个检查点；<code>src/index.ts:130</code> 负责其中一个检查点；<code>src/index.ts:137</code> 负责其中一个检查点；<code>src/index.ts:138</code>，没有 search 时返回完整列表，有 search 时返回 matches 与 notInList。这个返回形状对 Agent 友好，因为它能先读最佳匹配，也能看到兜底服务。</p></section><section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>src/index.ts:127</code> 到 <code>src/index.ts:129</code> 处理空 bare name，防止空字符串匹配整个目录。</li><li><code>src/index.ts:140</code> 到 <code>src/index.ts:142</code> 在无匹配时提示换国家或用 notInList。</li><li><code>src/index.ts:101</code> 到 <code>src/index.ts:104</code> 把 deliverability=0 改成 null，避免误读成 0% 到达率。</li></ul></section><section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">API client</div><div class="card-d"><code>src/api.ts:43</code> 负责其中一个检查点；<code>src/api.ts:56</code> 负责其中一个检查点；<code>src/api.ts:63</code> 是所有工具的底层出口。</div></div><div class="card"><div class="card-h">Activation tools</div><div class="card-d"><code>src/index.ts:150</code> 负责其中一个检查点；<code>src/index.ts:179</code> 负责其中一个检查点；<code>src/index.ts:208</code> 负责其中一个检查点；<code>src/index.ts:223</code> 负责其中一个检查点；<code>src/index.ts:239</code> 消费 list_services 的结果。</div></div></div></section><div class="foot"><span>Sub-page · 2026-08-12</span><span>Source · <a href="https://github.com/sv-number/mcp-server">sv-number/mcp-server</a></span><span><a href="../mcp-server.html">↑ mcp-server 主页面</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const el=document.getElementById(a.getAttribute('href').slice(1));if(el)map.set(el,a)});const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){links.forEach(a=>a.classList.remove('active'));map.get(e.target)?.classList.add('active')}})},{rootMargin:'-40% 0px -55% 0px'});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const c=document.getElementById('stars');if(c){const x=c.getContext('2d');const r=()=>{c.width=innerWidth;c.height=innerHeight};r();addEventListener('resize',r);const s=Array.from({length:60},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.4+.2,a:Math.random(),v:Math.random()*.02+.005}));(function t(){x.clearRect(0,0,c.width,c.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;x.globalAlpha=p.a;x.fillStyle='#87ead9';x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fill()});requestAnimationFrame(t)})()}})();</script></body></html>
