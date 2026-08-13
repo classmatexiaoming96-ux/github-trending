@@ -1,0 +1,813 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>pi-from-scratch · 600 行 TypeScript Agent Loop · 源码观测台</title><meta name="description" content="SaladDay/pi-from-scratch 源码级深度解析"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#6bd2ff;--star-soft:#a7e6ff;--star-deep:#2a8fb8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">pi<b>scratch</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">pi<b>scratch</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · tiny agent</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#loop"><span class="idx">01</span>Agent Loop</a></li><li><a href="#protocol"><span class="idx">02</span>协议转换</a></li><li><a href="#tools"><span class="idx">03</span>工具层</a></li><li><a href="#trace"><span class="idx">04</span>Trace Lab</a></li><li><a href="#risk"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★791 · 2026-08-09</div><div><a href="https://github.com/SaladDay/pi-from-scratch" target="_blank">SaladDay/pi-from-scratch</a></div><div><a href="../index.html">← 返回</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">pi-from-scratch <em>600 行手撕 Agent Loop</em></h1><p class="hero-desc">这个仓库把 coding agent 拆到最小可运行形态：<code>src/agent.ts:80</code> 暴露 async generator 循环，<code>src/llm.ts:167</code> 解析 OpenAI 兼容 SSE，<code>src/tools.ts:123</code> 注册四个内置工具，再由 <code>src/cli.ts:47</code> 接到终端输入和 JSONL session。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 791</div><div class="stat-lbl">Stars</div></div><div class="stat"><div class="stat-num">5.2K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">TypeScript</div><div class="stat-lbl">Language</div></div><div class="stat"><div class="stat-num">Aug 13</div><div class="stat-lbl">Active</div></div></div></div><div class="flow">user prompt
+  ↓
+Tui.onPrompt → cli context append
+  ↓
+runAgent while(true)
+  ↓
+stream() parses SSE + tool_calls
+  ↓
+execute tools → tool_result message
+  ↓
+next LLM turn or end_turn</div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2><p>pi-from-scratch 的目标不是做一个功能最全的 agent，而是把生产级 coding agent 的最小骨架摊开：<code>src/agent.ts:89</code> 用一个无限循环表达 agent 的生命线，<code>src/agent.ts:98</code> 把模型流事件接进循环，<code>src/agent.ts:122</code> 把 assistant message 写回 context，<code>src/agent.ts:172</code> 再把工具结果变成下一轮模型输入。这个闭环足够小，但已经包含 tool use、streaming、abort、compaction、session persistence 和测试。</p><p>它的教学价值在于每个模块都很薄。<code>src/llm.ts:57</code> 只负责消息格式转换，<code>src/llm.ts:107</code> 只解析一行 SSE，<code>src/tools.ts:24</code> 只做输出截断，<code>src/cli.ts:97</code> 只做 append-only JSONL 持久化。读者可以看到 agent 不是魔法，而是一组状态转换和协议适配。</p><h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">事件流驱动的单循环 agent；Context 是唯一状态。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">Model、Context、ContentBlock、AgentTool、AgentEvent。</div></div><div class="card"><div class="card-h">验证面</div><div class="card-d">Vitest 覆盖 agent loop、工具、SSE、session。</div></div><div class="card"><div class="card-h">下游体验</div><div class="card-d">CLI + Web TraceLab，兼顾运行和教学。</div></div></div><h3><span class="arr">▸</span>为什么不是 README 摘要</h3><p>源码里真正值得看的点出现在边界处理：<code>src/agent.ts:107</code> 在 abort 时丢弃未完成 tool_calls，<code>src/agent.ts:125</code> 遇到 max_tokens 时把错误写回 context，<code>src/tools.ts:88</code> 对 edit 做 0 匹配错误，<code>src/tools.ts:89</code> 对多匹配错误硬失败。这些细节决定一个教学 agent 是否会把 session 搞坏。</p></section>
+<section class="sec" id="loop"><div class="sec-no">§ <b>01</b> · AGENT LOOP</div><h2 class="sec-title">Agent Loop：<em>一个 while(true)</em>承载所有回合</h2><p>主循环从 <code>src/agent.ts:80</code> 的 async generator 开始，先在 <code>src/agent.ts:86</code> 建立 toolMap，再在 <code>src/agent.ts:89</code> 进入循环。每轮先执行 <code>src/agent.ts:91</code> 的 compaction，再通过 <code>src/agent.ts:98</code> 调用 stream。这里的取舍很清楚：agent 本体不直接知道 OpenAI SSE，只消费统一 StreamEvent。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L80-134</span><span>TypeScript</span></div><pre class="code"><span class="ln">80</span>export async function* runAgent(
+<span class="ln">81</span>  model: Model,
+<span class="ln">82</span>  context: Context,
+<span class="ln">83</span>  tools: AgentTool[],
+<span class="ln">84</span>  signal?: AbortSignal,
+<span class="ln">85</span>): AsyncGenerator&lt;AgentEvent&gt; {
+<span class="ln">86</span>  const toolMap = new Map(tools.map(t =&gt; [t.name, t]))
+<span class="ln">87</span>  const toolDefs = tools.map(t =&gt; ({ name: t.name, description: t.description, parameters: t.parameters }))
+<span class="ln">88</span>
+<span class="ln">89</span>  while (true) {
+<span class="ln">90</span>    // 0. 对话压缩：消息过多时先压缩旧消息
+<span class="ln">91</span>    await compactContext(model, context, signal)
+<span class="ln">92</span>
+<span class="ln">93</span>    // 1. 流式调用 LLM，收集文本和 tool_calls
+<span class="ln">94</span>    let text = &#x27;&#x27;
+<span class="ln">95</span>    let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | &#x27;aborted&#x27; = &#x27;end_turn&#x27;
+<span class="ln">96</span>    const toolCalls: { id: string; name: string; args: unknown }[] = []
+<span class="ln">97</span>
+<span class="ln">98</span>    for await (const ev of stream(model, context, { tools: toolDefs, signal })) {
+<span class="ln">99</span>      if (ev.type === &#x27;text_delta&#x27;) {
+<span class="ln">100</span>        text += ev.delta
+<span class="ln">101</span>        yield { type: &#x27;assistant_text&#x27;, delta: ev.delta }
+<span class="ln">102</span>      } else if (ev.type === &#x27;tool_call&#x27;) {
+<span class="ln">103</span>        toolCalls.push({ id: ev.id, name: ev.name, args: ev.args })
+<span class="ln">104</span>        yield { type: &#x27;tool_call&#x27;, id: ev.id, name: ev.name, args: ev.args }
+<span class="ln">105</span>      } else if (ev.type === &#x27;done&#x27;) {
+<span class="ln">106</span>        stopReason = ev.stopReason
+<span class="ln">107</span>        if (ev.stopReason === &#x27;aborted&#x27;) {
+<span class="ln">108</span>          // abort 时丢弃 tool_calls（无对应 tool_result 会导致 session 恢复后 API 报错）
+<span class="ln">109</span>          context.messages.push(buildAssistantMessage(text, []))
+<span class="ln">110</span>          yield { type: &#x27;turn_end&#x27;, stopReason: &#x27;aborted&#x27; }
+<span class="ln">111</span>          return
+<span class="ln">112</span>        }
+<span class="ln">113</span>      } else if (ev.type === &#x27;error&#x27;) {
+<span class="ln">114</span>        context.messages.push(buildAssistantMessage(text, []))
+<span class="ln">115</span>        yield { type: &#x27;assistant_text&#x27;, delta: `\n[error] ${ev.error.message}` }
+<span class="ln">116</span>        yield { type: &#x27;turn_end&#x27;, stopReason: &#x27;error&#x27; }
+<span class="ln">117</span>        return
+<span class="ln">118</span>      }
+<span class="ln">119</span>    }
+<span class="ln">120</span>
+<span class="ln">121</span>    // 2. 把 assistant 回复塞回 context
+<span class="ln">122</span>    context.messages.push(buildAssistantMessage(text, toolCalls))
+<span class="ln">123</span>
+<span class="ln">124</span>    // 3. 截断处理：max_tokens 时 tool args 可能不完整，不执行，把错误放回到 Context 让模型重发
+<span class="ln">125</span>    if (stopReason === &#x27;max_tokens&#x27; &amp;&amp; toolCalls.length &gt; 0) {
+<span class="ln">126</span>      const results = toolCalls.map(tc =&gt; ({
+<span class="ln">127</span>        tool_use_id: tc.id,
+<span class="ln">128</span>        content: `error: output truncated by max_tokens, tool &quot;${tc.name}&quot; args may be incomplete.`,
+<span class="ln">129</span>      }))
+<span class="ln">130</span>      context.messages.push(buildToolResultMessage(results))
+<span class="ln">131</span>      for (let i = 0; i &lt; toolCalls.length; i++) {
+<span class="ln">132</span>        yield { type: &#x27;tool_result&#x27;, id: toolCalls[i].id, name: toolCalls[i].name, result: results[i].content }
+<span class="ln">133</span>      }
+<span class="ln">134</span>      continue</pre></div><p>这段代码的关键不是“能调用工具”，而是工具调用如何进入 context。<code>src/agent.ts:102</code> 收到 tool_call 时只缓存和广播，<code>src/agent.ts:122</code> 才将完整 assistant 消息落入 context；如果 <code>src/agent.ts:125</code> 发现 max_tokens 截断，就不执行工具，而是在 <code>src/agent.ts:130</code> 写回错误，逼模型下一轮重发参数。</p><h3><span class="arr">▸</span>工具结果补齐</h3><p>执行工具的段落从 <code>src/agent.ts:145</code> 开始，串行执行是教学版有意简化。真正值得注意的是 <code>src/agent.ts:151</code> 未知工具返回错误而不是抛出，<code>src/agent.ts:155</code> 把 signal 传给工具，<code>src/agent.ts:166</code> 为 abort 后没跑到的 tool_call 补上 error。否则 OpenAI 兼容 API 恢复 session 时会因为 tool_call / tool_result 不配对报错。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L145-173</span><span>TypeScript</span></div><pre class="code"><span class="ln">145</span>    // 5. 串行执行 tool_calls（pi 有 sequential/parallel 两种模式，教学版统一串行）
+<span class="ln">146</span>    // args 未经 parameters 验证直接传入 execute（教学版简化，生产应先 validate）
+<span class="ln">147</span>    const results: { tool_use_id: string; content: string }[] = []
+<span class="ln">148</span>    for (const tc of toolCalls) {
+<span class="ln">149</span>      const tool = toolMap.get(tc.name)
+<span class="ln">150</span>      let result: string
+<span class="ln">151</span>      if (!tool) {
+<span class="ln">152</span>        result = `error: tool &quot;${tc.name}&quot; not found`
+<span class="ln">153</span>      } else {
+<span class="ln">154</span>        try {
+<span class="ln">155</span>          result = await tool.execute(tc.args, signal)
+<span class="ln">156</span>        } catch (e) {
+<span class="ln">157</span>          result = `error: ${(e as Error).message}`
+<span class="ln">158</span>        }
+<span class="ln">159</span>      }
+<span class="ln">160</span>      results.push({ tool_use_id: tc.id, content: result })
+<span class="ln">161</span>      yield { type: &#x27;tool_result&#x27;, id: tc.id, name: tc.name, result }
+<span class="ln">162</span>      if (signal?.aborted) break
+<span class="ln">163</span>    }
+<span class="ln">164</span>
+<span class="ln">165</span>    // 6. 为被 abort 跳过的 tool_call 补上错误结果（API 要求每个 tool_call 都有对应 tool_result）
+<span class="ln">166</span>    for (const tc of toolCalls.slice(results.length)) {
+<span class="ln">167</span>      results.push({ tool_use_id: tc.id, content: &#x27;error: aborted&#x27; })
+<span class="ln">168</span>      yield { type: &#x27;tool_result&#x27;, id: tc.id, name: tc.name, result: &#x27;error: aborted&#x27; }
+<span class="ln">169</span>    }
+<span class="ln">170</span>
+<span class="ln">171</span>    // 7. 把 tool_result 放回到 Context，进入下一轮
+<span class="ln">172</span>    context.messages.push(buildToolResultMessage(results))
+<span class="ln">173</span>  }</pre></div><a class="deep-link" href="pi-from-scratch/pi-from-scratch-agent-loop.html">深度阅读 · Agent Loop 与 Context 写回</a></section>
+<section class="sec" id="protocol"><div class="sec-no">§ <b>02</b> · PROTOCOL</div><h2 class="sec-title">LLM Adapter：把 OpenAI 兼容流转成四种事件</h2><h3><span class="arr">▸</span>Context 到 OpenAI messages</h3><p><code>src/llm.ts:57</code> 是协议适配的入口，系统提示在 <code>src/llm.ts:59</code> 被提升为 system message；assistant 的 tool_use 在 <code>src/llm.ts:74</code> 被转成 function tool_calls；user 里的 tool_result 在 <code>src/llm.ts:85</code> 被拆成 role:tool 消息。这让 agent 内部保持纯 JSON，但对外满足 OpenAI 兼容格式。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L57-92</span><span>TypeScript</span></div><pre class="code"><span class="ln">57</span>export function contextToOpenAIMessages(context: Context): object[] {
+<span class="ln">58</span>  const messages: object[] = []
+<span class="ln">59</span>  if (context.systemPrompt) messages.push({ role: &#x27;system&#x27;, content: context.systemPrompt })
+<span class="ln">60</span>
+<span class="ln">61</span>  for (const msg of context.messages) {
+<span class="ln">62</span>    if (typeof msg.content === &#x27;string&#x27;) {
+<span class="ln">63</span>      messages.push({ role: msg.role, content: msg.content })
+<span class="ln">64</span>      continue
+<span class="ln">65</span>    }
+<span class="ln">66</span>
+<span class="ln">67</span>    const blocks = msg.content
+<span class="ln">68</span>    if (msg.role === &#x27;assistant&#x27;) {
+<span class="ln">69</span>      const toolCalls: object[] = []
+<span class="ln">70</span>      let text = &#x27;&#x27;
+<span class="ln">71</span>      for (const b of blocks) {
+<span class="ln">72</span>        if (b.type === &#x27;text&#x27;) text += b.text
+<span class="ln">73</span>        else if (b.type === &#x27;tool_use&#x27;) {
+<span class="ln">74</span>          toolCalls.push({ id: b.id, type: &#x27;function&#x27;, function: { name: b.name, arguments: JSON.stringify(b.input) } })
+<span class="ln">75</span>        }
+<span class="ln">76</span>      }
+<span class="ln">77</span>      // OpenAI 要求 assistant 消息必须有 content（非 null）或 tool_calls。
+<span class="ln">78</span>      // 纯 tool_call 时 content 为 null；两者皆空（如 abort/error 后的无内容轮次）用空串占位，避免 API 400。
+<span class="ln">79</span>      const content = text || (toolCalls.length ? null : &#x27;&#x27;)
+<span class="ln">80</span>      messages.push({ role: &#x27;assistant&#x27;, content, tool_calls: toolCalls.length ? toolCalls : undefined })
+<span class="ln">81</span>    } else {
+<span class="ln">82</span>      // user message 里的 tool_result block → OpenAI 要求独立的 role:tool 消息
+<span class="ln">83</span>      for (const b of blocks) {
+<span class="ln">84</span>        if (b.type === &#x27;tool_result&#x27;) {
+<span class="ln">85</span>          messages.push({ role: &#x27;tool&#x27;, tool_call_id: b.tool_use_id, content: b.content })
+<span class="ln">86</span>        } else if (b.type === &#x27;text&#x27;) {
+<span class="ln">87</span>          messages.push({ role: &#x27;user&#x27;, content: b.text })
+<span class="ln">88</span>        }
+<span class="ln">89</span>      }
+<span class="ln">90</span>    }
+<span class="ln">91</span>  }
+<span class="ln">92</span>  return messages</pre></div><h3><span class="arr">▸</span>SSE 增量和 tool_call buffer</h3><p>流式解析的复杂度集中在 <code>src/llm.ts:107</code> 和 <code>src/llm.ts:144</code>。模型可能把 function arguments 分多次吐出，所以 <code>src/llm.ts:127</code> 先按 index 建 buffer，<code>src/llm.ts:132</code> 追加 JSON 字符串，最后 <code>src/llm.ts:151</code> 尝试 JSON.parse。这个设计解释了为什么 tool_call 事件要等流结束后统一 flush。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L107-155</span><span>TypeScript</span></div><pre class="code"><span class="ln">107</span>function handleSSELine(
+<span class="ln">108</span>  data: string,
+<span class="ln">109</span>  toolCallBuffers: Map&lt;number, { id: string; name: string; argsBuf: string }&gt;,
+<span class="ln">110</span>): { textDelta: string | null; stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | null } {
+<span class="ln">111</span>  let chunk: OpenAIChunk
+<span class="ln">112</span>  try { chunk = JSON.parse(data) as OpenAIChunk } catch { return { textDelta: null, stopReason: null } }
+<span class="ln">113</span>
+<span class="ln">114</span>  const choice = chunk.choices[0]
+<span class="ln">115</span>  if (!choice) return { textDelta: null, stopReason: null }
+<span class="ln">116</span>
+<span class="ln">117</span>  let textDelta: string | null = null
+<span class="ln">118</span>  let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | null = null
+<span class="ln">119</span>
+<span class="ln">120</span>  if (choice.delta?.content) textDelta = choice.delta.content
+<span class="ln">121</span>
+<span class="ln">122</span>  // tool_call 增量：按 index 累积 name + arguments 的 partial JSON
+<span class="ln">123</span>  if (choice.delta?.tool_calls) {
+<span class="ln">124</span>    for (const tc of choice.delta.tool_calls) {
+<span class="ln">125</span>      const idx = tc.index ?? 0
+<span class="ln">126</span>      if (!toolCallBuffers.has(idx)) {
+<span class="ln">127</span>        toolCallBuffers.set(idx, { id: tc.id ?? `call_${idx}`, name: &#x27;&#x27;, argsBuf: &#x27;&#x27; })
+<span class="ln">128</span>      }
+<span class="ln">129</span>      const entry = toolCallBuffers.get(idx)!
+<span class="ln">130</span>      if (tc.id) entry.id = tc.id
+<span class="ln">131</span>      if (tc.function?.name) entry.name = tc.function.name
+<span class="ln">132</span>      if (tc.function?.arguments) entry.argsBuf += tc.function.arguments
+<span class="ln">133</span>    }
+<span class="ln">134</span>  }
+<span class="ln">135</span>
+<span class="ln">136</span>  // finish_reason 映射：tool_calls → tool_use，length → max_tokens，stop → end_turn（默认值）
+<span class="ln">137</span>  if (choice.finish_reason === &#x27;tool_calls&#x27;) stopReason = &#x27;tool_use&#x27;
+<span class="ln">138</span>  else if (choice.finish_reason === &#x27;length&#x27;) stopReason = &#x27;max_tokens&#x27;
+<span class="ln">139</span>
+<span class="ln">140</span>  return { textDelta, stopReason }
+<span class="ln">141</span>}
+<span class="ln">142</span>
+<span class="ln">143</span>/** 流结束：把累积的 tool_calls 按顺序发出 */
+<span class="ln">144</span>function flushToolCalls(
+<span class="ln">145</span>  toolCallBuffers: Map&lt;number, { id: string; name: string; argsBuf: string }&gt;,
+<span class="ln">146</span>): { id: string; name: string; args: unknown }[] {
+<span class="ln">147</span>  const calls: { id: string; name: string; args: unknown }[] = []
+<span class="ln">148</span>  for (const [, tc] of [...toolCallBuffers].sort((a, b) =&gt; a[0] - b[0])) {
+<span class="ln">149</span>    let args: unknown = {}
+<span class="ln">150</span>    if (tc.argsBuf) {
+<span class="ln">151</span>      try { args = JSON.parse(tc.argsBuf) } catch { args = {} }
+<span class="ln">152</span>    }
+<span class="ln">153</span>    calls.push({ id: tc.id, name: tc.name, args })
+<span class="ln">154</span>  }
+<span class="ln">155</span>  return calls</pre></div><p>网络请求本身在 <code>src/llm.ts:167</code> 之后组装：<code>src/llm.ts:175</code> 放 model、stream、messages，<code>src/llm.ts:178</code> 注入 tool definitions，<code>src/llm.ts:187</code> 发 fetch，<code>src/llm.ts:234</code> 再把累计 tool_calls 逐个 yield。错误路径也很薄，<code>src/llm.ts:198</code> 把非 2xx 变成 error event。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L167-238</span><span>TypeScript</span></div><pre class="code"><span class="ln">167</span>export async function* stream(
+<span class="ln">168</span>  model: Model,
+<span class="ln">169</span>  context: Context,
+<span class="ln">170</span>  opts: { tools?: ToolDef[]; signal?: AbortSignal } = {},
+<span class="ln">171</span>): AsyncGenerator&lt;StreamEvent&gt; {
+<span class="ln">172</span>  const url = `${model.baseUrl ?? &#x27;https://api.openai.com/v1&#x27;}/chat/completions`
+<span class="ln">173</span>  const messages = contextToOpenAIMessages(context)
+<span class="ln">174</span>
+<span class="ln">175</span>  const body: Record&lt;string, unknown&gt; = { model: model.model, stream: true, messages }
+<span class="ln">176</span>  if (model.maxTokens) body.max_tokens = model.maxTokens
+<span class="ln">177</span>  if (opts.tools?.length) {
+<span class="ln">178</span>    body.tools = opts.tools.map(t =&gt; ({
+<span class="ln">179</span>      type: &#x27;function&#x27;,
+<span class="ln">180</span>      function: { name: t.name, description: t.description, parameters: t.parameters },
+<span class="ln">181</span>    }))
+<span class="ln">182</span>  }
+<span class="ln">183</span>
+<span class="ln">184</span>  // 发请求
+<span class="ln">185</span>  let response: Response
+<span class="ln">186</span>  try {
+<span class="ln">187</span>    response = await fetch(url, {
+<span class="ln">188</span>      method: &#x27;POST&#x27;,
+<span class="ln">189</span>      headers: { &#x27;content-type&#x27;: &#x27;application/json&#x27;, authorization: `Bearer ${model.apiKey}` },
+<span class="ln">190</span>      body: JSON.stringify(body),
+<span class="ln">191</span>      signal: opts.signal,
+<span class="ln">192</span>    })
+<span class="ln">193</span>  } catch (e) {
+<span class="ln">194</span>    if (opts.signal?.aborted) { yield { type: &#x27;done&#x27;, stopReason: &#x27;aborted&#x27; }; return }
+<span class="ln">195</span>    yield { type: &#x27;error&#x27;, error: e as Error }; return
+<span class="ln">196</span>  }
+<span class="ln">197</span>
+<span class="ln">198</span>  if (!response.ok || !response.body) {
+<span class="ln">199</span>    const text = await response.text().catch(() =&gt; &#x27;unknown error&#x27;)
+<span class="ln">200</span>    yield { type: &#x27;error&#x27;, error: new Error(`API ${response.status}: ${text}`) }; return
+<span class="ln">201</span>  }
+<span class="ln">202</span>
+<span class="ln">203</span>  // 逐行解析 SSE
+<span class="ln">204</span>  const reader = response.body.getReader()
+<span class="ln">205</span>  const decoder = new TextDecoder()
+<span class="ln">206</span>  let buf = &#x27;&#x27;
+<span class="ln">207</span>  let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; = &#x27;end_turn&#x27;
+<span class="ln">208</span>  const toolCallBuffers = new Map&lt;number, { id: string; name: string; argsBuf: string }&gt;()
+<span class="ln">209</span>
+<span class="ln">210</span>  try {
+<span class="ln">211</span>    while (true) {
+<span class="ln">212</span>      const { done, value } = await reader.read()
+<span class="ln">213</span>      if (done) break
+<span class="ln">214</span>      buf += decoder.decode(value, { stream: true })
+<span class="ln">215</span>
+<span class="ln">216</span>      let nl: number
+<span class="ln">217</span>      while ((nl = buf.indexOf(&#x27;\n&#x27;)) &gt;= 0) {
+<span class="ln">218</span>        const line = buf.slice(0, nl).trim()
+<span class="ln">219</span>        buf = buf.slice(nl + 1)
+<span class="ln">220</span>        if (!line.startsWith(&#x27;data: &#x27;)) continue
+<span class="ln">221</span>        const data = line.slice(6)
+<span class="ln">222</span>        if (data === &#x27;[DONE]&#x27;) continue
+<span class="ln">223</span>
+<span class="ln">224</span>        const result = handleSSELine(data, toolCallBuffers)
+<span class="ln">225</span>        if (result.textDelta) yield { type: &#x27;text_delta&#x27;, delta: result.textDelta }
+<span class="ln">226</span>        if (result.stopReason) stopReason = result.stopReason
+<span class="ln">227</span>      }
+<span class="ln">228</span>    }
+<span class="ln">229</span>  } catch (e) {
+<span class="ln">230</span>    if (opts.signal?.aborted) { yield { type: &#x27;done&#x27;, stopReason: &#x27;aborted&#x27; }; return }
+<span class="ln">231</span>    yield { type: &#x27;error&#x27;, error: e as Error }; return
+<span class="ln">232</span>  }
+<span class="ln">233</span>
+<span class="ln">234</span>  // 发出累积的 tool_calls
+<span class="ln">235</span>  for (const tc of flushToolCalls(toolCallBuffers)) {
+<span class="ln">236</span>    yield { type: &#x27;tool_call&#x27;, id: tc.id, name: tc.name, args: tc.args }
+<span class="ln">237</span>  }
+<span class="ln">238</span>  yield { type: &#x27;done&#x27;, stopReason: opts.signal?.aborted ? &#x27;aborted&#x27; : stopReason }</pre></div><a class="deep-link" href="pi-from-scratch/pi-from-scratch-llm-tools.html">深度阅读 · LLM 协议与工具契约</a></section>
+<section class="sec" id="tools"><div class="sec-no">§ <b>03</b> · TOOLS</div><h2 class="sec-title">工具层：能读写改跑，<em>但保留教学边界</em></h2><h3><span class="arr">▸</span>四个工具的最小闭环</h3><p>工具层用 <code>src/tools.ts:34</code> 定义 read_file、<code>src/tools.ts:52</code> 定义 write_file、<code>src/tools.ts:72</code> 定义 edit、<code>src/tools.ts:98</code> 定义 run_bash，最后由 <code>src/tools.ts:123</code> 统一导出。每个工具都是纯 execute 函数，不碰 agent 状态，这是把副作用限制在工具边界内的关键。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/tools.ts</span> · L20-49</span><span>TypeScript</span></div><pre class="code"><span class="ln">20</span>/**
+<span class="ln">21</span> * 截取工具输出：超过 maxLines 行时只保留尾部，完整输出存到临时文件。
+<span class="ln">22</span> * 尾部优先——错误信息通常在末尾。
+<span class="ln">23</span> */
+<span class="ln">24</span>async function truncateOutput(content: string, maxLines = MAX_OUTPUT_LINES): Promise&lt;string&gt; {
+<span class="ln">25</span>  const lines = content.split(&#x27;\n&#x27;)
+<span class="ln">26</span>  if (lines.length &lt;= maxLines) return content
+<span class="ln">27</span>  const kept = lines.slice(-maxLines).join(&#x27;\n&#x27;)
+<span class="ln">28</span>  const tmpPath = path.join(os.tmpdir(), `nanopi-output-${process.pid}-${truncateCounter++}.txt`)
+<span class="ln">29</span>  await fs.writeFile(tmpPath, content, &#x27;utf-8&#x27;)
+<span class="ln">30</span>  return `[output truncated: showing last ${maxLines} of ${lines.length} lines. full output: ${tmpPath}]\n${kept}`
+<span class="ln">31</span>}
+<span class="ln">32</span>
+<span class="ln">33</span>/** read_file：返回文件内容（截取尾部防止超大输出） */
+<span class="ln">34</span>const readFile: AgentTool = {
+<span class="ln">35</span>  name: &#x27;read_file&#x27;,
+<span class="ln">36</span>  description: &#x27;读取文件内容。参数：path（文件路径）。大文件截取最后 200 行。&#x27;,
+<span class="ln">37</span>  parameters: {
+<span class="ln">38</span>    type: &#x27;object&#x27;,
+<span class="ln">39</span>    properties: {
+<span class="ln">40</span>      path: { type: &#x27;string&#x27;, description: &#x27;要读取的文件路径&#x27; },
+<span class="ln">41</span>    },
+<span class="ln">42</span>    required: [&#x27;path&#x27;],
+<span class="ln">43</span>  },
+<span class="ln">44</span>  execute: async (args) =&gt; {
+<span class="ln">45</span>    const { path: filePath } = args as { path: string }
+<span class="ln">46</span>    const content = await fs.readFile(filePath, &#x27;utf-8&#x27;)
+<span class="ln">47</span>    return await truncateOutput(content)
+<span class="ln">48</span>  },
+<span class="ln">49</span>}</pre></div><p>edit 的实现体现了“少而硬”的质量门：<code>src/tools.ts:87</code> 统计 old_string 出现次数，<code>src/tools.ts:88</code> 对 0 次匹配失败，<code>src/tools.ts:89</code> 对多处匹配失败，<code>src/tools.ts:91</code> 用函数替换避免 new_string 里的美元符号被 String.replace 解释。对 coding agent 来说，这比模糊 patch 更可控。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/tools.ts</span> · L71-124</span><span>TypeScript</span></div><pre class="code"><span class="ln">71</span>/** edit：局部字符串替换（精确匹配 + 唯一性校验） */
+<span class="ln">72</span>const edit: AgentTool = {
+<span class="ln">73</span>  name: &#x27;edit&#x27;,
+<span class="ln">74</span>  description: &#x27;编辑文件：精确替换一段文本。参数：path、old_string、new_string。old_string 必须在文件中唯一匹配，否则报错。&#x27;,
+<span class="ln">75</span>  parameters: {
+<span class="ln">76</span>    type: &#x27;object&#x27;,
+<span class="ln">77</span>    properties: {
+<span class="ln">78</span>      path: { type: &#x27;string&#x27;, description: &#x27;文件路径&#x27; },
+<span class="ln">79</span>      old_string: { type: &#x27;string&#x27;, description: &#x27;要被替换的文本（必须唯一匹配）&#x27; },
+<span class="ln">80</span>      new_string: { type: &#x27;string&#x27;, description: &#x27;替换后的文本&#x27; },
+<span class="ln">81</span>    },
+<span class="ln">82</span>    required: [&#x27;path&#x27;, &#x27;old_string&#x27;, &#x27;new_string&#x27;],
+<span class="ln">83</span>  },
+<span class="ln">84</span>  execute: async (args) =&gt; {
+<span class="ln">85</span>    const { path: filePath, old_string, new_string } = args as { path: string; old_string: string; new_string: string }
+<span class="ln">86</span>    const content = await fs.readFile(filePath, &#x27;utf-8&#x27;)
+<span class="ln">87</span>    const count = content.split(old_string).length - 1
+<span class="ln">88</span>    if (count === 0) throw new Error(`old_string not found in ${filePath}`)
+<span class="ln">89</span>    if (count &gt; 1) throw new Error(`old_string matches ${count} places in ${filePath}, must be unique`)
+<span class="ln">90</span>    // 用函数替换避免 new_string 中的 $ 特殊字符（$&amp; $` $&#x27; $1）被 String.replace 解释
+<span class="ln">91</span>    const newContent = content.replace(old_string, () =&gt; new_string)
+<span class="ln">92</span>    await fs.writeFile(filePath, newContent, &#x27;utf-8&#x27;)
+<span class="ln">93</span>    return `edited ${filePath}: replaced ${old_string.length} chars`
+<span class="ln">94</span>  },
+<span class="ln">95</span>}
+<span class="ln">96</span>
+<span class="ln">97</span>/** run_bash：执行 shell 命令（截取尾部输出防止超大输出） */
+<span class="ln">98</span>const runBash: AgentTool = {
+<span class="ln">99</span>  name: &#x27;run_bash&#x27;,
+<span class="ln">100</span>  description: &#x27;执行 shell 命令。参数：command（命令字符串）。返回 stdout+stderr，截取最后 200 行。&#x27;,
+<span class="ln">101</span>  parameters: {
+<span class="ln">102</span>    type: &#x27;object&#x27;,
+<span class="ln">103</span>    properties: {
+<span class="ln">104</span>      command: { type: &#x27;string&#x27;, description: &#x27;要执行的 shell 命令&#x27; },
+<span class="ln">105</span>    },
+<span class="ln">106</span>    required: [&#x27;command&#x27;],
+<span class="ln">107</span>  },
+<span class="ln">108</span>  execute: async (args, signal) =&gt; {
+<span class="ln">109</span>    const { command } = args as { command: string }
+<span class="ln">110</span>    try {
+<span class="ln">111</span>      const { stdout, stderr } = await execAsync(command, { maxBuffer: 1024 * 1024, timeout: 30000, signal })
+<span class="ln">112</span>      const output = stderr ? `[stderr] ${stderr}\n[stdout] ${stdout}` : stdout
+<span class="ln">113</span>      return await truncateOutput(output)
+<span class="ln">114</span>    } catch (e: unknown) {
+<span class="ln">115</span>      if (signal?.aborted) return &#x27;aborted&#x27;
+<span class="ln">116</span>      const err = e as NodeJS.ErrnoException &amp; { code?: number; stdout?: string; stderr?: string }
+<span class="ln">117</span>      return `[exit ${err.code}] ${err.stderr ?? &#x27;&#x27;}${err.stdout ?? &#x27;&#x27;}`
+<span class="ln">118</span>    }
+<span class="ln">119</span>  },
+<span class="ln">120</span>}
+<span class="ln">121</span>
+<span class="ln">122</span>/** 返回全部内置工具 */
+<span class="ln">123</span>export function builtinTools(): AgentTool[] {
+<span class="ln">124</span>  return [readFile, writeFile, edit, runBash]</pre></div><h3><span class="arr">▸</span>CLI 与 session</h3><p><code>src/cli.ts:47</code> 接收用户输入后，先在 <code>src/cli.ts:49</code> 把 user message 追加到 context，再在 <code>src/cli.ts:55</code> 消费 runAgent 事件。回合结束后 <code>src/cli.ts:68</code> 执行持久化，而 <code>src/cli.ts:97</code> 只 append 新消息，避免重复写入历史。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/cli.ts</span> · L47-104</span><span>TypeScript</span></div><pre class="code"><span class="ln">47</span>  tui.onPrompt(async (text) =&gt; {
+<span class="ln">48</span>    try {
+<span class="ln">49</span>      context.messages.push({ role: &#x27;user&#x27;, content: text })
+<span class="ln">50</span>
+<span class="ln">51</span>      tui.setBusy(true)
+<span class="ln">52</span>      const ctrl = new AbortController()
+<span class="ln">53</span>      tui.onAbort(() =&gt; ctrl.abort())  // 每轮新建 AbortController，需重新注册回调指向新的 controller
+<span class="ln">54</span>
+<span class="ln">55</span>      for await (const ev of runAgent(model, context, tools, ctrl.signal)) {
+<span class="ln">56</span>        switch (ev.type) {
+<span class="ln">57</span>          case &#x27;assistant_text&#x27;: tui.printText(ev.delta); break
+<span class="ln">58</span>          case &#x27;tool_call&#x27;: tui.printToolCall(ev.name, ev.args); break
+<span class="ln">59</span>          case &#x27;tool_result&#x27;: tui.printToolResult(ev.name, ev.result); break
+<span class="ln">60</span>          case &#x27;turn_end&#x27;:
+<span class="ln">61</span>            if (ev.stopReason === &#x27;max_tokens&#x27;) tui.printText(&#x27;\n[output truncated by max_tokens]&#x27;)
+<span class="ln">62</span>            if (ev.stopReason === &#x27;error&#x27;) tui.printText(&#x27;\n[error occurred]&#x27;)
+<span class="ln">63</span>            tui.printTurnEnd()
+<span class="ln">64</span>            break
+<span class="ln">65</span>        }
+<span class="ln">66</span>      }
+<span class="ln">67</span>
+<span class="ln">68</span>      await persistSession(context.messages)
+<span class="ln">69</span>    } catch (e) {
+<span class="ln">70</span>      console.error(`\n[error] ${(e as Error).message}`)
+<span class="ln">71</span>    } finally {
+<span class="ln">72</span>      tui.setBusy(false)
+<span class="ln">73</span>    }
+<span class="ln">74</span>  })
+<span class="ln">75</span>
+<span class="ln">76</span>  tui.start()
+<span class="ln">77</span>
+<span class="ln">78</span>}
+<span class="ln">79</span>
+<span class="ln">80</span>/** 启动时加载历史 messages，恢复上次对话（导出供测试） */
+<span class="ln">81</span>export async function loadSession(file: string = SESSION_FILE): Promise&lt;Message[]&gt; {
+<span class="ln">82</span>  try {
+<span class="ln">83</span>    const data = await fs.readFile(file, &#x27;utf-8&#x27;)
+<span class="ln">84</span>    const lines = data.trim().split(&#x27;\n&#x27;).filter(Boolean)
+<span class="ln">85</span>    // 逐行容错：跳过损坏行而非丢弃全部历史（进程崩溃可能写出半行 JSON）
+<span class="ln">86</span>    const messages = lines.flatMap(line =&gt; {
+<span class="ln">87</span>      try { return [JSON.parse(line) as Message] } catch { return [] }
+<span class="ln">88</span>    })
+<span class="ln">89</span>    persistedCount = messages.length  // 已加载的不重复写
+<span class="ln">90</span>    return messages
+<span class="ln">91</span>  } catch {
+<span class="ln">92</span>    return []  // 文件不存在，从空开始
+<span class="ln">93</span>  }
+<span class="ln">94</span>}
+<span class="ln">95</span>
+<span class="ln">96</span>/** 持久化 messages 到 session 文件（导出供测试） */
+<span class="ln">97</span>export async function persistSession(messages: Message[], file: string = SESSION_FILE): Promise&lt;void&gt; {
+<span class="ln">98</span>  await fs.mkdir(path.dirname(file) || &#x27;.&#x27;, { recursive: true })
+<span class="ln">99</span>  const newMessages = messages.slice(persistedCount)
+<span class="ln">100</span>  for (const msg of newMessages) {
+<span class="ln">101</span>    await fs.appendFile(file, JSON.stringify(msg) + &#x27;\n&#x27;, &#x27;utf-8&#x27;)
+<span class="ln">102</span>  }
+<span class="ln">103</span>  persistedCount = messages.length
+<span class="ln">104</span>}</pre></div><a class="deep-link" href="pi-from-scratch/pi-from-scratch-trace-ui.html">深度阅读 · Trace Lab 与教学调试器</a></section>
+<section class="sec" id="trace"><div class="sec-no">§ <b>04</b> · TRACE LAB</div><h2 class="sec-title">Trace Lab：把运行过程变成可单步调试教材</h2><h3><span class="arr">▸</span>真实 trace 不是手写截图</h3><p>trace 生成器读取真实源码：<code>scripts/generate-traces.ts:44</code> 收集五个核心文件，<code>scripts/generate-traces.ts:55</code> 通过 needle 反查行号，<code>scripts/generate-traces.ts:90</code> 根据最新 context 判断源码位置，<code>scripts/generate-traces.ts:166</code> 构造教学步骤。这个 pipeline 让网页里的每一步都能回到真实源码。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/generate-traces.ts</span> · L44-96</span><span>TypeScript</span></div><pre class="code"><span class="ln">44</span>const sourceFiles = Object.fromEntries(
+<span class="ln">45</span>  await Promise.all(
+<span class="ln">46</span>    ([&#x27;src/llm.ts&#x27;, &#x27;src/agent.ts&#x27;, &#x27;src/tools.ts&#x27;, &#x27;src/tui.ts&#x27;, &#x27;src/cli.ts&#x27;] as SourceFile[])
+<span class="ln">47</span>      .map(async (file) =&gt; [file, await readFile(resolve(projectRoot, file), &#x27;utf8&#x27;)]),
+<span class="ln">48</span>  ),
+<span class="ln">49</span>) as Record&lt;SourceFile, string&gt;
+<span class="ln">50</span>
+<span class="ln">51</span>function cloneContext(context: Context): TraceContext {
+<span class="ln">52</span>  return JSON.parse(JSON.stringify(context)) as TraceContext
+<span class="ln">53</span>}
+<span class="ln">54</span>
+<span class="ln">55</span>function findLine(file: SourceFile, needle: string, occurrence = 0): number {
+<span class="ln">56</span>  const matches = sourceFiles[file]
+<span class="ln">57</span>    .split(&#x27;\n&#x27;)
+<span class="ln">58</span>    .map((line, index) =&gt; ({ line, number: index + 1 }))
+<span class="ln">59</span>    .filter((entry) =&gt; entry.line.includes(needle))
+<span class="ln">60</span>  const match = occurrence &lt; 0 ? matches.at(occurrence) : matches[occurrence]
+<span class="ln">61</span>  if (!match) throw new Error(`找不到 trace 源码位置：${file} / ${needle}`)
+<span class="ln">62</span>  return match.number
+<span class="ln">63</span>}
+<span class="ln">64</span>
+<span class="ln">65</span>function source(file: SourceFile, needle: string, occurrence = 0): TraceSource {
+<span class="ln">66</span>  return { file, line: findLine(file, needle, occurrence) }
+<span class="ln">67</span>}
+<span class="ln">68</span>
+<span class="ln">69</span>function normalizeText(value: string, workspace: string): string {
+<span class="ln">70</span>  return value.split(workspace).join(&#x27;/workspace&#x27;)
+<span class="ln">71</span>}
+<span class="ln">72</span>
+<span class="ln">73</span>function normalizeValue&lt;T&gt;(value: T, workspace: string): T {
+<span class="ln">74</span>  return JSON.parse(normalizeText(JSON.stringify(value), workspace)) as T
+<span class="ln">75</span>}
+<span class="ln">76</span>
+<span class="ln">77</span>function messageKind(message: unknown): &#x27;tool_result&#x27; | &#x27;assistant&#x27; | &#x27;other&#x27; {
+<span class="ln">78</span>  if (!message || typeof message !== &#x27;object&#x27;) return &#x27;other&#x27;
+<span class="ln">79</span>  const item = message as { role?: string; content?: unknown }
+<span class="ln">80</span>  if (item.role === &#x27;assistant&#x27;) return &#x27;assistant&#x27;
+<span class="ln">81</span>  if (item.role === &#x27;user&#x27; &amp;&amp; Array.isArray(item.content)) {
+<span class="ln">82</span>    const hasResult = item.content.some((block) =&gt; (
+<span class="ln">83</span>      block &amp;&amp; typeof block === &#x27;object&#x27; &amp;&amp; (block as { type?: string }).type === &#x27;tool_result&#x27;
+<span class="ln">84</span>    ))
+<span class="ln">85</span>    if (hasResult) return &#x27;tool_result&#x27;
+<span class="ln">86</span>  }
+<span class="ln">87</span>  return &#x27;other&#x27;
+<span class="ln">88</span>}
+<span class="ln">89</span>
+<span class="ln">90</span>function contextStepSource(context: TraceContext): TraceSource {
+<span class="ln">91</span>  const latest = context.messages.at(-1)
+<span class="ln">92</span>  if (messageKind(latest) === &#x27;tool_result&#x27;) {
+<span class="ln">93</span>    return source(&#x27;src/agent.ts&#x27;, &#x27;context.messages.push(buildToolResultMessage(results))&#x27;, -1)
+<span class="ln">94</span>  }
+<span class="ln">95</span>  return source(&#x27;src/agent.ts&#x27;, &#x27;context.messages.push(buildAssistantMessage(text, toolCalls))&#x27;, -1)
+<span class="ln">96</span>}</pre></div><h3><span class="arr">▸</span>前端调试器复现调用栈</h3><p>Web 侧的 <code>web/app/trace-debugger.ts:100</code> 会把 trace case 展开成 debug frames，<code>web/app/trace-debugger.ts:119</code> 的 push 同时记录变量、事件、context 和 callStack。展示层在 <code>web/app/TraceLab.tsx:48</code> 用 useMemo 构建 frames，<code>web/app/TraceLab.tsx:72</code> 支持继续到断点，<code>web/app/TraceLab.tsx:186</code> 把当前源码行高亮。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">web/app/trace-debugger.ts</span> · L100-149</span><span>TypeScript</span></div><pre class="code"><span class="ln">100</span>export function buildDebugFrames(traceCase: TraceCase): TraceDebugFrame[] {
+<span class="ln">101</span>  const frames: TraceDebugFrame[] = [];
+<span class="ln">102</span>  const first = traceCase.steps[0];
+<span class="ln">103</span>  if (!first) return frames;
+<span class="ln">104</span>
+<span class="ln">105</span>  let context: TraceContext = clone(first.context);
+<span class="ln">106</span>  const state: RuntimeState = {
+<span class="ln">107</span>    text: &quot;&quot;,
+<span class="ln">108</span>    stopReason: &quot;end_turn&quot;,
+<span class="ln">109</span>    toolCalls: [],
+<span class="ln">110</span>    results: [],
+<span class="ln">111</span>    ev: null,
+<span class="ln">112</span>    signalAborted: false,
+<span class="ln">113</span>    loop: 1,
+<span class="ln">114</span>  };
+<span class="ln">115</span>  let sequence = 0;
+<span class="ln">116</span>  let toolPhaseStarted = false;
+<span class="ln">117</span>  let abortPrepared = false;
+<span class="ln">118</span>
+<span class="ln">119</span>  const push = (
+<span class="ln">120</span>    file: SourceFile,
+<span class="ln">121</span>    needle: string,
+<span class="ln">122</span>    options: {
+<span class="ln">123</span>      occurrence?: number;
+<span class="ln">124</span>      label?: string;
+<span class="ln">125</span>      event?: Record&lt;string, unknown&gt;;
+<span class="ln">126</span>      variables?: Record&lt;string, unknown&gt;;
+<span class="ln">127</span>    } = {},
+<span class="ln">128</span>  ) =&gt; {
+<span class="ln">129</span>    const position = source(file, needle, options.occurrence ?? 0);
+<span class="ln">130</span>    const variables = {
+<span class="ln">131</span>      text: state.text,
+<span class="ln">132</span>      stopReason: state.stopReason,
+<span class="ln">133</span>      toolCalls: clone(state.toolCalls),
+<span class="ln">134</span>      results: clone(state.results),
+<span class="ln">135</span>      ev: clone(state.ev),
+<span class="ln">136</span>      &quot;signal.aborted&quot;: state.signalAborted,
+<span class="ln">137</span>      &quot;context.messages.length&quot;: context.messages.length,
+<span class="ln">138</span>      loop: state.loop,
+<span class="ln">139</span>      ...options.variables,
+<span class="ln">140</span>    };
+<span class="ln">141</span>    frames.push({
+<span class="ln">142</span>      id: `${traceCase.id}-${sequence++}`,
+<span class="ln">143</span>      label: options.label ?? sourceLabel(position),
+<span class="ln">144</span>      source: position,
+<span class="ln">145</span>      event: options.event ? clone(options.event) : undefined,
+<span class="ln">146</span>      context: clone(context),
+<span class="ln">147</span>      variables,
+<span class="ln">148</span>      callStack: callStack(position),
+<span class="ln">149</span>    });</pre></div><p>这意味着项目不只是 CLI demo，而是把 agent loop 的隐性状态显性化：<code>web/app/TraceLab.tsx:220</code> 展示 Core State，<code>web/app/TraceLab.tsx:232</code> 展示调用栈，<code>web/app/TraceLab.tsx:242</code> 展示事件 JSON，<code>web/app/TraceLab.tsx:249</code> 展示 Context。它让学习者看到每个 tool_result 为什么会进入下一轮。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">web/app/TraceLab.tsx</span> · L40-78</span><span>TypeScript</span></div><pre class="code"><span class="ln">40</span>export default function TraceLab() {
+<span class="ln">41</span>  const [caseIndex, setCaseIndex] = useState(0);
+<span class="ln">42</span>  const [frameIndex, setFrameIndex] = useState(0);
+<span class="ln">43</span>  const [breakpoints, setBreakpoints] = useState&lt;ReadonlySet&lt;string&gt;&gt;(() =&gt; new Set());
+<span class="ln">44</span>  const [selectedFile, setSelectedFile] = useState&lt;TraceSource[&quot;file&quot;]&gt;(&quot;src/tui.ts&quot;);
+<span class="ln">45</span>  const codeScrollRef = useRef&lt;HTMLDivElement&gt;(null);
+<span class="ln">46</span>
+<span class="ln">47</span>  const traceCase = traceCases[caseIndex] ?? null;
+<span class="ln">48</span>  const debugFrames = useMemo(() =&gt; traceCase ? buildDebugFrames(traceCase) : [], [traceCase]);
+<span class="ln">49</span>  const frame = debugFrames[frameIndex] ?? null;
+<span class="ln">50</span>  const sourceCode = fullRepo[selectedFile] ?? &quot;&quot;;
+<span class="ln">51</span>  const sourceLines = useMemo(() =&gt; sourceCode.split(&quot;\n&quot;), [sourceCode]);
+<span class="ln">52</span>  const executableLines = useMemo(() =&gt; new Set(
+<span class="ln">53</span>    debugFrames
+<span class="ln">54</span>      .filter((item) =&gt; item.source.file === selectedFile)
+<span class="ln">55</span>      .map((item) =&gt; item.source.line),
+<span class="ln">56</span>  ), [debugFrames, selectedFile]);
+<span class="ln">57</span>
+<span class="ln">58</span>  const selectCase = (nextIndex: number) =&gt; {
+<span class="ln">59</span>    setCaseIndex(nextIndex);
+<span class="ln">60</span>    setFrameIndex(0);
+<span class="ln">61</span>    const first = traceCases[nextIndex] ? buildDebugFrames(traceCases[nextIndex])[0] : null;
+<span class="ln">62</span>    if (first) setSelectedFile(first.source.file);
+<span class="ln">63</span>  };
+<span class="ln">64</span>
+<span class="ln">65</span>  const goToFrame = (next: number) =&gt; {
+<span class="ln">66</span>    if (!debugFrames.length) return;
+<span class="ln">67</span>    const bounded = Math.max(0, Math.min(debugFrames.length - 1, next));
+<span class="ln">68</span>    setFrameIndex(bounded);
+<span class="ln">69</span>    setSelectedFile(debugFrames[bounded].source.file);
+<span class="ln">70</span>  };
+<span class="ln">71</span>
+<span class="ln">72</span>  const continueToBreakpoint = () =&gt; {
+<span class="ln">73</span>    if (!debugFrames.length || frameIndex &gt;= debugFrames.length - 1) return;
+<span class="ln">74</span>    const nextHit = debugFrames.findIndex((item, index) =&gt; (
+<span class="ln">75</span>      index &gt; frameIndex &amp;&amp; breakpoints.has(breakpointKey(item.source))
+<span class="ln">76</span>    ));
+<span class="ln">77</span>    goToFrame(nextHit &gt;= 0 ? nextHit : debugFrames.length - 1);
+<span class="ln">78</span>  };</pre></div></section>
+<section class="sec" id="risk"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2><h3><span class="arr">▸</span>参数验证被有意省略</h3><p>仓库自己在 <code>src/agent.ts:146</code> 和 <code>src/tools.ts:4</code> 标明教学版不验证 args。生产化时必须在 <code>src/agent.ts:155</code> 之前按 parameters 做 schema validation，否则模型可以把任意结构传给 <code>src/tools.ts:109</code> 的 run_bash。</p><h3><span class="arr">▸</span>run_bash 权限边界很粗</h3><p><code>src/tools.ts:111</code> 直接 exec shell command，只设了 maxBuffer 和 timeout。对于教学足够；对于真实 agent，需要工作目录沙箱、命令 allowlist、环境变量过滤和文件系统权限限制。</p><h3><span class="arr">▸</span>Context compaction 是条数近似</h3><p><code>src/agent.ts:28</code> 和 <code>src/agent.ts:30</code> 用消息数量触发压缩，而不是 token 估算；<code>src/agent.ts:57</code> 还会调用同一个 stream。这个实现讲清概念，但生产版要处理 token cut point、工具回合不可拆分和摘要质量验证。</p><div class="callout warn"><strong>结论</strong> — pi-from-scratch 适合作为 agent 内核教材，不应直接把 run_bash 和无验证 args 暴露到未隔离生产环境。</div></section>
+<div class="foot"><span>Generated · 2026-08-13</span><span>Source · <a href="https://github.com/SaladDay/pi-from-scratch">SaladDay/pi-from-scratch</a></span><span><a href="../index.html">← 返回</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7e6ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

@@ -1,0 +1,652 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Trace Lab 与教学调试器 · 深度解析 · pi-from-scratch</title><meta name="description" content="pi-from-scratch trace ui source deep dive"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#6bd2ff;--star-soft:#a7e6ff;--star-deep:#2a8fb8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">pi<b>scratch</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">pi<b>scratch</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · tiny agent</span><nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入</a></li><li><a href="#core"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界</a></li><li><a href="#related"><span class="idx">04</span>关联</a></li></ul></nav><div class="nav-foot"><div>Stars ★791 · 2026-08-09</div><div><a href="https://github.com/SaladDay/pi-from-scratch" target="_blank">SaladDay/pi-from-scratch</a></div><div><a href="../pi-from-scratch.html">← 返回</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Trace Lab <em>深度解析</em></h1><p class="hero-desc">这页拆 trace 生成与网页调试器：<code>scripts/generate-traces.ts:166</code> 构造步骤，<code>web/app/trace-debugger.ts:100</code> 展开调试帧，<code>web/app/TraceLab.tsx:40</code> 渲染交互界面。</p></div><section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p><code>web/app/trace-types.ts:1</code> 限定 source file 枚举，<code>web/app/trace-types.ts:11</code> 定义 TraceStep，<code>web/app/trace-types.ts:26</code> 定义 TraceDebugFrame。这个 schema 让生成脚本和前端 UI 共享同一条源码定位语言。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">web/app/trace-types.ts</span> · L1-51</span><span>TypeScript</span></div><pre class="code"><span class="ln">1</span>export type TraceSource = {
+<span class="ln">2</span>  file: &quot;src/llm.ts&quot; | &quot;src/agent.ts&quot; | &quot;src/tools.ts&quot; | &quot;src/tui.ts&quot; | &quot;src/cli.ts&quot;;
+<span class="ln">3</span>  line: number;
+<span class="ln">4</span>};
+<span class="ln">5</span>
+<span class="ln">6</span>export type TraceContext = {
+<span class="ln">7</span>  systemPrompt?: string;
+<span class="ln">8</span>  messages: unknown[];
+<span class="ln">9</span>};
+<span class="ln">10</span>
+<span class="ln">11</span>export type TraceStep = {
+<span class="ln">12</span>  id: string;
+<span class="ln">13</span>  label: string;
+<span class="ln">14</span>  detail: string;
+<span class="ln">15</span>  kind: &quot;input&quot; | &quot;stream&quot; | &quot;context&quot; | &quot;tool&quot; | &quot;end&quot; | &quot;error&quot;;
+<span class="ln">16</span>  source: TraceSource;
+<span class="ln">17</span>  event?: Record&lt;string, unknown&gt;;
+<span class="ln">18</span>  context: TraceContext;
+<span class="ln">19</span>};
+<span class="ln">20</span>
+<span class="ln">21</span>export type TraceCallFrame = {
+<span class="ln">22</span>  name: string;
+<span class="ln">23</span>  source: TraceSource;
+<span class="ln">24</span>};
+<span class="ln">25</span>
+<span class="ln">26</span>export type TraceDebugFrame = {
+<span class="ln">27</span>  id: string;
+<span class="ln">28</span>  label: string;
+<span class="ln">29</span>  source: TraceSource;
+<span class="ln">30</span>  event?: Record&lt;string, unknown&gt;;
+<span class="ln">31</span>  context: TraceContext;
+<span class="ln">32</span>  variables: Record&lt;string, unknown&gt;;
+<span class="ln">33</span>  callStack: TraceCallFrame[];
+<span class="ln">34</span>};
+<span class="ln">35</span>
+<span class="ln">36</span>export type TraceCase = {
+<span class="ln">37</span>  id: string;
+<span class="ln">38</span>  number: string;
+<span class="ln">39</span>  title: string;
+<span class="ln">40</span>  summary: string;
+<span class="ln">41</span>  prompt: string;
+<span class="ln">42</span>  model: string;
+<span class="ln">43</span>  outcome: string;
+<span class="ln">44</span>  steps: TraceStep[];
+<span class="ln">45</span>};
+<span class="ln">46</span>
+<span class="ln">47</span>export type TraceMeta = {
+<span class="ln">48</span>  model: string;
+<span class="ln">49</span>  generatedAt: string;
+<span class="ln">50</span>  liveGenerated: boolean;
+<span class="ln">51</span>};</pre></div></section><section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>生成脚本用源码反查行号</h3><p><code>scripts/generate-traces.ts:44</code> 读取五个核心源文件，<code>scripts/generate-traces.ts:55</code> 查找 needle 对应行号，<code>scripts/generate-traces.ts:65</code> 返回 TraceSource。这样 trace 数据不靠手写行号，源码改动后生成失败会暴露不一致。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/generate-traces.ts</span> · L44-96</span><span>TypeScript</span></div><pre class="code"><span class="ln">44</span>const sourceFiles = Object.fromEntries(
+<span class="ln">45</span>  await Promise.all(
+<span class="ln">46</span>    ([&#x27;src/llm.ts&#x27;, &#x27;src/agent.ts&#x27;, &#x27;src/tools.ts&#x27;, &#x27;src/tui.ts&#x27;, &#x27;src/cli.ts&#x27;] as SourceFile[])
+<span class="ln">47</span>      .map(async (file) =&gt; [file, await readFile(resolve(projectRoot, file), &#x27;utf8&#x27;)]),
+<span class="ln">48</span>  ),
+<span class="ln">49</span>) as Record&lt;SourceFile, string&gt;
+<span class="ln">50</span>
+<span class="ln">51</span>function cloneContext(context: Context): TraceContext {
+<span class="ln">52</span>  return JSON.parse(JSON.stringify(context)) as TraceContext
+<span class="ln">53</span>}
+<span class="ln">54</span>
+<span class="ln">55</span>function findLine(file: SourceFile, needle: string, occurrence = 0): number {
+<span class="ln">56</span>  const matches = sourceFiles[file]
+<span class="ln">57</span>    .split(&#x27;\n&#x27;)
+<span class="ln">58</span>    .map((line, index) =&gt; ({ line, number: index + 1 }))
+<span class="ln">59</span>    .filter((entry) =&gt; entry.line.includes(needle))
+<span class="ln">60</span>  const match = occurrence &lt; 0 ? matches.at(occurrence) : matches[occurrence]
+<span class="ln">61</span>  if (!match) throw new Error(`找不到 trace 源码位置：${file} / ${needle}`)
+<span class="ln">62</span>  return match.number
+<span class="ln">63</span>}
+<span class="ln">64</span>
+<span class="ln">65</span>function source(file: SourceFile, needle: string, occurrence = 0): TraceSource {
+<span class="ln">66</span>  return { file, line: findLine(file, needle, occurrence) }
+<span class="ln">67</span>}
+<span class="ln">68</span>
+<span class="ln">69</span>function normalizeText(value: string, workspace: string): string {
+<span class="ln">70</span>  return value.split(workspace).join(&#x27;/workspace&#x27;)
+<span class="ln">71</span>}
+<span class="ln">72</span>
+<span class="ln">73</span>function normalizeValue&lt;T&gt;(value: T, workspace: string): T {
+<span class="ln">74</span>  return JSON.parse(normalizeText(JSON.stringify(value), workspace)) as T
+<span class="ln">75</span>}
+<span class="ln">76</span>
+<span class="ln">77</span>function messageKind(message: unknown): &#x27;tool_result&#x27; | &#x27;assistant&#x27; | &#x27;other&#x27; {
+<span class="ln">78</span>  if (!message || typeof message !== &#x27;object&#x27;) return &#x27;other&#x27;
+<span class="ln">79</span>  const item = message as { role?: string; content?: unknown }
+<span class="ln">80</span>  if (item.role === &#x27;assistant&#x27;) return &#x27;assistant&#x27;
+<span class="ln">81</span>  if (item.role === &#x27;user&#x27; &amp;&amp; Array.isArray(item.content)) {
+<span class="ln">82</span>    const hasResult = item.content.some((block) =&gt; (
+<span class="ln">83</span>      block &amp;&amp; typeof block === &#x27;object&#x27; &amp;&amp; (block as { type?: string }).type === &#x27;tool_result&#x27;
+<span class="ln">84</span>    ))
+<span class="ln">85</span>    if (hasResult) return &#x27;tool_result&#x27;
+<span class="ln">86</span>  }
+<span class="ln">87</span>  return &#x27;other&#x27;
+<span class="ln">88</span>}
+<span class="ln">89</span>
+<span class="ln">90</span>function contextStepSource(context: TraceContext): TraceSource {
+<span class="ln">91</span>  const latest = context.messages.at(-1)
+<span class="ln">92</span>  if (messageKind(latest) === &#x27;tool_result&#x27;) {
+<span class="ln">93</span>    return source(&#x27;src/agent.ts&#x27;, &#x27;context.messages.push(buildToolResultMessage(results))&#x27;, -1)
+<span class="ln">94</span>  }
+<span class="ln">95</span>  return source(&#x27;src/agent.ts&#x27;, &#x27;context.messages.push(buildAssistantMessage(text, toolCalls))&#x27;, -1)
+<span class="ln">96</span>}</pre></div><h3><span class="arr">▸</span>事件被压成可教学步骤</h3><p><code>scripts/generate-traces.ts:117</code> 把 AgentEvent 转成展示文案，<code>scripts/generate-traces.ts:152</code> 合并连续 text delta，<code>scripts/generate-traces.ts:166</code> 开始构造 steps，<code>scripts/generate-traces.ts:179</code> 遍历捕获事件并插入 context 写回节点。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">scripts/generate-traces.ts</span> · L117-218</span><span>TypeScript</span></div><pre class="code"><span class="ln">117</span>function eventPresentation(event: AgentEvent): Pick&lt;TraceStep, &#x27;label&#x27; | &#x27;detail&#x27; | &#x27;kind&#x27;&gt; {
+<span class="ln">118</span>  switch (event.type) {
+<span class="ln">119</span>    case &#x27;assistant_text&#x27;:
+<span class="ln">120</span>      return {
+<span class="ln">121</span>        label: &#x27;模型流式输出文本&#x27;,
+<span class="ln">122</span>        detail: &#x27;stream() 产生 text_delta，agent 将它转成 assistant_text 发给界面。&#x27;,
+<span class="ln">123</span>        kind: &#x27;stream&#x27;,
+<span class="ln">124</span>      }
+<span class="ln">125</span>    case &#x27;tool_call&#x27;:
+<span class="ln">126</span>      return {
+<span class="ln">127</span>        label: `模型调用 ${event.name}`,
+<span class="ln">128</span>        detail: &#x27;agent 收集工具名和参数，同时发出 tool_call 事件。&#x27;,
+<span class="ln">129</span>        kind: &#x27;tool&#x27;,
+<span class="ln">130</span>      }
+<span class="ln">131</span>    case &#x27;tool_result&#x27;:
+<span class="ln">132</span>      return {
+<span class="ln">133</span>        label: `${event.name} 返回结果`,
+<span class="ln">134</span>        detail: &#x27;工具已经执行完，结果先作为 AgentEvent 发出，随后写回 Context。&#x27;,
+<span class="ln">135</span>        kind: event.result.startsWith(&#x27;error:&#x27;) ? &#x27;error&#x27; : &#x27;tool&#x27;,
+<span class="ln">136</span>      }
+<span class="ln">137</span>    case &#x27;turn_end&#x27;:
+<span class="ln">138</span>      return {
+<span class="ln">139</span>        label: `本轮结束：${event.stopReason}`,
+<span class="ln">140</span>        detail: event.stopReason === &#x27;aborted&#x27;
+<span class="ln">141</span>          ? &#x27;中断信号抵达当前任务，agent 清理未完成的数据后结束。&#x27;
+<span class="ln">142</span>          : event.stopReason === &#x27;max_tokens&#x27;
+<span class="ln">143</span>            ? &#x27;模型碰到输出上限，agent 保留已收到的文本并结束本轮。&#x27;
+<span class="ln">144</span>            : event.stopReason === &#x27;error&#x27;
+<span class="ln">145</span>              ? &#x27;请求失败，agent 发出错误事件并停止循环。&#x27;
+<span class="ln">146</span>              : &#x27;这一轮没有新的 tool_call，Agent Loop 正常退出。&#x27;,
+<span class="ln">147</span>        kind: event.stopReason === &#x27;error&#x27; ? &#x27;error&#x27; : &#x27;end&#x27;,
+<span class="ln">148</span>      }
+<span class="ln">149</span>  }
+<span class="ln">150</span>}
+<span class="ln">151</span>
+<span class="ln">152</span>function coalesceTextEvents(events: CapturedEvent[]): CapturedEvent[] {
+<span class="ln">153</span>  const result: CapturedEvent[] = []
+<span class="ln">154</span>  for (const captured of events) {
+<span class="ln">155</span>    const previous = result.at(-1)
+<span class="ln">156</span>    if (captured.event.type === &#x27;assistant_text&#x27; &amp;&amp; previous?.event.type === &#x27;assistant_text&#x27;) {
+<span class="ln">157</span>      previous.event = { type: &#x27;assistant_text&#x27;, delta: previous.event.delta + captured.event.delta }
+<span class="ln">158</span>      previous.context = captured.context
+<span class="ln">159</span>    } else {
+<span class="ln">160</span>      result.push(captured)
+<span class="ln">161</span>    }
+<span class="ln">162</span>  }
+<span class="ln">163</span>  return result
+<span class="ln">164</span>}
+<span class="ln">165</span>
+<span class="ln">166</span>function buildSteps(initial: TraceContext, captured: CapturedEvent[], finalContext: TraceContext): TraceStep[] {
+<span class="ln">167</span>  const steps: TraceStep[] = [{
+<span class="ln">168</span>    id: &#x27;input&#x27;,
+<span class="ln">169</span>    label: &#x27;用户消息进入 Context&#x27;,
+<span class="ln">170</span>    detail: &#x27;CLI 先把这一轮输入追加到 messages，随后把 Context 交给 runAgent()。&#x27;,
+<span class="ln">171</span>    kind: &#x27;input&#x27;,
+<span class="ln">172</span>    source: source(&#x27;src/cli.ts&#x27;, &quot;context.messages.push({ role: &#x27;user&#x27;, content: text })&quot;),
+<span class="ln">173</span>    context: initial,
+<span class="ln">174</span>  }]
+<span class="ln">175</span>
+<span class="ln">176</span>  let visibleMessages = initial.messages.length
+<span class="ln">177</span>  let index = 1
+<span class="ln">178</span>
+<span class="ln">179</span>  for (const item of coalesceTextEvents(captured)) {
+<span class="ln">180</span>    if (item.context.messages.length &gt; visibleMessages) {
+<span class="ln">181</span>      const context = cloneContext(item.context)
+<span class="ln">182</span>      steps.push({
+<span class="ln">183</span>        id: `context-${index++}`,
+<span class="ln">184</span>        label: messageKind(context.messages.at(-1)) === &#x27;tool_result&#x27;
+<span class="ln">185</span>          ? &#x27;tool_result 写回 Context&#x27;
+<span class="ln">186</span>          : &#x27;assistant message 写回 Context&#x27;,
+<span class="ln">187</span>        detail: &#x27;这次修改会进入下一轮请求，也会被 session 持久化。&#x27;,
+<span class="ln">188</span>        kind: &#x27;context&#x27;,
+<span class="ln">189</span>        source: contextStepSource(context),
+<span class="ln">190</span>        context,
+<span class="ln">191</span>      })
+<span class="ln">192</span>      visibleMessages = item.context.messages.length
+<span class="ln">193</span>    }
+<span class="ln">194</span>
+<span class="ln">195</span>    const presentation = eventPresentation(item.event)
+<span class="ln">196</span>    steps.push({
+<span class="ln">197</span>      id: `event-${index++}`,
+<span class="ln">198</span>      ...presentation,
+<span class="ln">199</span>      source: eventSource(item.event),
+<span class="ln">200</span>      event: eventCopy(item.event),
+<span class="ln">201</span>      context: cloneContext(item.context),
+<span class="ln">202</span>    })
+<span class="ln">203</span>  }
+<span class="ln">204</span>
+<span class="ln">205</span>  if (finalContext.messages.length &gt; visibleMessages) {
+<span class="ln">206</span>    steps.push({
+<span class="ln">207</span>      id: `context-${index++}`,
+<span class="ln">208</span>      label: messageKind(finalContext.messages.at(-1)) === &#x27;tool_result&#x27;
+<span class="ln">209</span>        ? &#x27;tool_result 写回 Context&#x27;
+<span class="ln">210</span>        : &#x27;assistant message 写回 Context&#x27;,
+<span class="ln">211</span>      detail: &#x27;循环退出前，最后一条消息已经放回 Context。&#x27;,
+<span class="ln">212</span>      kind: &#x27;context&#x27;,
+<span class="ln">213</span>      source: contextStepSource(finalContext),
+<span class="ln">214</span>      context: finalContext,
+<span class="ln">215</span>    })
+<span class="ln">216</span>  }
+<span class="ln">217</span>
+<span class="ln">218</span>  return steps</pre></div><h3><span class="arr">▸</span>前端调试帧保存变量、调用栈和 context</h3><p><code>web/app/trace-debugger.ts:119</code> 的 push 是核心：<code>web/app/trace-debugger.ts:130</code> 收集 text、stopReason、toolCalls、results，<code>web/app/trace-debugger.ts:141</code> 写入 frame，<code>web/app/trace-debugger.ts:148</code> 同步 callStack。它把一个异步 generator 执行过程变成可单步播放的数据结构。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">web/app/trace-debugger.ts</span> · L119-198</span><span>TypeScript</span></div><pre class="code"><span class="ln">119</span>  const push = (
+<span class="ln">120</span>    file: SourceFile,
+<span class="ln">121</span>    needle: string,
+<span class="ln">122</span>    options: {
+<span class="ln">123</span>      occurrence?: number;
+<span class="ln">124</span>      label?: string;
+<span class="ln">125</span>      event?: Record&lt;string, unknown&gt;;
+<span class="ln">126</span>      variables?: Record&lt;string, unknown&gt;;
+<span class="ln">127</span>    } = {},
+<span class="ln">128</span>  ) =&gt; {
+<span class="ln">129</span>    const position = source(file, needle, options.occurrence ?? 0);
+<span class="ln">130</span>    const variables = {
+<span class="ln">131</span>      text: state.text,
+<span class="ln">132</span>      stopReason: state.stopReason,
+<span class="ln">133</span>      toolCalls: clone(state.toolCalls),
+<span class="ln">134</span>      results: clone(state.results),
+<span class="ln">135</span>      ev: clone(state.ev),
+<span class="ln">136</span>      &quot;signal.aborted&quot;: state.signalAborted,
+<span class="ln">137</span>      &quot;context.messages.length&quot;: context.messages.length,
+<span class="ln">138</span>      loop: state.loop,
+<span class="ln">139</span>      ...options.variables,
+<span class="ln">140</span>    };
+<span class="ln">141</span>    frames.push({
+<span class="ln">142</span>      id: `${traceCase.id}-${sequence++}`,
+<span class="ln">143</span>      label: options.label ?? sourceLabel(position),
+<span class="ln">144</span>      source: position,
+<span class="ln">145</span>      event: options.event ? clone(options.event) : undefined,
+<span class="ln">146</span>      context: clone(context),
+<span class="ln">147</span>      variables,
+<span class="ln">148</span>      callStack: callStack(position),
+<span class="ln">149</span>    });
+<span class="ln">150</span>  };
+<span class="ln">151</span>
+<span class="ln">152</span>  const enterStream = () =&gt; {
+<span class="ln">153</span>    push(&quot;src/llm.ts&quot;, &quot;const url =&quot;, { variables: { model: traceCase.model } });
+<span class="ln">154</span>    push(&quot;src/llm.ts&quot;, &quot;const messages = contextToOpenAIMessages(context)&quot;);
+<span class="ln">155</span>    push(&quot;src/llm.ts&quot;, &quot;const messages: object[] = []&quot;);
+<span class="ln">156</span>    if (context.systemPrompt) push(&quot;src/llm.ts&quot;, &quot;if (context.systemPrompt)&quot;);
+<span class="ln">157</span>    for (const message of context.messages) {
+<span class="ln">158</span>      push(&quot;src/llm.ts&quot;, &quot;for (const msg of context.messages)&quot;, { variables: { msg: message } });
+<span class="ln">159</span>      if (typeof (message as { content?: unknown }).content === &quot;string&quot;) {
+<span class="ln">160</span>        push(&quot;src/llm.ts&quot;, &quot;if (typeof msg.content === &#x27;string&#x27;)&quot;);
+<span class="ln">161</span>        push(&quot;src/llm.ts&quot;, &quot;messages.push({ role: msg.role, content: msg.content })&quot;);
+<span class="ln">162</span>      } else {
+<span class="ln">163</span>        push(&quot;src/llm.ts&quot;, &quot;const blocks = msg.content&quot;);
+<span class="ln">164</span>        if ((message as { role?: unknown }).role === &quot;assistant&quot;) {
+<span class="ln">165</span>          push(&quot;src/llm.ts&quot;, &quot;if (msg.role === &#x27;assistant&#x27;)&quot;);
+<span class="ln">166</span>          push(&quot;src/llm.ts&quot;, &quot;const toolCalls: object[] = []&quot;);
+<span class="ln">167</span>          push(&quot;src/llm.ts&quot;, &quot;let text = &#x27;&#x27;&quot;);
+<span class="ln">168</span>          for (const block of (message as { content: unknown[] }).content) {
+<span class="ln">169</span>            push(&quot;src/llm.ts&quot;, &quot;for (const b of blocks)&quot;, { variables: { b: block } });
+<span class="ln">170</span>          }
+<span class="ln">171</span>          push(&quot;src/llm.ts&quot;, &quot;messages.push({ role: &#x27;assistant&#x27;&quot;);
+<span class="ln">172</span>        } else {
+<span class="ln">173</span>          for (const block of (message as { content: unknown[] }).content) {
+<span class="ln">174</span>            push(&quot;src/llm.ts&quot;, &quot;for (const b of blocks)&quot;, { occurrence: -1, variables: { b: block } });
+<span class="ln">175</span>            if ((block as { type?: unknown }).type === &quot;tool_result&quot;) {
+<span class="ln">176</span>              push(&quot;src/llm.ts&quot;, &quot;messages.push({ role: &#x27;tool&#x27;&quot;);
+<span class="ln">177</span>            }
+<span class="ln">178</span>          }
+<span class="ln">179</span>        }
+<span class="ln">180</span>      }
+<span class="ln">181</span>    }
+<span class="ln">182</span>    push(&quot;src/llm.ts&quot;, &quot;return messages&quot;);
+<span class="ln">183</span>    push(&quot;src/llm.ts&quot;, &quot;const body: Record&lt;string, unknown&gt;&quot;);
+<span class="ln">184</span>    push(&quot;src/llm.ts&quot;, &quot;if (model.maxTokens)&quot;);
+<span class="ln">185</span>    if ([&quot;read-file&quot;, &quot;edit-and-check&quot;, &quot;tool-error&quot;].includes(traceCase.id)) {
+<span class="ln">186</span>      push(&quot;src/llm.ts&quot;, &quot;if (opts.tools?.length)&quot;);
+<span class="ln">187</span>    }
+<span class="ln">188</span>    push(&quot;src/llm.ts&quot;, &quot;let response: Response&quot;);
+<span class="ln">189</span>    push(&quot;src/llm.ts&quot;, &quot;response = await fetch(url&quot;);
+<span class="ln">190</span>    push(&quot;src/llm.ts&quot;, &quot;if (!response.ok || !response.body)&quot;);
+<span class="ln">191</span>    push(&quot;src/llm.ts&quot;, &quot;const reader = response.body.getReader()&quot;);
+<span class="ln">192</span>    push(&quot;src/llm.ts&quot;, &quot;const decoder = new TextDecoder()&quot;);
+<span class="ln">193</span>    push(&quot;src/llm.ts&quot;, &quot;let buf = &#x27;&#x27;&quot;);
+<span class="ln">194</span>    push(&quot;src/llm.ts&quot;, &quot;let stopReason: &#x27;end_turn&#x27;&quot;);
+<span class="ln">195</span>    push(&quot;src/llm.ts&quot;, &quot;const toolCallBuffers = new Map&quot;);
+<span class="ln">196</span>    push(&quot;src/llm.ts&quot;, &quot;while (true)&quot;);
+<span class="ln">197</span>    push(&quot;src/llm.ts&quot;, &quot;const { done, value } = await reader.read()&quot;);
+<span class="ln">198</span>  };</pre></div></section><section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">live runAgent cases
+  ↓ scripts/generate-traces.ts:166
+TraceStep[]
+  ↓ web/app/trace-debugger.ts:100
+TraceDebugFrame[]
+  ↓ web/app/TraceLab.tsx:135
+interactive source debugger</div><p><code>web/app/TraceLab.tsx:47</code> 取当前 case，<code>web/app/TraceLab.tsx:48</code> 构造 debugFrames，<code>web/app/TraceLab.tsx:72</code> 支持继续到断点，<code>web/app/TraceLab.tsx:102</code> 自动滚动到当前源码行。这让教学页面更像 debugger，而不是静态文章。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">web/app/TraceLab.tsx</span> · L40-122</span><span>TypeScript</span></div><pre class="code"><span class="ln">40</span>export default function TraceLab() {
+<span class="ln">41</span>  const [caseIndex, setCaseIndex] = useState(0);
+<span class="ln">42</span>  const [frameIndex, setFrameIndex] = useState(0);
+<span class="ln">43</span>  const [breakpoints, setBreakpoints] = useState&lt;ReadonlySet&lt;string&gt;&gt;(() =&gt; new Set());
+<span class="ln">44</span>  const [selectedFile, setSelectedFile] = useState&lt;TraceSource[&quot;file&quot;]&gt;(&quot;src/tui.ts&quot;);
+<span class="ln">45</span>  const codeScrollRef = useRef&lt;HTMLDivElement&gt;(null);
+<span class="ln">46</span>
+<span class="ln">47</span>  const traceCase = traceCases[caseIndex] ?? null;
+<span class="ln">48</span>  const debugFrames = useMemo(() =&gt; traceCase ? buildDebugFrames(traceCase) : [], [traceCase]);
+<span class="ln">49</span>  const frame = debugFrames[frameIndex] ?? null;
+<span class="ln">50</span>  const sourceCode = fullRepo[selectedFile] ?? &quot;&quot;;
+<span class="ln">51</span>  const sourceLines = useMemo(() =&gt; sourceCode.split(&quot;\n&quot;), [sourceCode]);
+<span class="ln">52</span>  const executableLines = useMemo(() =&gt; new Set(
+<span class="ln">53</span>    debugFrames
+<span class="ln">54</span>      .filter((item) =&gt; item.source.file === selectedFile)
+<span class="ln">55</span>      .map((item) =&gt; item.source.line),
+<span class="ln">56</span>  ), [debugFrames, selectedFile]);
+<span class="ln">57</span>
+<span class="ln">58</span>  const selectCase = (nextIndex: number) =&gt; {
+<span class="ln">59</span>    setCaseIndex(nextIndex);
+<span class="ln">60</span>    setFrameIndex(0);
+<span class="ln">61</span>    const first = traceCases[nextIndex] ? buildDebugFrames(traceCases[nextIndex])[0] : null;
+<span class="ln">62</span>    if (first) setSelectedFile(first.source.file);
+<span class="ln">63</span>  };
+<span class="ln">64</span>
+<span class="ln">65</span>  const goToFrame = (next: number) =&gt; {
+<span class="ln">66</span>    if (!debugFrames.length) return;
+<span class="ln">67</span>    const bounded = Math.max(0, Math.min(debugFrames.length - 1, next));
+<span class="ln">68</span>    setFrameIndex(bounded);
+<span class="ln">69</span>    setSelectedFile(debugFrames[bounded].source.file);
+<span class="ln">70</span>  };
+<span class="ln">71</span>
+<span class="ln">72</span>  const continueToBreakpoint = () =&gt; {
+<span class="ln">73</span>    if (!debugFrames.length || frameIndex &gt;= debugFrames.length - 1) return;
+<span class="ln">74</span>    const nextHit = debugFrames.findIndex((item, index) =&gt; (
+<span class="ln">75</span>      index &gt; frameIndex &amp;&amp; breakpoints.has(breakpointKey(item.source))
+<span class="ln">76</span>    ));
+<span class="ln">77</span>    goToFrame(nextHit &gt;= 0 ? nextHit : debugFrames.length - 1);
+<span class="ln">78</span>  };
+<span class="ln">79</span>
+<span class="ln">80</span>  useEffect(() =&gt; {
+<span class="ln">81</span>    const onKeyDown = (event: KeyboardEvent) =&gt; {
+<span class="ln">82</span>      const target = event.target as HTMLElement | null;
+<span class="ln">83</span>      if (target?.closest(&quot;input, textarea, select&quot;)) return;
+<span class="ln">84</span>      if (event.key === &quot;F10&quot;) {
+<span class="ln">85</span>        event.preventDefault();
+<span class="ln">86</span>        goToFrame(frameIndex + 1);
+<span class="ln">87</span>      } else if (event.key === &quot;F5&quot;) {
+<span class="ln">88</span>        event.preventDefault();
+<span class="ln">89</span>        continueToBreakpoint();
+<span class="ln">90</span>      } else if (!target?.closest(&quot;button, a&quot;) &amp;&amp; event.key === &quot;ArrowRight&quot;) {
+<span class="ln">91</span>        event.preventDefault();
+<span class="ln">92</span>        goToFrame(frameIndex + 1);
+<span class="ln">93</span>      } else if (!target?.closest(&quot;button, a&quot;) &amp;&amp; event.key === &quot;ArrowLeft&quot;) {
+<span class="ln">94</span>        event.preventDefault();
+<span class="ln">95</span>        goToFrame(frameIndex - 1);
+<span class="ln">96</span>      }
+<span class="ln">97</span>    };
+<span class="ln">98</span>    window.addEventListener(&quot;keydown&quot;, onKeyDown);
+<span class="ln">99</span>    return () =&gt; window.removeEventListener(&quot;keydown&quot;, onKeyDown);
+<span class="ln">100</span>  });
+<span class="ln">101</span>
+<span class="ln">102</span>  useLayoutEffect(() =&gt; {
+<span class="ln">103</span>    const scroller = codeScrollRef.current;
+<span class="ln">104</span>    if (!scroller || !frame || selectedFile !== frame.source.file) return;
+<span class="ln">105</span>    const line = scroller.querySelector&lt;HTMLElement&gt;(`[data-trace-line=&quot;${frame.source.line}&quot;]`);
+<span class="ln">106</span>    if (!line) return;
+<span class="ln">107</span>    scroller.scrollTo({
+<span class="ln">108</span>      top: Math.max(0, line.offsetTop - scroller.clientHeight * 0.38),
+<span class="ln">109</span>      behavior: &quot;auto&quot;,
+<span class="ln">110</span>    });
+<span class="ln">111</span>  }, [frame, selectedFile]);
+<span class="ln">112</span>
+<span class="ln">113</span>  const toggleBreakpoint = (line: number) =&gt; {
+<span class="ln">114</span>    if (!executableLines.has(line)) return;
+<span class="ln">115</span>    const key = breakpointKey({ file: selectedFile, line });
+<span class="ln">116</span>    setBreakpoints((current) =&gt; {
+<span class="ln">117</span>      const next = new Set(current);
+<span class="ln">118</span>      if (next.has(key)) next.delete(key);
+<span class="ln">119</span>      else next.add(key);
+<span class="ln">120</span>      return next;
+<span class="ln">121</span>    });
+<span class="ln">122</span>  };</pre></div></section><section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>scripts/generate-traces.ts:35</code> 要求真实 NANOPI_API_KEY 和 NANOPI_BASE_URL，trace 不是离线 mock 默认生成。</li><li><code>web/app/trace-debugger.ts:32</code> 找不到源码 needle 会 throw，能及时暴露教学数据和源码不一致。</li><li><code>web/app/TraceLab.tsx:113</code> 只允许 executableLines 设置断点，避免用户点无效源码行。</li></ul></section><section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">Agent events</div><div class="card-d"><code>src/agent.ts:21</code> 定义可视化所需事件。</div></div><div class="card"><div class="card-h">CLI state</div><div class="card-d"><code>src/cli.ts:49</code> 是 trace 的用户输入起点。</div></div></div></section><section class="sec" id="trace-extra"><div class="sec-no">§ <b>05</b> · TRACE CONSISTENCY</div><h2 class="sec-title">一致性<em>校验</em></h2><h3><span class="arr">▸</span>为什么 trace 页面不会轻易漂移</h3><p>这套 trace 设计的防漂移点分布在生成端和运行端：<code>scripts/generate-traces.ts:55</code> 用源码文本反查行号，<code>scripts/generate-traces.ts:61</code> 找不到 needle 就直接失败；前端侧 <code>web/app/trace-debugger.ts:26</code> 也用同样的 source helper，<code>web/app/trace-debugger.ts:32</code> 在缺失行时抛错。换句话说，文档数据、源码和调试器三者不是弱绑定，只要核心源码移动，生成链路会提醒维护者重新生成 trace。</p></section><div class="foot"><span>Generated · 2026-08-13</span><span>Source · <a href="https://github.com/SaladDay/pi-from-scratch">SaladDay/pi-from-scratch</a></span><span><a href="../pi-from-scratch.html">← 返回</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7e6ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

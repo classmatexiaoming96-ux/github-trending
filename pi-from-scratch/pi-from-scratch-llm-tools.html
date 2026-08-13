@@ -1,0 +1,533 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>LLM 协议与工具契约 · 深度解析 · pi-from-scratch</title><meta name="description" content="pi-from-scratch llm tools source deep dive"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#6bd2ff;--star-soft:#a7e6ff;--star-deep:#2a8fb8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">pi<b>scratch</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">pi<b>scratch</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · tiny agent</span><nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入</a></li><li><a href="#core"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界</a></li><li><a href="#related"><span class="idx">04</span>关联</a></li></ul></nav><div class="nav-foot"><div>Stars ★791 · 2026-08-09</div><div><a href="https://github.com/SaladDay/pi-from-scratch" target="_blank">SaladDay/pi-from-scratch</a></div><div><a href="../pi-from-scratch.html">← 返回</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">LLM + Tools <em>深度解析</em></h1><p class="hero-desc">这页拆 <code>src/llm.ts:57</code> 的消息转换、<code>src/llm.ts:107</code> 的 SSE 解析和 <code>src/tools.ts:71</code> 的工具契约。</p></div><section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p><code>src/llm.ts:8</code> 定义 Model，<code>src/llm.ts:20</code> 定义 ContentBlock，<code>src/llm.ts:38</code> 定义 StreamEvent。agent 层只看到这些类型，不需要知道底层 API 的 chunk 格式。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L7-49</span><span>TypeScript</span></div><pre class="code"><span class="ln">7</span>/** 模型配置 */
+<span class="ln">8</span>export type Model = {
+<span class="ln">9</span>  apiKey: string
+<span class="ln">10</span>  model: string          // 如 &quot;gpt-4o&quot; 或 &quot;glm-5.2&quot;
+<span class="ln">11</span>  baseUrl?: string       // 默认 https://api.openai.com/v1
+<span class="ln">12</span>  maxTokens?: number     // 不设则由 API 决定默认值（cli.ts 设为 4096）
+<span class="ln">13</span>}
+<span class="ln">14</span>
+<span class="ln">15</span>/**
+<span class="ln">16</span> * content block：消息内容的结构化单元。
+<span class="ln">17</span> * 注意：tool_result 放在 ContentBlock 里再塞进 user message，
+<span class="ln">18</span> * pi 里它是独立的 ToolResultMessage 类型，nanopi 简化为统一结构。
+<span class="ln">19</span> */
+<span class="ln">20</span>export type ContentBlock =
+<span class="ln">21</span>  | { type: &#x27;text&#x27;; text: string }
+<span class="ln">22</span>  | { type: &#x27;tool_use&#x27;; id: string; name: string; input: unknown }
+<span class="ln">23</span>  | { type: &#x27;tool_result&#x27;; tool_use_id: string; content: string }
+<span class="ln">24</span>
+<span class="ln">25</span>/** 消息：user / assistant 共用同一结构 */
+<span class="ln">26</span>export type Message = {
+<span class="ln">27</span>  role: &#x27;user&#x27; | &#x27;assistant&#x27;
+<span class="ln">28</span>  content: string | ContentBlock[]
+<span class="ln">29</span>}
+<span class="ln">30</span>
+<span class="ln">31</span>/** Context：纯 JSON，可 stringify 落盘 */
+<span class="ln">32</span>export type Context = {
+<span class="ln">33</span>  systemPrompt?: string
+<span class="ln">34</span>  messages: Message[]
+<span class="ln">35</span>}
+<span class="ln">36</span>
+<span class="ln">37</span>/** 流事件：llm 模块对外的统一输出 */
+<span class="ln">38</span>export type StreamEvent =
+<span class="ln">39</span>  | { type: &#x27;text_delta&#x27;; delta: string }
+<span class="ln">40</span>  | { type: &#x27;tool_call&#x27;; id: string; name: string; args: unknown }
+<span class="ln">41</span>  | { type: &#x27;done&#x27;; stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | &#x27;aborted&#x27; }
+<span class="ln">42</span>  | { type: &#x27;error&#x27;; error: Error }
+<span class="ln">43</span>
+<span class="ln">44</span>/** agent 模块传入的 tool 定义格式 */
+<span class="ln">45</span>export type ToolDef = {
+<span class="ln">46</span>  name: string
+<span class="ln">47</span>  description: string
+<span class="ln">48</span>  parameters: object
+<span class="ln">49</span>}</pre></div></section><section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>内部 Context 到 OpenAI messages</h3><p><code>src/llm.ts:61</code> 遍历 message，<code>src/llm.ts:68</code> 识别 assistant，<code>src/llm.ts:74</code> 生成 function tool_calls，<code>src/llm.ts:83</code> 再把 user 中的 tool_result 拆成 role:tool。<code>test/llm.test.ts:90</code> 和 <code>test/llm.test.ts:107</code> 分别覆盖这两种转换。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L57-92</span><span>TypeScript</span></div><pre class="code"><span class="ln">57</span>export function contextToOpenAIMessages(context: Context): object[] {
+<span class="ln">58</span>  const messages: object[] = []
+<span class="ln">59</span>  if (context.systemPrompt) messages.push({ role: &#x27;system&#x27;, content: context.systemPrompt })
+<span class="ln">60</span>
+<span class="ln">61</span>  for (const msg of context.messages) {
+<span class="ln">62</span>    if (typeof msg.content === &#x27;string&#x27;) {
+<span class="ln">63</span>      messages.push({ role: msg.role, content: msg.content })
+<span class="ln">64</span>      continue
+<span class="ln">65</span>    }
+<span class="ln">66</span>
+<span class="ln">67</span>    const blocks = msg.content
+<span class="ln">68</span>    if (msg.role === &#x27;assistant&#x27;) {
+<span class="ln">69</span>      const toolCalls: object[] = []
+<span class="ln">70</span>      let text = &#x27;&#x27;
+<span class="ln">71</span>      for (const b of blocks) {
+<span class="ln">72</span>        if (b.type === &#x27;text&#x27;) text += b.text
+<span class="ln">73</span>        else if (b.type === &#x27;tool_use&#x27;) {
+<span class="ln">74</span>          toolCalls.push({ id: b.id, type: &#x27;function&#x27;, function: { name: b.name, arguments: JSON.stringify(b.input) } })
+<span class="ln">75</span>        }
+<span class="ln">76</span>      }
+<span class="ln">77</span>      // OpenAI 要求 assistant 消息必须有 content（非 null）或 tool_calls。
+<span class="ln">78</span>      // 纯 tool_call 时 content 为 null；两者皆空（如 abort/error 后的无内容轮次）用空串占位，避免 API 400。
+<span class="ln">79</span>      const content = text || (toolCalls.length ? null : &#x27;&#x27;)
+<span class="ln">80</span>      messages.push({ role: &#x27;assistant&#x27;, content, tool_calls: toolCalls.length ? toolCalls : undefined })
+<span class="ln">81</span>    } else {
+<span class="ln">82</span>      // user message 里的 tool_result block → OpenAI 要求独立的 role:tool 消息
+<span class="ln">83</span>      for (const b of blocks) {
+<span class="ln">84</span>        if (b.type === &#x27;tool_result&#x27;) {
+<span class="ln">85</span>          messages.push({ role: &#x27;tool&#x27;, tool_call_id: b.tool_use_id, content: b.content })
+<span class="ln">86</span>        } else if (b.type === &#x27;text&#x27;) {
+<span class="ln">87</span>          messages.push({ role: &#x27;user&#x27;, content: b.text })
+<span class="ln">88</span>        }
+<span class="ln">89</span>      }
+<span class="ln">90</span>    }
+<span class="ln">91</span>  }
+<span class="ln">92</span>  return messages</pre></div><h3><span class="arr">▸</span>tool_call arguments 是增量拼出来的</h3><p><code>src/llm.ts:123</code> 处理 delta.tool_calls，<code>src/llm.ts:127</code> 初始化 buffer，<code>src/llm.ts:132</code> 追加 arguments 片段，<code>src/llm.ts:148</code> 按 index 排序 flush。<code>test/llm.test.ts:40</code> 用两段 JSON 片段验证它能拼出完整参数。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L107-155</span><span>TypeScript</span></div><pre class="code"><span class="ln">107</span>function handleSSELine(
+<span class="ln">108</span>  data: string,
+<span class="ln">109</span>  toolCallBuffers: Map&lt;number, { id: string; name: string; argsBuf: string }&gt;,
+<span class="ln">110</span>): { textDelta: string | null; stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | null } {
+<span class="ln">111</span>  let chunk: OpenAIChunk
+<span class="ln">112</span>  try { chunk = JSON.parse(data) as OpenAIChunk } catch { return { textDelta: null, stopReason: null } }
+<span class="ln">113</span>
+<span class="ln">114</span>  const choice = chunk.choices[0]
+<span class="ln">115</span>  if (!choice) return { textDelta: null, stopReason: null }
+<span class="ln">116</span>
+<span class="ln">117</span>  let textDelta: string | null = null
+<span class="ln">118</span>  let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | null = null
+<span class="ln">119</span>
+<span class="ln">120</span>  if (choice.delta?.content) textDelta = choice.delta.content
+<span class="ln">121</span>
+<span class="ln">122</span>  // tool_call 增量：按 index 累积 name + arguments 的 partial JSON
+<span class="ln">123</span>  if (choice.delta?.tool_calls) {
+<span class="ln">124</span>    for (const tc of choice.delta.tool_calls) {
+<span class="ln">125</span>      const idx = tc.index ?? 0
+<span class="ln">126</span>      if (!toolCallBuffers.has(idx)) {
+<span class="ln">127</span>        toolCallBuffers.set(idx, { id: tc.id ?? `call_${idx}`, name: &#x27;&#x27;, argsBuf: &#x27;&#x27; })
+<span class="ln">128</span>      }
+<span class="ln">129</span>      const entry = toolCallBuffers.get(idx)!
+<span class="ln">130</span>      if (tc.id) entry.id = tc.id
+<span class="ln">131</span>      if (tc.function?.name) entry.name = tc.function.name
+<span class="ln">132</span>      if (tc.function?.arguments) entry.argsBuf += tc.function.arguments
+<span class="ln">133</span>    }
+<span class="ln">134</span>  }
+<span class="ln">135</span>
+<span class="ln">136</span>  // finish_reason 映射：tool_calls → tool_use，length → max_tokens，stop → end_turn（默认值）
+<span class="ln">137</span>  if (choice.finish_reason === &#x27;tool_calls&#x27;) stopReason = &#x27;tool_use&#x27;
+<span class="ln">138</span>  else if (choice.finish_reason === &#x27;length&#x27;) stopReason = &#x27;max_tokens&#x27;
+<span class="ln">139</span>
+<span class="ln">140</span>  return { textDelta, stopReason }
+<span class="ln">141</span>}
+<span class="ln">142</span>
+<span class="ln">143</span>/** 流结束：把累积的 tool_calls 按顺序发出 */
+<span class="ln">144</span>function flushToolCalls(
+<span class="ln">145</span>  toolCallBuffers: Map&lt;number, { id: string; name: string; argsBuf: string }&gt;,
+<span class="ln">146</span>): { id: string; name: string; args: unknown }[] {
+<span class="ln">147</span>  const calls: { id: string; name: string; args: unknown }[] = []
+<span class="ln">148</span>  for (const [, tc] of [...toolCallBuffers].sort((a, b) =&gt; a[0] - b[0])) {
+<span class="ln">149</span>    let args: unknown = {}
+<span class="ln">150</span>    if (tc.argsBuf) {
+<span class="ln">151</span>      try { args = JSON.parse(tc.argsBuf) } catch { args = {} }
+<span class="ln">152</span>    }
+<span class="ln">153</span>    calls.push({ id: tc.id, name: tc.name, args })
+<span class="ln">154</span>  }
+<span class="ln">155</span>  return calls</pre></div><h3><span class="arr">▸</span>工具层只暴露 execute</h3><p><code>src/tools.ts:34</code> 到 <code>src/tools.ts:49</code> 是 read_file，<code>src/tools.ts:52</code> 到 <code>src/tools.ts:69</code> 是 write_file；它们没有 agent 状态。<code>src/tools.ts:24</code> 的 truncateOutput 把长输出存临时文件并保留末尾，是终端 agent 很实用的小护栏。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/tools.ts</span> · L20-69</span><span>TypeScript</span></div><pre class="code"><span class="ln">20</span>/**
+<span class="ln">21</span> * 截取工具输出：超过 maxLines 行时只保留尾部，完整输出存到临时文件。
+<span class="ln">22</span> * 尾部优先——错误信息通常在末尾。
+<span class="ln">23</span> */
+<span class="ln">24</span>async function truncateOutput(content: string, maxLines = MAX_OUTPUT_LINES): Promise&lt;string&gt; {
+<span class="ln">25</span>  const lines = content.split(&#x27;\n&#x27;)
+<span class="ln">26</span>  if (lines.length &lt;= maxLines) return content
+<span class="ln">27</span>  const kept = lines.slice(-maxLines).join(&#x27;\n&#x27;)
+<span class="ln">28</span>  const tmpPath = path.join(os.tmpdir(), `nanopi-output-${process.pid}-${truncateCounter++}.txt`)
+<span class="ln">29</span>  await fs.writeFile(tmpPath, content, &#x27;utf-8&#x27;)
+<span class="ln">30</span>  return `[output truncated: showing last ${maxLines} of ${lines.length} lines. full output: ${tmpPath}]\n${kept}`
+<span class="ln">31</span>}
+<span class="ln">32</span>
+<span class="ln">33</span>/** read_file：返回文件内容（截取尾部防止超大输出） */
+<span class="ln">34</span>const readFile: AgentTool = {
+<span class="ln">35</span>  name: &#x27;read_file&#x27;,
+<span class="ln">36</span>  description: &#x27;读取文件内容。参数：path（文件路径）。大文件截取最后 200 行。&#x27;,
+<span class="ln">37</span>  parameters: {
+<span class="ln">38</span>    type: &#x27;object&#x27;,
+<span class="ln">39</span>    properties: {
+<span class="ln">40</span>      path: { type: &#x27;string&#x27;, description: &#x27;要读取的文件路径&#x27; },
+<span class="ln">41</span>    },
+<span class="ln">42</span>    required: [&#x27;path&#x27;],
+<span class="ln">43</span>  },
+<span class="ln">44</span>  execute: async (args) =&gt; {
+<span class="ln">45</span>    const { path: filePath } = args as { path: string }
+<span class="ln">46</span>    const content = await fs.readFile(filePath, &#x27;utf-8&#x27;)
+<span class="ln">47</span>    return await truncateOutput(content)
+<span class="ln">48</span>  },
+<span class="ln">49</span>}
+<span class="ln">50</span>
+<span class="ln">51</span>/** write_file：覆盖写入文件 */
+<span class="ln">52</span>const writeFile: AgentTool = {
+<span class="ln">53</span>  name: &#x27;write_file&#x27;,
+<span class="ln">54</span>  description: &#x27;写入文件（覆盖）。参数：path（路径）、content（内容）&#x27;,
+<span class="ln">55</span>  parameters: {
+<span class="ln">56</span>    type: &#x27;object&#x27;,
+<span class="ln">57</span>    properties: {
+<span class="ln">58</span>      path: { type: &#x27;string&#x27;, description: &#x27;要写入的文件路径&#x27; },
+<span class="ln">59</span>      content: { type: &#x27;string&#x27;, description: &#x27;文件内容&#x27; },
+<span class="ln">60</span>    },
+<span class="ln">61</span>    required: [&#x27;path&#x27;, &#x27;content&#x27;],
+<span class="ln">62</span>  },
+<span class="ln">63</span>  execute: async (args) =&gt; {
+<span class="ln">64</span>    const { path: filePath, content } = args as { path: string; content: string }
+<span class="ln">65</span>    await fs.mkdir(path.dirname(filePath) || &#x27;.&#x27;, { recursive: true })
+<span class="ln">66</span>    await fs.writeFile(filePath, content, &#x27;utf-8&#x27;)
+<span class="ln">67</span>    return `wrote ${filePath} (${content.length} chars)`
+<span class="ln">68</span>  },
+<span class="ln">69</span>}</pre></div></section><section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">Context blocks
+  ↓ src/llm.ts:57
+OpenAI messages + tools
+  ↓ src/llm.ts:187 fetch
+SSE chunks
+  ↓ src/llm.ts:235
+StreamEvent tool_call/text_delta</div><p>请求体在 <code>src/llm.ts:175</code> 生成，工具 definitions 在 <code>src/llm.ts:178</code> 注入，流读取在 <code>src/llm.ts:204</code> 开始。遇到非 2xx，<code>src/llm.ts:198</code> 会读响应文本并 yield error，而不是 throw 到 UI。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/llm.ts</span> · L167-238</span><span>TypeScript</span></div><pre class="code"><span class="ln">167</span>export async function* stream(
+<span class="ln">168</span>  model: Model,
+<span class="ln">169</span>  context: Context,
+<span class="ln">170</span>  opts: { tools?: ToolDef[]; signal?: AbortSignal } = {},
+<span class="ln">171</span>): AsyncGenerator&lt;StreamEvent&gt; {
+<span class="ln">172</span>  const url = `${model.baseUrl ?? &#x27;https://api.openai.com/v1&#x27;}/chat/completions`
+<span class="ln">173</span>  const messages = contextToOpenAIMessages(context)
+<span class="ln">174</span>
+<span class="ln">175</span>  const body: Record&lt;string, unknown&gt; = { model: model.model, stream: true, messages }
+<span class="ln">176</span>  if (model.maxTokens) body.max_tokens = model.maxTokens
+<span class="ln">177</span>  if (opts.tools?.length) {
+<span class="ln">178</span>    body.tools = opts.tools.map(t =&gt; ({
+<span class="ln">179</span>      type: &#x27;function&#x27;,
+<span class="ln">180</span>      function: { name: t.name, description: t.description, parameters: t.parameters },
+<span class="ln">181</span>    }))
+<span class="ln">182</span>  }
+<span class="ln">183</span>
+<span class="ln">184</span>  // 发请求
+<span class="ln">185</span>  let response: Response
+<span class="ln">186</span>  try {
+<span class="ln">187</span>    response = await fetch(url, {
+<span class="ln">188</span>      method: &#x27;POST&#x27;,
+<span class="ln">189</span>      headers: { &#x27;content-type&#x27;: &#x27;application/json&#x27;, authorization: `Bearer ${model.apiKey}` },
+<span class="ln">190</span>      body: JSON.stringify(body),
+<span class="ln">191</span>      signal: opts.signal,
+<span class="ln">192</span>    })
+<span class="ln">193</span>  } catch (e) {
+<span class="ln">194</span>    if (opts.signal?.aborted) { yield { type: &#x27;done&#x27;, stopReason: &#x27;aborted&#x27; }; return }
+<span class="ln">195</span>    yield { type: &#x27;error&#x27;, error: e as Error }; return
+<span class="ln">196</span>  }
+<span class="ln">197</span>
+<span class="ln">198</span>  if (!response.ok || !response.body) {
+<span class="ln">199</span>    const text = await response.text().catch(() =&gt; &#x27;unknown error&#x27;)
+<span class="ln">200</span>    yield { type: &#x27;error&#x27;, error: new Error(`API ${response.status}: ${text}`) }; return
+<span class="ln">201</span>  }
+<span class="ln">202</span>
+<span class="ln">203</span>  // 逐行解析 SSE
+<span class="ln">204</span>  const reader = response.body.getReader()
+<span class="ln">205</span>  const decoder = new TextDecoder()
+<span class="ln">206</span>  let buf = &#x27;&#x27;
+<span class="ln">207</span>  let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; = &#x27;end_turn&#x27;
+<span class="ln">208</span>  const toolCallBuffers = new Map&lt;number, { id: string; name: string; argsBuf: string }&gt;()
+<span class="ln">209</span>
+<span class="ln">210</span>  try {
+<span class="ln">211</span>    while (true) {
+<span class="ln">212</span>      const { done, value } = await reader.read()
+<span class="ln">213</span>      if (done) break
+<span class="ln">214</span>      buf += decoder.decode(value, { stream: true })
+<span class="ln">215</span>
+<span class="ln">216</span>      let nl: number
+<span class="ln">217</span>      while ((nl = buf.indexOf(&#x27;\n&#x27;)) &gt;= 0) {
+<span class="ln">218</span>        const line = buf.slice(0, nl).trim()
+<span class="ln">219</span>        buf = buf.slice(nl + 1)
+<span class="ln">220</span>        if (!line.startsWith(&#x27;data: &#x27;)) continue
+<span class="ln">221</span>        const data = line.slice(6)
+<span class="ln">222</span>        if (data === &#x27;[DONE]&#x27;) continue
+<span class="ln">223</span>
+<span class="ln">224</span>        const result = handleSSELine(data, toolCallBuffers)
+<span class="ln">225</span>        if (result.textDelta) yield { type: &#x27;text_delta&#x27;, delta: result.textDelta }
+<span class="ln">226</span>        if (result.stopReason) stopReason = result.stopReason
+<span class="ln">227</span>      }
+<span class="ln">228</span>    }
+<span class="ln">229</span>  } catch (e) {
+<span class="ln">230</span>    if (opts.signal?.aborted) { yield { type: &#x27;done&#x27;, stopReason: &#x27;aborted&#x27; }; return }
+<span class="ln">231</span>    yield { type: &#x27;error&#x27;, error: e as Error }; return
+<span class="ln">232</span>  }
+<span class="ln">233</span>
+<span class="ln">234</span>  // 发出累积的 tool_calls
+<span class="ln">235</span>  for (const tc of flushToolCalls(toolCallBuffers)) {
+<span class="ln">236</span>    yield { type: &#x27;tool_call&#x27;, id: tc.id, name: tc.name, args: tc.args }
+<span class="ln">237</span>  }
+<span class="ln">238</span>  yield { type: &#x27;done&#x27;, stopReason: opts.signal?.aborted ? &#x27;aborted&#x27; : stopReason }</pre></div></section><section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>src/llm.ts:151</code> JSON parse 失败会退回空对象，生产版应把 parse error 显式传给模型。</li><li><code>src/tools.ts:111</code> run_bash 只有 timeout，没有命令沙箱。</li><li><code>src/tools.ts:87</code> edit 依赖字符串唯一匹配，不适合复杂 AST 改写。</li></ul></section><section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">Agent loop</div><div class="card-d"><code>src/agent.ts:98</code> 消费 stream。</div></div><div class="card"><div class="card-h">Tests</div><div class="card-d"><code>test/tools.test.ts:19</code> 覆盖四个内置工具。</div></div></div></section><div class="foot"><span>Generated · 2026-08-13</span><span>Source · <a href="https://github.com/SaladDay/pi-from-scratch">SaladDay/pi-from-scratch</a></span><span><a href="../pi-from-scratch.html">← 返回</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7e6ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>

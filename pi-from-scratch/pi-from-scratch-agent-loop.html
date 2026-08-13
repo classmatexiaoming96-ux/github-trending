@@ -1,0 +1,463 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Agent Loop 与 Context 写回 · 深度解析 · pi-from-scratch</title><meta name="description" content="pi-from-scratch agent loop source deep dive"/><style>/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root{--star:#6bd2ff;--star-soft:#a7e6ff;--star-deep:#2a8fb8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">pi<b>scratch</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">pi<b>scratch</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">TypeScript · tiny agent</span><nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入</a></li><li><a href="#core"><span class="idx">01</span>核心实现</a></li><li><a href="#flow"><span class="idx">02</span>关键流程</a></li><li><a href="#edge"><span class="idx">03</span>边界</a></li><li><a href="#related"><span class="idx">04</span>关联</a></li></ul></nav><div class="nav-foot"><div>Stars ★791 · 2026-08-09</div><div><a href="https://github.com/SaladDay/pi-from-scratch" target="_blank">SaladDay/pi-from-scratch</a></div><div><a href="../pi-from-scratch.html">← 返回</a></div></div></aside><main class="main">
+<div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Agent Loop <em>深度解析</em></h1><p class="hero-desc">这页只拆 <code>src/agent.ts:80</code> 到 <code>src/agent.ts:173</code>：它如何收集模型事件、执行工具、补齐结果并维持 Context 可恢复性。</p></div><section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p><code>src/agent.ts:10</code> 只从 llm 层拿 stream 和 message builder，<code>src/agent.ts:13</code> 定义 AgentTool，<code>src/agent.ts:21</code> 定义 AgentEvent。这个契约让 UI 只消费事件，不碰 OpenAI 细节。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L10-30</span><span>TypeScript</span></div><pre class="code"><span class="ln">10</span>import { stream, buildAssistantMessage, buildToolResultMessage, type Model, type Context } from &#x27;./llm.js&#x27;
+<span class="ln">11</span>
+<span class="ln">12</span>/** 工具定义：name + 描述 + JSON Schema 参数 + execute 函数 */
+<span class="ln">13</span>export type AgentTool = {
+<span class="ln">14</span>  name: string
+<span class="ln">15</span>  description: string
+<span class="ln">16</span>  parameters: object  // JSON Schema
+<span class="ln">17</span>  execute: (args: unknown, signal?: AbortSignal) =&gt; Promise&lt;string&gt;
+<span class="ln">18</span>}
+<span class="ln">19</span>
+<span class="ln">20</span>/** agent 对外的事件流，供 UI 消费 */
+<span class="ln">21</span>export type AgentEvent =
+<span class="ln">22</span>  | { type: &#x27;assistant_text&#x27;; delta: string }
+<span class="ln">23</span>  | { type: &#x27;tool_call&#x27;; id: string; name: string; args: unknown }
+<span class="ln">24</span>  | { type: &#x27;tool_result&#x27;; id: string; name: string; result: string }
+<span class="ln">25</span>  | { type: &#x27;turn_end&#x27;; stopReason: &#x27;end_turn&#x27; | &#x27;max_tokens&#x27; | &#x27;aborted&#x27; | &#x27;error&#x27; }
+<span class="ln">26</span>
+<span class="ln">27</span>/** compaction 触发阈值：消息数超过此值时压缩旧消息 */
+<span class="ln">28</span>const COMPACT_THRESHOLD = 50
+<span class="ln">29</span>/** compaction 保留近期消息数 */
+<span class="ln">30</span>const KEEP_RECENT = 20</pre></div></section><section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>压缩不是删除历史，而是替换为摘要</h3><p><code>src/agent.ts:37</code> 先检查 abort 和长度，<code>src/agent.ts:41</code> 切出旧消息，<code>src/agent.ts:50</code> 构造摘要 context，<code>src/agent.ts:57</code> 用同一个 stream 总结。失败时 <code>src/agent.ts:63</code> 直接保留原始 context，这是避免空摘要污染会话的关键。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L37-70</span><span>TypeScript</span></div><pre class="code"><span class="ln">37</span>async function compactContext(model: Model, context: Context, signal?: AbortSignal): Promise&lt;void&gt; {
+<span class="ln">38</span>  if (signal?.aborted) return  // abort 时不压缩——避免空摘要损坏 context
+<span class="ln">39</span>  if (context.messages.length &lt; COMPACT_THRESHOLD) return
+<span class="ln">40</span>
+<span class="ln">41</span>  const oldMessages = context.messages.slice(0, -KEEP_RECENT)
+<span class="ln">42</span>  const recentMessages = context.messages.slice(-KEEP_RECENT)
+<span class="ln">43</span>
+<span class="ln">44</span>  // 把旧消息序列化成纯文本让 LLM 总结
+<span class="ln">45</span>  const conversationText = oldMessages
+<span class="ln">46</span>    .map(m =&gt; `${m.role}: ${typeof m.content === &#x27;string&#x27; ? m.content : JSON.stringify(m.content)}`)
+<span class="ln">47</span>    .join(&#x27;\n&#x27;)
+<span class="ln">48</span>
+<span class="ln">49</span>  // 用一轮非流式调用让 LLM 总结
+<span class="ln">50</span>  const summaryContext: Context = {
+<span class="ln">51</span>    systemPrompt: &#x27;请将以下对话总结为简洁的上下文摘要，保留关键决策、已做的工作和待办事项。&#x27;,
+<span class="ln">52</span>    messages: [{ role: &#x27;user&#x27;, content: conversationText }],
+<span class="ln">53</span>  }
+<span class="ln">54</span>
+<span class="ln">55</span>  let summary = &#x27;&#x27;
+<span class="ln">56</span>  let failed = false
+<span class="ln">57</span>  for await (const ev of stream(model, summaryContext, { signal })) {
+<span class="ln">58</span>    if (ev.type === &#x27;text_delta&#x27;) summary += ev.delta
+<span class="ln">59</span>    else if (ev.type === &#x27;error&#x27; || ev.type === &#x27;done&#x27; &amp;&amp; ev.stopReason === &#x27;aborted&#x27;) { failed = true; break }
+<span class="ln">60</span>  }
+<span class="ln">61</span>
+<span class="ln">62</span>  // 压缩失败时不替换 context——保留原始消息比空摘要更安全
+<span class="ln">63</span>  if (failed || !summary) return
+<span class="ln">64</span>
+<span class="ln">65</span>  // 用摘要消息替换旧消息，保留近期消息
+<span class="ln">66</span>  context.messages = [
+<span class="ln">67</span>    { role: &#x27;user&#x27;, content: `[context summary]\n${summary}` },
+<span class="ln">68</span>    ...recentMessages,
+<span class="ln">69</span>  ]
+<span class="ln">70</span>}</pre></div><h3><span class="arr">▸</span>主循环把 tool_call 和 text 分开处理</h3><p><code>src/agent.ts:89</code> 的 while 不设 max_steps，<code>src/agent.ts:98</code> 进入流式请求，<code>src/agent.ts:101</code> 立即转发文本，<code>src/agent.ts:103</code> 缓存工具调用，<code>src/agent.ts:122</code> 才把 assistant message 放回上下文。这保证 UI 可以流式显示，而协议状态仍完整。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L89-134</span><span>TypeScript</span></div><pre class="code"><span class="ln">89</span>  while (true) {
+<span class="ln">90</span>    // 0. 对话压缩：消息过多时先压缩旧消息
+<span class="ln">91</span>    await compactContext(model, context, signal)
+<span class="ln">92</span>
+<span class="ln">93</span>    // 1. 流式调用 LLM，收集文本和 tool_calls
+<span class="ln">94</span>    let text = &#x27;&#x27;
+<span class="ln">95</span>    let stopReason: &#x27;end_turn&#x27; | &#x27;tool_use&#x27; | &#x27;max_tokens&#x27; | &#x27;aborted&#x27; = &#x27;end_turn&#x27;
+<span class="ln">96</span>    const toolCalls: { id: string; name: string; args: unknown }[] = []
+<span class="ln">97</span>
+<span class="ln">98</span>    for await (const ev of stream(model, context, { tools: toolDefs, signal })) {
+<span class="ln">99</span>      if (ev.type === &#x27;text_delta&#x27;) {
+<span class="ln">100</span>        text += ev.delta
+<span class="ln">101</span>        yield { type: &#x27;assistant_text&#x27;, delta: ev.delta }
+<span class="ln">102</span>      } else if (ev.type === &#x27;tool_call&#x27;) {
+<span class="ln">103</span>        toolCalls.push({ id: ev.id, name: ev.name, args: ev.args })
+<span class="ln">104</span>        yield { type: &#x27;tool_call&#x27;, id: ev.id, name: ev.name, args: ev.args }
+<span class="ln">105</span>      } else if (ev.type === &#x27;done&#x27;) {
+<span class="ln">106</span>        stopReason = ev.stopReason
+<span class="ln">107</span>        if (ev.stopReason === &#x27;aborted&#x27;) {
+<span class="ln">108</span>          // abort 时丢弃 tool_calls（无对应 tool_result 会导致 session 恢复后 API 报错）
+<span class="ln">109</span>          context.messages.push(buildAssistantMessage(text, []))
+<span class="ln">110</span>          yield { type: &#x27;turn_end&#x27;, stopReason: &#x27;aborted&#x27; }
+<span class="ln">111</span>          return
+<span class="ln">112</span>        }
+<span class="ln">113</span>      } else if (ev.type === &#x27;error&#x27;) {
+<span class="ln">114</span>        context.messages.push(buildAssistantMessage(text, []))
+<span class="ln">115</span>        yield { type: &#x27;assistant_text&#x27;, delta: `\n[error] ${ev.error.message}` }
+<span class="ln">116</span>        yield { type: &#x27;turn_end&#x27;, stopReason: &#x27;error&#x27; }
+<span class="ln">117</span>        return
+<span class="ln">118</span>      }
+<span class="ln">119</span>    }
+<span class="ln">120</span>
+<span class="ln">121</span>    // 2. 把 assistant 回复塞回 context
+<span class="ln">122</span>    context.messages.push(buildAssistantMessage(text, toolCalls))
+<span class="ln">123</span>
+<span class="ln">124</span>    // 3. 截断处理：max_tokens 时 tool args 可能不完整，不执行，把错误放回到 Context 让模型重发
+<span class="ln">125</span>    if (stopReason === &#x27;max_tokens&#x27; &amp;&amp; toolCalls.length &gt; 0) {
+<span class="ln">126</span>      const results = toolCalls.map(tc =&gt; ({
+<span class="ln">127</span>        tool_use_id: tc.id,
+<span class="ln">128</span>        content: `error: output truncated by max_tokens, tool &quot;${tc.name}&quot; args may be incomplete.`,
+<span class="ln">129</span>      }))
+<span class="ln">130</span>      context.messages.push(buildToolResultMessage(results))
+<span class="ln">131</span>      for (let i = 0; i &lt; toolCalls.length; i++) {
+<span class="ln">132</span>        yield { type: &#x27;tool_result&#x27;, id: toolCalls[i].id, name: toolCalls[i].name, result: results[i].content }
+<span class="ln">133</span>      }
+<span class="ln">134</span>      continue</pre></div><h3><span class="arr">▸</span>工具执行后必须写回 tool_result</h3><p><code>src/agent.ts:145</code> 选择串行工具执行，<code>src/agent.ts:151</code> 对不存在的工具生成错误，<code>src/agent.ts:155</code> 运行 execute，<code>src/agent.ts:166</code> 对 abort 后剩余调用补 error，最后 <code>src/agent.ts:172</code> 写回 user/tool_result 消息进入下一轮。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/agent.ts</span> · L145-173</span><span>TypeScript</span></div><pre class="code"><span class="ln">145</span>    // 5. 串行执行 tool_calls（pi 有 sequential/parallel 两种模式，教学版统一串行）
+<span class="ln">146</span>    // args 未经 parameters 验证直接传入 execute（教学版简化，生产应先 validate）
+<span class="ln">147</span>    const results: { tool_use_id: string; content: string }[] = []
+<span class="ln">148</span>    for (const tc of toolCalls) {
+<span class="ln">149</span>      const tool = toolMap.get(tc.name)
+<span class="ln">150</span>      let result: string
+<span class="ln">151</span>      if (!tool) {
+<span class="ln">152</span>        result = `error: tool &quot;${tc.name}&quot; not found`
+<span class="ln">153</span>      } else {
+<span class="ln">154</span>        try {
+<span class="ln">155</span>          result = await tool.execute(tc.args, signal)
+<span class="ln">156</span>        } catch (e) {
+<span class="ln">157</span>          result = `error: ${(e as Error).message}`
+<span class="ln">158</span>        }
+<span class="ln">159</span>      }
+<span class="ln">160</span>      results.push({ tool_use_id: tc.id, content: result })
+<span class="ln">161</span>      yield { type: &#x27;tool_result&#x27;, id: tc.id, name: tc.name, result }
+<span class="ln">162</span>      if (signal?.aborted) break
+<span class="ln">163</span>    }
+<span class="ln">164</span>
+<span class="ln">165</span>    // 6. 为被 abort 跳过的 tool_call 补上错误结果（API 要求每个 tool_call 都有对应 tool_result）
+<span class="ln">166</span>    for (const tc of toolCalls.slice(results.length)) {
+<span class="ln">167</span>      results.push({ tool_use_id: tc.id, content: &#x27;error: aborted&#x27; })
+<span class="ln">168</span>      yield { type: &#x27;tool_result&#x27;, id: tc.id, name: tc.name, result: &#x27;error: aborted&#x27; }
+<span class="ln">169</span>    }
+<span class="ln">170</span>
+<span class="ln">171</span>    // 7. 把 tool_result 放回到 Context，进入下一轮
+<span class="ln">172</span>    context.messages.push(buildToolResultMessage(results))
+<span class="ln">173</span>  }</pre></div></section><section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">context.messages + tools
+  ↓ src/agent.ts:91 compact
+stream events
+  ↓ src/agent.ts:122 assistant message
+tool execution
+  ↓ src/agent.ts:172 tool_result message
+next while iteration</div><p><code>test/agent.test.ts:48</code> 用两轮 mock stream 验证这条路径，<code>test/agent.test.ts:72</code> 断言事件顺序，<code>test/agent.test.ts:76</code> 确认 context 最终有三条消息。未知工具路径由 <code>test/agent.test.ts:79</code> 覆盖。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">test/agent.test.ts</span> · L48-97</span><span>TypeScript</span></div><pre class="code"><span class="ln">48</span>  it(&#x27;tool_call → 执行 → 把结果放回到 Context → 下一轮纯文本&#x27;, async () =&gt; {
+<span class="ln">49</span>    const echoTool: AgentTool = {
+<span class="ln">50</span>      name: &#x27;echo&#x27;,
+<span class="ln">51</span>      description: &#x27;echo back&#x27;,
+<span class="ln">52</span>      parameters: { type: &#x27;object&#x27;, properties: {} },
+<span class="ln">53</span>      execute: async (args: { text: string }) =&gt; `ECHO: ${args.text}`,
+<span class="ln">54</span>    }
+<span class="ln">55</span>
+<span class="ln">56</span>    let round = 0
+<span class="ln">57</span>    mockStreamFn.mockImplementation(async function* (): AsyncGenerator&lt;StreamEvent&gt; {
+<span class="ln">58</span>      if (round === 0) {
+<span class="ln">59</span>        yield { type: &#x27;tool_call&#x27;, id: &#x27;t1&#x27;, name: &#x27;echo&#x27;, args: { text: &#x27;hi&#x27; } }
+<span class="ln">60</span>        yield { type: &#x27;done&#x27;, stopReason: &#x27;tool_use&#x27; }
+<span class="ln">61</span>      } else {
+<span class="ln">62</span>        yield { type: &#x27;text_delta&#x27;, delta: &#x27;Done&#x27; }
+<span class="ln">63</span>        yield { type: &#x27;done&#x27;, stopReason: &#x27;end_turn&#x27; }
+<span class="ln">64</span>      }
+<span class="ln">65</span>      round++
+<span class="ln">66</span>    })
+<span class="ln">67</span>
+<span class="ln">68</span>    const ctx: Context = { messages: [] }
+<span class="ln">69</span>    const events: { type: string; [k: string]: unknown }[] = []
+<span class="ln">70</span>    for await (const e of runAgent(model, ctx, [echoTool])) events.push(e)
+<span class="ln">71</span>
+<span class="ln">72</span>    expect(events.map(e =&gt; e.type)).toEqual([&#x27;tool_call&#x27;, &#x27;tool_result&#x27;, &#x27;assistant_text&#x27;, &#x27;turn_end&#x27;])
+<span class="ln">73</span>    const tr = events.find(e =&gt; e.type === &#x27;tool_result&#x27;) as { result: string }
+<span class="ln">74</span>    expect(tr.result).toBe(&#x27;ECHO: hi&#x27;)
+<span class="ln">75</span>    // 3 条消息：assistant(tool_use) + user(tool_result) + assistant(text)
+<span class="ln">76</span>    expect(ctx.messages).toHaveLength(3)
+<span class="ln">77</span>  })
+<span class="ln">78</span>
+<span class="ln">79</span>  it(&#x27;未知 tool 名 → 把报错结果放回到 Context&#x27;, async () =&gt; {
+<span class="ln">80</span>    let round = 0
+<span class="ln">81</span>    mockStreamFn.mockImplementation(async function* (): AsyncGenerator&lt;StreamEvent&gt; {
+<span class="ln">82</span>      if (round === 0) {
+<span class="ln">83</span>        yield { type: &#x27;tool_call&#x27;, id: &#x27;t1&#x27;, name: &#x27;nope&#x27;, args: {} }
+<span class="ln">84</span>        yield { type: &#x27;done&#x27;, stopReason: &#x27;tool_use&#x27; }
+<span class="ln">85</span>      } else {
+<span class="ln">86</span>        yield { type: &#x27;text_delta&#x27;, delta: &#x27;ok&#x27; }
+<span class="ln">87</span>        yield { type: &#x27;done&#x27;, stopReason: &#x27;end_turn&#x27; }
+<span class="ln">88</span>      }
+<span class="ln">89</span>      round++
+<span class="ln">90</span>    })
+<span class="ln">91</span>
+<span class="ln">92</span>    const events: { type: string; [k: string]: unknown }[] = []
+<span class="ln">93</span>    for await (const e of runAgent(model, { messages: [] }, [] as AgentTool[])) events.push(e)
+<span class="ln">94</span>
+<span class="ln">95</span>    const tr = events.find(e =&gt; e.type === &#x27;tool_result&#x27;) as { result: string }
+<span class="ln">96</span>    expect(tr.result).toContain(&#x27;not found&#x27;)
+<span class="ln">97</span>  })</pre></div></section><section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>src/agent.ts:107</code> abort 时丢弃 tool_calls，避免缺 tool_result 的恢复错误。</li><li><code>src/agent.ts:125</code> max_tokens 下不执行工具，防止半截 JSON 参数造成文件破坏。</li><li><code>src/agent.ts:146</code> 明确没有参数验证，生产化必须补 schema validation。</li></ul></section><section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">LLM adapter</div><div class="card-d"><code>src/llm.ts:167</code> 负责把模型流转成事件。</div></div><div class="card"><div class="card-h">CLI</div><div class="card-d"><code>src/cli.ts:55</code> 消费 runAgent 事件并转发给 TUI。</div></div></div></section><div class="foot"><span>Generated · 2026-08-13</span><span>Source · <a href="https://github.com/SaladDay/pi-from-scratch">SaladDay/pi-from-scratch</a></span><span><a href="../pi-from-scratch.html">← 返回</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#a7e6ff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill()});requestAnimationFrame(tick)};tick()}})();</script></body></html>
