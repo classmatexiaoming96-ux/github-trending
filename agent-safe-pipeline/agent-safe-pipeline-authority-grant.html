@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>policy verdict 与一次性 grant · 深度解析 · agent-safe-pipeline</title>
+<meta name="description" content="agent-safe-pipeline Authority Grant 子模块完整解析 — decionis/agent-safe-pipeline 源码级深度解析：immutable intent、独立 policy verdict、human approval 和 single-use grant 如何把 AI action 与执行权分离。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #f08a8a;
+  --star-soft:  #ffb0a8;
+  --star-deep:  #b94f58;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">agent-safe-pipeline<b>Safe</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agent-safe-pipeline<b>Safe</b></div>
+      <div class="sub">Authority Grant · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../agent-safe-pipeline.html">← 返回 agent-safe-pipeline 主页面</a></div>
+      <div><a href="../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">policy verdict 与一次性 grant <em>深度解析</em></h1>
+      <p class="hero-desc">远端 authority 不只返回 allow/block，它还必须把授权 token 绑定到当前 intentHash，并限制在 intent TTL 内。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p><code>packages/pipeline/src/decision/DecisionAuthority.ts:16</code> 的 GateDecision 是执行端唯一相信的 verdict 容器；<code>packages/pipeline/src/decision/DecisionAuthority.ts:22</code> 到 <code>packages/pipeline/src/decision/DecisionAuthority.ts:25</code> 把 authorization token 和 expiresAt 做成可空字段，意味着 ESCALATE/BLOCK 不能假装拥有执行权。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/decision/DecisionAuthority.ts</span> · L16-44</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">16</span>export interface GateDecision {
+<span class="ln">17</span>  readonly verdict: DecisionVerdict;
+<span class="ln">18</span>  readonly decisionId: string;
+<span class="ln">19</span>  readonly dossierId: string | null;
+<span class="ln">20</span>  readonly intentHash: string;
+<span class="ln">21</span>  readonly reasonCodes: readonly string[];
+<span class="ln">22</span>  readonly authorization: {
+<span class="ln">23</span>    readonly token: string;
+<span class="ln">24</span>    readonly expiresAt: string;
+<span class="ln">25</span>  } | null;
+<span class="ln">26</span>  readonly failClosed: boolean;
+<span class="ln">27</span>}
+<span class="ln">28</span>
+<span class="ln">29</span>export interface DecisionAuthority {
+<span class="ln">30</span>  evaluate(intent: CapturedIntent, evidence?: DecisionEvidence): Promise&lt;GateDecision&gt;;
+<span class="ln">31</span>}
+<span class="ln">32</span>
+<span class="ln">33</span>export class FailClosedDecision {
+<span class="ln">34</span>  public static create(intentHash: string, reasonCode: string): GateDecision {
+<span class="ln">35</span>    return immutableGateDecision({
+<span class="ln">36</span>      verdict: "BLOCK",
+<span class="ln">37</span>      decisionId: "unavailable",
+<span class="ln">38</span>      dossierId: null,
+<span class="ln">39</span>      intentHash,
+<span class="ln">40</span>      reasonCodes: [reasonCode],
+<span class="ln">41</span>      authorization: null,
+<span class="ln">42</span>      failClosed: true,
+<span class="ln">43</span>    });
+<span class="ln">44</span>  }</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>读这页时先看三个不变量</h3>
+      <p>第一，页面里的每个 <code>path:NN</code> 都指向当前源码快照；第二，所有授权都必须绑定到同一个 intentHash；第三，执行端只消费一次性 grant，不接收 agent 自己声明的“我被批准了”。</p>
+        </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>DecionisGate 对 authority 响应 fail-closed</h3>
+      <p><code>packages/pipeline/src/decision/DecionisGate.ts:70</code> 发起 enforce-and-bind 请求，<code>packages/pipeline/src/decision/DecionisGate.ts:85</code> 遇到非 2xx 立即 AUTHORITY_REQUEST_FAILED，<code>packages/pipeline/src/decision/DecionisGate.ts:88</code> 用 BoundedResponseBody 限制响应体，<code>packages/pipeline/src/decision/DecionisGate.ts:92</code> 再 parse schema。<code>packages/pipeline/src/decision/DecionisGate.ts:110</code> 会把缺 grant 的 ALLOW 降级成 BLOCK。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/decision/DecionisGate.ts</span> · L63-128</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">63</span>  public async evaluate(
+<span class="ln">64</span>    captured: CapturedIntent,
+<span class="ln">65</span>    evidence?: DecisionEvidence,
+<span class="ln">66</span>  ): Promise&lt;GateDecision&gt; {
+<span class="ln">67</span>    const controller = new AbortController();
+<span class="ln">68</span>    const timeout = setTimeout(() =&gt; controller.abort(), this.timeoutMs);
+<span class="ln">69</span>    try {
+<span class="ln">70</span>      const response = await this.fetchImpl(`${this.baseUrl}/v1/authority/enforce-and-bind`, {
+<span class="ln">71</span>        method: "POST",
+<span class="ln">72</span>        headers: {
+<span class="ln">73</span>          authorization: `Bearer ${this.apiKey}`,
+<span class="ln">74</span>          "content-type": "application/json",
+<span class="ln">75</span>          "idempotency-key": captured.intent.idempotencyKey,
+<span class="ln">76</span>        },
+<span class="ln">77</span>        body: JSON.stringify({
+<span class="ln">78</span>          ...CanonicalIntentHasher.bindingOf(captured.intent),
+<span class="ln">79</span>          intent_hash: captured.intentHash,
+<span class="ln">80</span>          mode: "ENFORCEMENT",
+<span class="ln">81</span>          ...(evidence === undefined ? {} : { evidence }),
+<span class="ln">82</span>        }),
+<span class="ln">83</span>        signal: controller.signal,
+<span class="ln">84</span>      });
+<span class="ln">85</span>      if (!response.ok) {
+<span class="ln">86</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_REQUEST_FAILED");
+<span class="ln">87</span>      }
+<span class="ln">88</span>      const text = await BoundedResponseBody.read(response, MAX_RESPONSE_BYTES);
+<span class="ln">89</span>      if (text === null) {
+<span class="ln">90</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_RESPONSE_TOO_LARGE");
+<span class="ln">91</span>      }
+<span class="ln">92</span>      const parsed = AuthorityResponseSchema.parse(JSON.parse(text));
+<span class="ln">93</span>      if (parsed.action_hash !== captured.intentHash) {
+<span class="ln">94</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_BINDING_MISMATCH");
+<span class="ln">95</span>      }
+<span class="ln">96</span>      const verdict =
+<span class="ln">97</span>        parsed.status === "ALLOW"
+<span class="ln">98</span>          ? "ALLOW"
+<span class="ln">99</span>          : parsed.status === "ESCALATE" || parsed.status === "REVIEW_REQUIRED"
+<span class="ln">100</span>            ? "ESCALATE"
+<span class="ln">101</span>            : "BLOCK";
+<span class="ln">102</span>      const canExecute =
+<span class="ln">103</span>        verdict === "ALLOW" &amp;&amp;
+<span class="ln">104</span>        parsed.should_execute &amp;&amp;
+<span class="ln">105</span>        parsed.dossier_id !== null &amp;&amp;
+<span class="ln">106</span>        parsed.execution_token !== null &amp;&amp;
+<span class="ln">107</span>        parsed.execution_token_expires_at !== null &amp;&amp;
+<span class="ln">108</span>        Date.parse(parsed.execution_token_expires_at) &gt; Date.now() &amp;&amp;
+<span class="ln">109</span>        Date.parse(parsed.execution_token_expires_at) &lt;= Date.parse(captured.intent.expiresAt);
+<span class="ln">110</span>      if (verdict === "ALLOW" &amp;&amp; !canExecute) {
+<span class="ln">111</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_GRANT_MISSING");
+<span class="ln">112</span>      }
+<span class="ln">113</span>      return immutableGateDecision({
+<span class="ln">114</span>        verdict,
+<span class="ln">115</span>        decisionId: parsed.decision_id,
+<span class="ln">116</span>        dossierId: parsed.dossier_id,
+<span class="ln">117</span>        intentHash: parsed.action_hash,
+<span class="ln">118</span>        reasonCodes: parsed.reason_codes,
+<span class="ln">119</span>        authorization: canExecute
+<span class="ln">120</span>          ? {
+<span class="ln">121</span>              token: parsed.execution_token as string,
+<span class="ln">122</span>              expiresAt: parsed.execution_token_expires_at as string,
+<span class="ln">123</span>            }
+<span class="ln">124</span>          : null,
+<span class="ln">125</span>        failClosed: parsed.status === "ERROR",
+<span class="ln">126</span>      });
+<span class="ln">127</span>    } catch {
+<span class="ln">128</span>      return FailClosedDecision.create(captured.intentHash, "AUTHORITY_UNAVAILABLE");</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Grant verifier 消费 token 时再次提交 intent binding</h3>
+      <p><code>packages/pipeline/src/execution/AuthorizationVerifier.ts:64</code> 的 verifyAndConsume 先拒绝非 ALLOW 和 hash mismatch，<code>packages/pipeline/src/execution/AuthorizationVerifier.ts:80</code> 调用 consume-token，body 中 <code>packages/pipeline/src/execution/AuthorizationVerifier.ts:87</code> 发送 execution_token，<code>packages/pipeline/src/execution/AuthorizationVerifier.ts:89</code> 重新附上 canonical binding。返回后 <code>packages/pipeline/src/execution/AuthorizationVerifier.ts:103</code> 到 <code>packages/pipeline/src/execution/AuthorizationVerifier.ts:110</code> 逐项核对 claims。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/execution/AuthorizationVerifier.ts</span> · L64-118</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">64</span>  public async verifyAndConsume(
+<span class="ln">65</span>    captured: CapturedIntent,
+<span class="ln">66</span>    decision: GateDecision,
+<span class="ln">67</span>  ): Promise&lt;VerifiedAuthorization | null&gt; {
+<span class="ln">68</span>    if (
+<span class="ln">69</span>      decision.verdict !== "ALLOW" ||
+<span class="ln">70</span>      decision.failClosed ||
+<span class="ln">71</span>      decision.authorization === null ||
+<span class="ln">72</span>      decision.dossierId === null ||
+<span class="ln">73</span>      decision.intentHash !== captured.intentHash
+<span class="ln">74</span>    ) {
+<span class="ln">75</span>      return null;
+<span class="ln">76</span>    }
+<span class="ln">77</span>    const controller = new AbortController();
+<span class="ln">78</span>    const timeout = setTimeout(() =&gt; controller.abort(), this.timeoutMs);
+<span class="ln">79</span>    try {
+<span class="ln">80</span>      const response = await this.fetchImpl(`${this.baseUrl}/v1/execution/consume-token`, {
+<span class="ln">81</span>        method: "POST",
+<span class="ln">82</span>        headers: {
+<span class="ln">83</span>          authorization: `Bearer ${this.apiKey}`,
+<span class="ln">84</span>          "content-type": "application/json",
+<span class="ln">85</span>        },
+<span class="ln">86</span>        body: JSON.stringify({
+<span class="ln">87</span>          execution_token: decision.authorization.token,
+<span class="ln">88</span>          intent_hash: captured.intentHash,
+<span class="ln">89</span>          intent: CanonicalIntentHasher.bindingOf(captured.intent),
+<span class="ln">90</span>          consumed_by: captured.intent.actor.id,
+<span class="ln">91</span>        }),
+<span class="ln">92</span>        signal: controller.signal,
+<span class="ln">93</span>      });
+<span class="ln">94</span>      if (!response.ok) return null;
+<span class="ln">95</span>      const text = await BoundedResponseBody.read(response, MAX_RESPONSE_BYTES);
+<span class="ln">96</span>      if (text === null) return null;
+<span class="ln">97</span>      const parsed = ConsumeResponseSchema.parse(JSON.parse(text));
+<span class="ln">98</span>      const claimExpiryMs = parsed.claims.exp * 1_000;
+<span class="ln">99</span>      const decisionExpirySeconds = Math.floor(
+<span class="ln">100</span>        Date.parse(decision.authorization.expiresAt) / 1_000,
+<span class="ln">101</span>      );
+<span class="ln">102</span>      if (
+<span class="ln">103</span>        parsed.claims.binding.intent_hash !== captured.intentHash ||
+<span class="ln">104</span>        parsed.claims.decision_id !== decision.decisionId ||
+<span class="ln">105</span>        parsed.claims.dossier_id !== decision.dossierId ||
+<span class="ln">106</span>        parsed.claims.exp !== decisionExpirySeconds ||
+<span class="ln">107</span>        claimExpiryMs &lt;= Date.now() ||
+<span class="ln">108</span>        claimExpiryMs &gt; Date.parse(captured.intent.expiresAt)
+<span class="ln">109</span>      ) {
+<span class="ln">110</span>        return null;
+<span class="ln">111</span>      }
+<span class="ln">112</span>      return Object.freeze({
+<span class="ln">113</span>        decisionId: parsed.claims.decision_id,
+<span class="ln">114</span>        dossierId: parsed.claims.dossier_id,
+<span class="ln">115</span>        grantId: parsed.claims.jti,
+<span class="ln">116</span>        intentHash: parsed.claims.binding.intent_hash,
+<span class="ln">117</span>        expiresAt: new Date(parsed.claims.exp * 1_000).toISOString(),
+<span class="ln">118</span>      });</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">GateDecision(ALLOW + token) -> consume-token -> VerifiedAuthorization -> SafeExecutor final checks</div>
+      <p>安全点在两端闭环：authority 端由 <code>packages/pipeline/src/decision/DecionisGate.ts:93</code> 确认 action_hash，执行端由 <code>packages/pipeline/src/execution/AuthorizationVerifier.ts:103</code> 确认 claims.binding.intent_hash。即使 token 被拿到，<code>packages/pipeline/src/execution/SafeExecutor.ts:61</code> 到 <code>packages/pipeline/src/execution/SafeExecutor.ts:68</code> 还会要求 decisionId、dossierId、grantId、intentHash 和 expiry 全部一致。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>packages/pipeline/src/decision/DecionisGate.ts:127</code> authority 异常统一 AUTHORITY_UNAVAILABLE。</li><li><code>packages/pipeline/src/execution/AuthorizationVerifier.ts:94</code> consume-token 非 2xx 返回 null，不执行。</li><li><code>packages/pipeline/src/execution/AuthorizationVerifier.ts:107</code> 过期 claims 直接返回 null。</li><li><code>packages/pipeline/src/execution/SafeExecutor.ts:68</code> grant 过期时间超过 intent.expiresAt 也被拒绝。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">Intent hash</div><div class="card-d"><code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:38</code> 生成的 hash 是 authority 和 executor 的共同绑定点。</div></div><div class="card"><div class="card-h">Replay store</div><div class="card-d"><code>packages/pipeline/src/execution/ReplayStore.ts:23</code> 防止同一个 grantId 被重复 claim。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-08-17</span>
+      <span>Source · <a href="https://github.com/decionis/agent-safe-pipeline">decionis/agent-safe-pipeline</a></span>
+      <span><a href="../agent-safe-pipeline.html">↑ agent-safe-pipeline 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

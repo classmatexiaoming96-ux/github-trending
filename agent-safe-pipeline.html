@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>agent-safe-pipeline · 不可越权的 Agent 执行管线 · 源码观测台</title>
+<meta name="description" content="decionis/agent-safe-pipeline 源码级深度解析 — decionis/agent-safe-pipeline 源码级深度解析：immutable intent、独立 policy verdict、human approval 和 single-use grant 如何把 AI action 与执行权分离。" />
+<meta property="og:title" content="agent-safe-pipeline · 源码观测台" />
+<meta property="og:description" content="decionis/agent-safe-pipeline 源码级深度解析：immutable intent、独立 policy verdict、human approval 和 single-use grant 如何把 AI action 与执行权分离。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #f08a8a;
+  --star-soft:  #ffb0a8;
+  --star-deep:  #b94f58;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">agent-safe-pipeline<b>Safe</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">agent-safe-pipeline<b>Safe</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">TypeScript · pnpm monorepo</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>不可变意图先落盘</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>授权与执行拆成两道门</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从提议到一次性 grant</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试把 fail-closed 写死</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>值得借鉴的工程亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险边界</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★486 · 2026-08-13</div>
+      <div><a href="https://github.com/decionis/agent-safe-pipeline" target="_blank">decionis/agent-safe-pipeline</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">agent-safe-pipeline <em>不可越权的 Agent 执行管线</em></h1>
+          <p class="hero-desc">agent-safe-pipeline 把 AI agent 的动作拆成 proposal、immutable intent、policy verdict、human approval、single-use grant 和 SafeExecutor 六段，核心原则是 agent 可以提出动作，但不能自行授权执行。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 486</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">1.8K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">56</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">today</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow">Agent proposal → intent hash → Decionis policy → human evidence → one-use grant → SafeExecutor</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>这个仓库的主线可以从 <code>packages/pipeline/src/intent/ExecutionIntent.ts:48</code> 读起：ExecutionIntentSchema 把 action、target、parameters、downstreamTarget 和 idempotencyKey 固定成严格 schema；<code>packages/pipeline/src/intent/IntentCapture.ts:32</code> 再把 agent proposal 和可信上下文合并成 captured intent；<code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:26</code> 用 canonical JSON 和 sha256 做绑定。换句话说，agent 只能提交“想做什么”，它不能绕过 <code>packages/pipeline/src/decision/DecionisGate.ts:63</code> 的 authority evaluate，也不能跳过 <code>packages/pipeline/src/execution/SafeExecutor.ts:35</code> 的 SafeExecutor.run。</p>
+      <p>最值得拆的是双重校验链。<code>packages/pipeline/src/decision/DecionisGate.ts:93</code> 会拒绝 authority 返回的 action_hash 与 captured hash 不一致，<code>packages/pipeline/src/execution/AuthorizationVerifier.ts:64</code> 会在执行前消费 token 并核对 decision_id、dossier_id、exp 与 intent_hash，<code>packages/pipeline/src/execution/SafeExecutor.ts:48</code> 和 <code>packages/pipeline/src/execution/SafeExecutor.ts:72</code> 还会在消费 grant 前后各重算一次 conformance。这些点让它不像一个普通 SDK，而像给高风险 agent action 准备的最小安全参考架构。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">Capture → bind → decide → approve → consume → execute；执行权被延迟到 SafeExecutor 末端。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">ExecutionIntent + intentHash + GateDecision + VerifiedAuthorization。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">Intent TTL 限制在 1-300 秒，authority timeout 限制在 1-15 秒，response body 限制 100KB。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Shopify refund、GitHub deploy、procurement、MCP tool gate 等 examples 展示可替换 action。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">不可变意图先落盘</h2>
+      <p><code>packages/pipeline/src/intent/ExecutionIntent.ts:12</code> 到 <code>packages/pipeline/src/intent/ExecutionIntent.ts:64</code> 把不可信 agent proposal 和可信运行上下文分开建模。这一步的关键不是生成 UUID，而是让后续 policy authority 拿到一个字段顺序稳定、可哈希、可审计的 binding。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">Agent</span> proposes action
+<span class="flow-arr">  ↓</span>
+<span class="flow-node">IntentCapture</span> validates proposal + trusted context
+<span class="flow-arr">  ↓</span>
+<span class="flow-node">CanonicalIntentHasher</span> creates sha256 binding
+<span class="flow-arr">  ↓</span>
+<span class="flow-node">DecionisGate</span> returns ALLOW / ESCALATE / BLOCK
+<span class="flow-arr">  ↓</span>
+<span class="flow-node">SafeExecutor</span> consumes one-use grant before action</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>核心模块不多，但边界清楚：<code>packages/pipeline/src/intent/IntentCapture.ts:19</code> 负责捕获，<code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:99</code> 负责生成 authority binding，<code>packages/pipeline/src/decision/DecionisGate.ts:47</code> 实现远端 policy authority，<code>packages/pipeline/src/execution/AuthorizationVerifier.ts:48</code> 消费执行 token，<code>packages/pipeline/src/execution/ActionRegistry.ts:21</code> 把可执行动作白名单化，<code>packages/pipeline/src/execution/ReplayStore.ts:5</code> 防止 grant 重放。</p>
+      <div class="g3"><div class="card"><div class="card-h">IntentCapture</div><div class="card-d">从 <code>packages/pipeline/src/intent/IntentCapture.ts:32</code> 开始先做 bounded check，再 parse proposal/context，最后设置 capturedAt/expiresAt。</div></div><div class="card"><div class="card-h">Canonical hash</div><div class="card-d"><code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:35</code> 先 canonical stringify，再由 <code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:38</code> 计算 sha256。</div></div><div class="card"><div class="card-h">SafeExecutor</div><div class="card-d"><code>packages/pipeline/src/execution/SafeExecutor.ts:39</code> 先拒绝非 ALLOW，<code>packages/pipeline/src/execution/SafeExecutor.ts:77</code> 才真正调用 action registry。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/intent/ExecutionIntent.ts</span> · L48-64</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">48</span>export const ExecutionIntentSchema = z
+<span class="ln">49</span>  .object({
+<span class="ln">50</span>    version: z.literal("agent-safe.intent/1"),
+<span class="ln">51</span>    intentId: z.string().uuid(),
+<span class="ln">52</span>    tenantId: z.string().uuid(),
+<span class="ln">53</span>    capturedAt: z.string().datetime(),
+<span class="ln">54</span>    expiresAt: z.string().datetime(),
+<span class="ln">55</span>    actor: IntentActorSchema,
+<span class="ln">56</span>    action: actionName,
+<span class="ln">57</span>    target: z.string().trim().min(1).max(500),
+<span class="ln">58</span>    parameters: JsonObjectSchema,
+<span class="ln">59</span>    downstreamTarget: DownstreamTargetSchema,
+<span class="ln">60</span>    context: JsonObjectSchema,
+<span class="ln">61</span>    correlationId: boundedId.optional(),
+<span class="ln">62</span>    idempotencyKey: z.string().trim().min(1).max(180),
+<span class="ln">63</span>  })
+<span class="ln">64</span>  .strict();</pre>
+      </div>
+
+      <a class="deep-link" href="agent-safe-pipeline/agent-safe-pipeline-intent-binding.html">深度阅读 · 意图绑定和 canonical hash</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">授权与执行拆成两道门</h2>
+
+      <h3><span class="arr">▸</span>IntentCapture 把提议变成短 TTL 事实</h3>
+      <p><code>packages/pipeline/src/intent/IntentCapture.ts:32</code> 的 capture 方法先调用 <code>packages/pipeline/src/intent/IntentCapture.ts:33</code> 和 <code>packages/pipeline/src/intent/IntentCapture.ts:34</code> 做输入复杂度限制，再在 <code>packages/pipeline/src/intent/IntentCapture.ts:39</code> 到 <code>packages/pipeline/src/intent/IntentCapture.ts:53</code> 组装 ExecutionIntent。注意 <code>packages/pipeline/src/intent/IntentCapture.ts:29</code> 把 ttlSeconds clamp 在 1 到 300 秒，意味着授权窗口被设计成短时有效，而不是长期 bearer permission。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/intent/IntentCapture.ts</span> · L32-55</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">32</span>  public capture(proposalInput: AgentProposal, trustedInput: TrustedIntentContext): CapturedIntent {
+<span class="ln">33</span>    this.hasher.assertInputBounded(proposalInput);
+<span class="ln">34</span>    this.hasher.assertInputBounded(trustedInput);
+<span class="ln">35</span>    const proposal = AgentProposalSchema.parse(proposalInput);
+<span class="ln">36</span>    const trusted = TrustedIntentContextSchema.parse(trustedInput);
+<span class="ln">37</span>    const capturedAt = this.clock();
+<span class="ln">38</span>    const expiresAt = new Date(capturedAt.valueOf() + this.ttlSeconds * 1_000);
+<span class="ln">39</span>    const intent = ExecutionIntentSchema.parse({
+<span class="ln">40</span>      version: "agent-safe.intent/1",
+<span class="ln">41</span>      intentId: this.createId(),
+<span class="ln">42</span>      tenantId: trusted.tenantId,
+<span class="ln">43</span>      capturedAt: capturedAt.toISOString(),
+<span class="ln">44</span>      expiresAt: expiresAt.toISOString(),
+<span class="ln">45</span>      actor: trusted.actor,
+<span class="ln">46</span>      action: proposal.action,
+<span class="ln">47</span>      target: proposal.target,
+<span class="ln">48</span>      parameters: proposal.parameters,
+<span class="ln">49</span>      downstreamTarget: trusted.downstreamTarget,
+<span class="ln">50</span>      context: trusted.context,
+<span class="ln">51</span>      ...(trusted.correlationId === undefined ? {} : { correlationId: trusted.correlationId }),
+<span class="ln">52</span>      idempotencyKey: trusted.idempotencyKey,
+<span class="ln">53</span>    });
+<span class="ln">54</span>    return this.hasher.capture(intent);
+<span class="ln">55</span>  }</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Authority gate 只承认绑定到 intentHash 的授权</h3>
+      <p><code>packages/pipeline/src/decision/DecionisGate.ts:70</code> 访问 /v1/authority/enforce-and-bind，body 里同时发送 canonical binding 与 <code>packages/pipeline/src/decision/DecionisGate.ts:79</code> 的 intent_hash。返回后，<code>packages/pipeline/src/decision/DecionisGate.ts:92</code> 用 zod 校验响应，<code>packages/pipeline/src/decision/DecionisGate.ts:93</code> 要求 action_hash 精确等于 captured intentHash，<code>packages/pipeline/src/decision/DecionisGate.ts:102</code> 到 <code>packages/pipeline/src/decision/DecionisGate.ts:111</code> 则把缺少 dossier/token/expiry 的 ALLOW 变成 fail-closed。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/pipeline/src/decision/DecionisGate.ts</span> · L63-111</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">63</span>  public async evaluate(
+<span class="ln">64</span>    captured: CapturedIntent,
+<span class="ln">65</span>    evidence?: DecisionEvidence,
+<span class="ln">66</span>  ): Promise&lt;GateDecision&gt; {
+<span class="ln">67</span>    const controller = new AbortController();
+<span class="ln">68</span>    const timeout = setTimeout(() =&gt; controller.abort(), this.timeoutMs);
+<span class="ln">69</span>    try {
+<span class="ln">70</span>      const response = await this.fetchImpl(`${this.baseUrl}/v1/authority/enforce-and-bind`, {
+<span class="ln">71</span>        method: "POST",
+<span class="ln">72</span>        headers: {
+<span class="ln">73</span>          authorization: `Bearer ${this.apiKey}`,
+<span class="ln">74</span>          "content-type": "application/json",
+<span class="ln">75</span>          "idempotency-key": captured.intent.idempotencyKey,
+<span class="ln">76</span>        },
+<span class="ln">77</span>        body: JSON.stringify({
+<span class="ln">78</span>          ...CanonicalIntentHasher.bindingOf(captured.intent),
+<span class="ln">79</span>          intent_hash: captured.intentHash,
+<span class="ln">80</span>          mode: "ENFORCEMENT",
+<span class="ln">81</span>          ...(evidence === undefined ? {} : { evidence }),
+<span class="ln">82</span>        }),
+<span class="ln">83</span>        signal: controller.signal,
+<span class="ln">84</span>      });
+<span class="ln">85</span>      if (!response.ok) {
+<span class="ln">86</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_REQUEST_FAILED");
+<span class="ln">87</span>      }
+<span class="ln">88</span>      const text = await BoundedResponseBody.read(response, MAX_RESPONSE_BYTES);
+<span class="ln">89</span>      if (text === null) {
+<span class="ln">90</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_RESPONSE_TOO_LARGE");
+<span class="ln">91</span>      }
+<span class="ln">92</span>      const parsed = AuthorityResponseSchema.parse(JSON.parse(text));
+<span class="ln">93</span>      if (parsed.action_hash !== captured.intentHash) {
+<span class="ln">94</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_BINDING_MISMATCH");
+<span class="ln">95</span>      }
+<span class="ln">96</span>      const verdict =
+<span class="ln">97</span>        parsed.status === "ALLOW"
+<span class="ln">98</span>          ? "ALLOW"
+<span class="ln">99</span>          : parsed.status === "ESCALATE" || parsed.status === "REVIEW_REQUIRED"
+<span class="ln">100</span>            ? "ESCALATE"
+<span class="ln">101</span>            : "BLOCK";
+<span class="ln">102</span>      const canExecute =
+<span class="ln">103</span>        verdict === "ALLOW" &amp;&amp;
+<span class="ln">104</span>        parsed.should_execute &amp;&amp;
+<span class="ln">105</span>        parsed.dossier_id !== null &amp;&amp;
+<span class="ln">106</span>        parsed.execution_token !== null &amp;&amp;
+<span class="ln">107</span>        parsed.execution_token_expires_at !== null &amp;&amp;
+<span class="ln">108</span>        Date.parse(parsed.execution_token_expires_at) &gt; Date.now() &amp;&amp;
+<span class="ln">109</span>        Date.parse(parsed.execution_token_expires_at) &lt;= Date.parse(captured.intent.expiresAt);
+<span class="ln">110</span>      if (verdict === "ALLOW" &amp;&amp; !canExecute) {
+<span class="ln">111</span>        return FailClosedDecision.create(captured.intentHash, "AUTHORITY_GRANT_MISSING");</pre>
+      </div>
+
+      <a class="deep-link" href="agent-safe-pipeline/agent-safe-pipeline-authority-grant.html">深度阅读 · policy verdict 与一次性 grant</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从提议到一次性 grant</h2>
+      <p>关键流程不是“问 policy 能不能做”，而是“让 policy 绑定一个具体 intent”。<code>packages/pipeline/src/decision/DecisionAuthority.ts:16</code> 的 GateDecision 保存 verdict、decisionId、dossierId、intentHash 和 authorization；<code>packages/pipeline/src/decision/DecisionAuthority.ts:33</code> 的 FailClosedDecision 把 authority 不可用也表示成 BLOCK。</p>
+
+      <h3><span class="arr">▸</span>执行路径</h3>
+      <div class="flow">proposal -> capture -> hash -> authority ALLOW -> verifyAndConsume -> registry.validate -> registry.execute
+packages/pipeline/src/intent/ExecutionIntent.ts:48 -> packages/pipeline/src/intent/IntentCapture.ts:32 -> packages/pipeline/src/intent/CanonicalIntentHasher.ts:26 -> packages/pipeline/src/decision/DecionisGate.ts:63 -> packages/pipeline/src/execution/AuthorizationVerifier.ts:64 -> packages/pipeline/src/execution/SafeExecutor.ts:51 -> packages/pipeline/src/execution/ActionRegistry.ts:53</div>
+
+      <h3><span class="arr">▸</span>阻断路径</h3>
+      <div class="flow">BLOCK/ESCALATE -> DECISION_NOT_ALLOW
+hash mismatch -> INTENT_BINDING_MISMATCH
+missing grant -> AUTHORIZATION_MISSING
+stale or replayed token -> AUTHORIZATION_INVALID</div>
+
+      <a class="deep-link" href="agent-safe-pipeline/agent-safe-pipeline-execution-tests.html">深度阅读 · 执行门禁和测试证据</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试把 fail-closed 写死</h2>
+      <p>测试文件不是装饰，它证明安全边界会在常见攻击面 fail closed。<code>packages/pipeline/test/execution/SafeExecutor.test.ts:91</code> 测 approval swapping，<code>packages/pipeline/test/execution/SafeExecutor.test.ts:101</code> 测 forged captured envelope，<code>packages/pipeline/test/execution/SafeExecutor.test.ts:189</code> 用 100 个并发执行证明 grant 只能消费一次。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p><code>packages/pipeline/test/execution/SafeExecutor.test.ts:62</code> 先确认正常 ALLOW 路径会执行，随后从 <code>packages/pipeline/test/execution/SafeExecutor.test.ts:81</code> 到 <code>packages/pipeline/test/execution/SafeExecutor.test.ts:213</code> 覆盖 BLOCK/ESCALATE、hash mismatch、conformance 破坏、缺 grant、并发 replay 和参数 schema 失败。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/pipeline/test/execution/SafeExecutor.test.ts</span> · L189-213</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">189</span>  it("allows exactly one execution under one grant across 100 concurrent claims", async () =&gt; {
+<span class="ln">190</span>    const { execute, pair, executor } = setup();
+<span class="ln">191</span>    const intent = captured();
+<span class="ln">192</span>    const decision = await pair.authority.evaluate(intent);
+<span class="ln">193</span>
+<span class="ln">194</span>    const results = await Promise.all(
+<span class="ln">195</span>      Array.from({ length: 100 }, async () =&gt; executor.run(intent, decision)),
+<span class="ln">196</span>    );
+<span class="ln">197</span>
+<span class="ln">198</span>    expect(results.filter((result) =&gt; result.executed)).toHaveLength(1);
+<span class="ln">199</span>    expect(execute).toHaveBeenCalledTimes(1);
+<span class="ln">200</span>    expect(
+<span class="ln">201</span>      results.filter((result) =&gt; !result.executed &amp;&amp; result.reason === "AUTHORIZATION_INVALID"),
+<span class="ln">202</span>    ).toHaveLength(99);
+<span class="ln">203</span>  });
+<span class="ln">204</span>
+<span class="ln">205</span>  it("does not consume a grant before action parameters pass the trusted schema", async () =&gt; {
+<span class="ln">206</span>    const { execute, pair, executor } = setup();
+<span class="ln">207</span>    const invalid = captured(-1);
+<span class="ln">208</span>    const decision = await pair.authority.evaluate(invalid);
+<span class="ln">209</span>
+<span class="ln">210</span>    await expect(executor.run(invalid, decision)).rejects.toThrow("ACTION_PARAMETERS_INVALID");
+<span class="ln">211</span>    expect(execute).not.toHaveBeenCalled();
+<span class="ln">212</span>    expect(await pair.verifier.verifyAndConsume(invalid, decision)).not.toBeNull();
+<span class="ln">213</span>  });</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li><code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:65</code> 拒绝过深对象，<code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:66</code> 拒绝循环引用，防止 intent hash 被复杂对象拖垮。</li><li><code>packages/pipeline/src/execution/ReplayStore.ts:23</code> 已 claim 的 grantId 直接返回 false，避免 token 重放。</li><li><code>packages/pipeline/src/execution/SafeExecutor.ts:75</code> 到 <code>packages/pipeline/src/execution/SafeExecutor.ts:80</code> 只把执行 handler 异常转成 ACTION_EXECUTION_FAILED，不把它伪装成授权失败。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">值得借鉴的工程亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">绑定字段窄而稳定</div><div class="card-d">bindingOf 只选择 authority 需要的字段；<code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:99</code> 到 <code>packages/pipeline/src/intent/CanonicalIntentHasher.ts:127</code> 避免把运行时对象泄漏进授权材料。</div></div><div class="card"><div class="card-h">执行前后双重 conformance</div><div class="card-d"><code>packages/pipeline/src/execution/SafeExecutor.ts:48</code> 与 <code>packages/pipeline/src/execution/SafeExecutor.ts:72</code> 两次重算，能发现 grant 消费期间 captured envelope 被篡改。</div></div>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">packages/pipeline/src/execution/AuthorizationVerifier.ts</span> · L64-118</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">64</span>  public async verifyAndConsume(
+<span class="ln">65</span>    captured: CapturedIntent,
+<span class="ln">66</span>    decision: GateDecision,
+<span class="ln">67</span>  ): Promise&lt;VerifiedAuthorization | null&gt; {
+<span class="ln">68</span>    if (
+<span class="ln">69</span>      decision.verdict !== "ALLOW" ||
+<span class="ln">70</span>      decision.failClosed ||
+<span class="ln">71</span>      decision.authorization === null ||
+<span class="ln">72</span>      decision.dossierId === null ||
+<span class="ln">73</span>      decision.intentHash !== captured.intentHash
+<span class="ln">74</span>    ) {
+<span class="ln">75</span>      return null;
+<span class="ln">76</span>    }
+<span class="ln">77</span>    const controller = new AbortController();
+<span class="ln">78</span>    const timeout = setTimeout(() =&gt; controller.abort(), this.timeoutMs);
+<span class="ln">79</span>    try {
+<span class="ln">80</span>      const response = await this.fetchImpl(`${this.baseUrl}/v1/execution/consume-token`, {
+<span class="ln">81</span>        method: "POST",
+<span class="ln">82</span>        headers: {
+<span class="ln">83</span>          authorization: `Bearer ${this.apiKey}`,
+<span class="ln">84</span>          "content-type": "application/json",
+<span class="ln">85</span>        },
+<span class="ln">86</span>        body: JSON.stringify({
+<span class="ln">87</span>          execution_token: decision.authorization.token,
+<span class="ln">88</span>          intent_hash: captured.intentHash,
+<span class="ln">89</span>          intent: CanonicalIntentHasher.bindingOf(captured.intent),
+<span class="ln">90</span>          consumed_by: captured.intent.actor.id,
+<span class="ln">91</span>        }),
+<span class="ln">92</span>        signal: controller.signal,
+<span class="ln">93</span>      });
+<span class="ln">94</span>      if (!response.ok) return null;
+<span class="ln">95</span>      const text = await BoundedResponseBody.read(response, MAX_RESPONSE_BYTES);
+<span class="ln">96</span>      if (text === null) return null;
+<span class="ln">97</span>      const parsed = ConsumeResponseSchema.parse(JSON.parse(text));
+<span class="ln">98</span>      const claimExpiryMs = parsed.claims.exp * 1_000;
+<span class="ln">99</span>      const decisionExpirySeconds = Math.floor(
+<span class="ln">100</span>        Date.parse(decision.authorization.expiresAt) / 1_000,
+<span class="ln">101</span>      );
+<span class="ln">102</span>      if (
+<span class="ln">103</span>        parsed.claims.binding.intent_hash !== captured.intentHash ||
+<span class="ln">104</span>        parsed.claims.decision_id !== decision.decisionId ||
+<span class="ln">105</span>        parsed.claims.dossier_id !== decision.dossierId ||
+<span class="ln">106</span>        parsed.claims.exp !== decisionExpirySeconds ||
+<span class="ln">107</span>        claimExpiryMs &lt;= Date.now() ||
+<span class="ln">108</span>        claimExpiryMs &gt; Date.parse(captured.intent.expiresAt)
+<span class="ln">109</span>      ) {
+<span class="ln">110</span>        return null;
+<span class="ln">111</span>      }
+<span class="ln">112</span>      return Object.freeze({
+<span class="ln">113</span>        decisionId: parsed.claims.decision_id,
+<span class="ln">114</span>        dossierId: parsed.claims.dossier_id,
+<span class="ln">115</span>        grantId: parsed.claims.jti,
+<span class="ln">116</span>        intentHash: parsed.claims.binding.intent_hash,
+<span class="ln">117</span>        expiresAt: new Date(parsed.claims.exp * 1_000).toISOString(),
+<span class="ln">118</span>      });</pre>
+      </div>
+    </div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>仓库是参考架构，不是完整生产系统。<code>packages/pipeline/src/shadow/ShadowPipeline.ts:10</code> 的 shadow mode 只有 compare 骨架，<code>packages/pipeline/src/execution/ReplayStore.ts:5</code> 的 InMemoryReplayStore 也明确只是进程内防重放。真实部署还需要持久化、审计、密钥轮换和 authority 高可用。</p>
+      <div class="g2"><div class="card"><div class="card-h">远端 authority 依赖</div><div class="card-d"><code>packages/pipeline/src/decision/DecionisGate.ts:127</code> catch 后 fail closed，这很安全，但也意味着 authority 不可用会阻断业务，需要 SLO 和降级策略。</div></div><div class="card"><div class="card-h">内存 replay store 不够生产</div><div class="card-d"><code>packages/pipeline/src/execution/ReplayStore.ts:6</code> 用 Map 保存 claims，单进程有效；多实例部署必须换成共享原子存储。</div></div>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">packages/pipeline/src/execution/ReplayStore.ts</span> · L14-27</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">14</span>  public async claim(grantId: string, expiresAt: Date): Promise&lt;boolean&gt; {
+<span class="ln">15</span>    const now = Date.now();
+<span class="ln">16</span>    const expiry = expiresAt.valueOf();
+<span class="ln">17</span>    if (grantId.length === 0 || grantId.length &gt; 200 || !Number.isFinite(expiry) || expiry &lt;= now) {
+<span class="ln">18</span>      return false;
+<span class="ln">19</span>    }
+<span class="ln">20</span>    for (const [key, expiry] of this.claims) {
+<span class="ln">21</span>      if (expiry &lt;= now) this.claims.delete(key);
+<span class="ln">22</span>    }
+<span class="ln">23</span>    if (this.claims.has(grantId)) return false;
+<span class="ln">24</span>    if (this.claims.size &gt;= this.maxEntries) throw new Error("REPLAY_STORE_CAPACITY_EXCEEDED");
+<span class="ln">25</span>    this.claims.set(grantId, expiry);
+<span class="ln">26</span>    return true;
+<span class="ln">27</span>  }</pre>
+      </div>
+    </div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-17</span>
+      <span>Source · <a href="https://github.com/decionis/agent-safe-pipeline">decionis/agent-safe-pipeline</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../agent-safe-pipeline.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
