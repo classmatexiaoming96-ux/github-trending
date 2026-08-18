@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Runtime Orchestrator · cumora · 源码观测台</title>
+<meta name="description" content="yetone/cumora 源码级深度解析：AI agents as first-class teammates 的消息、唤醒、运行时与协作界面。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #5fd4c8;
+  --star-soft: #95eee6;
+  --star-deep: #2f9f96;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">cumora<b>AI</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">cumora<b>AI</b></div><div class="sub">runtime orchestrator · 深度解析</div></div>
+    <span class="nav-ver">TypeScript · React / Express / Electron</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+      <li><a href="#section-1"><span class="idx">01</span>运行时边界</a></li>
+      <li><a href="#section-2"><span class="idx">02</span>消息与唤醒</a></li>
+      <li><a href="#section-3"><span class="idx">03</span>Agent Turn</a></li>
+      <li><a href="#section-4"><span class="idx">04</span>验证与测试</a></li>
+      <li><a href="#section-5"><span class="idx">05</span>亮点</a></li>
+      <li><a href="#section-6"><span class="idx">06</span>风险</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★1,522 · created 2026-08-17</div><div><a href="https://github.com/yetone/cumora" target="_blank">yetone/cumora</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Runtime Orchestrator <em>深度解析</em></h1><p class="hero-desc">这一页只看 cumora 如何把一个 agent 变成可启动、可休眠、可重建的 Kubernetes pod。</p></div>
+    <section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p><code>server/src/agents/runtime/orchestrator.ts:24</code> 到 <code>server/src/agents/runtime/orchestrator.ts:31</code> 说明 orchestrator 的边界：它依赖 spawn、env、pool、JWT、alerting 和 Semaphore。这个组合让 pod lifecycle 既能读配置和 DB，又能把 kubectl 并发收束在 server 进程内。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">server/src/agents/runtime/orchestrator.ts</span> · L24-48</span><span>TypeScript</span></div><pre class="code"><span class="ln">24</span>import { spawn } from &#x27;node:child_process&#x27;\n<span class="ln">25</span>import { env } from &#x27;../../env.js&#x27;\n<span class="ln">26</span>import { pool } from &#x27;../../db/pool.js&#x27;\n<span class="ln">27</span>import { sub2apiConfigured, sub2apiOpenAIBaseURL } from &#x27;../../sub2api.js&#x27;\n<span class="ln">28</span>import { inprocClient } from &#x27;./inproc-client.js&#x27;\n<span class="ln">29</span>import { signAgentToken } from &#x27;./jwt.js&#x27;\n<span class="ln">30</span>import { notifyAlert } from &#x27;../../alerting.js&#x27;\n<span class="ln">31</span>import { Semaphore } from &#x27;../../concurrency.js&#x27;\n<span class="ln">32</span>\n<span class="ln">33</span>const KUBECTL = process.env.CUMORA_KUBECTL ?? &#x27;kubectl&#x27;\n<span class="ln">34</span>/** kubectl context to target. In dev we pin to OrbStack so a stray\n<span class="ln">35</span> *  `kubectl config use-context gke-...` on the dev laptop can&#x27;t cause\n<span class="ln">36</span> *  the dev server to spawn agent Pods in a real cluster. In production\n<span class="ln">37</span> *  we leave it unset and let kubectl resolve the current context\n<span class="ln">38</span> *  (typically the in-cluster SA when the server runs in K8s). Override\n<span class="ln">39</span> *  the dev default with CUMORA_KUBECTL_CONTEXT (e.g. if your local\n<span class="ln">40</span> *  context is named differently). */\n<span class="ln">41</span>const KUBECTL_CONTEXT = process.env.CUMORA_KUBECTL_CONTEXT\n<span class="ln">42</span>  ?? (env.NODE_ENV === &#x27;production&#x27; ? &#x27;&#x27; : &#x27;orbstack&#x27;)\n<span class="ln">43</span>const IMAGE = process.env.CUMORA_AGENT_COMPUTER_IMAGE\n<span class="ln">44</span>  ?? &#x27;quay.io/yetoneful/cumora-agent-computer:dev&#x27;\n<span class="ln">45</span>/** TTL of the JWT minted at Pod-spawn time. Pods live up to\n<span class="ln">46</span> *  CUMORA_AGENT_IDLE_MS without restart, so the JWT lives longer than\n<span class="ln">47</span> *  the idle ceiling to avoid mid-life expiry. */\n<span class="ln">48</span>const TOKEN_TTL_SECONDS = Number(process.env.CUMORA_AGENT_TOKEN_TTL_SECONDS ?? 24 * 60 * 60)</pre></div>
+    </section>
+    <section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      <h3><span class="arr">▸</span>kubectl timeout 与重试分类</h3>
+      <p><code>server/src/agents/runtime/orchestrator.ts:95</code> 到 <code>server/src/agents/runtime/orchestrator.ts:151</code> 把每次 kubectl 调用包成有 timeout、SIGTERM/SIGKILL 和完整 stdout/stderr 的 Promise。紧接着 <code>server/src/agents/runtime/orchestrator.ts:154</code> 到 <code>server/src/agents/runtime/orchestrator.ts:202</code> 只重试网络、超时和 API server 抖动，避免把 validation error 也无限重跑。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">server/src/agents/runtime/orchestrator.ts</span> · L95-151</span><span>TypeScript</span></div><pre class="code"><span class="ln">95</span>function kubectl(args: string[], opts: KubectlOpts = {}): Promise&lt;KubectlResult&gt; {\n<span class="ln">96</span>  // Hold a permit for the FULL lifetime of the child (incl. timeout) so\n<span class="ln">97</span>  // the in-flight process count — not just the spawn rate — is bounded.\n<span class="ln">98</span>  return kubectlSem.run(() =&gt; kubectlSpawn(args, opts))\n<span class="ln">99</span>}\n<span class="ln">100</span>\n<span class="ln">101</span>function kubectlSpawn(args: string[], opts: KubectlOpts = {}): Promise&lt;KubectlResult&gt; {\n<span class="ln">102</span>  const timeoutMs = opts.timeoutMs ?? KUBECTL_DEFAULT_TIMEOUT_MS\n<span class="ln">103</span>  return new Promise((resolve) =&gt; {\n<span class="ln">104</span>    const ctxArgs = KUBECTL_CONTEXT === &#x27;&#x27; ? [] : [&#x27;--context&#x27;, KUBECTL_CONTEXT]\n<span class="ln">105</span>    const child = spawn(KUBECTL, [...ctxArgs, &#x27;-n&#x27;, NS, ...args], { stdio: [&#x27;pipe&#x27;, &#x27;pipe&#x27;, &#x27;pipe&#x27;] })\n<span class="ln">106</span>    let out = &#x27;&#x27;\n<span class="ln">107</span>    let err = &#x27;&#x27;\n<span class="ln">108</span>    let settled = false\n<span class="ln">109</span>    let killTimer: NodeJS.Timeout | null = null\n<span class="ln">110</span>    const finish = (r: KubectlResult): void =&gt; {\n<span class="ln">111</span>      if (settled) return\n<span class="ln">112</span>      settled = true\n<span class="ln">113</span>      if (killTimer) { clearTimeout(killTimer); killTimer = null }\n<span class="ln">114</span>      if (timer) { clearTimeout(timer); }\n<span class="ln">115</span>      resolve(r)\n<span class="ln">116</span>    }\n<span class="ln">117</span>    const timer = setTimeout(() =&gt; {\n<span class="ln">118</span>      if (settled) return\n<span class="ln">119</span>      // Try graceful first, then force.\n<span class="ln">120</span>      try { child.kill(&#x27;SIGTERM&#x27;) } catch { /* already gone */ }\n<span class="ln">121</span>      killTimer = setTimeout(() =&gt; {\n<span class="ln">122</span>        try { child.kill(&#x27;SIGKILL&#x27;) } catch { /* already gone */ }\n<span class="ln">123</span>      }, KUBECTL_KILL_GRACE_MS)\n<span class="ln">124</span>      // Resolve immediately rather than waiting for exit — the caller\n<span class="ln">125</span>      // is treating this as &quot;kubectl is unresponsive&quot;, and the child&#x27;s\n<span class="ln">126</span>      // exit event will fire later (we ignore it via `settled`).\n<span class="ln">127</span>      finish({\n<span class="ln">128</span>        code: 124, // curl/timeout(1) convention for &quot;timed out&quot;\n<span class="ln">129</span>        out,\n<span class="ln">130</span>        err: err + `\n[kubectl] killed after ${timeoutMs}ms timeout`,\n<span class="ln">131</span>        timedOut: true,\n<span class="ln">132</span>      })\n<span class="ln">133</span>    }, timeoutMs)\n<span class="ln">134</span>    timer.unref?.()\n<span class="ln">135</span>    child.stdout.on(&#x27;data&#x27;, (d: Buffer) =&gt; { out += d.toString() })\n<span class="ln">136</span>    child.stderr.on(&#x27;data&#x27;, (d: Buffer) =&gt; { err += d.toString() })\n<span class="ln">137</span>    child.on(&#x27;error&#x27;, (e) =&gt; finish({\n<span class="ln">138</span>      code: 1, out, err: err + (e.message ?? String(e)), timedOut: false,\n<span class="ln">139</span>    }))\n<span class="ln">140</span>    child.on(&#x27;exit&#x27;, (code) =&gt; finish({\n<span class="ln">141</span>      code: code ?? 1, out, err, timedOut: false,\n<span class="ln">142</span>    }))\n<span class="ln">143</span>    try {\n<span class="ln">144</span>      if (opts.stdin !== undefined) child.stdin.end(opts.stdin)\n<span class="ln">145</span>      else child.stdin.end()\n<span class="ln">146</span>    } catch (e) {\n<span class="ln">147</span>      // EPIPE if the child died before we wrote stdin — covered by\n<span class="ln">148</span>      // the error/exit handlers above.\n<span class="ln">149</span>      void e\n<span class="ln">150</span>    }\n<span class="ln">151</span>  })</pre></div>
+      <h3><span class="arr">▸</span>Pod manifest 的资源与安全边界</h3>
+      <p><code>server/src/agents/runtime/orchestrator.ts:294</code> 到 <code>server/src/agents/runtime/orchestrator.ts:395</code> 渲染完整 Pod，里面最重要的是 FUSE CAP_SYS_ADMIN、/dev/fuse slot、Chrome PVC、runtime token 和 OPENAI_BASE_URL。它显示 cumora 的 agent 是一个带浏览器和文件系统的工作机，而不是简单后台函数。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">server/src/agents/runtime/orchestrator.ts</span> · L294-376</span><span>TypeScript</span></div><pre class="code"><span class="ln">294</span>  return `apiVersion: v1\n<span class="ln">295</span>kind: Pod\n<span class="ln">296</span>metadata:\n<span class="ln">297</span>  name: ${podName(args.agentId)}\n<span class="ln">298</span>  labels:\n<span class="ln">299</span>    app: cumora-agent\n<span class="ln">300</span>    cumora.agent: ${yamlQuote(labelValue)}\n<span class="ln">301</span>spec:\n<span class="ln">302</span>  restartPolicy: OnFailure${saBlock}${pullSecretsBlock}\n<span class="ln">303</span>  containers:\n<span class="ln">304</span>  - name: agent-computer\n<span class="ln">305</span>    image: ${yamlQuote(args.image)}\n<span class="ln">306</span>    imagePullPolicy: IfNotPresent\n<span class="ln">307</span>    securityContext:\n<span class="ln">308</span>      # FUSE mount needs three things to work on GKE-COS:\n<span class="ln">309</span>      #   1. CAP_SYS_ADMIN — for the mount(2) syscall.\n<span class="ln">310</span>      #   2. /dev/fuse in the cgroup device whitelist — granted by the\n<span class="ln">311</span>      #      generic-device-plugin DaemonSet (squat/generic-device-\n<span class="ln">312</span>      #      plugin) which we depend on being installed in the cluster\n<span class="ln">313</span>      #      (see server/k8s/generic-device-plugin.note).\n<span class="ln">314</span>      #   3. AppArmor unconfined — the default cri-containerd profile\n<span class="ln">315</span>      #      denies the mount syscall even with CAP_SYS_ADMIN, so the\n<span class="ln">316</span>      #      pod must opt out. Without this the agent boots but\n<span class="ln">317</span>      #      fusermount3 fails with &quot;Permission denied&quot; and /workspace\n<span class="ln">318</span>      #      falls through to the empty backing dir — the agent loses\n<span class="ln">319</span>      #      access to its persona files / memory FS.\n<span class="ln">320</span>      appArmorProfile:\n<span class="ln">321</span>        type: Unconfined\n<span class="ln">322</span>      capabilities:\n<span class="ln">323</span>        add: [&quot;SYS_ADMIN&quot;]\n<span class="ln">324</span>    resources:\n<span class="ln">325</span>      requests:\n<span class="ln">326</span>        # Measured in prod, per-pod working-set ≈ 420 MiB, but only\n<span class="ln">327</span>        # ~263 MiB is anon (irreducible) — the other ~137 MiB is\n<span class="ln">328</span>        # file-backed page cache that the kernel can evict under\n<span class="ln">329</span>        # memory pressure. Setting memory request to 320 MiB covers\n<span class="ln">330</span>        # the irreducible portion with comfortable buffer; under load\n<span class="ln">331</span>        # the limit (1.5 GiB) absorbs bursts. CPU between wakes is\n<span class="ln">332</span>        # &lt;1% — 50m is a generous reservation for a process that\n<span class="ln">333</span>        # spends most of its life as an idle SSE listener; bursts to\n<span class="ln">334</span>        # 2 cores during page render are bounded by the limit (2500m),\n<span class="ln">335</span>        # not the request. Density per e2-standard-2 (1180m CPU / ~6\n<span class="ln">336</span>        # GiB usable after kubelet reserve): ~18 pods CPU-wise, ~18\n<span class="ln">337</span>        # pods memory-wise — balanced, no single-resource binding.\n<span class="ln">338</span>        cpu: &quot;50m&quot;\n<span class="ln">339</span>        memory: &quot;320Mi&quot;\n<span class="ln">340</span>        devic.es/fuse: 1\n<span class="ln">341</span>      limits:\n<span class="ln">342</span>        # Measured under realistic workload (4 sites opened + extracted\n<span class="ln">343</span>        # + an adapter call): memory peaked at ~1230MiB; CPU spiked to\n<span class="ln">344</span>        # 2.2 cores during page rendering. 1.5Gi memory limit leaves\n<span class="ln">345</span>        # ~250Mi headroom over peak; 2500m CPU avoids throttling\n<span class="ln">346</span>        # Chromium during JS-heavy page loads.\n<span class="ln">347</span>        cpu: &quot;2500m&quot;\n<span class="ln">348</span>        memory: &quot;1.5Gi&quot;\n<span class="ln">349</span>        # Reserves one /dev/fuse slot from the device plugin; the\n<span class="ln">350</span>        # kubelet inserts the device into the container&#x27;s cgroup.\n<span class="ln">351</span>        # Resource name comes from squat/generic-device-plugin&#x27;s\n<span class="ln">352</span>        # default config — it uses the &#x27;devic.es&#x27; domain.\n<span class="ln">353</span>        devic.es/fuse: 1\n<span class="ln">354</span>    volumeMounts:\n<span class="ln">355</span>    - name: chrome-profile\n<span class="ln">356</span>      mountPath: /opt/chrome-profile\n<span class="ln">357</span>    env:\n<span class="ln">358</span>    - name: CUMORA_AGENT_ID\n<span class="ln">359</span>      value: ${yamlQuote(args.agentId)}\n<span class="ln">360</span>    - name: CUMORA_AGENT_RUNTIME_URL\n<span class="ln">361</span>      value: ${yamlQuote(args.serverUrl)}\n<span class="ln">362</span>    - name: CUMORA_AGENT_IDLE_MS\n<span class="ln">363</span>      value: ${yamlQuote(String(args.idleMs))}\n<span class="ln">364</span>    - name: CUMORA_AGENT_NO_WORK_MS\n<span class="ln">365</span>      value: ${yamlQuote(String(args.noWorkMs))}\n<span class="ln">366</span>    - name: CUMORA_PERSONA_DIR\n<span class="ln">367</span>      value: &quot;/workspace&quot;\n<span class="ln">368</span>    - name: CUMORA_AGENT_RUNTIME_TOKEN\n<span class="ln">369</span>      value: |-\n<span class="ln">370</span>${indent(args.token)}\n<span class="ln">371</span>    - name: OPENAI_API_KEY\n<span class="ln">372</span>      value: |-\n<span class="ln">373</span>${indent(args.openaiKey)}\n<span class="ln">374</span>    - name: OPENAI_BASE_URL\n<span class="ln">375</span>      value: |-\n<span class="ln">376</span>${indent(args.openaiBaseUrl)}</pre></div>
+      <h3><span class="arr">▸</span>FUSE admission 让醒来的 agent 不把集群打穿</h3>
+      <p><code>server/src/agents/runtime/orchestrator.ts:429</code> 到 <code>server/src/agents/runtime/orchestrator.ts:523</code> 是生产事故后的容量门禁：解析节点和 pod 的 devic.es/fuse 容量，按 cache TTL 和 90% threshold 拒绝新 spawn。这个逻辑和 <code>server/src/agents/scheduler.ts:198</code> 的低优先级 wake budget 配套，都是为了 wake storm。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">server/src/agents/runtime/orchestrator.ts</span> · L429-523</span><span>TypeScript</span></div><pre class="code"><span class="ln">429</span>// ─── cluster-wide FUSE admission control ─────────────────────────────\n<span class="ln">430</span>//\n<span class="ln">431</span>// Triggered by the FUSE-cap incident on 2026-05-20: agent pods request\n<span class="ln">432</span>// `devic.es/fuse: 1` (one slot per pod), and each prod node advertises\n<span class="ln">433</span>// 800 slots via the generic-device-plugin DaemonSet. The app-level\n<span class="ln">434</span>// admission cap is intentionally lower (AGENT_POD_ADMISSION_MAX,\n<span class="ln">435</span>// default 40) because CPU, memory, API-server churn, and provider\n<span class="ln">436</span>// concurrency are the real production ceiling.\n<span class="ln">437</span>//\n<span class="ln">438</span>// `ensurePod` must REFUSE rather than blindly apply when the cluster\n<span class="ln">439</span>// is near saturation. Refusing lets pending wakes survive in their\n<span class="ln">440</span>// inbox (message.new) or get retried by their scheduler (idle /\n<span class="ln">441</span>// scanner); blowing past the cap, conversely, leaves pods stuck in\n<span class="ln">442</span>// FailedScheduling for tens of minutes with no recovery.\n<span class="ln">443</span>\n<span class="ln">444</span>export interface ClusterFuseUtilization {\n<span class="ln">445</span>  /** Number of cumora-agent pods currently using a fuse slot\n<span class="ln">446</span>   *  (Pending + Running, excluding Succeeded/Failed). */\n<span class="ln">447</span>  used: number\n<span class="ln">448</span>  /** Effective admission cap: min(cluster `devic.es/fuse` capacity,\n<span class="ln">449</span>   *  AGENT_POD_ADMISSION_MAX when that env is positive). */\n<span class="ln">450</span>  cap: number\n<span class="ln">451</span>  /** used / cap. 0 when cap is 0 (no nodes report fuse). */\n<span class="ln">452</span>  ratio: number\n<span class="ln">453</span>  /** True when result came from the in-memory cache. */\n<span class="ln">454</span>  cached: boolean\n<span class="ln">455</span>}\n<span class="ln">456</span>\n<span class="ln">457</span>/** Pure parser — extracted so the unit test can pin both branches\n<span class="ln">458</span> *  (well-formed JSON, malformed) without spawning kubectl. */\n<span class="ln">459</span>export function parseClusterFuse(nodesJson: string, podsJson: string): { used: number; cap: number } {\n<span class="ln">460</span>  let cap = 0\n<span class="ln">461</span>  try {\n<span class="ln">462</span>    const d = JSON.parse(nodesJson) as { items?: Array&lt;{ status?: { capacity?: Record&lt;string, string&gt; } }&gt; }\n<span class="ln">463</span>    for (const n of d.items ?? []) {\n<span class="ln">464</span>      const slots = Number(n.status?.capacity?.[&#x27;devic.es/fuse&#x27;] ?? 0)\n<span class="ln">465</span>      if (Number.isFinite(slots) &amp;&amp; slots &gt; 0) cap += slots\n<span class="ln">466</span>    }\n<span class="ln">467</span>  } catch { /* ignore — return 0 */ }\n<span class="ln">468</span>  let used = 0\n<span class="ln">469</span>  try {\n<span class="ln">470</span>    const d = JSON.parse(podsJson) as { items?: Array&lt;{ status?: { phase?: string } }&gt; }\n<span class="ln">471</span>    for (const p of d.items ?? []) {\n<span class="ln">472</span>      const phase = p.status?.phase\n<span class="ln">473</span>      // Pending pods that haven&#x27;t been bound yet don&#x27;t actually hold\n<span class="ln">474</span>      // a device slot, but they DO represent demand the scheduler is\n<span class="ln">475</span>      // trying to fulfill — count them so we don&#x27;t over-spawn into a\n<span class="ln">476</span>      // queue. Succeeded/Failed pods released their slot at exit.\n<span class="ln">477</span>      if (phase === &#x27;Running&#x27; || phase === &#x27;Pending&#x27;) used++\n<span class="ln">478</span>    }\n<span class="ln">479</span>  } catch { /* ignore — return 0 */ }\n<span class="ln">480</span>  return { used, cap }\n<span class="ln">481</span>}\n<span class="ln">482</span>\n<span class="ln">483</span>interface FuseUtilCache { ts: number; used: number; cap: number }\n<span class="ln">484</span>let fuseUtilCache: FuseUtilCache | null = null\n<span class="ln">485</span>\n<span class="ln">486</span>/** TTL on the cluster-wide fuse sample. Short enough that bursts get\n<span class="ln">487</span> *  re-evaluated quickly; long enough that we don&#x27;t hammer the K8s API\n<span class="ln">488</span> *  on every wake. Each successful spawn bumps `used` in-memory so the\n<span class="ln">489</span> *  cached value tracks intra-window growth without a refresh. */\n<span class="ln">490</span>const FUSE_CACHE_TTL_MS = 10_000\n<span class="ln">491</span>\n<span class="ln">492</span>/** Threshold above which `ensurePod` refuses new spawns. 0.90 leaves\n<span class="ln">493</span> *  a 10% buffer for in-flight scheduling latency and inFlight-dedup\n<span class="ln">494</span> *  raciness. Below 0.90 we let everything through. */\n<span class="ln">495</span>const FUSE_ADMISSION_THRESHOLD = 0.90\n<span class="ln">496</span>\n<span class="ln">497</span>/** Sample (or read from cache) the cluster&#x27;s cumora-agent fuse usage.\n<span class="ln">498</span> *  Fails open: on kubectl error returns `cap=Infinity` so callers\n<span class="ln">499</span> *  never block on transient cluster-state read failures. */\n<span class="ln">500</span>export async function getClusterFuseUtilization(): Promise&lt;ClusterFuseUtilization&gt; {\n<span class="ln">501</span>  const now = Date.now()\n<span class="ln">502</span>  if (fuseUtilCache &amp;&amp; now - fuseUtilCache.ts &lt; FUSE_CACHE_TTL_MS) {\n<span class="ln">503</span>    const { used, cap } = fuseUtilCache\n<span class="ln">504</span>    return { used, cap, ratio: cap &gt; 0 ? used / cap : 0, cached: true }\n<span class="ln">505</span>  }\n<span class="ln">506</span>  const [nodes, pods] = await Promise.all([\n<span class="ln">507</span>    kubectlWithRetry([&#x27;get&#x27;, &#x27;nodes&#x27;, &#x27;-o&#x27;, &#x27;json&#x27;], { timeoutMs: 10_000 }),\n<span class="ln">508</span>    kubectlWithRetry(\n<span class="ln">509</span>      [&#x27;get&#x27;, &#x27;pods&#x27;, &#x27;-l&#x27;, &#x27;app=cumora-agent&#x27;, &#x27;-o&#x27;, &#x27;json&#x27;],\n<span class="ln">510</span>      { timeoutMs: 10_000 },\n<span class="ln">511</span>    ),\n<span class="ln">512</span>  ])\n<span class="ln">513</span>  if (nodes.code !== 0 || pods.code !== 0) {\n<span class="ln">514</span>    // Fail open — we&#x27;d rather over-spawn during a kubectl flake than\n<span class="ln">515</span>    // wedge every wake. Don&#x27;t cache this so the next call retries.\n<span class="ln">516</span>    return { used: 0, cap: Number.POSITIVE_INFINITY, ratio: 0, cached: false }\n<span class="ln">517</span>  }\n<span class="ln">518</span>  const parsed = parseClusterFuse(nodes.out, pods.out)\n<span class="ln">519</span>  const appCap = env.AGENT_POD_ADMISSION_MAX\n<span class="ln">520</span>  const cap = appCap &gt; 0 ? Math.min(parsed.cap, appCap) : parsed.cap\n<span class="ln">521</span>  fuseUtilCache = { ts: now, used: parsed.used, cap }\n<span class="ln">522</span>  return { used: parsed.used, cap, ratio: cap &gt; 0 ? parsed.used / cap : 0, cached: false }\n<span class="ln">523</span>}</pre></div>
+    </section>
+    <section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">ensurePod(agent)
+  <span class="flow-arr">→</span> sample fuse usage
+  <span class="flow-arr">→</span> apply PVC
+  <span class="flow-arr">→</span> apply Pod manifest
+  <span class="flow-arr">→</span> pod-agent connects wake-stream
+  <span class="flow-arr">→</span> bootstrap drain inbox</div>
+      <p>流程的恢复点分散在三处：<code>server/src/agents/runtime/orchestrator.ts:500</code> 采样失败时 fail-open，<code>server/src/agents/runtime/pod-agent.ts:207</code> 冷启动后无条件 drain，<code>server/src/agents/scheduler.ts:82</code> 对 message.new 不排队重试以避免重复回复。</p>
+    </section>
+    <section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>server/src/agents/runtime/orchestrator.ts:555</code> 的 parsePodHealth 会读取 waitingReasons，避免 Pending + ImagePullBackOff 永远不恢复。</li><li><code>server/src/__tests__/agents-orchestrator.test.ts:63</code>、<code>server/src/__tests__/agents-orchestrator.test.ts:169</code>、<code>server/src/__tests__/agents-orchestrator.test.ts:223</code> 分别钉住镜像拉取、Unschedulable 和 DNS-safe 名字。</li><li><code>server/src/agents/runtime/orchestrator.ts:531</code> 在成功 spawn 后 bump cache，避免 cache TTL 内连续 ensurePod 低估 used。</li></ul>
+    </section>
+    <section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">pod-agent</div><div class="card-d"><code>server/src/agents/runtime/pod-agent.ts:162</code> 负责 drain 串行化。</div></div><div class="card"><div class="card-h">wake-bus</div><div class="card-d"><code>server/src/agents/runtime/wake-bus.ts:232</code> 负责 SSE attach。</div></div></div></section>
+    <div class="foot"><span>Sub-page · 2026-08-18</span><span><a href="../cumora.html">↑ cumora 主页面</a></span></div></main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.remove('active')); map.get(e.target)?.classList.add('active'); } }), { rootMargin: '-40% 0px -55% 0px' });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => { const o = document.createElement('option'); o.value = a.getAttribute('href'); o.textContent = a.textContent.trim(); sel.appendChild(o); });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:60}, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*1.4+.2, a: Math.random(), s: Math.random()*.02+.005 }));
+    const tick = () => { ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#95eee6'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat State and WS · cumora · 源码观测台</title>
+<meta name="description" content="yetone/cumora 源码级深度解析：AI agents as first-class teammates 的消息、唤醒、运行时与协作界面。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #5fd4c8;
+  --star-soft: #95eee6;
+  --star-deep: #2f9f96;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">cumora<b>AI</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">cumora<b>AI</b></div><div class="sub">chat state · 深度解析</div></div>
+    <span class="nav-ver">TypeScript · React / Express / Electron</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+      <li><a href="#section-1"><span class="idx">01</span>运行时边界</a></li>
+      <li><a href="#section-2"><span class="idx">02</span>消息与唤醒</a></li>
+      <li><a href="#section-3"><span class="idx">03</span>Agent Turn</a></li>
+      <li><a href="#section-4"><span class="idx">04</span>验证与测试</a></li>
+      <li><a href="#section-5"><span class="idx">05</span>亮点</a></li>
+      <li><a href="#section-6"><span class="idx">06</span>风险</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★1,522 · created 2026-08-17</div><div><a href="https://github.com/yetone/cumora" target="_blank">yetone/cumora</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Chat State and WS <em>深度解析</em></h1><p class="hero-desc">这一页看 cumora 如何把 agent 队友、conversation、message、doc 协作和 WebSocket 事件放进同一前端/服务端模型。</p></div>
+    <section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p><code>src/types.ts:1</code> 到 <code>src/types.ts:10</code> 定义 agent role、participant kind、status、computer kind 和 engine id；这些类型随后贯穿 <code>src/types.ts:31</code> 的 Participant、<code>src/types.ts:64</code> 的 Conversation 和 <code>src/types.ts:193</code> 的 Message。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">src/types.ts</span> · L1-62</span><span>TypeScript</span></div><pre class="code"><span class="ln">1</span>export type AgentRole = &#x27;researcher&#x27; | &#x27;designer&#x27; | &#x27;engineer&#x27; | &#x27;pm&#x27; | &#x27;brand&#x27; | &#x27;ops&#x27;\n<span class="ln">2</span>export type ParticipantKind = &#x27;agent&#x27; | &#x27;human&#x27;\n<span class="ln">3</span>export type Status = &#x27;avail&#x27; | &#x27;working&#x27; | &#x27;thinking&#x27; | &#x27;waiting&#x27; | &#x27;resting&#x27;\n<span class="ln">4</span>\n<span class="ln">5</span>/** Where an agent runs. &#x27;cloud&#x27; = the built-in Cumora Cloud (managed engine);\n<span class="ln">6</span> *  &#x27;local&#x27;/&#x27;vps&#x27; = a computer the user paired, running the BYOA daemon. */\n<span class="ln">7</span>export type ComputerKind = &#x27;cloud&#x27; | &#x27;local&#x27; | &#x27;vps&#x27;\n<span class="ln">8</span>export type ComputerStatus = &#x27;online&#x27; | &#x27;offline&#x27; | &#x27;busy&#x27;\n<span class="ln">9</span>/** Engine an agent&#x27;s host runs it on. &#x27;managed&#x27; = Cumora&#x27;s server-side loop. */\n<span class="ln">10</span>export type EngineId = &#x27;managed&#x27; | &#x27;claude&#x27; | &#x27;codex&#x27;\n<span class="ln">11</span>\n<span class="ln">12</span>export interface Computer {\n<span class="ln">13</span>  id: string\n<span class="ln">14</span>  name: string\n<span class="ln">15</span>  kind: ComputerKind\n<span class="ln">16</span>  status: ComputerStatus\n<span class="ln">17</span>  availableEngines: EngineId[]\n<span class="ln">18</span>  lastSeenAt?: string | null\n<span class="ln">19</span>  pairedAt?: string | null\n<span class="ln">20</span>  /** The cumora daemon version this computer is running (null = cloud / unknown). */\n<span class="ln">21</span>  daemonVersion?: string | null\n<span class="ln">22</span>  /** How the daemon runs: true = installed service (launchd/systemd),\n<span class="ln">23</span>   *  false = manually-run foreground command, null = cloud / unknown. */\n<span class="ln">24</span>  daemonSupervised?: boolean | null\n<span class="ln">25</span>  /** Newest published daemon version (for the upgrade banner). */\n<span class="ln">26</span>  latestDaemonVersion?: string | null\n<span class="ln">27</span>  /** True when the daemon is behind the latest version → show the upgrade banner. */\n<span class="ln">28</span>  daemonOutdated?: boolean\n<span class="ln">29</span>}\n<span class="ln">30</span>\n<span class="ln">31</span>export interface Participant {\n<span class="ln">32</span>  id: string\n<span class="ln">33</span>  kind: ParticipantKind\n<span class="ln">34</span>  name: string\n<span class="ln">35</span>  role?: string\n<span class="ln">36</span>  initial: string\n<span class="ln">37</span>  /** linear-gradient or any css background — fallback when avatarUrl is empty */\n<span class="ln">38</span>  avatarBg: string\n<span class="ln">39</span>  /** AI-generated portrait URL (preferred over avatarBg when set) */\n<span class="ln">40</span>  avatarUrl?: string | null\n<span class="ln">41</span>  status: Status\n<span class="ln">42</span>  statusUpdatedAt?: string\n<span class="ln">43</span>  bio?: string\n<span class="ln">44</span>  tools?: string[]\n<span class="ln">45</span>  /** the agent&#x27;s distinctive style — only set for agents */\n<span class="ln">46</span>  systemPrompt?: string\n<span class="ln">47</span>  /** big-brain (main) model override; null/undefined = use system default */\n<span class="ln">48</span>  model?: string | null\n<span class="ln">49</span>  /** small-brain (fast/auxiliary) model override */\n<span class="ln">50</span>  fastModel?: string | null\n<span class="ln">51</span>  /** id of the Computer this agent runs on (null/undefined = Cumora Cloud) */\n<span class="ln">52</span>  computerId?: string | null\n<span class="ln">53</span>  /** engine the agent&#x27;s host runs it on (&#x27;managed&#x27; for cloud agents) */\n<span class="ln">54</span>  engine?: EngineId | null\n<span class="ln">55</span>  /** Real external email address. Agents get one of the form\n<span class="ln">56</span>   *  `&lt;id&gt;@&lt;companySlug&gt;.&lt;EMAIL_DOMAIN&gt;` (auto-minted on first use);\n<span class="ln">57</span>   *  humans carry their auth email here for the renderer&#x27;s contact\n<span class="ln">58</span>   *  picker. Null when the email feature isn&#x27;t configured. */\n<span class="ln">59</span>  email?: string | null\n<span class="ln">60</span>  /** non-null = agent has been off-boarded; ISO timestamp of when */\n<span class="ln">61</span>  departedAt?: string | null\n<span class="ln">62</span>}</pre></div>
+    </section>
+    <section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      <h3><span class="arr">▸</span>Conversation 把 agent convene 和 whisper 放进同一模型</h3>
+      <p><code>src/types.ts:64</code> 到 <code>src/types.ts:104</code> 里，conversation kind 包括 group、direct、whisper、email，members 是 participant id，pulledBy 记录 agent 发起拉群的原因。这个模型让 agent-only whisper 和 human-agent group 不需要两套 UI 数据结构。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">src/types.ts</span> · L64-104</span><span>TypeScript</span></div><pre class="code"><span class="ln">64</span>export type ConversationKind = &#x27;group&#x27; | &#x27;direct&#x27; | &#x27;whisper&#x27; | &#x27;email&#x27;\n<span class="ln">65</span>\n<span class="ln">66</span>export interface Conversation {\n<span class="ln">67</span>  id: string\n<span class="ln">68</span>  kind: ConversationKind\n<span class="ln">69</span>  title: string\n<span class="ln">70</span>  /** display subtitle - members or whisper pair */\n<span class="ln">71</span>  subtitle?: string\n<span class="ln">72</span>  /** free-form purpose / topic line, editable by any member */\n<span class="ln">73</span>  topic?: string | null\n<span class="ln">74</span>  /** participant ids */\n<span class="ln">75</span>  members: string[]\n<span class="ln">76</span>  /** for whispers: the two agents in private chat */\n<span class="ln">77</span>  whisperPair?: [string, string]\n<span class="ln">78</span>  pinned?: boolean\n<span class="ln">79</span>  /** Per-user mute. When true, the conversation suppresses notifications and\n<span class="ln">80</span>   *  is excluded from the global unread total (but its per-row badge still\n<span class="ln">81</span>   *  shows). Pair with `mutedUntil` to know when the mute auto-expires. */\n<span class="ln">82</span>  muted?: boolean\n<span class="ln">83</span>  /** ISO timestamp when the mute auto-expires; null/undefined = forever. */\n<span class="ln">84</span>  mutedUntil?: string | null\n<span class="ln">85</span>  unread?: number\n<span class="ln">86</span>  /** Latest persisted message id from the conversation list payload. Used to\n<span class="ln">87</span>   *  detect when the sidebar preview has advanced past the open transcript. */\n<span class="ln">88</span>  lastMessageId?: string | null\n<span class="ln">89</span>  lastAt: string\n<span class="ln">90</span>  /** Raw ISO timestamp the row was last touched (last message time, or\n<span class="ln">91</span>   *  the conversation&#x27;s own updatedAt when there are no messages yet).\n<span class="ln">92</span>   *  Server returns the list in this order; we keep the raw value so any\n<span class="ln">93</span>   *  client-side re-sort uses real time rather than the display label. */\n<span class="ln">94</span>  lastAtIso: string\n<span class="ln">95</span>  preview: string\n<span class="ln">96</span>  /** optional special tag */\n<span class="ln">97</span>  tag?: &#x27;team&#x27; | &#x27;whisper&#x27; | &#x27;human&#x27; | &#x27;fresh-pulled&#x27;\n<span class="ln">98</span>  /** if pulled by an agent: the convener id and reason */\n<span class="ln">99</span>  pulledBy?: { agentId: string; at: string; reason: string }\n<span class="ln">100</span>  /** when this conversation belongs to a project, the project&#x27;s id + name + tint */\n<span class="ln">101</span>  projectId?: string | null\n<span class="ln">102</span>  projectName?: string | null\n<span class="ln">103</span>  projectColor?: string | null\n<span class="ln">104</span>}</pre></div>
+      <h3><span class="arr">▸</span>Message 统一 text、tool、email、poll 与 optimistic state</h3>
+      <p><code>src/types.ts:106</code> 到 <code>src/types.ts:255</code> 定义 MessageKind、EmailFields、ReactionEntry、QuotedSummary 和 Message。注意 <code>src/types.ts:247</code> 的 pending/failed/clientId 是前端 optimistic render 所需，不是 API 永久字段。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">src/types.ts</span> · L193-255</span><span>TypeScript</span></div><pre class="code"><span class="ln">193</span>export interface Message {\n<span class="ln">194</span>  id: string\n<span class="ln">195</span>  conversationId: string\n<span class="ln">196</span>  authorId: string\n<span class="ln">197</span>  kind: MessageKind\n<span class="ln">198</span>  body: string\n<span class="ln">199</span>  at: string\n<span class="ln">200</span>  reactions?: ReactionEntry[]\n<span class="ln">201</span>  /** for tool messages */\n<span class="ln">202</span>  tool?: {\n<span class="ln">203</span>    name: string\n<span class="ln">204</span>    arg: string\n<span class="ln">205</span>    status: string\n<span class="ln">206</span>    detail: string\n<span class="ln">207</span>    icon?: &#x27;web&#x27; | &#x27;github&#x27; | &#x27;figma&#x27; | &#x27;db&#x27;\n<span class="ln">208</span>  }\n<span class="ln">209</span>  /** for attachments */\n<span class="ln">210</span>  attachment?: {\n<span class="ln">211</span>    name: string\n<span class="ln">212</span>    /** kind &#x27;img&#x27; renders inline; others render as a file card */\n<span class="ln">213</span>    kind: &#x27;img&#x27; | &#x27;pdf&#x27; | &#x27;file&#x27; | &#x27;fig&#x27;\n<span class="ln">214</span>    /** real assets carry a URL; mock/legacy data may not */\n<span class="ln">215</span>    url?: string\n<span class="ln">216</span>    mime?: string\n<span class="ln">217</span>    size?: number\n<span class="ln">218</span>    /** legacy descriptor — fallback when no real file is present (e.g. mock data) */\n<span class="ln">219</span>    meta?: string\n<span class="ln">220</span>  }\n<span class="ln">221</span>  /** for whisper-link cards in main chat */\n<span class="ln">222</span>  whisperLink?: {\n<span class="ln">223</span>    pair: [string, string]\n<span class="ln">224</span>    snippet: string\n<span class="ln">225</span>    count: number\n<span class="ln">226</span>  }\n<span class="ln">227</span>  /** Populated by the server when kind === &#x27;email&#x27;. Carries headers,\n<span class="ln">228</span>   *  direction, and transport status so the email bubble can render the\n<span class="ln">229</span>   *  &quot;subject + from / to / cc + sent/failed&quot; chrome. */\n<span class="ln">230</span>  email?: EmailFields\n<span class="ln">231</span>  /** Populated by the server when kind === &#x27;poll&#x27;. */\n<span class="ln">232</span>  poll?: PollPayload\n<span class="ln">233</span>  /** Per-option aggregated tallies for kind === &#x27;poll&#x27;. Empty array for\n<span class="ln">234</span>   *  any other message kind. Updated in place by `poll.updated` WS events. */\n<span class="ln">235</span>  pollTallies?: PollTally[]\n<span class="ln">236</span>  /** Reply-to / quote pointer: the id of another message in this same\n<span class="ln">237</span>   *  conversation that this one is quoting. Null for non-reply messages. */\n<span class="ln">238</span>  quotedMessageId?: string\n<span class="ln">239</span>  /** Inlined summary of the quoted-original, resolved server-side so the\n<span class="ln">240</span>   *  renderer can draw the quote card without a second roundtrip. Missing\n<span class="ln">241</span>   *  when the original was deleted — bubble renders &quot;[deleted]&quot;. */\n<span class="ln">242</span>  quoted?: QuotedSummary\n<span class="ln">243</span>  /** Number of OTHER messages quoting this one. Drives the &quot;N 条回复&quot; link\n<span class="ln">244</span>   *  under the bubble that opens the thread drawer. Server-computed on\n<span class="ln">245</span>   *  fetch; 0 / undefined means no replies. */\n<span class="ln">246</span>  replyCount?: number\n<span class="ln">247</span>  /** Optimistic-render flags. Only set on locally-inserted messages awaiting\n<span class="ln">248</span>   *  the server round-trip; never returned from the API. */\n<span class="ln">249</span>  pending?: boolean\n<span class="ln">250</span>  failed?: boolean\n<span class="ln">251</span>  /** Stable identity that survives the temp-id → real-id rename so React\n<span class="ln">252</span>   *  keeps the same DOM node (avoids re-firing the entry animation). Set on\n<span class="ln">253</span>   *  optimistic insert; carried onto the server echo in `applyEvent`. */\n<span class="ln">254</span>  clientId?: string\n<span class="ln">255</span>}</pre></div>
+      <h3><span class="arr">▸</span>WebSocket 连接用 membership 过滤事件</h3>
+      <p><code>server/src/ws.ts:26</code> 到 <code>server/src/ws.ts:45</code> 的 AuthedSocket 保存 userId、originId、companies、doc subscriptions 和 heartbeat 标记；<code>server/src/ws.ts:135</code> 到 <code>server/src/ws.ts:155</code> 通过 company_members 查询 membership。实时广播不是裸推，而是先知道这个 socket 属于哪些租户。</p>
+      <div class="code-wrap"><div class="code-bar"><span><span class="src">server/src/ws.ts</span> · L135-201</span><span>TypeScript</span></div><pre class="code"><span class="ln">135</span>async function loadMemberships(userId: string): Promise&lt;Set&lt;string&gt;&gt; {\n<span class="ln">136</span>  const { rows } = await pool.query&lt;{ company_id: string }&gt;(\n<span class="ln">137</span>    `SELECT company_id FROM company_members WHERE user_id = $1`,\n<span class="ln">138</span>    [userId],\n<span class="ln">139</span>  )\n<span class="ln">140</span>  return new Set(rows.map((r) =&gt; r.company_id))\n<span class="ln">141</span>}\n<span class="ln">142</span>\n<span class="ln">143</span>/** Look up a doc + verify the caller&#x27;s tenant membership in one shot.\n<span class="ln">144</span> *  Returns null when the doc doesn&#x27;t exist OR the caller can&#x27;t see it —\n<span class="ln">145</span> *  same opaque posture the chat handlers use to avoid leaking existence. */\n<span class="ln">146</span>async function docCompanyFor(documentId: string, userId: string): Promise&lt;string | null&gt; {\n<span class="ln">147</span>  const { rows } = await pool.query&lt;{ company_id: string }&gt;(\n<span class="ln">148</span>    `SELECT d.company_id\n<span class="ln">149</span>       FROM documents d\n<span class="ln">150</span>       JOIN company_members m ON m.company_id = d.company_id AND m.user_id = $2\n<span class="ln">151</span>      WHERE d.id = $1\n<span class="ln">152</span>      LIMIT 1`,\n<span class="ln">153</span>    [documentId, userId],\n<span class="ln">154</span>  )\n<span class="ln">155</span>  return rows[0]?.company_id ?? null\n<span class="ln">156</span>}\n<span class="ln">157</span>\n<span class="ln">158</span>function sendJson(ws: WebSocket, payload: unknown): void {\n<span class="ln">159</span>  if (ws.readyState !== ws.OPEN) return\n<span class="ln">160</span>  try { ws.send(JSON.stringify(payload)) } catch { /* ignore */ }\n<span class="ln">161</span>}\n<span class="ln">162</span>\n<span class="ln">163</span>async function handleDocFrame(c: AuthedSocket, msg: Record&lt;string, unknown&gt;): Promise&lt;void&gt; {\n<span class="ln">164</span>  const type = msg.type as string | undefined\n<span class="ln">165</span>  const documentId = typeof msg.documentId === &#x27;string&#x27; ? msg.documentId : null\n<span class="ln">166</span>  if (!documentId) return\n<span class="ln">167</span>\n<span class="ln">168</span>  if (type === &#x27;doc.subscribe&#x27;) {\n<span class="ln">169</span>    if (c.docSubs.has(documentId)) return  // idempotent\n<span class="ln">170</span>    const companyId = await docCompanyFor(documentId, c.userId)\n<span class="ln">171</span>    if (!companyId) {\n<span class="ln">172</span>      sendJson(c.ws, { type: &#x27;doc.error&#x27;, documentId, error: &#x27;not found&#x27; })\n<span class="ln">173</span>      return\n<span class="ln">174</span>    }\n<span class="ln">175</span>    const subRec: DocSubscriber = {\n<span class="ln">176</span>      originId: c.originId,\n<span class="ln">177</span>      onUpdate: (update, originId) =&gt; {\n<span class="ln">178</span>        sendJson(c.ws, {\n<span class="ln">179</span>          type: &#x27;doc.update&#x27;,\n<span class="ln">180</span>          documentId,\n<span class="ln">181</span>          updateB64: Buffer.from(update).toString(&#x27;base64&#x27;),\n<span class="ln">182</span>          originId,\n<span class="ln">183</span>        })\n<span class="ln">184</span>      },\n<span class="ln">185</span>      onAwareness: (update, originId) =&gt; {\n<span class="ln">186</span>        sendJson(c.ws, {\n<span class="ln">187</span>          type: &#x27;doc.awareness&#x27;,\n<span class="ln">188</span>          documentId,\n<span class="ln">189</span>          updateB64: Buffer.from(update).toString(&#x27;base64&#x27;),\n<span class="ln">190</span>          originId,\n<span class="ln">191</span>        })\n<span class="ln">192</span>      },\n<span class="ln">193</span>    }\n<span class="ln">194</span>    const { initialState } = await docSubscribe(documentId, companyId, subRec)\n<span class="ln">195</span>    c.docSubs.set(documentId, subRec)\n<span class="ln">196</span>    sendJson(c.ws, {\n<span class="ln">197</span>      type: &#x27;doc.sync&#x27;,\n<span class="ln">198</span>      documentId,\n<span class="ln">199</span>      stateB64: Buffer.from(initialState).toString(&#x27;base64&#x27;),\n<span class="ln">200</span>      originId: c.originId,\n<span class="ln">201</span>    })</pre></div>
+    </section>
+    <section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">REST list conversations
+  <span class="flow-arr">→</span> WebSocket ticket auth
+  <span class="flow-arr">→</span> tenant-filtered Redis bridge
+  <span class="flow-arr">→</span> message / reaction / poll / doc events
+  <span class="flow-arr">→</span> zustand stores render one team inbox</div>
+      <p>doc 协作路径展示了同一 WS 如何服务非聊天状态：<code>server/src/ws.ts:163</code> 的 handleDocFrame 处理 subscribe/update/awareness，<code>server/src/ws.ts:213</code> 到 <code>server/src/ws.ts:235</code> 把 Yjs update 和 awareness 分开广播。</p>
+    </section>
+    <section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>server/src/ws.ts:49</code> 的 WS_MAX_BUFFERED_BYTES 与 TERMINATE cap 防止慢客户端造成 OOM。</li><li><code>server/src/ws.ts:65</code> 的 resetHumanPresenceOnBoot 清理 stale avail，人类 presence 不依赖旧进程状态。</li><li><code>server/src/ws.ts:143</code> 的 docCompanyFor 返回 opaque null，避免泄露不可见文档是否存在。</li></ul>
+    </section>
+    <section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">React shell</div><div class="card-d"><code>src/App.tsx:132</code> 懒加载消息并标记已读。</div></div><div class="card"><div class="card-h">Document rooms</div><div class="card-d"><code>server/src/documents/rooms.ts:1</code> 管理 Yjs room。</div></div></div></section>
+    <div class="foot"><span>Sub-page · 2026-08-18</span><span><a href="../cumora.html">↑ cumora 主页面</a></span></div></main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { links.forEach(a => a.classList.remove('active')); map.get(e.target)?.classList.add('active'); } }), { rootMargin: '-40% 0px -55% 0px' });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => { const o = document.createElement('option'); o.value = a.getAttribute('href'); o.textContent = a.textContent.trim(); sel.appendChild(o); });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:60}, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*1.4+.2, a: Math.random(), s: Math.random()*.02+.005 }));
+    const tick = () => { ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#95eee6'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
