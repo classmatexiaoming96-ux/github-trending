@@ -1,0 +1,592 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>PID 输入与焦点守卫 · 深度解析 · macos-harness</title><meta name="description" content="macos-harness 子模块源码解析" /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" /><style>/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root{--star:#7fd7ff;--star-soft:#b8ecff;--star-deep:#2b91c8;}</style></head><body><canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg><div class="mobile-bar"><div class="glyph">macos-harness<b>Detail</b></div><select id="msel" aria-label="跳转章节"></select></div><div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">macos-harness<b>Detail</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">Python · uv package</span><nav><ul class="nav-list" id="navlist"><li><a href="#section-0"><span class="idx">00</span>导入与契约</a></li><li><a href="#section-1"><span class="idx">01</span>核心实现</a></li><li><a href="#section-2"><span class="idx">02</span>关键流程</a></li><li><a href="#section-3"><span class="idx">03</span>边界失败</a></li><li><a href="#section-4"><span class="idx">04</span>关联模块</a></li></ul></nav><div class="nav-foot"><div>Stars ★420 · 2026-08-17</div><div><a href="https://github.com/browser-use/macos-harness" target="_blank">browser-use/macos-harness</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside><main class="main"><div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">PID 输入与焦点守卫 <em>深度解析</em></h1><p class="hero-desc">这一页拆 raw input 的不变量：必须有目标 PID，不能移动物理鼠标，不能把后台目标拉到前台，不能把 coordinate click 偷换成 AXPress。</p></div>
+<section class="sec" id="section-0"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>输入层依赖 <code>src/macos_harness/macos.py:1128</code> 之后的 direct visual and keyboard input 区块。所有入口都先走 <code>src/macos_harness/macos.py:405</code>、<code>src/macos_harness/macos.py:421</code> 的权限检查，再通过 <code>src/macos_harness/macos.py:1130</code> 到 <code>src/macos_harness/macos.py:1141</code> 找到目标 PID 并拒绝无目标输入。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/macos_harness/macos.py</span> · L1128-1162</span><span>Python</span></div><pre class="code"><span class="ln">1128</span>    # --- direct visual and keyboard input -------------------------------
+<span class="ln">1129</span>
+<span class="ln">1130</span>    def _pid(self, app: str | None) -&gt; int | None:
+<span class="ln">1131</span>        if app is None and self._last_app is None:
+<span class="ln">1132</span>            return None
+<span class="ln">1133</span>        _, info = self._resolve_app(app)
+<span class="ln">1134</span>        self._last_app = info
+<span class="ln">1135</span>        return int(info[&quot;pid&quot;])
+<span class="ln">1136</span>
+<span class="ln">1137</span>    @staticmethod
+<span class="ln">1138</span>    def _post(event: Any, pid: int | None) -&gt; None:
+<span class="ln">1139</span>        if pid is None:
+<span class="ln">1140</span>            raise MacOSError(&quot;Input requires an app or prior app snapshot&quot;)
+<span class="ln">1141</span>        AS.CGEventPostToPid(pid, event)
+<span class="ln">1142</span>
+<span class="ln">1143</span>    def _screen_point(
+<span class="ln">1144</span>        self, x: float, y: float, coordinate_space: str
+<span class="ln">1145</span>    ) -&gt; tuple[float, float]:
+<span class="ln">1146</span>        if coordinate_space == &quot;screen&quot;:
+<span class="ln">1147</span>            return float(x), float(y)
+<span class="ln">1148</span>        if self._last_screenshot is None:
+<span class="ln">1149</span>            raise MacOSError(
+<span class="ln">1150</span>                &quot;Take a screenshot before using window or screenshot coordinates, &quot;
+<span class="ln">1151</span>                &quot;or pass coordinate_space=&#x27;screen&#x27;&quot;
+<span class="ln">1152</span>            )
+<span class="ln">1153</span>        shot = self._last_screenshot
+<span class="ln">1154</span>        bounds = shot[&quot;bounds&quot;]
+<span class="ln">1155</span>        if coordinate_space == &quot;screenshot&quot;:
+<span class="ln">1156</span>            x = float(x) / float(shot[&quot;scale_x&quot;])
+<span class="ln">1157</span>            y = float(y) / float(shot[&quot;scale_y&quot;])
+<span class="ln">1158</span>        elif coordinate_space != &quot;window&quot;:
+<span class="ln">1159</span>            raise MacOSError(
+<span class="ln">1160</span>                &quot;coordinate_space must be &#x27;screenshot&#x27;, &#x27;window&#x27;, or &#x27;screen&#x27;&quot;
+<span class="ln">1161</span>            )
+<span class="ln">1162</span>        return bounds[&quot;x&quot;] + float(x), bounds[&quot;y&quot;] + float(y)</pre></div></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>click 保持 raw coordinate 语义</h3><p>click 的实现 <code>src/macos_harness/macos.py:1206</code> 到 <code>src/macos_harness/macos.py:1249</code> 明确说“never guess an AX action”。它记录 focus_before，移动的是 overlay 指针，然后用 <code>src/macos_harness/macos.py:1231</code> 到 <code>src/macos_harness/macos.py:1243</code> 创建 down/up 事件投递给 PID。<code>src/macos_harness/macos.py:1245</code> 再检查焦点是否被意外改变。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/macos_harness/macos.py</span> · L1206-1249</span><span>Python</span></div><pre class="code"><span class="ln">1206</span>    def click(
+<span class="ln">1207</span>        self,
+<span class="ln">1208</span>        x: float,
+<span class="ln">1209</span>        y: float,
+<span class="ln">1210</span>        *,
+<span class="ln">1211</span>        app: str | None = None,
+<span class="ln">1212</span>        button: str = &quot;left&quot;,
+<span class="ln">1213</span>        clicks: int = 1,
+<span class="ln">1214</span>        coordinate_space: str = &quot;screenshot&quot;,
+<span class="ln">1215</span>    ) -&gt; dict[str, Any]:
+<span class="ln">1216</span>        &quot;&quot;&quot;Send one raw coordinate click to an app PID; never guess an AX action.&quot;&quot;&quot;
+<span class="ln">1217</span>        self._ensure_accessibility()
+<span class="ln">1218</span>        self._ensure_post_events()
+<span class="ln">1219</span>        button = button.casefold()
+<span class="ln">1220</span>        if button not in _BUTTONS:
+<span class="ln">1221</span>            raise MacOSError(f&quot;Unknown mouse button {button!r}&quot;)
+<span class="ln">1222</span>        point = self._screen_point(x, y, coordinate_space)
+<span class="ln">1223</span>        pid = self._pid(app)
+<span class="ln">1224</span>        if pid is None:
+<span class="ln">1225</span>            raise MacOSError(&quot;Pointer input requires an app or prior app snapshot&quot;)
+<span class="ln">1226</span>        focus_before = self._frontmost_app()
+<span class="ln">1227</span>        self._pointer_position = point
+<span class="ln">1228</span>        self._overlay.move(*point)
+<span class="ln">1229</span>        down_type, up_type, _ = _MOUSE_EVENTS[button]
+<span class="ln">1230</span>        for click_count in range(1, max(1, int(clicks)) + 1):
+<span class="ln">1231</span>            down = AS.CGEventCreateMouseEvent(
+<span class="ln">1232</span>                self._event_source, down_type, point, _BUTTONS[button]
+<span class="ln">1233</span>            )
+<span class="ln">1234</span>            up = AS.CGEventCreateMouseEvent(
+<span class="ln">1235</span>                self._event_source, up_type, point, _BUTTONS[button]
+<span class="ln">1236</span>            )
+<span class="ln">1237</span>            AS.CGEventSetIntegerValueField(
+<span class="ln">1238</span>                down, AS.kCGMouseEventClickState, click_count
+<span class="ln">1239</span>            )
+<span class="ln">1240</span>            AS.CGEventSetIntegerValueField(up, AS.kCGMouseEventClickState, click_count)
+<span class="ln">1241</span>            self._post(down, pid)
+<span class="ln">1242</span>            time.sleep(0.03)
+<span class="ln">1243</span>            self._post(up, pid)
+<span class="ln">1244</span>            time.sleep(0.03)
+<span class="ln">1245</span>            self._guard_focus(focus_before, pid, &quot;click&quot;)
+<span class="ln">1246</span>        self._overlay.click()
+<span class="ln">1247</span>        pointer = self._pointer_info()
+<span class="ln">1248</span>        assert pointer is not None
+<span class="ln">1249</span>        return pointer</pre></div><h3><span class="arr">▸</span>drag 与 scroll 也继承相同约束</h3><p>拖拽和滚动没有绕开守卫。<code>src/macos_harness/macos.py:1251</code> 到 <code>src/macos_harness/macos.py:1305</code> 用同一 PID、同一 focus guard 和同一 overlay 位置；<code>src/macos_harness/macos.py:1307</code> 到 <code>src/macos_harness/macos.py:1356</code> 把大 delta 拆成小步，避免某些 App 对过大滚轮事件处理不稳定。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/macos_harness/macos.py</span> · L1251-1356</span><span>Python</span></div><pre class="code"><span class="ln">1251</span>    def drag(
+<span class="ln">1252</span>        self,
+<span class="ln">1253</span>        from_x: float,
+<span class="ln">1254</span>        from_y: float,
+<span class="ln">1255</span>        to_x: float,
+<span class="ln">1256</span>        to_y: float,
+<span class="ln">1257</span>        *,
+<span class="ln">1258</span>        app: str | None = None,
+<span class="ln">1259</span>        button: str = &quot;left&quot;,
+<span class="ln">1260</span>        coordinate_space: str = &quot;screenshot&quot;,
+<span class="ln">1261</span>        duration: float = 0.25,
+<span class="ln">1262</span>        steps: int = 12,
+<span class="ln">1263</span>    ) -&gt; None:
+<span class="ln">1264</span>        self._ensure_accessibility()
+<span class="ln">1265</span>        self._ensure_post_events()
+<span class="ln">1266</span>        button = button.casefold()
+<span class="ln">1267</span>        if button not in _BUTTONS:
+<span class="ln">1268</span>            raise MacOSError(f&quot;Unknown mouse button {button!r}&quot;)
+<span class="ln">1269</span>        start = self._screen_point(from_x, from_y, coordinate_space)
+<span class="ln">1270</span>        end = self._screen_point(to_x, to_y, coordinate_space)
+<span class="ln">1271</span>        pid = self._pid(app)
+<span class="ln">1272</span>        if pid is None:
+<span class="ln">1273</span>            raise MacOSError(&quot;Pointer input requires an app or prior app snapshot&quot;)
+<span class="ln">1274</span>        focus_before = self._frontmost_app()
+<span class="ln">1275</span>        self._pointer_position = start
+<span class="ln">1276</span>        self._overlay.move(*start, duration=0)
+<span class="ln">1277</span>        self._overlay.move(*end, duration=duration)
+<span class="ln">1278</span>        down_type, up_type, drag_type = _MOUSE_EVENTS[button]
+<span class="ln">1279</span>        self._post(
+<span class="ln">1280</span>            AS.CGEventCreateMouseEvent(
+<span class="ln">1281</span>                self._event_source, down_type, start, _BUTTONS[button]
+<span class="ln">1282</span>            ),
+<span class="ln">1283</span>            pid,
+<span class="ln">1284</span>        )
+<span class="ln">1285</span>        self._pointer_position = end
+<span class="ln">1286</span>        for index in range(1, max(1, steps) + 1):
+<span class="ln">1287</span>            ratio = index / max(1, steps)
+<span class="ln">1288</span>            point = (
+<span class="ln">1289</span>                start[0] + (end[0] - start[0]) * ratio,
+<span class="ln">1290</span>                start[1] + (end[1] - start[1]) * ratio,
+<span class="ln">1291</span>            )
+<span class="ln">1292</span>            self._post(
+<span class="ln">1293</span>                AS.CGEventCreateMouseEvent(
+<span class="ln">1294</span>                    self._event_source, drag_type, point, _BUTTONS[button]
+<span class="ln">1295</span>                ),
+<span class="ln">1296</span>                pid,
+<span class="ln">1297</span>            )
+<span class="ln">1298</span>            time.sleep(max(0.0, duration) / max(1, steps))
+<span class="ln">1299</span>        self._post(
+<span class="ln">1300</span>            AS.CGEventCreateMouseEvent(
+<span class="ln">1301</span>                self._event_source, up_type, end, _BUTTONS[button]
+<span class="ln">1302</span>            ),
+<span class="ln">1303</span>            pid,
+<span class="ln">1304</span>        )
+<span class="ln">1305</span>        self._guard_focus(focus_before, pid, &quot;drag&quot;)
+<span class="ln">1306</span>
+<span class="ln">1307</span>    def scroll(
+<span class="ln">1308</span>        self,
+<span class="ln">1309</span>        delta_y: int,
+<span class="ln">1310</span>        delta_x: int = 0,
+<span class="ln">1311</span>        *,
+<span class="ln">1312</span>        app: str | None = None,
+<span class="ln">1313</span>        unit: str = &quot;pixel&quot;,
+<span class="ln">1314</span>        x: float | None = None,
+<span class="ln">1315</span>        y: float | None = None,
+<span class="ln">1316</span>        coordinate_space: str = &quot;screenshot&quot;,
+<span class="ln">1317</span>    ) -&gt; None:
+<span class="ln">1318</span>        self._ensure_accessibility()
+<span class="ln">1319</span>        self._ensure_post_events()
+<span class="ln">1320</span>        units = {
+<span class="ln">1321</span>            &quot;pixel&quot;: AS.kCGScrollEventUnitPixel,
+<span class="ln">1322</span>            &quot;line&quot;: AS.kCGScrollEventUnitLine,
+<span class="ln">1323</span>        }
+<span class="ln">1324</span>        try:
+<span class="ln">1325</span>            scroll_unit = units[unit]
+<span class="ln">1326</span>        except KeyError as exc:
+<span class="ln">1327</span>            raise MacOSError(&quot;Scroll unit must be &#x27;pixel&#x27; or &#x27;line&#x27;&quot;) from exc
+<span class="ln">1328</span>        if (x is None) != (y is None):
+<span class="ln">1329</span>            raise MacOSError(&quot;Provide both x and y when targeting a scroll point&quot;)
+<span class="ln">1330</span>        point: tuple[float, float] | None = None
+<span class="ln">1331</span>        if x is not None and y is not None:
+<span class="ln">1332</span>            point = self._screen_point(x, y, coordinate_space)
+<span class="ln">1333</span>            self._pointer_position = point
+<span class="ln">1334</span>            self._overlay.move(*point)
+<span class="ln">1335</span>
+<span class="ln">1336</span>        pid = self._pid(app)
+<span class="ln">1337</span>        if pid is None:
+<span class="ln">1338</span>            raise MacOSError(&quot;Scroll input requires an app or prior app snapshot&quot;)
+<span class="ln">1339</span>        focus_before = self._frontmost_app()
+<span class="ln">1340</span>
+<span class="ln">1341</span>        maximum = 100 if unit == &quot;pixel&quot; else 10
+<span class="ln">1342</span>        y_steps = _split_scroll_delta(delta_y, maximum)
+<span class="ln">1343</span>        x_steps = _split_scroll_delta(delta_x, maximum)
+<span class="ln">1344</span>        count = max(len(y_steps), len(x_steps))
+<span class="ln">1345</span>        y_steps.extend([0] * (count - len(y_steps)))
+<span class="ln">1346</span>        x_steps.extend([0] * (count - len(x_steps)))
+<span class="ln">1347</span>
+<span class="ln">1348</span>        for step_y, step_x in zip(y_steps, x_steps, strict=True):
+<span class="ln">1349</span>            event = AS.CGEventCreateScrollWheelEvent(
+<span class="ln">1350</span>                self._event_source, scroll_unit, 2, int(step_y), int(step_x)
+<span class="ln">1351</span>            )
+<span class="ln">1352</span>            if point:
+<span class="ln">1353</span>                AS.CGEventSetLocation(event, point)
+<span class="ln">1354</span>            self._post(event, pid)
+<span class="ln">1355</span>            time.sleep(0.01)
+<span class="ln">1356</span>            self._guard_focus(focus_before, pid, &quot;scroll&quot;)</pre></div><h3><span class="arr">▸</span>type/key 保留真实键盘事件形态</h3><p>文本输入 <code>src/macos_harness/macos.py:1358</code> 到 <code>src/macos_harness/macos.py:1387</code> 为每个字符设置 Unicode 字符串，组合键 <code>src/macos_harness/macos.py:1388</code> 到 <code>src/macos_harness/macos.py:1445</code> 则逐个按下 modifier 并反向释放。测试 <code>tests/test_macos.py:218</code> 到 <code>tests/test_macos.py:251</code> 覆盖 emoji 和 Shift 字符，证明它不是 ASCII-only 的简化输入。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">src/macos_harness/macos.py</span> · L1358-1445</span><span>Python</span></div><pre class="code"><span class="ln">1358</span>    def type(self, text: str, *, app: str | None = None) -&gt; None:
+<span class="ln">1359</span>        self._ensure_accessibility()
+<span class="ln">1360</span>        self._ensure_post_events()
+<span class="ln">1361</span>        pid = self._pid(app)
+<span class="ln">1362</span>        if pid is None:
+<span class="ln">1363</span>            raise MacOSError(&quot;Keyboard input requires an app or prior app snapshot&quot;)
+<span class="ln">1364</span>        focus_before = self._frontmost_app()
+<span class="ln">1365</span>        aliases = {&quot; &quot;: &quot;space&quot;, &quot;\n&quot;: &quot;return&quot;, &quot;\r&quot;: &quot;return&quot;, &quot;\t&quot;: &quot;tab&quot;}
+<span class="ln">1366</span>        for character in text:
+<span class="ln">1367</span>            base = _SHIFTED_CHARACTERS.get(
+<span class="ln">1368</span>                character, aliases.get(character, character.casefold())
+<span class="ln">1369</span>            )
+<span class="ln">1370</span>            flags = (
+<span class="ln">1371</span>                AS.kCGEventFlagMaskShift
+<span class="ln">1372</span>                if character.isupper() or character in _SHIFTED_CHARACTERS
+<span class="ln">1373</span>                else 0
+<span class="ln">1374</span>            )
+<span class="ln">1375</span>            keycode = _KEYCODES.get(base, 0)
+<span class="ln">1376</span>            down = AS.CGEventCreateKeyboardEvent(self._event_source, keycode, True)
+<span class="ln">1377</span>            up = AS.CGEventCreateKeyboardEvent(self._event_source, keycode, False)
+<span class="ln">1378</span>            length = len(character.encode(&quot;utf-16-le&quot;)) // 2
+<span class="ln">1379</span>            AS.CGEventKeyboardSetUnicodeString(down, length, character)
+<span class="ln">1380</span>            AS.CGEventKeyboardSetUnicodeString(up, length, character)
+<span class="ln">1381</span>            AS.CGEventSetFlags(down, flags)
+<span class="ln">1382</span>            AS.CGEventSetFlags(up, flags)
+<span class="ln">1383</span>            self._post(down, pid)
+<span class="ln">1384</span>            self._post(up, pid)
+<span class="ln">1385</span>            time.sleep(0.01)
+<span class="ln">1386</span>            self._guard_focus(focus_before, pid, &quot;typing&quot;)
+<span class="ln">1387</span>
+<span class="ln">1388</span>    def key(self, key: str, *, app: str | None = None) -&gt; None:
+<span class="ln">1389</span>        self._ensure_accessibility()
+<span class="ln">1390</span>        self._ensure_post_events()
+<span class="ln">1391</span>        parts = [part.casefold() for part in re.split(r&quot;[+-]&quot;, key) if part]
+<span class="ln">1392</span>        if not parts:
+<span class="ln">1393</span>            raise MacOSError(&quot;Key must not be empty&quot;)
+<span class="ln">1394</span>        base = parts[-1]
+<span class="ln">1395</span>        modifiers = parts[:-1]
+<span class="ln">1396</span>        try:
+<span class="ln">1397</span>            keycode = _KEYCODES[base]
+<span class="ln">1398</span>        except KeyError as exc:
+<span class="ln">1399</span>            raise MacOSError(
+<span class="ln">1400</span>                f&quot;Unsupported key {base!r}; use mac.type() for arbitrary text&quot;
+<span class="ln">1401</span>            ) from exc
+<span class="ln">1402</span>        parsed_modifiers: list[tuple[int, int]] = []
+<span class="ln">1403</span>        seen_keycodes: set[int] = set()
+<span class="ln">1404</span>        for modifier in modifiers:
+<span class="ln">1405</span>            try:
+<span class="ln">1406</span>                modifier_keycode = _MODIFIER_KEYCODES[modifier]
+<span class="ln">1407</span>                modifier_flag = _MODIFIER_FLAGS[modifier]
+<span class="ln">1408</span>            except KeyError as exc:
+<span class="ln">1409</span>                raise MacOSError(f&quot;Unsupported modifier {modifier!r}&quot;) from exc
+<span class="ln">1410</span>            if modifier_keycode not in seen_keycodes:
+<span class="ln">1411</span>                seen_keycodes.add(modifier_keycode)
+<span class="ln">1412</span>                parsed_modifiers.append((modifier_keycode, modifier_flag))
+<span class="ln">1413</span>        pid = self._pid(app)
+<span class="ln">1414</span>        if pid is None:
+<span class="ln">1415</span>            raise MacOSError(&quot;Keyboard input requires an app or prior app snapshot&quot;)
+<span class="ln">1416</span>        focus_before = self._frontmost_app()
+<span class="ln">1417</span>        active_flags = 0
+<span class="ln">1418</span>        pressed: list[tuple[int, int]] = []
+<span class="ln">1419</span>        try:
+<span class="ln">1420</span>            for modifier_keycode, modifier_flag in parsed_modifiers:
+<span class="ln">1421</span>                active_flags |= modifier_flag
+<span class="ln">1422</span>                event = AS.CGEventCreateKeyboardEvent(
+<span class="ln">1423</span>                    self._event_source, modifier_keycode, True
+<span class="ln">1424</span>                )
+<span class="ln">1425</span>                AS.CGEventSetFlags(event, active_flags)
+<span class="ln">1426</span>                self._post(event, pid)
+<span class="ln">1427</span>                pressed.append((modifier_keycode, modifier_flag))
+<span class="ln">1428</span>                time.sleep(0.005)
+<span class="ln">1429</span>
+<span class="ln">1430</span>            down = AS.CGEventCreateKeyboardEvent(self._event_source, keycode, True)
+<span class="ln">1431</span>            up = AS.CGEventCreateKeyboardEvent(self._event_source, keycode, False)
+<span class="ln">1432</span>            AS.CGEventSetFlags(down, active_flags)
+<span class="ln">1433</span>            AS.CGEventSetFlags(up, active_flags)
+<span class="ln">1434</span>            self._post(down, pid)
+<span class="ln">1435</span>            self._post(up, pid)
+<span class="ln">1436</span>        finally:
+<span class="ln">1437</span>            for modifier_keycode, modifier_flag in reversed(pressed):
+<span class="ln">1438</span>                active_flags &amp;= ~modifier_flag
+<span class="ln">1439</span>                event = AS.CGEventCreateKeyboardEvent(
+<span class="ln">1440</span>                    self._event_source, modifier_keycode, False
+<span class="ln">1441</span>                )
+<span class="ln">1442</span>                AS.CGEventSetFlags(event, active_flags)
+<span class="ln">1443</span>                self._post(event, pid)
+<span class="ln">1444</span>        time.sleep(0.01)
+<span class="ln">1445</span>        self._guard_focus(focus_before, pid, f&quot;key {key!r}&quot;)</pre></div></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow">click(x,y,app) → permissions → coordinate transform → pid → focus snapshot → CGEvent down/up → focus guard → virtual pointer click</div><p>测试把这些不变量固定下来：<code>tests/test_macos.py:179</code> 到 <code>tests/test_macos.py:199</code> 断言 background click 只投递到 PID 且不会 warp 光标；<code>tests/test_macos.py:326</code> 到 <code>tests/test_macos.py:346</code> 断言使用 private event source；<code>tests/test_macos.py:289</code> 到 <code>tests/test_macos.py:323</code> 断言目标变成 frontmost 时停止打字。</p><div class="code-wrap"><div class="code-bar"><span><span class="src">tests/test_macos.py</span> · L179-215</span><span>Python</span></div><pre class="code"><span class="ln">179</span>def test_background_click_posts_to_pid_without_warp_or_activate(monkeypatch) -&gt; None:
+<span class="ln">180</span>    mac = MacOS()
+<span class="ln">181</span>    posted = []
+<span class="ln">182</span>    monkeypatch.setattr(mac, &quot;_ensure_accessibility&quot;, lambda: None)
+<span class="ln">183</span>    monkeypatch.setattr(mac, &quot;_ensure_post_events&quot;, lambda: None)
+<span class="ln">184</span>    monkeypatch.setattr(mac, &quot;_pid&quot;, lambda app: 42)
+<span class="ln">185</span>    monkeypatch.setattr(mac, &quot;_post&quot;, lambda event, pid: posted.append(pid))
+<span class="ln">186</span>    monkeypatch.setattr(
+<span class="ln">187</span>        macos_module.AS,
+<span class="ln">188</span>        &quot;CGWarpMouseCursorPosition&quot;,
+<span class="ln">189</span>        lambda point: pytest.fail(&quot;background click must not warp the cursor&quot;),
+<span class="ln">190</span>    )
+<span class="ln">191</span>
+<span class="ln">192</span>    mac.click(
+<span class="ln">193</span>        10,
+<span class="ln">194</span>        20,
+<span class="ln">195</span>        app=&quot;Slack&quot;,
+<span class="ln">196</span>        coordinate_space=&quot;screen&quot;,
+<span class="ln">197</span>    )
+<span class="ln">198</span>
+<span class="ln">199</span>    assert posted == [42, 42]
+<span class="ln">200</span>
+<span class="ln">201</span>
+<span class="ln">202</span>def test_input_without_target_is_refused(monkeypatch) -&gt; None:
+<span class="ln">203</span>    mac = MacOS()
+<span class="ln">204</span>    monkeypatch.setattr(mac, &quot;_ensure_accessibility&quot;, lambda: None)
+<span class="ln">205</span>    monkeypatch.setattr(mac, &quot;_ensure_post_events&quot;, lambda: None)
+<span class="ln">206</span>    monkeypatch.setattr(
+<span class="ln">207</span>        macos_module.AS,
+<span class="ln">208</span>        &quot;AXUIElementCopyElementAtPosition&quot;,
+<span class="ln">209</span>        lambda *args: pytest.fail(&quot;untargeted input must stop before AX hit testing&quot;),
+<span class="ln">210</span>    )
+<span class="ln">211</span>
+<span class="ln">212</span>    with pytest.raises(MacOSError, match=&quot;requires an app&quot;):
+<span class="ln">213</span>        mac.type(&quot;hello&quot;)
+<span class="ln">214</span>    with pytest.raises(MacOSError, match=&quot;requires an app&quot;):
+<span class="ln">215</span>        mac.click(10, 20, coordinate_space=&quot;screen&quot;)</pre></div></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>src/macos_harness/macos.py:1148</code> 到 <code>src/macos_harness/macos.py:1152</code> 要求截图坐标必须来自最近 screenshot，否则调用方要显式使用 screen 坐标。</li><li><code>src/macos_harness/macos.py:1220</code> 到 <code>src/macos_harness/macos.py:1225</code> 拒绝未知鼠标按钮和无目标 pointer input。</li><li><code>src/macos_harness/macos.py:1396</code> 到 <code>src/macos_harness/macos.py:1409</code> 对不支持的 key 或 modifier 直接报错。</li></ul></section><section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="g2"><div class="card"><div class="card-h">pointer.py</div><div class="card-d"><code>src/macos_harness/pointer.py:5</code> 到 <code>src/macos_harness/pointer.py:24</code> 定义虚拟指针几何和 pressed 缩放。</div></div><div class="card"><div class="card-h">overlay.py</div><div class="card-d"><code>src/macos_harness/overlay.py:280</code> 到 <code>src/macos_harness/overlay.py:297</code> 把 move/show/hide/click/quit 转成 AppKit 面板状态。</div></div></div></section><div class="foot"><span>Generated · 2026-08-19</span><span>Source · <a href="https://github.com/browser-use/macos-harness">browser-use/macos-harness</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span></div></main></div><script>(()=>{const links=document.querySelectorAll('.nav-list a');const map=new Map();links.forEach(a=>{const id=a.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)map.set(el,a);});const setActive=el=>{links.forEach(a=>a.classList.remove('active'));if(el)map.get(el).classList.add('active');};const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting)setActive(e.target);});},{rootMargin:'-40% 0px -55% 0px',threshold:0});map.forEach((_,el)=>obs.observe(el));const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o);});sel.addEventListener('change',e=>location.href=e.target.value);}const canvas=document.getElementById('stars');if(canvas){const ctx=canvas.getContext('2d');const resize=()=>{canvas.width=innerWidth;canvas.height=innerHeight;};resize();addEventListener('resize',resize);const stars=Array.from({length:60},()=>({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*.02+.005}));const tick=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);stars.forEach(s=>{s.a+=s.s;if(s.a>1||s.a<.2)s.s*=-1;ctx.globalAlpha=s.a;ctx.fillStyle='#b8ecff';ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});requestAnimationFrame(tick);};tick();}})();</script></body></html>
