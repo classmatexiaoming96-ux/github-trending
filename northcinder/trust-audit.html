@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>本地证据只展示，审计与订单图分开落盘 · 深度解析 · northcinder</title>
+<meta name="description" content="northcinder 信任信号、审计与订单图 子模块完整解析 — 从 MCP 工具、排序校验、人工授权、签名 mandate、checkout rail 与本地审计看一个买家侧购物 Agent 如何把交易风险拆成可验证边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #70d6c9;
+  --star-soft:  #a7f3e8;
+  --star-deep:  #2f9f94;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">northcinder<b>.shop</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">northcinder<b>.shop</b></div>
+      <div class="sub">信任信号、审计与订单图 · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../northcinder.html">← 返回 northcinder 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">本地证据只展示，审计与订单图分开落盘 <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆 NorthCinder 的可追责层：trust engine 控制冷探测预算，本地历史只做 display evidence，audit log append-only，订单图不篡改 checkout log。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>trust engine 在 <code>service/src/trust/engine.ts:44</code> 定义默认 TTL，<code>service/src/trust/engine.ts:63</code> 定义 800ms 预算，<code>service/src/trust/engine.ts:92</code> 先看 allow/deny/platform seed，<code>service/src/trust/engine.ts:119</code> 再按预算冷探测。这说明搜索路径优先稳定响应，而不是阻塞等完整风控。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/service/src/trust/engine.ts</span> · L44-84</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">44</span>}
+<span class="ln">45</span>
+<span class="ln">46</span>function domainMatches(domain: string, seedDomain: string): boolean {
+<span class="ln">47</span>  const d = domain.toLowerCase();
+<span class="ln">48</span>  const s = seedDomain.toLowerCase();
+<span class="ln">49</span>  return d === s || d.endsWith(`.${s}`);
+<span class="ln">50</span>}
+<span class="ln">51</span>function findEntry(entries: TrustSeedEntry[], domain: string): TrustSeedEntry | undefined {
+<span class="ln">52</span>  return entries.find((e) =&gt; domainMatches(domain, e.domain));
+<span class="ln">53</span>}
+<span class="ln">54</span>
+<span class="ln">55</span>interface SeedEvaluation {
+<span class="ln">56</span>  inputs: Pick&lt;TrustDerivationInputs, &quot;allowHit&quot; | &quot;denyHit&quot; | &quot;platformHit&quot;&gt;;
+<span class="ln">57</span>  evidence: TrustEvidence[];
+<span class="ln">58</span>  /** Set when deny/allow is authoritative — the engine can skip probes entirely. */
+<span class="ln">59</span>  shortCircuit: boolean;
+<span class="ln">60</span>}
+<span class="ln">61</span>
+<span class="ln">62</span>/** Curation layer: instant, live, no I/O. Only the verifiable DOMAIN is matched. */
+<span class="ln">63</span>function evaluateSeed(seed: TrustSeed, domain: string): SeedEvaluation {
+<span class="ln">64</span>  const denied = findEntry(seed.deny, domain);
+<span class="ln">65</span>  if (denied) {
+<span class="ln">66</span>    return { inputs: { denyHit: true }, evidence: [{ source: &quot;seed-list&quot;, detail: `deny-listed: ${denied.detail}` }], shortCircuit: true };
+<span class="ln">67</span>  }
+<span class="ln">68</span>  const allowed = findEntry(seed.allow, domain);
+<span class="ln">69</span>  if (allowed) {
+<span class="ln">70</span>    return { inputs: { allowHit: true }, evidence: [{ source: &quot;seed-list&quot;, detail: `allow-listed: ${allowed.detail}` }], shortCircuit: true };
+<span class="ln">71</span>  }
+<span class="ln">72</span>  const platform = findEntry(seed.knownPlatformDomains, domain);
+<span class="ln">73</span>  if (platform) {
+<span class="ln">74</span>    return { inputs: { platformHit: true }, evidence: [{ source: &quot;platform-heuristic&quot;, detail: platform.detail }], shortCircuit: false };
+<span class="ln">75</span>  }
+<span class="ln">76</span>  return { inputs: {}, evidence: [], shortCircuit: false };
+<span class="ln">77</span>}
+<span class="ln">78</span>
+<span class="ln">79</span>function toSignal(merchant: Merchant, inputs: TrustDerivationInputs, evidence: TrustEvidence[]): TrustSignal {
+<span class="ln">80</span>  const { level } = deriveTrustLevel(inputs);
+<span class="ln">81</span>  // Evidence is non-empty by construction (schema min(1)); a merchant with no
+<span class="ln">82</span>  // curation and no measured signals still carries the explicit unknown floor.
+<span class="ln">83</span>  const lines =
+<span class="ln">84</span>    evidence.length &gt; 0</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>audit log：追加失败即 fail closed</h3>
+      <p>audit log 的注释在 <code>client/src/audit-log.ts:1</code> 说明 append-only，<code>client/src/audit-log.ts:40</code> 定义 audit 类型，<code>client/src/audit-log.ts:57</code> append 时 mkdir 0700，<code>client/src/audit-log.ts:62</code> 追加 JSONL，<code>client/src/audit-log.ts:64</code> 若 chmod/write 失败直接抛错。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/audit-log.ts</span> · L1-79</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">1</span>/**
+<span class="ln">2</span> * Append-only local audit log (spec §2 &quot;user-auditable&quot;, §4.5): every search,
+<span class="ln">3</span> * ranking (with its machine-readable reasons), mandate issuance/approval, and
+<span class="ln">4</span> * checkout attempt lands here as one JSONL line in the user&#x27;s config dir.
+<span class="ln">5</span> * This file is what makes &quot;neutral&quot; PROVABLE to the user — so writes fail
+<span class="ln">6</span> * CLOSED: if the trail cannot be written, the operation that needed auditing
+<span class="ln">7</span> * reports an error instead of proceeding un-audited.
+<span class="ln">8</span> *
+<span class="ln">9</span> * The log is never truncated or rewritten by this module; `append` is the
+<span class="ln">10</span> * only operation.
+<span class="ln">11</span> */
+<span class="ln">12</span>import { appendFileSync, chmodSync, existsSync, mkdirSync } from &quot;node:fs&quot;;
+<span class="ln">13</span>import { join } from &quot;node:path&quot;;
+<span class="ln">14</span>import { forEachLineFromEnd } from &quot;./bounded-tail-reader.js&quot;;
+<span class="ln">15</span>import { runFsOp } from &quot;./fs-error-sanitizer.js&quot;;
+<span class="ln">16</span>
+<span class="ln">17</span>export const AUDIT_LOG_FILENAME = &quot;audit.jsonl&quot;;
+<span class="ln">18</span>
+<span class="ln">19</span>export interface AuditEvent extends Record&lt;string, unknown&gt; {
+<span class="ln">20</span>  /** e.g. &quot;search&quot; | &quot;trust&quot; | &quot;authorization_requested&quot; | &quot;authorization_approved&quot;
+<span class="ln">21</span>   *  | &quot;authorization_denied&quot; | &quot;checkout_attempt&quot; | &quot;checkout_result&quot; */
+<span class="ln">22</span>  type: string;
+<span class="ln">23</span>}
+<span class="ln">24</span>
+<span class="ln">25</span>export interface AuditLog {
+<span class="ln">26</span>  readonly path: string;
+<span class="ln">27</span>  /** Appends one JSONL line ({at: ISO timestamp, ...event}). Throws on I/O failure. */
+<span class="ln">28</span>  append(event: AuditEvent): void;
+<span class="ln">29</span>}
+<span class="ln">30</span>
+<span class="ln">31</span>/** One page of the audit trail (local UI dashboard browser — read side only). */
+<span class="ln">32</span>export interface AuditPage {
+<span class="ln">33</span>  /** Entries NEWEST FIRST. An unparsable line surfaces as { raw } — never hidden. */
+<span class="ln">34</span>  entries: Array&lt;Record&lt;string, unknown&gt;&gt;;
+<span class="ln">35</span>  page: number;
+<span class="ln">36</span>  pageSize: number;
+<span class="ln">37</span>  totalEntries: number;
+<span class="ln">38</span>  totalPages: number;
+<span class="ln">39</span>}
+<span class="ln">40</span>
+<span class="ln">41</span>export const AUDIT_PAGE_SIZE_DEFAULT = 50;
+<span class="ln">42</span>
+<span class="ln">43</span>/**
+<span class="ln">44</span> * Paged, read-only view over the append-only JSONL trail, newest first
+<span class="ln">45</span> * (page 1 = the most recent events). Purely a READER: it never writes,
+<span class="ln">46</span> * truncates, or rewrites — the log&#x27;s only mutation stays `append`.
+<span class="ln">47</span> *
+<span class="ln">48</span> * BOUNDED reader (local UI follow-up fix): this never does
+<span class="ln">49</span> * `readFileSync(path).split(&quot;\n&quot;)` — that loads the ENTIRE log into one
+<span class="ln">50</span> * string and one array before paginating, and the log only grows (one line
+<span class="ln">51</span> * per search/auth event, forever). Instead it walks the file BACKWARD in
+<span class="ln">52</span> * fixed-size chunks via `forEachLineFromEnd`, so memory stays bounded to
+<span class="ln">53</span> * ~one chunk regardless of log size — a first pass counts total non-blank
+<span class="ln">54</span> * lines (needed for totalPages), a second stops early once it has collected
+<span class="ln">55</span> * this page&#x27;s window.
+<span class="ln">56</span> */
+<span class="ln">57</span>export function readAuditPage(
+<span class="ln">58</span>  path: string,
+<span class="ln">59</span>  opts: { page?: number; pageSize?: number; chunkSize?: number } = {},
+<span class="ln">60</span>): AuditPage {
+<span class="ln">61</span>  const pageSize = Math.max(1, opts.pageSize ?? AUDIT_PAGE_SIZE_DEFAULT);
+<span class="ln">62</span>
+<span class="ln">63</span>  let totalEntries = 0;
+<span class="ln">64</span>  forEachLineFromEnd(
+<span class="ln">65</span>    path,
+<span class="ln">66</span>    (line) =&gt; {
+<span class="ln">67</span>      if (line.trim().length &gt; 0) totalEntries += 1;
+<span class="ln">68</span>    },
+<span class="ln">69</span>    opts.chunkSize,
+<span class="ln">70</span>  );
+<span class="ln">71</span>
+<span class="ln">72</span>  const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
+<span class="ln">73</span>  const page = Math.min(Math.max(1, opts.page ?? 1), totalPages);
+<span class="ln">74</span>  // Newest first: page 1 starts at the END of the file. `offset`/`windowEnd`
+<span class="ln">75</span>  // are ranks counted from EOF (rank 0 = newest non-blank line).
+<span class="ln">76</span>  const offset = (page - 1) * pageSize;
+<span class="ln">77</span>  const windowEnd = page * pageSize;
+<span class="ln">78</span>
+<span class="ln">79</span>  const rawLines: string[] = [];</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>订单图：邮件解析与 checkout log 分离</h3>
+      <p>orders store 在 <code>packages/orders/src/store.ts:8</code> 声明与 checkout order-store 相邻而非扩展，<code>packages/orders/src/store.ts:100</code> 读取 graph，<code>packages/orders/src/store.ts:110</code> 以 tmp+rename 持久化，<code>packages/orders/src/store.ts:136</code> 保留 unparsed 邮件，<code>packages/orders/src/store.ts:153</code> 把 checkout record 只读适配为 Order。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/orders/src/store.ts</span> · L95-164</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">95</span>export function createOrderGraphStore(configDir: string): OrderGraphStore {
+<span class="ln">96</span>  const path = join(configDir, ORDER_GRAPH_FILENAME);
+<span class="ln">97</span>  const unparsedPath = join(configDir, UNPARSED_FILENAME);
+<span class="ln">98</span>  const processedPath = join(configDir, PROCESSED_MESSAGES_FILENAME);
+<span class="ln">99</span>
+<span class="ln">100</span>  function loadGraph(): OrderGraphFile {
+<span class="ln">101</span>    if (!existsSync(path)) return { ...EMPTY_GRAPH, orders: {}, shipments: {}, returnWindows: {} };
+<span class="ln">102</span>    try {
+<span class="ln">103</span>      const raw = JSON.parse(readFileSync(path, &quot;utf8&quot;)) as OrderGraphFile;
+<span class="ln">104</span>      return { version: 1, orders: raw.orders ?? {}, shipments: raw.shipments ?? {}, returnWindows: raw.returnWindows ?? {} };
+<span class="ln">105</span>    } catch {
+<span class="ln">106</span>      throw new Error(`${BRAND_NAME} orders: ${path} is not valid JSON — refusing to touch it (fix or remove the file)`);
+<span class="ln">107</span>    }
+<span class="ln">108</span>  }
+<span class="ln">109</span>
+<span class="ln">110</span>  function persistGraph(graph: OrderGraphFile): void {
+<span class="ln">111</span>    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+<span class="ln">112</span>    const tmp = `${path}.tmp`;
+<span class="ln">113</span>    writeFileSync(tmp, `${JSON.stringify(graph, null, 2)}\n`, { mode: 0o600 });
+<span class="ln">114</span>    chmodSync(tmp, 0o600);
+<span class="ln">115</span>    renameSync(tmp, path);
+<span class="ln">116</span>  }
+<span class="ln">117</span>
+<span class="ln">118</span>  function loadProcessed(): Set&lt;string&gt; {
+<span class="ln">119</span>    if (!existsSync(processedPath)) return new Set();
+<span class="ln">120</span>    try {
+<span class="ln">121</span>      const raw = JSON.parse(readFileSync(processedPath, &quot;utf8&quot;)) as { messageIds: string[] };
+<span class="ln">122</span>      return new Set(raw.messageIds ?? []);
+<span class="ln">123</span>    } catch {
+<span class="ln">124</span>      return new Set();
+<span class="ln">125</span>    }
+<span class="ln">126</span>  }
+<span class="ln">127</span>
+<span class="ln">128</span>  function persistProcessed(ids: Set&lt;string&gt;): void {
+<span class="ln">129</span>    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+<span class="ln">130</span>    const tmp = `${processedPath}.tmp`;
+<span class="ln">131</span>    writeFileSync(tmp, `${JSON.stringify({ version: 1, messageIds: [...ids] }, null, 2)}\n`, { mode: 0o600 });
+<span class="ln">132</span>    chmodSync(tmp, 0o600);
+<span class="ln">133</span>    renameSync(tmp, processedPath);
+<span class="ln">134</span>  }
+<span class="ln">135</span>
+<span class="ln">136</span>  function appendUnparsed(record: UnparsedEmailRecord): void {
+<span class="ln">137</span>    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+<span class="ln">138</span>    const existed = existsSync(unparsedPath);
+<span class="ln">139</span>    appendFileSync(unparsedPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+<span class="ln">140</span>    if (!existed) chmodSync(unparsedPath, 0o600);
+<span class="ln">141</span>  }
+<span class="ln">142</span>
+<span class="ln">143</span>  /** Strips control chars from the free-text fields a hostile mail/caller can influence (leak/injection discipline — see sanitize.ts). */
+<span class="ln">144</span>function sanitizeOrderText(order: Order): Order {
+<span class="ln">145</span>  return {
+<span class="ln">146</span>    ...order,
+<span class="ln">147</span>    merchantName: sanitizeTextField(order.merchantName),
+<span class="ln">148</span>    ...(order.orderNumber !== undefined ? { orderNumber: sanitizeTextField(order.orderNumber) } : {}),
+<span class="ln">149</span>    items: order.items.map((item) =&gt; ({ ...item, title: sanitizeTextField(item.title) })),
+<span class="ln">150</span>  };
+<span class="ln">151</span>}
+<span class="ln">152</span>
+<span class="ln">153</span>function orderRecordToOrder(record: OrderRecord): Order {
+<span class="ln">154</span>    return {
+<span class="ln">155</span>      id: record.orderId,
+<span class="ln">156</span>      merchantName: record.merchantId,
+<span class="ln">157</span>      merchantDomain: record.merchantId,
+<span class="ln">158</span>      orderDate: record.createdAt,
+<span class="ln">159</span>      items: [{ title: record.mandate.intent, quantity: 1 }],
+<span class="ln">160</span>      total: record.mandate.constraints.maxAmount,
+<span class="ln">161</span>      status: record.status === &quot;completed&quot; ? &quot;confirmed&quot; : &quot;unknown&quot;,
+<span class="ln">162</span>      source: { kind: &quot;checkout&quot;, orderId: record.orderId },
+<span class="ln">163</span>    };
+<span class="ln">164</span>  }</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">merchant -&gt; trust engine -&gt; service evidence
+checkout/order emails -&gt; order graph
+client server -&gt; local history evidence appended after service signal
+audit log -&gt; append-only JSONL for every search/auth/checkout/order read</div>
+      <p>server 的 <code>client/src/server.ts:1219</code> 获取 service trust 后，<code>client/src/server.ts:1225</code> 才追加 localEvidence，<code>client/src/server.ts:1228</code> 审计 trust 事件。订单工具测试在 <code>client/test/order-tools.test.ts:125</code> 用真实 MCP client/server 检查 drop-dir 重扫、get_order 和 ICS 刷新。</p>
+      <h3><span class="arr">▸</span>验证联动</h3><p>这页把实现和测试一起看：源码引用说明控制点，测试引用说明这些控制点已经被行为化约束，避免只把 README 的安全承诺复述成架构结论。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>service/test/trust-engine.test.ts:73</code> 覆盖新鲜缓存不触发 probe，<code>service/test/trust-engine.test.ts:101</code> 覆盖 timeout 返回 unknown。</li><li><code>packages/orders/src/parser.ts:31</code> 插件逐个尝试，<code>packages/orders/src/parser.ts:48</code> 捕获异常并继续，避免坏插件吞掉邮件。</li><li><code>client/test/order-tools.test.ts:151</code> 检查响应不泄漏 configDir，<code>client/test/order-tools.test.ts:155</code> 检查 order_read audit。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">信任层测试</div><div class="card-d">见 <code>service/test/trust-engine.test.ts:116</code>、<code>service/test/trust-engine.test.ts:137</code>、<code>service/test/trust-engine.test.ts:158</code>，覆盖 pending、dedupe 与 stale best available。</div></div><div class="card"><div class="card-h">邮件解析策略</div><div class="card-d">parser 在 <code>packages/orders/src/parser.ts:16</code> 构造插件表，<code>packages/orders/src/parser.ts:55</code> 使用 generic fallback，未知格式进入 unparsed。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-08-20</span>
+      <span>Source · <a href="https://github.com/cinderline/northcinder">cinderline/northcinder</a></span>
+      <span><a href="../northcinder.html">↑ northcinder 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

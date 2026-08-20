@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>northcinder · 买家侧 Agent 商务防线 · 源码观测台</title>
+<meta name="description" content="cinderline/northcinder 源码级深度解析 — 从 MCP 工具、排序校验、人工授权、签名 mandate、checkout rail 与本地审计看一个买家侧购物 Agent 如何把交易风险拆成可验证边界。" />
+<meta property="og:title" content="northcinder · 源码观测台" />
+<meta property="og:description" content="从 MCP 工具、排序校验、人工授权、签名 mandate、checkout rail 与本地审计看一个买家侧购物 Agent 如何把交易风险拆成可验证边界。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #70d6c9;
+  --star-soft:  #a7f3e8;
+  --star-deep:  #2f9f94;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">northcinder<b>.shop</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">northcinder<b>.shop</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">TypeScript · MCP · Agent Commerce</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>架构边界：本地可买，远端只读</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>核心模块：搜索验证、授权、审计</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>关键流程：从 search 到 checkout attempt</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试验证：失败路径比成功路径更关键</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>亮点：交易权限被拆成可审查接口</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与缺口：安全边界依赖正确集成</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★1.2k · 2026-08-17</div>
+      <div><a href="https://github.com/cinderline/northcinder" target="_blank">cinderline/northcinder</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">northcinder <em>买家侧 Agent 商务防线</em></h1>
+          <p class="hero-desc">NorthCinder 不是把购物流程交给一个会点击网页的模型，而是把搜索、排序、信任信号、人工确认、签名 mandate 与 checkout rail 拆成多个互相制衡的源码边界。本页只看代码：本地 MCP server 在 <code>client/src/server.ts:339</code> 建立搜索入口，远端 bridge 在 <code>remote/src/mcp-server.ts:123</code> 刻意保持只读，授权存储在 <code>client/src/authorization.ts:299</code> 生成一次性确认码，真正 checkout 则由 <code>packages/checkout/src/orchestrator.ts:101</code> 的 mandate 硬门控制。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 1.2k</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">81k</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">425</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-08-18</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow">Buyer MCP host
+  -&gt; client/src/server.ts:339 search_products
+  -&gt; client/src/server.ts:1244 request_purchase_authorization
+  -&gt; client/src/server.ts:1402 approve_purchase
+  -&gt; client/src/server.ts:1505 complete_checkout
+  -&gt; packages/checkout/src/orchestrator.ts:107 verifyMandate
+  -&gt; client/src/audit-log.ts:57 append JSONL</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>这个仓库的核心价值在于把“Agent 能买东西”改写成“Agent 只能请求、解释和执行被验证过的购买尝试”。搜索工具在 <code>client/src/server.ts:339</code> 后会把服务端排序结果重新校验，<code>client/src/server.ts:426</code> 记录 rankingVerified 与 coverage，浏览器观察结果从 <code>client/src/server.ts:572</code> 进入但在 <code>client/src/server.ts:1323</code> 被拒绝直接授权，人工授权工具从 <code>client/src/server.ts:1244</code> 开始，把 confirmation code 放到本地渠道而非 MCP 返回值。这让模型可以推荐和解释，但不能仅凭一次搜索结果绕过用户确认。</p>
+      <p>更值得拆的是它的失败语义：<code>client/src/server.ts:1338</code> 拒绝跨币种 shipping，<code>client/src/server.ts:1351</code> 校验 cap 与 offer total，<code>client/src/server.ts:1541</code> 拒绝 pending authorization，<code>client/src/server.ts:1568</code> 在 checkout 中标记执行中，而 <code>packages/checkout/src/orchestrator.ts:123</code> 对 mandate verification 失败只返回结构化错误。审计层在 <code>client/src/audit-log.ts:57</code> 以 append-only JSONL 落盘，订单图在 <code>packages/orders/src/store.ts:136</code> 保留无法解析邮件，整体设计偏向可追责而不是自动化炫技。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">本地 buyer MCP server + 可选只读 remote bridge + checkout orchestrator + file-backed audit/nonce/order stores。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">Offer、SearchRankResponse、TrustSignal、Authorization、PurchaseMandate、CheckoutRail、OrderGraph。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">trust engine 搜索路径预算 800ms，见 <code>service/src/trust/engine.ts:63</code> 与 <code>service/test/trust-engine.test.ts:73</code>。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">MCP host、browser observation agent、ACP rail、Shopify cart permalink、mail drop/IMAP order parser。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">架构边界：本地可买，远端只读</h2>
+      <p>源码把本地 server 与 remote bridge 分得很清楚。<code>client/src/server.ts:1</code> 的注释定义本地 MCP server 覆盖 search/ranking/auth/checkout/audit，而 <code>remote/src/mcp-server.ts:1</code> 明确 remote bridge 只有 search 和 trust 两个只读工具。服务端搜索返回后，本地在 <code>client/src/server.ts:285</code> 追加本地历史证据但不影响排序，在 <code>client/src/server.ts:403</code> 把 ranking tamper warning 写进 brief。这条边界避免了把购买权限暴露给远端 API key 持有人。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">local MCP host
+  -&gt; client/src/server.ts search_products
+      -&gt; service/src/orchestrator/orchestrator.ts rank/search
+      -&gt; client/src/server.ts verifies ranking + coverage
+  -&gt; request_purchase_authorization -&gt; local code file
+  -&gt; approve_purchase -&gt; signed PurchaseMandate
+  -&gt; complete_checkout -&gt; checkout orchestrator -&gt; rail
+
+remote MCP bridge
+  -&gt; remote/src/mcp-server.ts search_products / get_trust_signal only
+  -&gt; no authorization, no checkout, no watches, no profile, no orders</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>模块拆分不是按 UI 页面拆，而是按交易边界拆。<code>client/src/server.ts:113</code> 注入 service、authorization、checkout、audit、profile、watches 和 orders；<code>client/src/checkout-wiring.ts:51</code> 组合 rail 优先级；<code>packages/checkout/src/index.ts:1</code> 只导出 mandate hard gate 和 rails；<code>packages/orders/src/parser.ts:16</code> 则把邮件解析保持为确定性插件链。</p>
+      <div class="g3"><div class="card"><div class="card-h">client</div><div class="card-d">MCP 工具面：<code>client/src/server.ts:507</code> search、<code>client/src/server.ts:1244</code> authorization、<code>client/src/server.ts:1505</code> checkout、<code>client/src/server.ts:904</code> watches。</div></div><div class="card"><div class="card-h">remote</div><div class="card-d">自托管 bridge：<code>remote/src/mcp-server.ts:31</code> 明确无 authorization/checkout，<code>remote/src/mcp-server.ts:76</code> 清洗上游错误。</div></div><div class="card"><div class="card-h">checkout</div><div class="card-d">强制 mandate gate：<code>packages/checkout/src/orchestrator.ts:77</code> rail 选择先于 nonce，<code>packages/checkout/src/orchestrator.ts:107</code> verifyMandate 后才执行。</div></div><div class="card"><div class="card-h">trust</div><div class="card-d">信任信号 cache-first：<code>service/src/trust/engine.ts:44</code> TTL，<code>service/src/trust/engine.ts:119</code> 冷探测预算，<code>service/src/trust/engine.ts:163</code> 后台刷新。</div></div><div class="card"><div class="card-h">orders</div><div class="card-d">订单图与 checkout audit 分离：<code>packages/orders/src/store.ts:8</code> 说明相邻而非扩展，<code>packages/orders/src/store.ts:153</code> 只读适配 checkout record。</div></div><div class="card"><div class="card-h">tests</div><div class="card-d">行为测试覆盖安全边界：<code>client/test/authorization.test.ts:47</code> 查 code 不泄漏，<code>client/test/ranking-verification.test.ts:119</code> 查排序篡改。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/packages/checkout/src/orchestrator.ts</span> · L22-42</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">22</span>/** Durable record of an authorized checkout, citing the mandate that gated it. */
+<span class="ln">23</span>export interface OrderRecord {
+<span class="ln">24</span>  orderId: string;
+<span class="ln">25</span>  createdAt: string;
+<span class="ln">26</span>  offerId: string;
+<span class="ln">27</span>  merchantId: string;
+<span class="ln">28</span>  /** Canonical merchant domain paired with merchantId to avoid local-history collisions. */
+<span class="ln">29</span>  merchantDomain: string;
+<span class="ln">30</span>  railId: string;
+<span class="ln">31</span>  /** &quot;completed&quot; = purchase made by the rail; &quot;handed_off&quot; = user&#x27;s own session completes it. */
+<span class="ln">32</span>  status: &quot;completed&quot; | &quot;handed_off&quot;;
+<span class="ln">33</span>  /** The mandate that authorized this checkout (cited in full for audit). */
+<span class="ln">34</span>  mandateId: string;
+<span class="ln">35</span>  mandate: PurchaseMandate;
+<span class="ln">36</span>  evidence: RailEvidence;
+<span class="ln">37</span>}
+<span class="ln">38</span>
+<span class="ln">39</span>export type CheckoutOutcome =
+<span class="ln">40</span>  | { ok: true; order: OrderRecord }
+<span class="ln">41</span>  | { ok: false; stage: &quot;mandate&quot;; error: MandateRejection }
+<span class="ln">42</span>  | { ok: false; stage: &quot;rail&quot;; error: CheckoutError };</pre>
+      </div>
+
+      <a class="deep-link" href="northcinder/mcp-tools.html">深度阅读 · MCP 工具边界</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">核心模块：搜索验证、授权、审计</h2>
+
+      <h3><span class="arr">▸</span>搜索结果不会被服务端排名单独决定</h3>
+      <p>本地 search_products 在 <code>client/src/server.ts:339</code> 校验服务端响应 schema，并在 <code>client/src/server.ts:371</code> 按 sourceStore+offer.id 建缓存。随后 <code>client/src/server.ts:382</code> 重新计算 ranking，<code>client/src/server.ts:387</code> 校验 store coverage，<code>client/src/server.ts:426</code> 把结果写进 structured output。测试在 <code>client/test/ranking-verification.test.ts:112</code> 构造被赞助结果插队的假服务，确保 <code>client/test/ranking-verification.test.ts:155</code> 能看到 rankingVerified=false。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/server.ts</span> · L339-386</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">339</span>  function finalizeSearch(params: {
+<span class="ln">340</span>    searchId: string;
+<span class="ln">341</span>    interpreted: InterpretedQuery;
+<span class="ln">342</span>    data: SearchRankResponse;
+<span class="ln">343</span>    continuedFrom?: string;
+<span class="ln">344</span>  }) {
+<span class="ln">345</span>    const { searchId, interpreted, continuedFrom } = params;
+<span class="ln">346</span>    const parsedData = SearchRankResponseSchema.safeParse(params.data);
+<span class="ln">347</span>    if (!parsedData.success) {
+<span class="ln">348</span>      return failure({
+<span class="ln">349</span>        code: &quot;invalid_service_response&quot;,
+<span class="ln">350</span>        message: &quot;configured engine returned an invalid search response&quot;,
+<span class="ln">351</span>      });
+<span class="ln">352</span>    }
+<span class="ln">353</span>    const data = parsedData.data;
+<span class="ln">354</span>    const query = interpreted.criteria;
+<span class="ln">355</span>    const { results, storeStatuses, trustSignals, registeredStores, browserObservationReport } = data;
+<span class="ln">356</span>
+<span class="ln">357</span>    seenSearches.set(searchId, interpreted);
+<span class="ln">358</span>
+<span class="ln">359</span>    for (const r of results) {
+<span class="ln">360</span>      seenOffers.set(offerKey(r.offer.sourceStore, r.offer.id), r.offer);
+<span class="ln">361</span>      const merchantKey = trustKey(r.offer.merchant);
+<span class="ln">362</span>      seenMerchants.set(merchantKey, r.offer.merchant);
+<span class="ln">363</span>      const keys = seenMerchantKeysById.get(r.offer.merchant.id) ?? new Set&lt;string&gt;();
+<span class="ln">364</span>      keys.add(merchantKey);
+<span class="ln">365</span>      seenMerchantKeysById.set(r.offer.merchant.id, keys);
+<span class="ln">366</span>    }
+<span class="ln">367</span>
+<span class="ln">368</span>    const verification = verifySearchRanking(data, query);
+<span class="ln">369</span>    const coverage = verifyStoreCoverage(registeredStores, storeStatuses);
+<span class="ln">370</span>    const brief = composeBuyersBrief({
+<span class="ln">371</span>      searchId,
+<span class="ln">372</span>      results,
+<span class="ln">373</span>      interpretedQuery: interpreted,
+<span class="ln">374</span>      storeStatuses,
+<span class="ln">375</span>      trustSignals,
+<span class="ln">376</span>    });
+<span class="ln">377</span>    seenBriefs.set(searchId, brief);
+<span class="ln">378</span>
+<span class="ln">379</span>    const localTrustEvidence: Record&lt;string, ReturnType&lt;typeof localTrustEvidenceFor&gt;&gt; = {};
+<span class="ln">380</span>    const localTrustEvidenceKeys: Record&lt;string, string&gt; = {};
+<span class="ln">381</span>    for (const f of brief.finalists) {
+<span class="ln">382</span>      const finalistKey = offerKey(f.sourceStore, f.offerId);
+<span class="ln">383</span>      const fullMerchant = seenOffers.get(finalistKey)?.merchant;
+<span class="ln">384</span>      if (!fullMerchant) continue;
+<span class="ln">385</span>      const merchantKey = trustKey(fullMerchant);
+<span class="ln">386</span>      localTrustEvidenceKeys[finalistKey] = merchantKey;</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>授权码本地化，mandate 绑定四元组</h3>
+      <p>授权 store 的注释从 <code>client/src/authorization.ts:1</code> 就声明三步流程，<code>client/src/authorization.ts:198</code> 确保 summary 不带 code，<code>client/src/authorization.ts:240</code> 保存 offer/maxAmount/intent 快照，<code>client/src/authorization.ts:255</code> 把 merchant、offer、variant、total、nonce 纳入 fingerprint，<code>client/src/authorization.ts:299</code> 写入 0600 code file。对应测试在 <code>client/test/authorization.test.ts:47</code> 和 <code>client/test/authorization.test.ts:84</code> 检查 code 与路径都不从 MCP 泄漏。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/authorization.ts</span> · L240-315</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">240</span>    /** Fingerprint over the canonical tuple AS DISPLAYED to the human. */
+<span class="ln">241</span>    fingerprint: string;
+<span class="ln">242</span>    /**
+<span class="ln">243</span>     * Private request-time snapshot of the WHOLE offer as displayed to the
+<span class="ln">244</span>     * human. approve() deep-compares the live offer against it (catches
+<span class="ln">245</span>     * mutation of ANY field — incl. product.id, variant gid, title — not
+<span class="ln">246</span>     * just the fingerprinted ones), and checkout reads THIS, never the
+<span class="ln">247</span>     * externally-reachable live object.
+<span class="ln">248</span>     */
+<span class="ln">249</span>    offerSnapshot: Offer;
+<span class="ln">250</span>    /** Snapshot of the cap shown on the trusted channels (mutation-detected at approve). */
+<span class="ln">251</span>    approvedCap: Money;
+<span class="ln">252</span>    /** Snapshot of the intent line the human read (mutation-detected at approve). */
+<span class="ln">253</span>    intentSnapshot: string;
+<span class="ln">254</span>    /** True while a checkout attempt is executing (decline is refused then). */
+<span class="ln">255</span>    checkoutInFlight: boolean;
+<span class="ln">256</span>  }
+<span class="ln">257</span>  const records = new Map&lt;string, InternalRecord&gt;();
+<span class="ln">258</span>
+<span class="ln">259</span>  /** Fingerprint over the authorization&#x27;s CURRENT tuple + the issuance nonce. */
+<span class="ln">260</span>  function currentFingerprint(auth: Authorization, nonce: string): string {
+<span class="ln">261</span>    const total = offerTotal(auth.offer);
+<span class="ln">262</span>    return orderFingerprint({
+<span class="ln">263</span>      merchantId: auth.offer.merchant.id,
+<span class="ln">264</span>      offerId: auth.offer.id,
+<span class="ln">265</span>      // Bind the PURCHASE-relevant identities, not just the offer id: the
+<span class="ln">266</span>      // ACP rail buys by product.id, cart-permalink by the variant gid.
+<span class="ln">267</span>      productId: auth.offer.product.id,
+<span class="ln">268</span>      variantKey: auth.offer.product.attributes[VARIANT_ATTRIBUTE] ?? &quot;&quot;,
+<span class="ln">269</span>      totalMinor: total.amount,
+<span class="ln">270</span>      currency: total.currency,
+<span class="ln">271</span>      nonce,
+<span class="ln">272</span>    });
+<span class="ln">273</span>  }
+<span class="ln">274</span>
+<span class="ln">275</span>  /**
+<span class="ln">276</span>   * Defensive read view (the CHECKOUT door): a deep clone whose offer and cap
+<span class="ln">277</span>   * come from the private request-time snapshots — approve-time truth, never
+<span class="ln">278</span>   * the externally-reachable live object. Post-approve mutation of a held
+<span class="ln">279</span>   * reference therefore cannot re-aim what checkout verifies or charges.
+<span class="ln">280</span>   */
+<span class="ln">281</span>  function snapshotView(record: InternalRecord): Authorization {
+<span class="ln">282</span>    return {
+<span class="ln">283</span>      ...structuredClone(record.authorization),
+<span class="ln">284</span>      offer: structuredClone(record.offerSnapshot),
+<span class="ln">285</span>      maxAmount: structuredClone(record.approvedCap),
+<span class="ln">286</span>      intent: record.intentSnapshot,
+<span class="ln">287</span>    };
+<span class="ln">288</span>  }
+<span class="ln">289</span>
+<span class="ln">290</span>  function expireIfDue(record: InternalRecord): void {
+<span class="ln">291</span>    const auth = record.authorization;
+<span class="ln">292</span>    if (auth.status === &quot;pending&quot; &amp;&amp; now().getTime() &gt; new Date(auth.expiresAt).getTime()) {
+<span class="ln">293</span>      auth.status = &quot;expired&quot;;
+<span class="ln">294</span>      rmSync(record.codeFile, { force: true });
+<span class="ln">295</span>    }
+<span class="ln">296</span>  }
+<span class="ln">297</span>
+<span class="ln">298</span>  return {
+<span class="ln">299</span>    request(offer, opts) {
+<span class="ln">300</span>      const at = now();
+<span class="ln">301</span>      const id = `auth_${randomUUID()}`;
+<span class="ln">302</span>      // Own copies: the authorization&#x27;s tuple must not alias caller-held
+<span class="ln">303</span>      // objects (a later caller-side mutation must not silently retarget it).
+<span class="ln">304</span>      const ownOffer = structuredClone(offer);
+<span class="ln">305</span>      const maxAmount = structuredClone(opts.maxAmount ?? offerTotal(offer));
+<span class="ln">306</span>      const paymentContext = opts.paymentContext ?? &quot;none&quot;;
+<span class="ln">307</span>      const authorization: Authorization = {
+<span class="ln">308</span>        id,
+<span class="ln">309</span>        status: &quot;pending&quot;,
+<span class="ln">310</span>        offer: ownOffer,
+<span class="ln">311</span>        intent: opts.intent,
+<span class="ln">312</span>        maxAmount,
+<span class="ln">313</span>        paymentContext,
+<span class="ln">314</span>        createdAt: at.toISOString(),
+<span class="ln">315</span>        expiresAt: new Date(at.getTime() + ttlMs).toISOString(),</pre>
+      </div>
+
+      <a class="deep-link" href="northcinder/authorization.html">深度阅读 · 人工授权与签名 mandate</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键流程：从 search 到 checkout attempt</h2>
+      <p>购买链被拆成 request、approve、complete 三段。<code>client/src/server.ts:1244</code> 只创建 pending request，<code>client/src/server.ts:1402</code> 需要人类提供一次性 code，<code>client/src/server.ts:1505</code> 才尝试 checkout。真正的安全关键点在 <code>packages/checkout/src/orchestrator.ts:101</code>：rail selection 之后先 verifyMandate，<code>packages/checkout/src/orchestrator.ts:127</code> 才允许 rail.execute 接触 VerifiedMandate。</p>
+
+      <h3><span class="arr">▸</span>购买授权三段式</h3>
+      <div class="flow">search_products -&gt; seenOffers
+  request_purchase_authorization
+    validate offer / cap / shipping currency
+    write local code file, return summary only
+  approve_purchase
+    compare human code, sign mandate
+  complete_checkout
+    verify mandate, consume nonce, execute rail</div>
+
+      <h3><span class="arr">▸</span>订单与信任的旁路证据</h3>
+      <div class="flow">email drop / IMAP -&gt; packages/orders parser -&gt; order graph
+checkout order log -&gt; read-only adapter -&gt; order graph view
+merchant trust signal -&gt; service evidence + local history
+ranking remains service-derived; local history is display-only</div>
+
+      <a class="deep-link" href="northcinder/trust-audit.html">深度阅读 · 信任信号、审计与订单图</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试验证：失败路径比成功路径更关键</h2>
+      <p>测试侧覆盖的是交易系统真正怕的路径：<code>client/test/authorization.test.ts:98</code> 验证签名 mandate，<code>client/test/authorization.test.ts:122</code> 限制错误 code 次数，<code>client/test/authorization.test.ts:141</code> 阻止过期 approval，<code>client/test/authorization.test.ts:177</code> 校验四元组文本，<code>client/test/ranking-verification.test.ts:171</code> 断言 audit 写入 tamper，<code>service/test/trust-engine.test.ts:101</code> 检查冷探测超时返回 unknown。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>排名验证测试直接构造 sponsored offer 被服务端置顶的场景。<code>client/test/ranking-verification.test.ts:74</code> 定义第一个自然排序结果，<code>client/test/ranking-verification.test.ts:86</code> 定义 sponsored offer，<code>client/test/ranking-verification.test.ts:119</code> 把 sponsored 放到第一位，<code>client/test/ranking-verification.test.ts:144</code> 调用 search_products，<code>client/test/ranking-verification.test.ts:155</code> 检查 rankingVerified=false，<code>client/test/ranking-verification.test.ts:164</code> 再查文本中包含 divergence。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/client/test/ranking-verification.test.ts</span> · L112-174</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">112</span>      error: {
+<span class="ln">113</span>        code: &quot;invalid_service_response&quot;,
+<span class="ln">114</span>        message: &quot;configured engine returned an invalid search response&quot;,
+<span class="ln">115</span>      },
+<span class="ln">116</span>    });
+<span class="ln">117</span>    expect(existsSync(auditPath) ? readFileSync(auditPath, &quot;utf8&quot;) : &quot;&quot;).toBe(auditBefore);
+<span class="ln">118</span>
+<span class="ln">119</span>    const authorization = await client.callTool({
+<span class="ln">120</span>      name: &quot;request_purchase_authorization&quot;,
+<span class="ln">121</span>      arguments: { offerId: provenanceStrippedBrowser.id, sourceStore: provenanceStrippedBrowser.sourceStore },
+<span class="ln">122</span>    });
+<span class="ln">123</span>    expect(JSON.parse((authorization.content as Array&lt;{ text: string }&gt;)[0]!.text)).toMatchObject({
+<span class="ln">124</span>      error: { code: &quot;unknown_offer&quot; },
+<span class="ln">125</span>    });
+<span class="ln">126</span>    await client.close();
+<span class="ln">127</span>  });
+<span class="ln">128</span>
+<span class="ln">129</span>  it(&quot;an HONEST service is verified: rankingVerified true in output and audit log&quot;, async () =&gt; {
+<span class="ln">130</span>    const honest: SearchRankResponse = {
+<span class="ln">131</span>      results: rankOffers(OFFERS, { text: &quot;sneaker&quot; }, { trust: TRUST }),
+<span class="ln">132</span>      storeStatuses: STORE_STATUSES,
+<span class="ln">133</span>      trustSignals: TRUST,
+<span class="ln">134</span>    };
+<span class="ln">135</span>    const { client, auditPath } = await connectedClient(serviceReturning(honest));
+<span class="ln">136</span>    const result = await client.callTool({ name: &quot;search_products&quot;, arguments: { text: &quot;sneaker&quot; } });
+<span class="ln">137</span>    expect(result.isError ?? false).toBe(false);
+<span class="ln">138</span>    const structured = result.structuredContent as { rankingVerified: unknown; rankingDivergences?: unknown };
+<span class="ln">139</span>    expect(structured.rankingVerified).toBe(true);
+<span class="ln">140</span>    expect(structured.rankingDivergences).toBeUndefined();
+<span class="ln">141</span>    const text = (result.content as Array&lt;{ text: string }&gt;)[0]!.text;
+<span class="ln">142</span>    expect(text).toContain(&quot;Ranking verified&quot;);
+<span class="ln">143</span>    expect(text).not.toContain(RANKING_TAMPER_WARNING);
+<span class="ln">144</span>
+<span class="ln">145</span>    const search = auditSearchLine(auditPath);
+<span class="ln">146</span>    expect(search.rankingVerified).toBe(true);
+<span class="ln">147</span>    await client.close();
+<span class="ln">148</span>  });
+<span class="ln">149</span>
+<span class="ln">150</span>  it(&quot;TAMPER: a fake service returning a boosted re-order is flagged rankingVerified false with the exact divergence&quot;, async () =&gt; {
+<span class="ln">151</span>    const ranked = rankOffers(OFFERS, { text: &quot;sneaker&quot; }, { trust: TRUST });
+<span class="ln">152</span>    // Honest order is [cheap, mid, paid] (sponsored strictly last). The tampered
+<span class="ln">153</span>    // service &quot;boosts&quot; the sponsored offer to the top — the classic pay-for-rank.
+<span class="ln">154</span>    expect(ranked.map((r) =&gt; r.offer.id)).toEqual([&quot;cheap&quot;, &quot;mid&quot;, &quot;paid&quot;]);
+<span class="ln">155</span>    const boosted: SearchRankResponse = {
+<span class="ln">156</span>      results: [ranked[2]!, ranked[0]!, ranked[1]!],
+<span class="ln">157</span>      storeStatuses: STORE_STATUSES,
+<span class="ln">158</span>      trustSignals: TRUST,
+<span class="ln">159</span>    };
+<span class="ln">160</span>    const { client, auditPath } = await connectedClient(serviceReturning(boosted));
+<span class="ln">161</span>    const result = await client.callTool({ name: &quot;search_products&quot;, arguments: { text: &quot;sneaker&quot; } });
+<span class="ln">162</span>    expect(result.isError ?? false).toBe(false); // results still returned — but loudly flagged
+<span class="ln">163</span>
+<span class="ln">164</span>    const structured = result.structuredContent as {
+<span class="ln">165</span>      rankingVerified: unknown;
+<span class="ln">166</span>      rankingDivergences?: Array&lt;{ kind: string; position: number; expected: { offerKey: string }; actual: { offerKey: string } }&gt;;
+<span class="ln">167</span>    };
+<span class="ln">168</span>    expect(structured.rankingVerified).toBe(false);
+<span class="ln">169</span>    expect(structured.rankingDivergences).toBeDefined();
+<span class="ln">170</span>    expect(structured.rankingDivergences![0]).toEqual({
+<span class="ln">171</span>      kind: &quot;order_mismatch&quot;,
+<span class="ln">172</span>      position: 1,
+<span class="ln">173</span>      expected: { offerKey: &quot;ebay:cheap&quot;, score: ranked[0]!.score },
+<span class="ln">174</span>      actual: { offerKey: &quot;ebay:paid&quot;, score: ranked[2]!.score },</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li><code>client/src/server.ts:1027</code> 和 <code>client/src/server.ts:1312</code> 都拒绝同一个 offerId 跨 store 的模糊选择，避免 silently pick。</li><li><code>client/src/server.ts:1044</code> 与 <code>packages/checkout/src/orchestrator.ts:65</code> 双重拒绝 browser observation 直接进入购买。</li><li><code>client/src/server.ts:1580</code> 规定 no_rail 不烧 nonce，但 verification 后 rail 失败会消耗授权，偏向防重复付款。</li><li><code>packages/orders/src/parser.ts:45</code> 插件异常会降级到 unparsed，<code>packages/orders/src/store.ts:176</code> 保留记录，不吞邮件。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">亮点：交易权限被拆成可审查接口</h2>
+      <div class="g2"><div class="card"><div class="card-h">本地优先权限</div><div class="card-d">授权 code 只写 buyer-local 渠道，<code>client/src/authorization.ts:315</code> 写入文件，<code>client/src/authorization.ts:330</code> 设置 0600，MCP 只返回 summary。</div></div><div class="card"><div class="card-h">远端最小权限</div><div class="card-d">remote bridge 在 <code>remote/src/mcp-server.ts:21</code> 明确不包含授权、checkout、watch、profile、orders；<code>remote/src/mcp-server.ts:199</code> 仍复用排序校验。</div></div><div class="code-wrap"><div class="code-bar"><span><span class="src">client/src/audit-log.ts</span> · L57-79</span><span>TypeScript</span></div><pre class="code"><span class="ln">57</span>export function readAuditPage(
+<span class="ln">58</span>  path: string,
+<span class="ln">59</span>  opts: { page?: number; pageSize?: number; chunkSize?: number } = {},
+<span class="ln">60</span>): AuditPage {
+<span class="ln">61</span>  const pageSize = Math.max(1, opts.pageSize ?? AUDIT_PAGE_SIZE_DEFAULT);
+<span class="ln">62</span>
+<span class="ln">63</span>  let totalEntries = 0;
+<span class="ln">64</span>  forEachLineFromEnd(
+<span class="ln">65</span>    path,
+<span class="ln">66</span>    (line) =&gt; {
+<span class="ln">67</span>      if (line.trim().length &gt; 0) totalEntries += 1;
+<span class="ln">68</span>    },
+<span class="ln">69</span>    opts.chunkSize,
+<span class="ln">70</span>  );
+<span class="ln">71</span>
+<span class="ln">72</span>  const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
+<span class="ln">73</span>  const page = Math.min(Math.max(1, opts.page ?? 1), totalPages);
+<span class="ln">74</span>  // Newest first: page 1 starts at the END of the file. `offset`/`windowEnd`
+<span class="ln">75</span>  // are ranks counted from EOF (rank 0 = newest non-blank line).
+<span class="ln">76</span>  const offset = (page - 1) * pageSize;
+<span class="ln">77</span>  const windowEnd = page * pageSize;
+<span class="ln">78</span>
+<span class="ln">79</span>  const rawLines: string[] = [];</pre></div><div class="code-wrap"><div class="code-bar"><span><span class="src">service/src/trust/engine.ts</span> · L58-84</span><span>TypeScript</span></div><pre class="code"><span class="ln">58</span>  /** Set when deny/allow is authoritative — the engine can skip probes entirely. */
+<span class="ln">59</span>  shortCircuit: boolean;
+<span class="ln">60</span>}
+<span class="ln">61</span>
+<span class="ln">62</span>/** Curation layer: instant, live, no I/O. Only the verifiable DOMAIN is matched. */
+<span class="ln">63</span>function evaluateSeed(seed: TrustSeed, domain: string): SeedEvaluation {
+<span class="ln">64</span>  const denied = findEntry(seed.deny, domain);
+<span class="ln">65</span>  if (denied) {
+<span class="ln">66</span>    return { inputs: { denyHit: true }, evidence: [{ source: &quot;seed-list&quot;, detail: `deny-listed: ${denied.detail}` }], shortCircuit: true };
+<span class="ln">67</span>  }
+<span class="ln">68</span>  const allowed = findEntry(seed.allow, domain);
+<span class="ln">69</span>  if (allowed) {
+<span class="ln">70</span>    return { inputs: { allowHit: true }, evidence: [{ source: &quot;seed-list&quot;, detail: `allow-listed: ${allowed.detail}` }], shortCircuit: true };
+<span class="ln">71</span>  }
+<span class="ln">72</span>  const platform = findEntry(seed.knownPlatformDomains, domain);
+<span class="ln">73</span>  if (platform) {
+<span class="ln">74</span>    return { inputs: { platformHit: true }, evidence: [{ source: &quot;platform-heuristic&quot;, detail: platform.detail }], shortCircuit: false };
+<span class="ln">75</span>  }
+<span class="ln">76</span>  return { inputs: {}, evidence: [], shortCircuit: false };
+<span class="ln">77</span>}
+<span class="ln">78</span>
+<span class="ln">79</span>function toSignal(merchant: Merchant, inputs: TrustDerivationInputs, evidence: TrustEvidence[]): TrustSignal {
+<span class="ln">80</span>  const { level } = deriveTrustLevel(inputs);
+<span class="ln">81</span>  // Evidence is non-empty by construction (schema min(1)); a merchant with no
+<span class="ln">82</span>  // curation and no measured signals still carries the explicit unknown floor.
+<span class="ln">83</span>  const lines =
+<span class="ln">84</span>    evidence.length &gt; 0</pre></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>风险主要不是“代码没有防线”，而是工程集成时容易误解这些防线。<code>client/src/checkout-wiring.ts:57</code> 只有配置 ACP merchants 才启用 ACP rail，<code>client/src/checkout-wiring.ts:73</code> 默认还会加入 cart-permalink handoff；<code>client/src/server.ts:1512</code> 说明一个 mandate 只授权一次尝试。如果宿主 Agent UI 没有清晰呈现 pending/approved/declined 状态，安全语义会被用户体验稀释。</p>
+      <div class="g2"><div class="card"><div class="card-h">体验依赖宿主</div><div class="card-d">源码能确保 code 不走 MCP，但 <code>client/src/server.ts:1409</code> 仍要求宿主向用户索取 code；宿主 UI 不清晰会造成误操作。</div></div><div class="card"><div class="card-h">远端服务仍是关键依赖</div><div class="card-d">本地能校验排序，但候选供给来自 service；<code>remote/src/mcp-server.ts:178</code> 对 upstream failure 只能结构化返回，无法替用户补齐商品来源。</div></div><div class="card"><div class="card-h">冷信任信号有限</div><div class="card-d">trust engine 在 <code>service/src/trust/engine.ts:119</code> 预算内探测，超时会返回 unknown；这是诚实失败，不是完整风险画像。</div></div><div class="card"><div class="card-h">订单解析是确定性插件</div><div class="card-d">邮件 parser 在 <code>packages/orders/src/parser.ts:31</code> 逐个插件尝试，未知格式会进入 unparsed，自动化覆盖度取决于插件库。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-20</span>
+      <span>Source · <a href="https://github.com/cinderline/northcinder">cinderline/northcinder</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../northcinder.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

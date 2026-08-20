@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>本地 MCP 与远端只读桥 · 深度解析 · northcinder</title>
+<meta name="description" content="northcinder MCP 工具边界 子模块完整解析 — 从 MCP 工具、排序校验、人工授权、签名 mandate、checkout rail 与本地审计看一个买家侧购物 Agent 如何把交易风险拆成可验证边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #70d6c9;
+  --star-soft:  #a7f3e8;
+  --star-deep:  #2f9f94;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">northcinder<b>.shop</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">northcinder<b>.shop</b></div>
+      <div class="sub">MCP 工具边界 · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../northcinder.html">← 返回 northcinder 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">本地 MCP 与远端只读桥 <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆 NorthCinder 的工具面：本地 server 可以进入授权和 checkout，remote bridge 只允许 search 与 trust。关键不是工具数量，而是权限按进程边界拆开。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>本地 server 的依赖注入在 <code>client/src/server.ts:113</code> 暴露 authorizations、checkout、audit、profile、watches 与 orders；remote bridge 的文件头在 <code>remote/src/mcp-server.ts:1</code> 直接说明无授权与 checkout，<code>remote/src/mcp-server.ts:25</code> 还强调 stateless。搜索结果被本地缓存于 <code>client/src/server.ts:371</code>，用于后续 authorization 绑定真实 offer。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/remote/src/mcp-server.ts</span> · L1-31</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">1</span>/**
+<span class="ln">2</span> * The optional self-hosted, read-only NorthCinder MCP bridge, exposed over
+<span class="ln">3</span> * Streamable HTTP for clients that cannot run a local stdio process. The
+<span class="ln">4</span> * person deploying it owns the process and keys; there is no NorthCinder-operated endpoint.
+<span class="ln">5</span> *
+<span class="ln">6</span> * Deliberately NARROWER than client/src/server.ts (the stdio client): exactly
+<span class="ln">7</span> * two tools, both read-only —
+<span class="ln">8</span> *   - search_products: criteria search, neutrality-ranked, with the buyer brief
+<span class="ln">9</span> *     buyer&#x27;s brief and the profile interpretation echo (this variant is
+<span class="ln">10</span> *     STATELESS v1 — there is no per-user profile store on this shared host,
+<span class="ln">11</span> *     so the interpretation echo always shows &quot;nothing applied&quot;).
+<span class="ln">12</span> *   - get_trust_signal: merchant trust lookup.
+<span class="ln">13</span> *
+<span class="ln">14</span> * NO authorization/checkout/watch/profile/orders tools exist here — there is
+<span class="ln">15</span> * no code path from this server to a purchase, a mandate, or a checkout rail
+<span class="ln">16</span> * (safety contract law: no unattended checkout anywhere). This is enforced structurally
+<span class="ln">17</span> * (the tools are simply never registered), and remote/test/mcp-server.test.ts
+<span class="ln">18</span> * asserts their absence architecturally, the same way watch asserts local
+<span class="ln">19</span> * checkout-tool absence from watch-only surfaces.
+<span class="ln">20</span> *
+<span class="ln">21</span> * Because each HTTP request in the Streamable-HTTP *stateless* transport mode
+<span class="ln">22</span> * gets a fresh McpServer + transport (see src/http-server.ts), there is no
+<span class="ln">23</span> * cross-call session memory: get_trust_signal takes a full `merchant` object
+<span class="ln">24</span> * (as returned by search_products in the SAME tool-call response) rather than
+<span class="ln">25</span> * a session-remembered merchantId.
+<span class="ln">26</span> *
+<span class="ln">27</span> * Neutrality-proof loop (ranking verification): this server calls the SAME buyer-run engine the
+<span class="ln">28</span> * stdio client calls, over the SAME NorthCinderServiceClient HTTP contract, and
+<span class="ln">29</span> * re-runs verifySearchRanking over the engine&#x27;s own inputs exactly like the
+<span class="ln">30</span> * stdio client does — the remote bridge does not get to skip the honesty
+<span class="ln">31</span> * that the local client is held to.</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>本地 search_products：验证、缓存、审计</h3>
+      <p>本地 search_products 从 <code>client/src/server.ts:339</code> 开始校验 SearchRankResponseSchema，<code>client/src/server.ts:365</code> 记录 searchId，<code>client/src/server.ts:373</code> 写入 merchant map，<code>client/src/server.ts:382</code> 重新计算排名，<code>client/src/server.ts:412</code> 写入 search audit。这些状态让后续工具只能引用本 session 已见过的 offer。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/server.ts</span> · L339-426</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">339</span>  function finalizeSearch(params: {
+<span class="ln">340</span>    searchId: string;
+<span class="ln">341</span>    interpreted: InterpretedQuery;
+<span class="ln">342</span>    data: SearchRankResponse;
+<span class="ln">343</span>    continuedFrom?: string;
+<span class="ln">344</span>  }) {
+<span class="ln">345</span>    const { searchId, interpreted, continuedFrom } = params;
+<span class="ln">346</span>    const parsedData = SearchRankResponseSchema.safeParse(params.data);
+<span class="ln">347</span>    if (!parsedData.success) {
+<span class="ln">348</span>      return failure({
+<span class="ln">349</span>        code: &quot;invalid_service_response&quot;,
+<span class="ln">350</span>        message: &quot;configured engine returned an invalid search response&quot;,
+<span class="ln">351</span>      });
+<span class="ln">352</span>    }
+<span class="ln">353</span>    const data = parsedData.data;
+<span class="ln">354</span>    const query = interpreted.criteria;
+<span class="ln">355</span>    const { results, storeStatuses, trustSignals, registeredStores, browserObservationReport } = data;
+<span class="ln">356</span>
+<span class="ln">357</span>    seenSearches.set(searchId, interpreted);
+<span class="ln">358</span>
+<span class="ln">359</span>    for (const r of results) {
+<span class="ln">360</span>      seenOffers.set(offerKey(r.offer.sourceStore, r.offer.id), r.offer);
+<span class="ln">361</span>      const merchantKey = trustKey(r.offer.merchant);
+<span class="ln">362</span>      seenMerchants.set(merchantKey, r.offer.merchant);
+<span class="ln">363</span>      const keys = seenMerchantKeysById.get(r.offer.merchant.id) ?? new Set&lt;string&gt;();
+<span class="ln">364</span>      keys.add(merchantKey);
+<span class="ln">365</span>      seenMerchantKeysById.set(r.offer.merchant.id, keys);
+<span class="ln">366</span>    }
+<span class="ln">367</span>
+<span class="ln">368</span>    const verification = verifySearchRanking(data, query);
+<span class="ln">369</span>    const coverage = verifyStoreCoverage(registeredStores, storeStatuses);
+<span class="ln">370</span>    const brief = composeBuyersBrief({
+<span class="ln">371</span>      searchId,
+<span class="ln">372</span>      results,
+<span class="ln">373</span>      interpretedQuery: interpreted,
+<span class="ln">374</span>      storeStatuses,
+<span class="ln">375</span>      trustSignals,
+<span class="ln">376</span>    });
+<span class="ln">377</span>    seenBriefs.set(searchId, brief);
+<span class="ln">378</span>
+<span class="ln">379</span>    const localTrustEvidence: Record&lt;string, ReturnType&lt;typeof localTrustEvidenceFor&gt;&gt; = {};
+<span class="ln">380</span>    const localTrustEvidenceKeys: Record&lt;string, string&gt; = {};
+<span class="ln">381</span>    for (const f of brief.finalists) {
+<span class="ln">382</span>      const finalistKey = offerKey(f.sourceStore, f.offerId);
+<span class="ln">383</span>      const fullMerchant = seenOffers.get(finalistKey)?.merchant;
+<span class="ln">384</span>      if (!fullMerchant) continue;
+<span class="ln">385</span>      const merchantKey = trustKey(fullMerchant);
+<span class="ln">386</span>      localTrustEvidenceKeys[finalistKey] = merchantKey;
+<span class="ln">387</span>      const lines = localTrustEvidenceFor(fullMerchant);
+<span class="ln">388</span>      if (lines.length &gt; 0) localTrustEvidence[merchantKey] = lines;
+<span class="ln">389</span>    }
+<span class="ln">390</span>
+<span class="ln">391</span>    deps.audit.append({
+<span class="ln">392</span>      type: &quot;search&quot;,
+<span class="ln">393</span>      searchId,
+<span class="ln">394</span>      ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+<span class="ln">395</span>      query,
+<span class="ln">396</span>      interpretedQuery: interpreted,
+<span class="ln">397</span>      storeStatuses,
+<span class="ln">398</span>      ...(browserObservationReport !== undefined ? { browserObservationReport } : {}),
+<span class="ln">399</span>      rankingVerified: verification.verified,
+<span class="ln">400</span>      ...(verification.verified === false
+<span class="ln">401</span>        ? {
+<span class="ln">402</span>            rankingDivergences: verification.divergences,
+<span class="ln">403</span>            rankingExpectedOrder: verification.expectedOrder,
+<span class="ln">404</span>            rankingActualOrder: verification.actualOrder,
+<span class="ln">405</span>          }
+<span class="ln">406</span>        : {}),
+<span class="ln">407</span>      ranking: results.map((r) =&gt; ({
+<span class="ln">408</span>        offerId: r.offer.id,
+<span class="ln">409</span>        title: r.offer.product.title,
+<span class="ln">410</span>        store: r.offer.sourceStore,
+<span class="ln">411</span>        merchantId: r.offer.merchant.id,
+<span class="ln">412</span>        price: r.offer.price,
+<span class="ln">413</span>        sponsored: r.offer.sponsored,
+<span class="ln">414</span>        ...(r.offer.acquisition !== undefined ? { acquisition: r.offer.acquisition } : {}),
+<span class="ln">415</span>        score: r.score,
+<span class="ln">416</span>        reasons: r.reasons,
+<span class="ln">417</span>      })),
+<span class="ln">418</span>    });
+<span class="ln">419</span>
+<span class="ln">420</span>    const statusLines = storeStatuses
+<span class="ln">421</span>      .map((s) =&gt;
+<span class="ln">422</span>        s.ok
+<span class="ln">423</span>          ? `  ✓ ${s.store}: ${s.offerCount} offer(s) in ${s.durationMs}ms`
+<span class="ln">424</span>          : `  ✗ ${s.store}: ${s.error.code} — ${s.error.message}`,
+<span class="ln">425</span>      )
+<span class="ln">426</span>      .join(&quot;\n&quot;);</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>远端 bridge：只读且清洗错误</h3>
+      <p>remote bridge 仍然会校验 ranking 与 coverage，但在 <code>remote/src/mcp-server.ts:76</code> 先清洗上游 service 错误，<code>remote/src/mcp-server.ts:125</code> 注册 search_products，<code>remote/src/mcp-server.ts:176</code> 处理 upstream failure，<code>remote/src/mcp-server.ts:199</code> 复用 verifyRanking，<code>remote/src/mcp-server.ts:219</code> 返回 rankingVerified。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/remote/src/mcp-server.ts</span> · L76-121</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">76</span>/**
+<span class="ln">77</span> * Sanitize an upstream-service error before it reaches an authenticated
+<span class="ln">78</span> * third-party MCP client on this PUBLIC bridge.
+<span class="ln">79</span> *
+<span class="ln">80</span> * `service-client.ts` (mirrored from the trusted local stdio client, where
+<span class="ln">81</span> * this detail is fine) builds `service_unreachable` messages containing the
+<span class="ln">82</span> * real `NORTHCINDER_SERVICE_URL` + path, and `service_error`/HTTP-error messages
+<span class="ln">83</span> * that can echo up to 200 chars of the upstream response body. Neither
+<span class="ln">84</span> * infra topology nor upstream internals should ever reach an arbitrary
+<span class="ln">85</span> * API-key holder — do not log the detail either, because production log
+<span class="ln">86</span> * access is broader than the upstream credential boundary; return a generic,
+<span class="ln">87</span> * bounded message. Every other error code (invalid_query, invalid_merchant,
+<span class="ln">88</span> * invalid_service_response, …) is already safe to pass through verbatim —
+<span class="ln">89</span> * those messages describe the caller&#x27;s OWN input or a schema mismatch, not
+<span class="ln">90</span> * upstream infra.
+<span class="ln">91</span> */
+<span class="ln">92</span>function sanitizeServiceError(error: ToolFailure): ToolFailure {
+<span class="ln">93</span>  const isUnreachable = error.code === &quot;service_unreachable&quot;;
+<span class="ln">94</span>  const isUpstreamHttpError = error.message.startsWith(&quot;service HTTP &quot;);
+<span class="ln">95</span>  if (!isUnreachable &amp;&amp; !isUpstreamHttpError) return error;
+<span class="ln">96</span>  console.error(`[northcinder-remote] upstream error suppressed from client response (${error.code})`);
+<span class="ln">97</span>  return {
+<span class="ln">98</span>    code: error.code,
+<span class="ln">99</span>    message: isUnreachable ? &quot;configured engine unavailable&quot; : &quot;configured engine error&quot;,
+<span class="ln">100</span>  };
+<span class="ln">101</span>}
+<span class="ln">102</span>
+<span class="ln">103</span>function money(m: { amount: number; currency: string }): string {
+<span class="ln">104</span>  return `${(m.amount / 100).toFixed(2)} ${m.currency}`;
+<span class="ln">105</span>}
+<span class="ln">106</span>
+<span class="ln">107</span>/**
+<span class="ln">108</span> * Verify that the service accounted for every adapter it says is registered.
+<span class="ln">109</span> * Keep this consumer-local rather than trusting the local client package: the
+<span class="ln">110</span> * self-hosted bridge is independently deployable and must not silently bless an
+<span class="ln">111</span> * omitted (or duplicated) store status.
+<span class="ln">112</span> */
+<span class="ln">113</span>function verifyStoreCoverage(registeredStores: readonly string[] | undefined, statuses: readonly { store: string }[]) {
+<span class="ln">114</span>  if (registeredStores === undefined) return { verified: &quot;not_applicable&quot; as const, missing: [], unexpected: [] };
+<span class="ln">115</span>  const registered = new Set(registeredStores);
+<span class="ln">116</span>  const counts = new Map&lt;string, number&gt;();
+<span class="ln">117</span>  for (const status of statuses) counts.set(status.store, (counts.get(status.store) ?? 0) + 1);
+<span class="ln">118</span>  const missing = [...registered].filter((store) =&gt; !counts.has(store)).sort();
+<span class="ln">119</span>  const unexpected = [...counts.keys()].filter((store) =&gt; !registered.has(store) || (counts.get(store) ?? 0) !== 1).sort();
+<span class="ln">120</span>  return { verified: missing.length === 0 &amp;&amp; unexpected.length === 0, missing, unexpected };
+<span class="ln">121</span>}</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">client search -&gt; verify ranking -&gt; audit
+remote search -&gt; sanitize upstream error -&gt; verify ranking -&gt; return read-only result
+remote never registers request_purchase_authorization / approve_purchase / complete_checkout</div>
+      <p>本地工具链从 <code>client/src/server.ts:507</code> 注册 search_products，<code>client/src/server.ts:648</code> 开始 profile 工具，<code>client/src/server.ts:904</code> 开始 watches；remote 只在 <code>remote/src/mcp-server.ts:123</code> 创建 server。这种差异是安全边界本身，而不是部署形态的偶然结果。</p>
+      <h3><span class="arr">▸</span>验证联动</h3><p>这页把实现和测试一起看：源码引用说明控制点，测试引用说明这些控制点已经被行为化约束，避免只把 README 的安全承诺复述成架构结论。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>client/src/server.ts:572</code> 接受 browser observations，但后续购买前仍会因 native revalidation 被拒。</li><li><code>remote/src/mcp-server.ts:95</code> 对任意错误消息做截断，避免把内部异常原样暴露给 API key 持有人。</li><li><code>client/src/server.ts:285</code> 的 local trust evidence 只展示，不影响排序，防止本地历史污染 ranking。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">排序篡改测试</div><div class="card-d">见 <code>client/test/ranking-verification.test.ts:112</code> 到 <code>client/test/ranking-verification.test.ts:171</code>，测试同时检查文本与 audit。</div></div><div class="card"><div class="card-h">store coverage</div><div class="card-d">本地和远端分别在 <code>client/src/server.ts:387</code> 与 <code>remote/src/mcp-server.ts:201</code> 验证 store coverage。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-08-20</span>
+      <span>Source · <a href="https://github.com/cinderline/northcinder">cinderline/northcinder</a></span>
+      <span><a href="../northcinder.html">↑ northcinder 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

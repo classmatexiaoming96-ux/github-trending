@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>从 pending code 到 single-use mandate · 深度解析 · northcinder</title>
+<meta name="description" content="northcinder 人工授权与签名 mandate 子模块完整解析 — 从 MCP 工具、排序校验、人工授权、签名 mandate、checkout rail 与本地审计看一个买家侧购物 Agent 如何把交易风险拆成可验证边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #70d6c9;
+  --star-soft:  #a7f3e8;
+  --star-deep:  #2f9f94;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">northcinder<b>.shop</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">northcinder<b>.shop</b></div>
+      <div class="sub">人工授权与签名 mandate · 深度解析</div>
+    </div>
+    <span class="nav-ver">TypeScript</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../northcinder.html">← 返回 northcinder 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">从 pending code 到 single-use mandate <em>深度解析</em></h1>
+      <p class="hero-desc">这一页看购买权限如何从模型输出变成人类确认后的签名 mandate：code 不从 MCP 返回，fingerprint 绑定购买四元组，checkout 前再做 cryptographic verification。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>授权 store 的注释在 <code>client/src/authorization.ts:1</code> 定义 request/approve/decline 三步，<code>client/src/authorization.ts:45</code> 设置 15 分钟 TTL，<code>client/src/authorization.ts:49</code> 限制三次错误尝试，<code>client/src/authorization.ts:179</code> 生成随机 code 并使用 timingSafeEqual 比较。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/authorization.ts</span> · L1-27</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">1</span>/**
+<span class="ln">2</span> * The explicit human approval gate (spec §4 invariant 4):
+<span class="ln">3</span> *
+<span class="ln">4</span> *   request_purchase_authorization  → PENDING authorization + human summary
+<span class="ln">5</span> *   approve_purchase(code)          → mandate SIGNED, authorization approved
+<span class="ln">6</span> *   decline_purchase                → authorization VOID (symmetric, guilt-free)
+<span class="ln">7</span> *
+<span class="ln">8</span> * The confirmation code is written to
+<span class="ln">9</span> * `&lt;configDir&gt;/pending-authorizations/&lt;id&gt;.code` (0600). The standard MCP
+<span class="ln">10</span> * runtime disables the optional STDERR banner because hosts commonly capture
+<span class="ln">11</span> * child-process stderr. The tool result deliberately omits the code. Another
+<span class="ln">12</span> * program the buyer runs under the same OS account can read buyer-local state;
+<span class="ln">13</span> * separate accounts are an optional local hardening boundary.
+<span class="ln">14</span> * Wrong-code attempts are bounded; pending authorizations expire.
+<span class="ln">15</span> *
+<span class="ln">16</span> * approval &quot;sign what you see&quot;: both trusted channels render the FOUR-TUPLE
+<span class="ln">17</span> * (merchant of record, exact item + variant, all-in total with an honest
+<span class="ln">18</span> * unknown-tax statement, payment context per rail) plus an order fingerprint
+<span class="ln">19</span> * displayed WITH the code. The fingerprint commits the code to the tuple —
+<span class="ln">20</span> * approval recomputes it and rejects any tuple mutated after issuance — and
+<span class="ln">21</span> * the mandate nonce is fixed at request time so the mandate signed at
+<span class="ln">22</span> * approval is exactly the order the human saw fingerprinted.
+<span class="ln">23</span> *
+<span class="ln">24</span> * The purchase mandate is signed only AT APPROVAL TIME (issuance = the human
+<span class="ln">25</span> * act), with the user&#x27;s local ed25519 keypair, binding offer id, merchant,
+<span class="ln">26</span> * and a hard spending cap.
+<span class="ln">27</span> */</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>request：写本地 code，不回传给 MCP</h3>
+      <p><code>client/src/authorization.ts:299</code> 创建 authorizationId、code、nonce 与 fingerprint，<code>client/src/authorization.ts:315</code> 写 code file，<code>client/src/authorization.ts:321</code> 记录 merchant/offer/total，<code>client/src/authorization.ts:330</code> chmod 到 0600。测试在 <code>client/test/authorization.test.ts:47</code> 与 <code>client/test/authorization.test.ts:84</code> 证明 summary 与 stderr 不泄漏 code。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/authorization.ts</span> · L299-345</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">299</span>    request(offer, opts) {
+<span class="ln">300</span>      const at = now();
+<span class="ln">301</span>      const id = `auth_${randomUUID()}`;
+<span class="ln">302</span>      // Own copies: the authorization&#x27;s tuple must not alias caller-held
+<span class="ln">303</span>      // objects (a later caller-side mutation must not silently retarget it).
+<span class="ln">304</span>      const ownOffer = structuredClone(offer);
+<span class="ln">305</span>      const maxAmount = structuredClone(opts.maxAmount ?? offerTotal(offer));
+<span class="ln">306</span>      const paymentContext = opts.paymentContext ?? &quot;none&quot;;
+<span class="ln">307</span>      const authorization: Authorization = {
+<span class="ln">308</span>        id,
+<span class="ln">309</span>        status: &quot;pending&quot;,
+<span class="ln">310</span>        offer: ownOffer,
+<span class="ln">311</span>        intent: opts.intent,
+<span class="ln">312</span>        maxAmount,
+<span class="ln">313</span>        paymentContext,
+<span class="ln">314</span>        createdAt: at.toISOString(),
+<span class="ln">315</span>        expiresAt: new Date(at.getTime() + ttlMs).toISOString(),
+<span class="ln">316</span>        attemptsRemaining: maxAttempts,
+<span class="ln">317</span>      };
+<span class="ln">318</span>
+<span class="ln">319</span>      const code = generateCode();
+<span class="ln">320</span>      // The mandate nonce is fixed NOW so the fingerprint displayed with the
+<span class="ln">321</span>      // code commits to the exact mandate that approval will sign.
+<span class="ln">322</span>      const nonce = randomBytes(18).toString(&quot;base64url&quot;);
+<span class="ln">323</span>      const fingerprint = currentFingerprint(authorization, nonce);
+<span class="ln">324</span>      const codeFile = join(pendingDir, `${id}.code`);
+<span class="ln">325</span>      // Every buyer-local approval channel shows the FULL four-tuple the mandate will sign
+<span class="ln">326</span>      // (merchant of record, exact item + variant, all-in total with honest
+<span class="ln">327</span>      // unknown-tax statement, payment context) plus the hard cap the
+<span class="ln">328</span>      // (untrusted) host agent chose — &quot;sign what you see&quot;.
+<span class="ln">329</span>      const tupleLines = renderOrderTuple(ownOffer, paymentContext);
+<span class="ln">330</span>      const capLine = `HARD SPENDING CAP: ${formatMoney(maxAmount)} — the agent may spend up to this amount`;
+<span class="ln">331</span>      // local UI second door: the approval-page URL rides the same buyer-local
+<span class="ln">332</span>      // channels as the code — never the tool result.
+<span class="ln">333</span>      const approvalUrl = options.approvalUrl?.(id);
+<span class="ln">334</span>      const approvalUrlLine =
+<span class="ln">335</span>        approvalUrl !== undefined ? `Or review &amp; approve/decline in your browser: ${approvalUrl}` : undefined;
+<span class="ln">336</span>      // Fail CLOSED but never let the underlying fs error — which typically
+<span class="ln">337</span>      // embeds the absolute configDir/pending-authorizations path — reach a
+<span class="ln">338</span>      // tool-facing error string; request_purchase_authorization
+<span class="ln">339</span>      // calls this via deps.authorizations.request at server.ts).
+<span class="ln">340</span>      runFsOp(() =&gt; {
+<span class="ln">341</span>        mkdirSync(pendingDir, { recursive: true, mode: 0o700 });
+<span class="ln">342</span>        writeFileSync(
+<span class="ln">343</span>          codeFile,
+<span class="ln">344</span>          [
+<span class="ln">345</span>            code,</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>approve：签名并限制错误尝试</h3>
+      <p><code>client/src/authorization.ts:346</code> 开始 approve 流程，<code>client/src/authorization.ts:369</code> 递增 wrongAttempts，<code>client/src/authorization.ts:376</code> 达到上限后 declined，<code>client/src/authorization.ts:388</code> 重新计算 fingerprint，<code>client/src/authorization.ts:397</code> 签发 mandate。测试在 <code>client/test/authorization.test.ts:122</code> 覆盖错误码上限。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/client/src/authorization.ts</span> · L346-415</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">346</span>            `# Authorization ${id} · order-fingerprint ${fingerprint}`,
+<span class="ln">347</span>            `# ${authorization.intent}`,
+<span class="ln">348</span>            ...tupleLines.map((line) =&gt; `# ${line}`),
+<span class="ln">349</span>            `# ${capLine}`,
+<span class="ln">350</span>            `# Give the first line of this file to your agent ONLY if you approve this purchase.`,
+<span class="ln">351</span>            ...(approvalUrlLine !== undefined ? [`# ${approvalUrlLine}`] : []),
+<span class="ln">352</span>            `# ${DECLINE_CHANNEL_LINE}`,
+<span class="ln">353</span>            ``,
+<span class="ln">354</span>          ].join(&quot;\n&quot;),
+<span class="ln">355</span>          { mode: 0o600 },
+<span class="ln">356</span>        );
+<span class="ln">357</span>        chmodSync(codeFile, 0o600);
+<span class="ln">358</span>      }, &quot;purchase authorization request failed: the confirmation code could not be written&quot;);
+<span class="ln">359</span>
+<span class="ln">360</span>      if (!options.quiet) {
+<span class="ln">361</span>        // Optional low-level diagnostic mode only. The standard MCP runtime
+<span class="ln">362</span>        // sets quiet=true because hosts commonly capture child-process stderr.
+<span class="ln">363</span>        process.stderr.write(
+<span class="ln">364</span>          [
+<span class="ln">365</span>            ``,
+<span class="ln">366</span>            `┌─ ${BRAND_NAME} purchase approval ──────────────────────────────────────`,
+<span class="ln">367</span>            `│ ${authorization.intent}`,
+<span class="ln">368</span>            ...tupleLines.map((line) =&gt; `│ ${line}`),
+<span class="ln">369</span>            `│ ${capLine}`,
+<span class="ln">370</span>            `│ Authorization ${id}`,
+<span class="ln">371</span>            `│ CONFIRMATION CODE: ${code} · order-fingerprint ${fingerprint}`,
+<span class="ln">372</span>            `│ Give this code to your agent ONLY if you approve this purchase.`,
+<span class="ln">373</span>            ...(approvalUrlLine !== undefined ? [`│ ${approvalUrlLine}`] : []),
+<span class="ln">374</span>            `│ ${DECLINE_CHANNEL_LINE}`,
+<span class="ln">375</span>            `└─────────────────────────────────────────────────────────────────`,
+<span class="ln">376</span>            ``,
+<span class="ln">377</span>          ].join(&quot;\n&quot;),
+<span class="ln">378</span>        );
+<span class="ln">379</span>      }
+<span class="ln">380</span>
+<span class="ln">381</span>      records.set(id, {
+<span class="ln">382</span>        authorization,
+<span class="ln">383</span>        code,
+<span class="ln">384</span>        codeFile,
+<span class="ln">385</span>        nonce,
+<span class="ln">386</span>        fingerprint,
+<span class="ln">387</span>        offerSnapshot: structuredClone(ownOffer),
+<span class="ln">388</span>        approvedCap: structuredClone(maxAmount),
+<span class="ln">389</span>        intentSnapshot: opts.intent,
+<span class="ln">390</span>        checkoutInFlight: false,
+<span class="ln">391</span>      });
+<span class="ln">392</span>      // local UI push hook (best-effort, contained): the approval push must never
+<span class="ln">393</span>      // fail — or delay reporting — the authorization request itself.
+<span class="ln">394</span>      if (options.onRequested !== undefined) {
+<span class="ln">395</span>        try {
+<span class="ln">396</span>          options.onRequested({
+<span class="ln">397</span>            authorizationId: id,
+<span class="ln">398</span>            fingerprint,
+<span class="ln">399</span>            intent: authorization.intent,
+<span class="ln">400</span>            expiresAt: authorization.expiresAt,
+<span class="ln">401</span>            ...(approvalUrl !== undefined ? { approvalUrl } : {}),
+<span class="ln">402</span>          });
+<span class="ln">403</span>        } catch {
+<span class="ln">404</span>          process.stderr.write(
+<span class="ln">405</span>            `[${BRAND_NAME}] approval push hook failed (authorization ${id}): hook_error\n`,
+<span class="ln">406</span>          );
+<span class="ln">407</span>        }
+<span class="ln">408</span>      }
+<span class="ln">409</span>      return {
+<span class="ln">410</span>        authorization,
+<span class="ln">411</span>        summary: buildAuthorizationSummary(authorization),
+<span class="ln">412</span>        codeDelivery: { file: codeFile, stderr: !options.quiet },
+<span class="ln">413</span>        fingerprint,
+<span class="ln">414</span>      };
+<span class="ln">415</span>    },</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">request_purchase_authorization -&gt; local code file
+approve_purchase -&gt; code compare + fingerprint check -&gt; signed mandate
+complete_checkout -&gt; verifyMandate -&gt; consume nonce -&gt; rail.execute</div>
+      <p>server 层在 <code>client/src/server.ts:1338</code> 先拒绝 mixed-currency shipping，<code>client/src/server.ts:1359</code> 拒绝 cap 小于 total，<code>client/src/server.ts:1431</code> 才调用 approve，<code>client/src/server.ts:1455</code> 返回 mandate id。这些校验把错误尽量提前到人类确认之前。</p>
+      <h3><span class="arr">▸</span>验证联动</h3><p>这页把实现和测试一起看：源码引用说明控制点，测试引用说明这些控制点已经被行为化约束，避免只把 README 的安全承诺复述成架构结论。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li><code>client/src/server.ts:1471</code> 把 decline 做成对称工具，不需要 code，用户说不时不会被二次门禁卡住。</li><li><code>client/src/authorization.ts:290</code> 会在过期后清理 code file，避免 stale code 长期有效。</li><li><code>client/test/authorization.test.ts:141</code> 覆盖过期无法 approve，<code>client/test/authorization.test.ts:160</code> 覆盖 approve twice 失败。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">checkout hard gate</div><div class="card-d">orchestrator 在 <code>packages/checkout/src/orchestrator.ts:107</code> 调用 verifyMandate，<code>packages/checkout/src/orchestrator.ts:130</code> 再检查 VerifiedMandate brand。</div></div><div class="card"><div class="card-h">本地 checkout wiring</div><div class="card-d"><code>client/src/checkout-wiring.ts:57</code> 仅配置 ACP merchant 时加入 ACP rail，<code>client/src/checkout-wiring.ts:73</code> 总是提供 cart-permalink handoff。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-08-20</span>
+      <span>Source · <a href="https://github.com/cinderline/northcinder">cinderline/northcinder</a></span>
+      <span><a href="../northcinder.html">↑ northcinder 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
