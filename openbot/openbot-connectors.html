@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Connectors &amp; Worker · 深度解析 · openbot</title>
+<meta name="description" content="CopilotKit/OpenBot 源码级深度解析：AI coworker、per-bot computer、policy gateway 与 human handoff。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star:       #62d6c8;
+  --star-soft:  #9af0e4;
+  --star-deep:  #2aa99b;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar">
+  <div class="glyph">open<b>bot</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open<b>bot</b></div>
+      <div class="sub">Connectors &amp; Worker</div>
+    </div>
+    <span class="nav-ver">TypeScript · Bun monorepo</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+<li><a href="#core"><span class="idx">01</span>核心实现</a></li>
+<li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界失败</a></li>
+<li><a href="#related"><span class="idx">04</span>关联模块</a></li></ul></nav>
+    <div class="nav-foot">
+      <div>Stars ★1,693 · created 2026-08-17</div>
+      <div><a href="https://github.com/CopilotKit/OpenBot" target="_blank">CopilotKit/OpenBot</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+  <main class="main">
+
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Connectors &amp; Worker <em>深度解析</em></h1>
+      <p class="hero-desc">这一页只看 OpenBot 的一个局部模块，用真实源码行号解释它承担的契约、失败路径和与主架构的关系。</p>
+    </div>
+
+    <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+      <h3><span class="arr">▸</span>小 runner，强契约</h3><p>worker connector runner 很小，但契约明确。ConnectorPersistence 类型从 <code>worker/src/connector-runner.ts:6</code> 定义，runConnector 入口是 <code>worker/src/connector-runner.ts:17</code>，discover 调用在 <code>worker/src/connector-runner.ts:23</code>；batch 路径由 <code>worker/src/connector-runner.ts:27</code> 选择，能力检查是 <code>worker/src/connector-runner.ts:30</code>，逐条 apply 位于 <code>worker/src/connector-runner.ts:35</code>，cursor 提交和成功记录分别是 <code>worker/src/connector-runner.ts:36</code>、<code>worker/src/connector-runner.ts:40</code> 显示 adapter.discover、persistence.cursor、batch/individual writes 和 recordRun 是它的全部接口。它不是业务 extractor，而是所有 knowledge source 同步的事务外壳。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/worker/src/connector-runner.ts</span> · L1-45</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">1</span>import type {
+<span class="ln">2</span>  ConnectorAdapter,
+<span class="ln">3</span>  ConnectorChange,
+<span class="ln">4</span>} from &quot;../../server/src/connectors/contract&quot;;
+<span class="ln">5</span>
+<span class="ln">6</span>export type ConnectorPersistence = {
+<span class="ln">7</span>  cursor: () =&gt; Promise&lt;string | null&gt;;
+<span class="ln">8</span>  apply?: (change: ConnectorChange) =&gt; Promise&lt;void&gt;;
+<span class="ln">9</span>  commitCursor?: (cursor: string) =&gt; Promise&lt;void&gt;;
+<span class="ln">10</span>  persistBatch?: (
+<span class="ln">11</span>    changes: ConnectorChange[],
+<span class="ln">12</span>    cursor: string | null,
+<span class="ln">13</span>  ) =&gt; Promise&lt;void&gt;;
+<span class="ln">14</span>  recordRun?: (status: &quot;succeeded&quot; | &quot;failed&quot;) =&gt; Promise&lt;void&gt;;
+<span class="ln">15</span>};
+<span class="ln">16</span>
+<span class="ln">17</span>export async function runConnector(
+<span class="ln">18</span>  adapter: ConnectorAdapter,
+<span class="ln">19</span>  persistence: ConnectorPersistence,
+<span class="ln">20</span>  mode: &quot;sync&quot; | &quot;reconcile&quot; = &quot;sync&quot;,
+<span class="ln">21</span>) {
+<span class="ln">22</span>  try {
+<span class="ln">23</span>    const discovered = await adapter.discover({
+<span class="ln">24</span>      cursor: await persistence.cursor(),
+<span class="ln">25</span>      mode,
+<span class="ln">26</span>    });
+<span class="ln">27</span>    if (persistence.persistBatch) {
+<span class="ln">28</span>      await persistence.persistBatch(discovered.changes, discovered.nextCursor);
+<span class="ln">29</span>    } else {
+<span class="ln">30</span>      if (!persistence.apply || !persistence.commitCursor) {
+<span class="ln">31</span>        throw new Error(
+<span class="ln">32</span>          &quot;Connector persistence must support batch or individual writes.&quot;,
+<span class="ln">33</span>        );
+<span class="ln">34</span>      }
+<span class="ln">35</span>      for (const change of discovered.changes) await persistence.apply(change);
+<span class="ln">36</span>      if (discovered.nextCursor !== null) {
+<span class="ln">37</span>        await persistence.commitCursor(discovered.nextCursor);
+<span class="ln">38</span>      }
+<span class="ln">39</span>    }
+<span class="ln">40</span>    await persistence.recordRun?.(&quot;succeeded&quot;);
+<span class="ln">41</span>  } catch (error) {
+<span class="ln">42</span>    await persistence.recordRun?.(&quot;failed&quot;);
+<span class="ln">43</span>    throw error;
+<span class="ln">44</span>  }
+<span class="ln">45</span>}</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      <h3><span class="arr">▸</span>batch 优先，逐条 fallback</h3><p><code>worker/src/connector-runner.ts:27</code> 先用 persistBatch，<code>worker/src/connector-runner.ts:30</code> 检查 individual write 能力，<code>worker/src/connector-runner.ts:35</code> 逐条 apply，<code>worker/src/connector-runner.ts:36</code> 到 <code>worker/src/connector-runner.ts:38</code> 最后提交 cursor。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/worker/src/connector-runner.ts</span> · L17-45</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">17</span>export async function runConnector(
+<span class="ln">18</span>  adapter: ConnectorAdapter,
+<span class="ln">19</span>  persistence: ConnectorPersistence,
+<span class="ln">20</span>  mode: &quot;sync&quot; | &quot;reconcile&quot; = &quot;sync&quot;,
+<span class="ln">21</span>) {
+<span class="ln">22</span>  try {
+<span class="ln">23</span>    const discovered = await adapter.discover({
+<span class="ln">24</span>      cursor: await persistence.cursor(),
+<span class="ln">25</span>      mode,
+<span class="ln">26</span>    });
+<span class="ln">27</span>    if (persistence.persistBatch) {
+<span class="ln">28</span>      await persistence.persistBatch(discovered.changes, discovered.nextCursor);
+<span class="ln">29</span>    } else {
+<span class="ln">30</span>      if (!persistence.apply || !persistence.commitCursor) {
+<span class="ln">31</span>        throw new Error(
+<span class="ln">32</span>          &quot;Connector persistence must support batch or individual writes.&quot;,
+<span class="ln">33</span>        );
+<span class="ln">34</span>      }
+<span class="ln">35</span>      for (const change of discovered.changes) await persistence.apply(change);
+<span class="ln">36</span>      if (discovered.nextCursor !== null) {
+<span class="ln">37</span>        await persistence.commitCursor(discovered.nextCursor);
+<span class="ln">38</span>      }
+<span class="ln">39</span>    }
+<span class="ln">40</span>    await persistence.recordRun?.(&quot;succeeded&quot;);
+<span class="ln">41</span>  } catch (error) {
+<span class="ln">42</span>    await persistence.recordRun?.(&quot;failed&quot;);
+<span class="ln">43</span>    throw error;
+<span class="ln">44</span>  }
+<span class="ln">45</span>}</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>channel start 的 UI 顺序也有事务感</h3><p>useStartChannel 从 <code>app/src/lib/channels/start.ts:13</code> 导出，mutation 创建在 <code>app/src/lib/channels/start.ts:16</code>，start 函数是 <code>app/src/lib/channels/start.ts:20</code>；createChannel 调用在 <code>app/src/lib/channels/start.ts:21</code>，cache seed 是 <code>app/src/lib/channels/start.ts:22</code>，首消息暂存是 <code>app/src/lib/channels/start.ts:23</code>，navigate 从 <code>app/src/lib/channels/start.ts:24</code> 到 <code>app/src/lib/channels/start.ts:27</code> 完成 展示 UI 开新 channel 的顺序：create mutation、seed query cache、stash first message、navigate。<code>app/src/lib/channels/start.ts:10</code> 到 <code>app/src/lib/channels/start.ts:11</code> 的注释说明这是为了让第一条消息在 thread join 前可见。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/app/src/lib/channels/start.ts</span> · L13-31</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">13</span>export function useStartChannel() {
+<span class="ln">14</span>  const queryClient = useQueryClient();
+<span class="ln">15</span>  const navigate = useNavigate();
+<span class="ln">16</span>  const createChannel = useMutation(createChannelMutationOptions(queryClient));
+<span class="ln">17</span>
+<span class="ln">18</span>  return {
+<span class="ln">19</span>    pending: createChannel.isPending,
+<span class="ln">20</span>    start: async (agentId: string, text: string) =&gt; {
+<span class="ln">21</span>      const channel = await createChannel.mutateAsync([agentId]);
+<span class="ln">22</span>      queryClient.setQueryData(channelKeys.detail(channel.id), channel);
+<span class="ln">23</span>      stashFirstMessage(channel.id, text);
+<span class="ln">24</span>      await navigate({
+<span class="ln">25</span>        params: { channelId: channel.id },
+<span class="ln">26</span>        replace: true,
+<span class="ln">27</span>        to: &quot;/channel/$channelId&quot;,
+<span class="ln">28</span>      });
+<span class="ln">29</span>    },
+<span class="ln">30</span>  };
+<span class="ln">31</span>}</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+      <h3><span class="arr">▸</span>同步游标只代表已持久化位置</h3><div class="flow">cursor() → adapter.discover(cursor, mode)
+  → persistBatch(changes,nextCursor) OR apply(change)* then commitCursor(nextCursor)
+  → recordRun(succeeded)
+  ↘ catch → recordRun(failed) → throw</div>
+      <p>这个流程的要点是 cursor 代表“已经安全持久化到哪里”，所以 <code>worker/tests/connector-runner.test.ts:27</code> 的失败测试很重要：如果 apply 抛错，<code>worker/tests/connector-runner.test.ts:48</code> 断言 cursors 仍为空。</p>
+    </section>
+    <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <h3><span class="arr">▸</span>失败不推进游标</h3><ul><li><code>worker/src/connector-runner.ts:31</code> 在缺少 batch 和 individual write 能力时直接抛错，避免静默丢数据。</li><li><code>worker/src/connector-runner.ts:41</code> 到 <code>worker/src/connector-runner.ts:43</code> 失败会记录 run failed 并继续抛出，调度层能重试。</li><li><code>worker/tests/connector-runner.test.ts:51</code> 验证 reconcile mode 被传给 adapter，说明同步模式不是 runner 私自决定。</li></ul>
+    </section>
+    <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2>
+      <h3><span class="arr">▸</span>测试证据</h3><p>测试证据是 成功提交 cursor 的测试从 <code>worker/tests/connector-runner.test.ts:5</code> 开始，runConnector 调用在 <code>worker/tests/connector-runner.test.ts:9</code>，cursor 初始值是 <code>worker/tests/connector-runner.test.ts:17</code>，结果断言在 <code>worker/tests/connector-runner.test.ts:23</code>；失败测试从 <code>worker/tests/connector-runner.test.ts:27</code> 开始，expect wrapper 在 <code>worker/tests/connector-runner.test.ts:30</code>，故障注入是 <code>worker/tests/connector-runner.test.ts:40</code>，cursor 为空由 <code>worker/tests/connector-runner.test.ts:48</code> 验证。这类 runner 看似简单，但它决定外部知识源是否会因为半批失败造成永久漏同步；OpenBot 把这个边界写得足够小，也足够容易测试。</p>
+      <p>从产品语义看，<code>worker/src/connector-runner.ts:17</code> 是后台知识同步的最小事务边界，而 <code>app/src/lib/channels/start.ts:20</code> 是前台会话启动的最小用户体验边界；二者都先完成必要状态写入，再暴露下一步，让用户和调度器都不会看到半完成状态。</p><div class="g2"><div class="card"><div class="card-h">server/src/connectors</div><div class="card-d">Connector admin service 管理 tenant package 中声明的 knowledge sources。</div></div><div class="card"><div class="card-h">app/src/lib/channels</div><div class="card-d">UI channel flow 把 agent conversation 与缓存、导航和 optimistic first message 串起来。</div></div></div>
+      <p>这也是 OpenBot 与普通导入脚本的差异：<code>worker/tests/connector-runner.test.ts:51</code> 专门验证 reconcile mode 会被传给 adapter，说明同步层尊重调度者指定的运行语义；而 <code>worker/src/connector-runner.ts:41</code> 到失败分支只负责记录 failed 并继续抛出，让上层重试策略能够看到真实错误。</p>
+      <p>如果把 connector 看成外部知识源的事务日志，<code>worker/src/connector-runner.ts:27</code> 的 batch 分支适合数据库一次性 upsert，<code>worker/src/connector-runner.ts:35</code> 的逐条分支适合简单 adapter；两条路最终都必须等到变更落盘后才进入 <code>worker/src/connector-runner.ts:36</code> 的 cursor 提交，因此失败重跑最多重复处理，不会永久跳过未写入的数据。</p>
+      <p>前端 channel flow 也用同一套“先落状态再切视图”的思路：<code>app/src/lib/channels/start.ts:21</code> 先创建 channel，<code>app/src/lib/channels/start.ts:22</code> 立即把返回对象写入 query cache，<code>app/src/lib/channels/start.ts:23</code> 暂存用户第一条消息，然后 <code>app/src/lib/channels/start.ts:24</code> 才开始导航。这样首屏不会出现空 thread，也不会把用户刚输入的目标丢给后台 join 时序。</p>
+    </section>
+
+
+    <div class="foot">
+      <span>Generated · 2026-08-21</span>
+      <span>Source · <a href="https://github.com/CopilotKit/OpenBot">CopilotKit/OpenBot</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+    </div>
+  </main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el && map.get(el)) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:60}, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*1.4+0.2, a: Math.random(), s: Math.random()*0.02+0.005 }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#62d6c8'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>openbot · AI coworker with a computer · 源码观测台</title>
+<meta name="description" content="CopilotKit/OpenBot 源码级深度解析：AI coworker、per-bot computer、policy gateway 与 human handoff。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star:       #62d6c8;
+  --star-soft:  #9af0e4;
+  --star-deep:  #2aa99b;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar">
+  <div class="glyph">open<b>bot</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open<b>bot</b></div>
+      <div class="sub">源码级架构解析 · OpenBot</div>
+    </div>
+    <span class="nav-ver">TypeScript · Bun monorepo</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li>
+<li><a href="#architecture"><span class="idx">01</span>权限拓扑</a></li>
+<li><a href="#gateway"><span class="idx">02</span>策略网关</a></li>
+<li><a href="#computer"><span class="idx">03</span>电脑进程</a></li>
+<li><a href="#handoff"><span class="idx">04</span>人工接管</a></li>
+<li><a href="#worker"><span class="idx">05</span>连接器</a></li>
+<li><a href="#tests"><span class="idx">06</span>测试风险</a></li></ul></nav>
+    <div class="nav-foot">
+      <div>Stars ★1,693 · created 2026-08-17</div>
+      <div><a href="https://github.com/CopilotKit/OpenBot" target="_blank">CopilotKit/OpenBot</a></div>
+      <div><a href="index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+  <main class="main">
+
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">openbot <em>AI coworker with a computer</em></h1>
+          <p class="hero-desc">OpenBot 不是普通聊天机器人壳，而是把 AI coworker、浏览器电脑、工具授权、人工接管、知识源同步和审计轨迹放进一个 Bun/TypeScript monorepo。它值得拆，是因为源码里对“agent 能做真实动作”这件事给出了多层边界。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 1,693</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">~42K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">463</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2h ago</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div class="flow"><span class="flow-node">Person</span> <span class="flow-arr">→</span> Web App <span class="flow-arr">→</span> Server/Gateway
+  <span class="flow-arr">↘</span> Copilot Runtime <span class="flow-arr">→</span> Remote Bot
+  <span class="flow-arr">↘</span> Policy/Audit <span class="flow-arr">→</span> Agent Computer
+  <span class="flow-arr">↘</span> Supervisor <span class="flow-arr">→</span> per-bot container</div>
+      </div>
+    </div>
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>OpenBot 的核心问题是：如果一个 AI coworker 拥有浏览器、文件、shell 和外部工具，它怎样既能做事，又不把权限边界交给模型文本？组合根在 <code>server/src/index.ts:297</code> 到 <code>server/src/index.ts:367</code> 把 runtime、computer gateway、policy store、plugin store、channel store 和审计 store 统一装配，这说明项目把“会聊天”和“会行动”视为同一个受治理系统，而不是两个孤立功能。</p>
+      <p>源码最强的地方是边界分层：身份用 <code>server/src/index.ts:58</code> 和 <code>server/src/index.ts:100</code> 统一解析，电脑动作必须穿过 <code>server/src/computer/gateway.ts:309</code>，真实浏览器动作在 <code>agent-computer/src/index.ts:27</code> 后的独立进程里执行，Docker socket 则被缩到 <code>supervisor/src/index.ts:14</code> 描述的 supervisor 词汇。这样的拆分让每个风险面都有明确所有者。</p>
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card"><div class="card-h">架构模式</div><div class="card-d">Bun monorepo + server gateway + per-bot computer process + Docker supervisor + React control surface。</div></div>
+        <div class="card"><div class="card-h">核心抽象</div><div class="card-d">Bot、Channel、Computer、Policy、Audit、Connector、Tenant package。</div></div>
+        <div class="card"><div class="card-h">性能/精度数据</div><div class="card-d">GitHub Search API 显示 1,693 stars；仓库最近 2 小时仍有提交，工程活跃度高。</div></div>
+        <div class="card"><div class="card-h">下游依赖</div><div class="card-d">Bun、Hono、Playwright、CopilotKit、Drizzle、React、TanStack Router/Query。</div></div>
+      </div>
+      <div class="callout"><strong>读法</strong> — 这篇主页面看整体装配和关键边界；三篇子页面分别展开 computer gateway、human handoff 和 connector/worker 持久化。</div>
+    </section>
+    <section class="sec" id="architecture">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">从组合根看 OpenBot 的<em>权限拓扑</em></h2>
+      <p>server 的组合根不是薄启动脚本，它决定了谁能看 thread、谁能运行 bot、工具权限从哪里取、computer policy 怎样加载，以及 token 如何绑定 actor/bot/run。证据集中在 入口函数是 <code>server/src/index.ts:58</code>，session 从 <code>server/src/index.ts:66</code> 进入，角色在 <code>server/src/index.ts:71</code> 收口；用户投影落在 <code>server/src/index.ts:82</code>，actor 投影落在 <code>server/src/index.ts:100</code>；配置和数据库从 <code>server/src/index.ts:109</code> 开始，agent profile 在 <code>server/src/index.ts:121</code> 装配，事件监听在 <code>server/src/index.ts:149</code> 接入，tenant 同步位于 <code>server/src/index.ts:155</code>，policy store 则由 <code>server/src/index.ts:166</code> 建立，这些引用说明 OpenBot 不是让 remote bot 自己声明身份，而是在 server 侧签发和装配。</p>
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow"><span class="flow-stage">User session</span> → resolveRequestActor → identifyUser / identifyActor
+  → mountCopilotRuntime → remote bot run assertion
+  → grantedTools(pluginStore, botId, actorId)
+  → computerGateway(policy + audit + provider)
+  → agent-computer(browser/workspace/shell)</div>
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>模块边界能从文件职责直接看出来：<code>server/src/index.ts:121</code> 初始化 agent profile store，<code>server/src/index.ts:137</code> 建 channel event hub，<code>server/src/index.ts:146</code> 加载 component store，<code>server/src/index.ts:183</code> 打开 boot audit store，<code>server/src/index.ts:204</code> 创建 plugin store。每个 store 都在启动时注入，而不是在请求里随意 new。</p>
+      <div class="g3"><div class="card"><div class="card-h">server</div><div class="card-d">身份解析、tenant package、agent profile、policy store、plugin store、Copilot runtime 和 computer gateway 的组合根。</div></div>
+<div class="card"><div class="card-h">agent-computer</div><div class="card-d">每个 Bot 的浏览器、workspace、shell、ARIA snapshot、human handoff 和 secret entry 都在这个进程执行。</div></div>
+<div class="card"><div class="card-h">supervisor</div><div class="card-d">唯一持有 Docker socket 的小服务，只暴露 ensure/stop/reset/list 四个 Bot 语义动作。</div></div>
+<div class="card"><div class="card-h">worker</div><div class="card-d">connector runner 把外部知识源同步成变更，并把 cursor 提交放在成功持久化之后。</div></div>
+<div class="card"><div class="card-h">app</div><div class="card-d">React UI 管理 channel、tool line、take-the-wheel 和人工接管体验。</div></div>
+<div class="card"><div class="card-h">tests</div><div class="card-d">gateway/control/connector runner 等测试覆盖拒绝路径、审计路径和 cursor 提交边界。</div></div></div>
+      <h3><span class="arr">▸</span>身份解析代码</h3>
+      <p>下面这段来自 <code>server/src/index.ts:58</code> 到 <code>server/src/index.ts:80</code>，它把 session、role 和 fallback 错误处理集中起来。关键是 <code>server/src/index.ts:66</code> 读 session，<code>server/src/index.ts:71</code> 查询角色，<code>server/src/index.ts:72</code> 到 <code>server/src/index.ts:74</code> fail closed。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/server/src/index.ts</span> · L58-80</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">58</span>async function resolveRequestActor(request: Request): Promise&lt;{
+<span class="ln">59</span>  id: string;
+<span class="ln">60</span>  name: string;
+<span class="ln">61</span>  role: OpenBotRole;
+<span class="ln">62</span>}&gt; {
+<span class="ln">63</span>  if (config.devNoAuth) {
+<span class="ln">64</span>    return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
+<span class="ln">65</span>  }
+<span class="ln">66</span>  const session = await auth?.api.getSession({ headers: request.headers });
+<span class="ln">67</span>  const user = session?.user;
+<span class="ln">68</span>  if (!user) {
+<span class="ln">69</span>    throw new Error(&quot;A CopilotKit run requires a signed-in user.&quot;);
+<span class="ln">70</span>  }
+<span class="ln">71</span>  const roles = await roleRepository.rolesForUser(user.id);
+<span class="ln">72</span>  if (!roles.includes(&quot;admin&quot;) &amp;&amp; !roles.includes(&quot;user&quot;)) {
+<span class="ln">73</span>    throw new Error(&quot;A CopilotKit run requires an authorized user.&quot;);
+<span class="ln">74</span>  }
+<span class="ln">75</span>  return {
+<span class="ln">76</span>    id: user.id,
+<span class="ln">77</span>    name: user.name ?? user.email ?? user.id,
+<span class="ln">78</span>    role: roles.includes(&quot;admin&quot;) ? &quot;admin&quot; : &quot;user&quot;,
+<span class="ln">79</span>  };
+<span class="ln">80</span>}</pre>
+      </div>
+    
+      <a class="deep-link" href="openbot/openbot-computer-gateway.html">深度阅读 · Computer Gateway</a>
+    </section>
+    <section class="sec" id="gateway">
+      <div class="sec-no">§ <b>02</b> · GOVERNED ACTIONS</div>
+      <h2 class="sec-title">真实动作必须经过<em>策略与审计</em></h2>
+      <h3><span class="arr">▸</span>gateway 三段式：resolve、policy、audit</h3>
+      <p>Gateway 的证据链是 工厂从 <code>server/src/computer/gateway.ts:205</code> 开始，地址定位在 <code>server/src/computer/gateway.ts:229</code>，snapshot 写入缓存由 <code>server/src/computer/gateway.ts:266</code> 完成；ref 解析是 <code>server/src/computer/gateway.ts:294</code>，govern 主流程是 <code>server/src/computer/gateway.ts:309</code>，策略判断在 <code>server/src/computer/gateway.ts:356</code>，审计先写于 <code>server/src/computer/gateway.ts:357</code>；拒绝由 <code>server/src/computer/gateway.ts:369</code> 截断，失败补行在 <code>server/src/computer/gateway.ts:387</code>，返回标签补充发生在 <code>server/src/computer/gateway.ts:403</code>。<code>server/src/computer/gateway.ts:294</code> 先从 server 持有的 snapshot 解析 ref，<code>server/src/computer/gateway.ts:356</code> 再评估策略，<code>server/src/computer/gateway.ts:357</code> 在真实动作前写审计，<code>server/src/computer/gateway.ts:369</code> 拒绝时直接抛错，<code>server/src/computer/gateway.ts:387</code> 则给允许后失败的动作补失败行。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/server/src/computer/gateway.ts</span> · L302-405</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">302</span>  /**
+<span class="ln">303</span>   * Decide, record, then act.
+<span class="ln">304</span>   *
+<span class="ln">305</span>   * The audit row is written before the action runs, not after it succeeds. An allowed action that
+<span class="ln">306</span>   * later fails is still part of the audit sequence, and a trail that only contains successes cannot
+<span class="ln">307</span>   * show that sequence.
+<span class="ln">308</span>   */
+<span class="ln">309</span>  async function govern&lt;T&gt;(
+<span class="ln">310</span>    toolName: string,
+<span class="ln">311</span>    botId: string,
+<span class="ln">312</span>    actor: ActionActor,
+<span class="ln">313</span>    subject: {
+<span class="ln">314</span>      ref?: string;
+<span class="ln">315</span>      filePath?: string;
+<span class="ln">316</span>      targetUrl?: string;
+<span class="ln">317</span>      key?: string;
+<span class="ln">318</span>      /** The command a shell call is about to run, so a rule can be written against it. */
+<span class="ln">319</span>      command?: string;
+<span class="ln">320</span>      /** The person&#x27;s Stop, on its way to the browser. See the acting methods below. */
+<span class="ln">321</span>      signal?: AbortSignal;
+<span class="ln">322</span>    },
+<span class="ln">323</span>    run: () =&gt; Promise&lt;T&gt;,
+<span class="ln">324</span>  ): Promise&lt;T&gt; {
+<span class="ln">325</span>    const { ref, filePath } = subject;
+<span class="ln">326</span>    const element = resolve(botId, ref);
+<span class="ln">327</span>    const cached = snapshots.get(botId);
+<span class="ln">328</span>    // For a navigation the relevant page is the one being opened, not the one already loaded. Using
+<span class="ln">329</span>    // the cached URL would mean `page.host == &quot;...&quot;` could never match the destination, which is the
+<span class="ln">330</span>    // only thing a rule about navigation would ever want to say.
+<span class="ln">331</span>    const pageUrl = subject.targetUrl ?? cached?.url ?? &quot;&quot;;
+<span class="ln">332</span>
+<span class="ln">333</span>    const intent = intentOf(toolName, subject.key);
+<span class="ln">334</span>
+<span class="ln">335</span>    const context: PolicyContext = {
+<span class="ln">336</span>      tool: { name: toolName },
+<span class="ln">337</span>      bot: { id: botId },
+<span class="ln">338</span>      actor: { id: actor.id },
+<span class="ln">339</span>      page: { url: pageUrl, host: hostOf(pageUrl) },
+<span class="ln">340</span>      ...(intent ? { intent } : {}),
+<span class="ln">341</span>      ...(subject.key ? { key: subject.key } : {}),
+<span class="ln">342</span>      ...(element
+<span class="ln">343</span>        ? {
+<span class="ln">344</span>            element: {
+<span class="ln">345</span>              ref: element.ref,
+<span class="ln">346</span>              role: element.role,
+<span class="ln">347</span>              name: element.name,
+<span class="ln">348</span>              ...(element.type ? { type: element.type } : {}),
+<span class="ln">349</span>            },
+<span class="ln">350</span>          }
+<span class="ln">351</span>        : {}),
+<span class="ln">352</span>      ...(filePath ? { file: describeFile(filePath) } : {}),
+<span class="ln">353</span>      ...(subject.command ? { command: subject.command } : {}),
+<span class="ln">354</span>    };
+<span class="ln">355</span>
+<span class="ln">356</span>    const decision = evaluateActionPolicy(options.policy(), context);
+<span class="ln">357</span>    await write(auditStore, {
+<span class="ln">358</span>      toolName,
+<span class="ln">359</span>      botId,
+<span class="ln">360</span>      actor,
+<span class="ln">361</span>      element,
+<span class="ln">362</span>      ref,
+<span class="ln">363</span>      ...(subject.key ? { key: subject.key } : {}),
+<span class="ln">364</span>      ...(subject.command ? { command: subject.command } : {}),
+<span class="ln">365</span>      filePath,
+<span class="ln">366</span>      pageUrl,
+<span class="ln">367</span>      decision,
+<span class="ln">368</span>    });
+<span class="ln">369</span>    if (!decision.forward) {
+<span class="ln">370</span>      throw new ActionRefusedError(decision.reason, decision.matched);
+<span class="ln">371</span>    }
+<span class="ln">372</span>
+<span class="ln">373</span>    let result: T;
+<span class="ln">374</span>    try {
+<span class="ln">375</span>      result = await run();
+<span class="ln">376</span>    } catch (error) {
+<span class="ln">377</span>      /**
+<span class="ln">378</span>       * A permitted action that did not happen gets its own row.
+<span class="ln">379</span>       *
+<span class="ln">380</span>       * Without this the trail lies by omission. The row above says the policy allowed the call, and
+<span class="ln">381</span>       * a reader takes &quot;allowed&quot; to mean &quot;it happened&quot;.
+<span class="ln">382</span>       *
+<span class="ln">383</span>       * Writing the decision before acting is still right, because an allowed action may have partial
+<span class="ln">384</span>       * effects before failing. The failure row records the outcome separately from the policy
+<span class="ln">385</span>       * decision.
+<span class="ln">386</span>       */
+<span class="ln">387</span>      await write(auditStore, {
+<span class="ln">388</span>        toolName,
+<span class="ln">389</span>        botId,
+<span class="ln">390</span>        actor,
+<span class="ln">391</span>        element,
+<span class="ln">392</span>        ref,
+<span class="ln">393</span>        filePath,
+<span class="ln">394</span>        pageUrl,
+<span class="ln">395</span>        decision,
+<span class="ln">396</span>        failure: error instanceof Error ? error.message : &quot;The action failed.&quot;,
+<span class="ln">397</span>      });
+<span class="ln">398</span>      throw error;
+<span class="ln">399</span>    }
+<span class="ln">400</span>    // The element&#x27;s label, attached on the way out, so the transcript can say what was acted on
+<span class="ln">401</span>    // instead of quoting a ref. The computer cannot supply this: it knows the ref, and the resolved
+<span class="ln">402</span>    // snapshot lives here. File calls carry their own path already, so there is nothing to add.
+<span class="ln">403</span>    return element &amp;&amp; result &amp;&amp; typeof result === &quot;object&quot;
+<span class="ln">404</span>      ? { ...result, element: { role: element.role, name: element.name } }
+<span class="ln">405</span>      : result;</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>策略语言不是表格，而是 CEL</h3>
+      <p><code>server/src/computer/policy.ts:21</code> 定义 deny/allow/mode，<code>server/src/computer/policy.ts:44</code> 定义上下文字段，<code>server/src/computer/policy.ts:87</code> 把动作意图拆成 activate/type/navigate/read/write_file 等效果，<code>server/src/computer/policy.ts:228</code> 执行评估。这个设计允许企业写“不要点击外部页面的 Submit”这类业务句子。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/server/src/computer/policy.ts</span> · L21-67</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">21</span>export type ActionPolicy = {
+<span class="ln">22</span>  /**
+<span class="ln">23</span>   * `enforce` blocks. `dry-run` decides and records, and lets everything through.
+<span class="ln">24</span>   *
+<span class="ln">25</span>   * Dry-run exists so an operator can write a rule against real traffic and read the audit trail
+<span class="ln">26</span>   * before it starts refusing anybody&#x27;s work. A governance feature nobody dares switch on is not a
+<span class="ln">27</span>   * governance feature.
+<span class="ln">28</span>   */
+<span class="ln">29</span>  mode: PolicyMode;
+<span class="ln">30</span>  /** Evaluated first. Any expression true means refused, whatever `allow` says. */
+<span class="ln">31</span>  deny: string[];
+<span class="ln">32</span>  /** Any expression true means permitted. Empty means nothing is permitted. */
+<span class="ln">33</span>  allow: string[];
+<span class="ln">34</span>};
+<span class="ln">35</span>
+<span class="ln">36</span>/**
+<span class="ln">37</span> * The attributes a rule can be written against.
+<span class="ln">38</span> *
+<span class="ln">39</span> * `element` is resolved by the gateway from the snapshot the server itself fetched, never from what
+<span class="ln">40</span> * the caller claimed it was clicking. A policy that decides on an attacker-supplied label is
+<span class="ln">41</span> * decoration: the whole point is that &quot;do not click Submit&quot; cannot be evaded by calling it something
+<span class="ln">42</span> * else in the request.
+<span class="ln">43</span> */
+<span class="ln">44</span>export type PolicyContext = {
+<span class="ln">45</span>  tool: { name: string };
+<span class="ln">46</span>  bot: { id: string };
+<span class="ln">47</span>  page: { url: string; host: string };
+<span class="ln">48</span>  actor: { id: string };
+<span class="ln">49</span>  element?: {
+<span class="ln">50</span>    ref: string;
+<span class="ln">51</span>    role: string;
+<span class="ln">52</span>    name: string;
+<span class="ln">53</span>    type?: string;
+<span class="ln">54</span>  };
+<span class="ln">55</span>  /**
+<span class="ln">56</span>   * The key a `computer_key` call is about to press.
+<span class="ln">57</span>   *
+<span class="ln">58</span>   * Without this, a rule about clicking is bypassed. An agent that meets a deny rule on
+<span class="ln">59</span>   * clicking &quot;Submit order&quot; will press Enter in the form instead, and the order goes through: the
+<span class="ln">60</span>   * click is refused and audited, the keypress is allowed, because nothing in the context could tell
+<span class="ln">61</span>   * one keypress from another.
+<span class="ln">62</span>   *
+<span class="ln">63</span>   * A form has two doors and the policy could only see one. Now a rule can say
+<span class="ln">64</span>   * `tool.name == &quot;computer_key&quot; &amp;&amp; key == &quot;Enter&quot;`, and an operator blocking a submit button knows
+<span class="ln">65</span>   * to block both routes, which the deny example in `.env.example` now does.
+<span class="ln">66</span>   */
+<span class="ln">67</span>  key?: string;</pre>
+      </div>
+    
+      <a class="deep-link" href="openbot/openbot-human-handoff.html">深度阅读 · Human Handoff</a>
+    </section>
+    <section class="sec" id="computer">
+      <div class="sec-no">§ <b>03</b> · COMPUTER PROCESS</div>
+      <h2 class="sec-title">浏览器电脑是<em>独立执行面</em></h2>
+      <h3><span class="arr">▸</span>agent-computer 的持久浏览器与 ARIA snapshot</h3>
+      <p>Computer 进程的关键引用是 computer token 从 <code>agent-computer/src/index.ts:64</code> 强制，文本上限在 <code>agent-computer/src/index.ts:97</code>，session map 是 <code>agent-computer/src/index.ts:123</code>；workspace 根位于 <code>agent-computer/src/index.ts:154</code>，profile 在 <code>agent-computer/src/index.ts:168</code>，snapshot 函数从 <code>agent-computer/src/index.ts:217</code> 开始并在 <code>agent-computer/src/index.ts:227</code> 递增版本；ref 定位在 <code>agent-computer/src/index.ts:243</code>，aria-ref selector 是 <code>agent-computer/src/index.ts:257</code>，空 ref 快速拒绝在 <code>agent-computer/src/index.ts:272</code>。它在 <code>agent-computer/src/index.ts:64</code> 要求 token，<code>agent-computer/src/index.ts:154</code> 固定 workspace，<code>agent-computer/src/index.ts:168</code> 创建持久 profile，<code>agent-computer/src/index.ts:217</code> 生成 AI snapshot，<code>agent-computer/src/index.ts:243</code> 和 <code>agent-computer/src/index.ts:272</code> 处理 stale ref。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/index.ts</span> · L217-285</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">217</span>async function snapshotPage(
+<span class="ln">218</span>  session: BotSession,
+<span class="ln">219</span>  target: Page,
+<span class="ln">220</span>): Promise&lt;{
+<span class="ln">221</span>  snapshotId: number;
+<span class="ln">222</span>  url: string;
+<span class="ln">223</span>  title: string;
+<span class="ln">224</span>  elements: SnapshotElement[];
+<span class="ln">225</span>  truncated: boolean;
+<span class="ln">226</span>}&gt; {
+<span class="ln">227</span>  session.snapshotId += 1;
+<span class="ln">228</span>  const yaml = await target.ariaSnapshot({ mode: &quot;ai&quot; });
+<span class="ln">229</span>  return {
+<span class="ln">230</span>    snapshotId: session.snapshotId,
+<span class="ln">231</span>    url: target.url(),
+<span class="ln">232</span>    title: await target.title(),
+<span class="ln">233</span>    ...parseAriaSnapshot(yaml),
+<span class="ln">234</span>  };
+<span class="ln">235</span>}
+<span class="ln">236</span>
+<span class="ln">237</span>/**
+<span class="ln">238</span> * Resolve a ref to a locator, refusing anything from a superseded snapshot.
+<span class="ln">239</span> *
+<span class="ln">240</span> * `aria-ref=` is a first-party Playwright selector engine, and it is the same one its MCP server uses.
+<span class="ln">241</span> * The generation check here is the caller-facing half; see the note on `snapshotId` for why both exist.
+<span class="ln">242</span> */
+<span class="ln">243</span>function locateRef(
+<span class="ln">244</span>  session: BotSession,
+<span class="ln">245</span>  target: Page,
+<span class="ln">246</span>  ref: string,
+<span class="ln">247</span>  expectedSnapshotId: number | undefined,
+<span class="ln">248</span>) {
+<span class="ln">249</span>  if (
+<span class="ln">250</span>    expectedSnapshotId !== undefined &amp;&amp;
+<span class="ln">251</span>    expectedSnapshotId !== session.snapshotId
+<span class="ln">252</span>  ) {
+<span class="ln">253</span>    throw new StaleSnapshotError(
+<span class="ln">254</span>      `That list of elements is out of date: it was taken for snapshot ${expectedSnapshotId} and the page is now at ${session.snapshotId}. Take a new snapshot and use the refs from it.`,
+<span class="ln">255</span>    );
+<span class="ln">256</span>  }
+<span class="ln">257</span>  return target.locator(`aria-ref=${ref}`);
+<span class="ln">258</span>}
+<span class="ln">259</span>
+<span class="ln">260</span>/**
+<span class="ln">261</span> * The element, or a refusal that says what to do about it.
+<span class="ln">262</span> *
+<span class="ln">263</span> * A generation check is not an existence check. A ref from
+<span class="ln">264</span> * the current snapshot that names nothing on the page, because a model invented it or because the
+<span class="ln">265</span> * page moved on without a new snapshot being taken, passes `locateRef` and then simply waits. The
+<span class="ln">266</span> * action times out, and the caller gets a generic failure carrying Playwright&#x27;s internal call log
+<span class="ln">267</span> * instead of the actionable answer: take a fresh snapshot.
+<span class="ln">268</span> *
+<span class="ln">269</span> * `count()` resolves immediately rather than waiting, so a ref that names nothing is refused in
+<span class="ln">270</span> * milliseconds instead of holding the action open for the full timeout.
+<span class="ln">271</span> */
+<span class="ln">272</span>async function resolveRef(
+<span class="ln">273</span>  session: BotSession,
+<span class="ln">274</span>  target: Page,
+<span class="ln">275</span>  ref: string,
+<span class="ln">276</span>  expectedSnapshotId: number | undefined,
+<span class="ln">277</span>) {
+<span class="ln">278</span>  const locator = locateRef(session, target, ref, expectedSnapshotId);
+<span class="ln">279</span>  if ((await locator.count()) === 0) {
+<span class="ln">280</span>    throw new StaleSnapshotError(
+<span class="ln">281</span>      `Nothing on this page has the ref ${ref}. Take a new snapshot and use the refs it returns.`,
+<span class="ln">282</span>    );
+<span class="ln">283</span>  }
+<span class="ln">284</span>  return locator;
+<span class="ln">285</span>}</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>Shell 是 hands，不是 judgement</h3>
+      <p><code>agent-computer/src/shell.ts:56</code> 暴露 shell runner，但文件开头反复强调策略不在这里。<code>agent-computer/src/shell.ts:79</code> 使用 bash 是为了真实命令能力，<code>agent-computer/src/shell.ts:95</code> 到 <code>agent-computer/src/shell.ts:112</code> 处理超时、abort 和输出截断。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/shell.ts</span> · L56-125</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">56</span>export function createShell(workspaceDir: string) {
+<span class="ln">57</span>  return {
+<span class="ln">58</span>    async run(input: {
+<span class="ln">59</span>      command: string;
+<span class="ln">60</span>      timeoutMs?: number;
+<span class="ln">61</span>      signal?: AbortSignal;
+<span class="ln">62</span>    }): Promise&lt;ShellResult&gt; {
+<span class="ln">63</span>      const started = Date.now();
+<span class="ln">64</span>      const timeoutMs = Math.min(
+<span class="ln">65</span>        input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+<span class="ln">66</span>        MAX_TIMEOUT_MS,
+<span class="ln">67</span>      );
+<span class="ln">68</span>
+<span class="ln">69</span>      /*
+<span class="ln">70</span>       * Through a shell on purpose. A Bot writes `apt-get install -y jq &amp;&amp; jq --version`, and pipes,
+<span class="ln">71</span>       * redirection and `&amp;&amp;` are most of why a shell is useful. Refusing them would leave something
+<span class="ln">72</span>       * that runs one binary and calls itself a shell.
+<span class="ln">73</span>       *
+<span class="ln">74</span>       * This is the argument for the container boundary rather than for string parsing: there is no
+<span class="ln">75</span>       * safe way to read a command&#x27;s intent from its text, so nothing here tries. The policy decides
+<span class="ln">76</span>       * whether this Bot may run commands at all and what they may say; the container decides what a
+<span class="ln">77</span>       * command can reach.
+<span class="ln">78</span>       */
+<span class="ln">79</span>      const child = spawn(&quot;/bin/bash&quot;, [&quot;-lc&quot;, input.command], {
+<span class="ln">80</span>        cwd: workspaceDir,
+<span class="ln">81</span>        env: { ...process.env, HOME: workspaceDir },
+<span class="ln">82</span>      });
+<span class="ln">83</span>
+<span class="ln">84</span>      let stdout = &quot;&quot;;
+<span class="ln">85</span>      let stderr = &quot;&quot;;
+<span class="ln">86</span>      let timedOut = false;
+<span class="ln">87</span>
+<span class="ln">88</span>      child.stdout.on(&quot;data&quot;, (chunk) =&gt; {
+<span class="ln">89</span>        stdout += String(chunk);
+<span class="ln">90</span>      });
+<span class="ln">91</span>      child.stderr.on(&quot;data&quot;, (chunk) =&gt; {
+<span class="ln">92</span>        stderr += String(chunk);
+<span class="ln">93</span>      });
+<span class="ln">94</span>
+<span class="ln">95</span>      const timer = setTimeout(() =&gt; {
+<span class="ln">96</span>        timedOut = true;
+<span class="ln">97</span>        child.kill(&quot;SIGKILL&quot;);
+<span class="ln">98</span>      }, timeoutMs);
+<span class="ln">99</span>
+<span class="ln">100</span>      // The person&#x27;s Stop reaches the command, not just the request that started it.
+<span class="ln">101</span>      const onAbort = () =&gt; child.kill(&quot;SIGKILL&quot;);
+<span class="ln">102</span>      input.signal?.addEventListener(&quot;abort&quot;, onAbort, { once: true });
+<span class="ln">103</span>
+<span class="ln">104</span>      const exitCode = await new Promise&lt;number&gt;((resolve) =&gt; {
+<span class="ln">105</span>        child.on(&quot;close&quot;, (code) =&gt; resolve(code ?? -1));
+<span class="ln">106</span>        child.on(&quot;error&quot;, () =&gt; resolve(-1));
+<span class="ln">107</span>      });
+<span class="ln">108</span>
+<span class="ln">109</span>      clearTimeout(timer);
+<span class="ln">110</span>      input.signal?.removeEventListener(&quot;abort&quot;, onAbort);
+<span class="ln">111</span>
+<span class="ln">112</span>      const out = clamp(stdout);
+<span class="ln">113</span>      const err = clamp(stderr);
+<span class="ln">114</span>      return {
+<span class="ln">115</span>        command: input.command,
+<span class="ln">116</span>        exitCode,
+<span class="ln">117</span>        stdout: out.text,
+<span class="ln">118</span>        stderr: err.text,
+<span class="ln">119</span>        truncated: out.truncated || err.truncated,
+<span class="ln">120</span>        timedOut,
+<span class="ln">121</span>        elapsedMs: Date.now() - started,
+<span class="ln">122</span>      };
+<span class="ln">123</span>    },
+<span class="ln">124</span>  };
+<span class="ln">125</span>}</pre>
+      </div>
+    
+      <a class="deep-link" href="openbot/openbot-connectors.html">深度阅读 · Connectors & Worker</a>
+    </section>
+    <section class="sec" id="handoff">
+      <div class="sec-no">§ <b>04</b> · HUMAN HANDOFF</div>
+      <h2 class="sec-title">一个页面只能有<em>一个驾驶者</em></h2>
+      <p>接管状态机的主线是 状态机工厂是 <code>agent-computer/src/control.ts:72</code>，get 返回副本在 <code>agent-computer/src/control.ts:83</code>；求助入口是 <code>agent-computer/src/control.ts:93</code>，secret 请求入口是 <code>agent-computer/src/control.ts:106</code>，pendingSecret 由 <code>agent-computer/src/control.ts:135</code> 限定；take 位于 <code>agent-computer/src/control.ts:162</code>，release 位于 <code>agent-computer/src/control.ts:180</code>，Bot 动作拒绝是 <code>agent-computer/src/control.ts:195</code>，humanMayDrive 是 <code>agent-computer/src/control.ts:200</code>，返回类型收在 <code>agent-computer/src/control.ts:203</code>。<code>agent-computer/src/control.ts:93</code> 允许 Bot 请求帮助但不交出权限，<code>agent-computer/src/control.ts:106</code> 要求 secret 必须绑定字段 ref，<code>agent-computer/src/control.ts:162</code> 让人接管，<code>agent-computer/src/control.ts:195</code> 在人控制时拒绝 Bot 动作。</p>
+      <h3><span class="arr">▸</span>Control state machine</h3>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/control.ts</span> · L72-127</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">72</span>export function createControl(
+<span class="ln">73</span>  now: () =&gt; string = () =&gt; new Date().toISOString(),
+<span class="ln">74</span>) {
+<span class="ln">75</span>  let state: ControlState = {
+<span class="ln">76</span>    holder: &quot;bot&quot;,
+<span class="ln">77</span>    since: now(),
+<span class="ln">78</span>    requested: false,
+<span class="ln">79</span>  };
+<span class="ln">80</span>
+<span class="ln">81</span>  return {
+<span class="ln">82</span>    /** The current state, as the surface polls it. A copy, so a caller cannot mutate the machine. */
+<span class="ln">83</span>    get(): ControlState {
+<span class="ln">84</span>      return { ...state };
+<span class="ln">85</span>    },
+<span class="ln">86</span>
+<span class="ln">87</span>    /**
+<span class="ln">88</span>     * The Bot asking for help.
+<span class="ln">89</span>     *
+<span class="ln">90</span>     * It does not take control: it says it is stuck and why, and a person decides. A Bot that could
+<span class="ln">91</span>     * hand itself to a human could also hand a human a page they never asked to see.
+<span class="ln">92</span>     */
+<span class="ln">93</span>    requestHelp(reason: unknown): ControlState {
+<span class="ln">94</span>      state = {
+<span class="ln">95</span>        ...state,
+<span class="ln">96</span>        requested: true,
+<span class="ln">97</span>        reason:
+<span class="ln">98</span>          typeof reason === &quot;string&quot; &amp;&amp; reason.trim()
+<span class="ln">99</span>            ? reason.trim()
+<span class="ln">100</span>            : &quot;The assistant needs a person to continue.&quot;,
+<span class="ln">101</span>      };
+<span class="ln">102</span>      return this.get();
+<span class="ln">103</span>    },
+<span class="ln">104</span>
+<span class="ln">105</span>    /** The Bot asking for one value it must not be told, naming the field it goes in. */
+<span class="ln">106</span>    requestSecret(input: {
+<span class="ln">107</span>      label?: unknown;
+<span class="ln">108</span>      ref?: unknown;
+<span class="ln">109</span>      snapshotId?: unknown;
+<span class="ln">110</span>    }): ControlState {
+<span class="ln">111</span>      if (typeof input.ref !== &quot;string&quot; || !input.ref.trim()) {
+<span class="ln">112</span>        throw new ControlRequestError(
+<span class="ln">113</span>          &quot;Say which field the value goes in, using a ref from your snapshot.&quot;,
+<span class="ln">114</span>        );
+<span class="ln">115</span>      }
+<span class="ln">116</span>      state = {
+<span class="ln">117</span>        ...state,
+<span class="ln">118</span>        secretWanted:
+<span class="ln">119</span>          typeof input.label === &quot;string&quot; &amp;&amp; input.label.trim()
+<span class="ln">120</span>            ? input.label.trim()
+<span class="ln">121</span>            : &quot;the value this page is asking for&quot;,
+<span class="ln">122</span>        secretRef: input.ref.trim(),
+<span class="ln">123</span>        secretSnapshotId:
+<span class="ln">124</span>          typeof input.snapshotId === &quot;number&quot; ? input.snapshotId : undefined,
+<span class="ln">125</span>      };
+<span class="ln">126</span>      return this.get();
+<span class="ln">127</span>    },</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>Supervisor 限缩 Docker socket 词汇</h3>
+      <p>Docker supervisor 的引用是 端口配置在 <code>supervisor/src/index.ts:37</code>，token 缺失由 <code>supervisor/src/index.ts:39</code> 拦截；环境变量生成从 <code>supervisor/src/index.ts:60</code> 到 <code>supervisor/src/index.ts:71</code>，中间件认证是 <code>supervisor/src/index.ts:88</code>；ensure 路由在 <code>supervisor/src/index.ts:106</code>，身份注册是 <code>supervisor/src/index.ts:113</code>，容器确保是 <code>supervisor/src/index.ts:115</code>；stop 和 reset 分别在 <code>supervisor/src/index.ts:137</code> 与 <code>supervisor/src/index.ts:151</code>。它在 <code>supervisor/src/index.ts:39</code> 没有 token 就拒绝启动，<code>supervisor/src/index.ts:60</code> 只从环境生成 container env，<code>supervisor/src/index.ts:106</code>、<code>supervisor/src/index.ts:137</code>、<code>supervisor/src/index.ts:151</code> 和 <code>supervisor/src/index.ts:165</code> 只暴露 ensure/stop/reset/list。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/supervisor/src/index.ts</span> · L86-176</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">86</span>const app = new Hono();
+<span class="ln">87</span>
+<span class="ln">88</span>app.use(&quot;*&quot;, async (context, next) =&gt; {
+<span class="ln">89</span>  // Health is open so an orchestrator can check it without holding the token.
+<span class="ln">90</span>  if (context.req.path === &quot;/health&quot;) return next();
+<span class="ln">91</span>  if (context.req.header(&quot;authorization&quot;) !== `Bearer ${token}`) {
+<span class="ln">92</span>    return context.json({ error: &quot;Unauthorized.&quot; }, 401);
+<span class="ln">93</span>  }
+<span class="ln">94</span>  return next();
+<span class="ln">95</span>});
+<span class="ln">96</span>
+<span class="ln">97</span>app.get(&quot;/health&quot;, async (context) =&gt;
+<span class="ln">98</span>  context.json({ status: &quot;ok&quot;, docker: await reachable() }),
+<span class="ln">99</span>);
+<span class="ln">100</span>
+<span class="ln">101</span>/** The Bot id in the path, validated before it becomes any kind of name. */
+<span class="ln">102</span>function resolve(raw: string) {
+<span class="ln">103</span>  return namesFor(raw);
+<span class="ln">104</span>}
+<span class="ln">105</span>
+<span class="ln">106</span>app.post(&quot;/computers/:botId/ensure&quot;, async (context) =&gt; {
+<span class="ln">107</span>  const parsed = resolve(context.req.param(&quot;botId&quot;));
+<span class="ln">108</span>  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+<span class="ln">109</span>
+<span class="ln">110</span>  try {
+<span class="ln">111</span>    // Registered before the computer is handed out, so it can prove which Bot it is from its first
+<span class="ln">112</span>    // request.
+<span class="ln">113</span>    const identity = await registerEntry(parsed.names);
+<span class="ln">114</span>
+<span class="ln">115</span>    const state = await ensure(parsed.names, {
+<span class="ln">116</span>      image,
+<span class="ln">117</span>      environment: environmentFor(parsed.names.botId),
+<span class="ln">118</span>      ...(network ? { network } : {}),
+<span class="ln">119</span>      ...(runtime ? { runtime } : {}),
+<span class="ln">120</span>      ...(memoryBytes ? { memoryBytes } : {}),
+<span class="ln">121</span>      ...(spireSocketVolume ? { spireSocketVolume } : {}),
+<span class="ln">122</span>    });
+<span class="ln">123</span>    return context.json({
+<span class="ln">124</span>      ...state,
+<span class="ln">125</span>      ...(identity.registered
+<span class="ln">126</span>        ? { spiffeId: identity.spiffeId }
+<span class="ln">127</span>        : { identity: identity.reason }),
+<span class="ln">128</span>    });
+<span class="ln">129</span>  } catch (error) {
+<span class="ln">130</span>    if (error instanceof DockerUnavailableError) {
+<span class="ln">131</span>      return context.json({ error: error.message }, 503);
+<span class="ln">132</span>    }
+<span class="ln">133</span>    throw error;
+<span class="ln">134</span>  }
+<span class="ln">135</span>});
+<span class="ln">136</span>
+<span class="ln">137</span>app.post(&quot;/computers/:botId/stop&quot;, async (context) =&gt; {
+<span class="ln">138</span>  const parsed = resolve(context.req.param(&quot;botId&quot;));
+<span class="ln">139</span>  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+<span class="ln">140</span>  try {
+<span class="ln">141</span>    const stopped = await stop(parsed.names);
+<span class="ln">142</span>    return context.json({ stopped });
+<span class="ln">143</span>  } catch (error) {
+<span class="ln">144</span>    if (error instanceof DockerUnavailableError) {
+<span class="ln">145</span>      return context.json({ error: error.message }, 503);
+<span class="ln">146</span>    }
+<span class="ln">147</span>    throw error;
+<span class="ln">148</span>  }
+<span class="ln">149</span>});
+<span class="ln">150</span>
+<span class="ln">151</span>app.post(&quot;/computers/:botId/reset&quot;, async (context) =&gt; {
+<span class="ln">152</span>  const parsed = resolve(context.req.param(&quot;botId&quot;));
+<span class="ln">153</span>  if (!parsed.ok) return context.json({ error: parsed.reason }, 400);
+<span class="ln">154</span>  try {
+<span class="ln">155</span>    const wasThere = await reset(parsed.names);
+<span class="ln">156</span>    return context.json({ reset: wasThere });
+<span class="ln">157</span>  } catch (error) {
+<span class="ln">158</span>    if (error instanceof DockerUnavailableError) {
+<span class="ln">159</span>      return context.json({ error: error.message }, 503);
+<span class="ln">160</span>    }
+<span class="ln">161</span>    throw error;
+<span class="ln">162</span>  }
+<span class="ln">163</span>});
+<span class="ln">164</span>
+<span class="ln">165</span>app.get(&quot;/computers&quot;, async (context) =&gt; {
+<span class="ln">166</span>  try {
+<span class="ln">167</span>    return context.json({ computers: await listOwned() });
+<span class="ln">168</span>  } catch (error) {
+<span class="ln">169</span>    if (error instanceof DockerUnavailableError) {
+<span class="ln">170</span>      return context.json({ error: error.message }, 503);
+<span class="ln">171</span>    }
+<span class="ln">172</span>    throw error;
+<span class="ln">173</span>  }
+<span class="ln">174</span>});
+<span class="ln">175</span>
+<span class="ln">176</span>serve({ port, fetch: app.fetch, idleTimeout: 120 });</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="worker">
+      <div class="sec-no">§ <b>05</b> · CONNECTORS</div>
+      <h2 class="sec-title">知识源同步：<em>cursor 不能先提交</em></h2>
+      <p>worker runner 的引用是 runner 入口是 <code>worker/src/connector-runner.ts:17</code>，discover 调用位于 <code>worker/src/connector-runner.ts:23</code>，batch 路径由 <code>worker/src/connector-runner.ts:27</code> 选择；fallback 能力检查在 <code>worker/src/connector-runner.ts:30</code>，逐条 apply 在 <code>worker/src/connector-runner.ts:35</code>，cursor 提交在 <code>worker/src/connector-runner.ts:36</code>；成功记录是 <code>worker/src/connector-runner.ts:40</code>，失败记录和重抛分别是 <code>worker/src/connector-runner.ts:41</code>、<code>worker/src/connector-runner.ts:42</code>、<code>worker/src/connector-runner.ts:43</code>。<code>worker/src/connector-runner.ts:23</code> 调用 adapter.discover，<code>worker/src/connector-runner.ts:27</code> 优先 batch 持久化，<code>worker/src/connector-runner.ts:35</code> 逐条 apply，<code>worker/src/connector-runner.ts:36</code> 到 <code>worker/src/connector-runner.ts:38</code> 只在变更成功后提交 cursor，<code>worker/src/connector-runner.ts:41</code> 到 <code>worker/src/connector-runner.ts:43</code> 失败时记录失败并抛出。</p>
+      <h3><span class="arr">▸</span>runner 核心实现</h3>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/worker/src/connector-runner.ts</span> · L17-45</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">17</span>export async function runConnector(
+<span class="ln">18</span>  adapter: ConnectorAdapter,
+<span class="ln">19</span>  persistence: ConnectorPersistence,
+<span class="ln">20</span>  mode: &quot;sync&quot; | &quot;reconcile&quot; = &quot;sync&quot;,
+<span class="ln">21</span>) {
+<span class="ln">22</span>  try {
+<span class="ln">23</span>    const discovered = await adapter.discover({
+<span class="ln">24</span>      cursor: await persistence.cursor(),
+<span class="ln">25</span>      mode,
+<span class="ln">26</span>    });
+<span class="ln">27</span>    if (persistence.persistBatch) {
+<span class="ln">28</span>      await persistence.persistBatch(discovered.changes, discovered.nextCursor);
+<span class="ln">29</span>    } else {
+<span class="ln">30</span>      if (!persistence.apply || !persistence.commitCursor) {
+<span class="ln">31</span>        throw new Error(
+<span class="ln">32</span>          &quot;Connector persistence must support batch or individual writes.&quot;,
+<span class="ln">33</span>        );
+<span class="ln">34</span>      }
+<span class="ln">35</span>      for (const change of discovered.changes) await persistence.apply(change);
+<span class="ln">36</span>      if (discovered.nextCursor !== null) {
+<span class="ln">37</span>        await persistence.commitCursor(discovered.nextCursor);
+<span class="ln">38</span>      }
+<span class="ln">39</span>    }
+<span class="ln">40</span>    await persistence.recordRun?.(&quot;succeeded&quot;);
+<span class="ln">41</span>  } catch (error) {
+<span class="ln">42</span>    await persistence.recordRun?.(&quot;failed&quot;);
+<span class="ln">43</span>    throw error;
+<span class="ln">44</span>  }
+<span class="ln">45</span>}</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>测试把失败路径写清楚</h3>
+      <p><code>worker/tests/connector-runner.test.ts:5</code> 验证成功后提交 cursor，<code>worker/tests/connector-runner.test.ts:27</code> 验证失败不推进 cursor，<code>worker/tests/connector-runner.test.ts:51</code> 验证 reconcile mode 与 run status。这里的价值是同步层不会因为半批失败把游标推过头。</p>
+    </section>
+    <section class="sec" id="tests">
+      <div class="sec-no">§ <b>06</b> · TESTS &amp; RISKS</div>
+      <h2 class="sec-title">测试关注的是<em>拒绝路径</em></h2>
+      <h3><span class="arr">▸</span>Gateway test</h3>
+      <p><code>server/tests/computer-gateway.test.ts:15</code> 到 <code>server/tests/computer-gateway.test.ts:23</code> 把 gateway 保证写成四条性质，<code>server/tests/computer-gateway.test.ts:224</code> 验证拒绝动作不到 computer，<code>server/tests/computer-gateway.test.ts:257</code> 验证策略看 server 解析的 element，而不是调用者伪造的 label。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/server/tests/computer-gateway.test.ts</span> · L210-274</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">210</span>describe(&quot;the computer gateway&quot;, () =&gt; {
+<span class="ln">211</span>  test(&quot;carries out an allowed action and records it&quot;, async () =&gt; {
+<span class="ln">212</span>    const { gateway, calls, rows } = await gatewayWith(PERMISSIVE);
+<span class="ln">213</span>    await gateway.click(&quot;bot-1&quot;, ACTOR, {
+<span class="ln">214</span>      ref: &quot;e9&quot;,
+<span class="ln">215</span>      snapshotId: 7,
+<span class="ln">216</span>    });
+<span class="ln">217</span>
+<span class="ln">218</span>    expect(calls).toEqual([&quot;click&quot;]);
+<span class="ln">219</span>    expect(rows).toHaveLength(1);
+<span class="ln">220</span>    expect(rows[0]?.eventType).toBe(&quot;computer.action_allowed&quot;);
+<span class="ln">221</span>    expect(rows[0]?.targetId).toBe(&quot;bot-1&quot;);
+<span class="ln">222</span>  });
+<span class="ln">223</span>
+<span class="ln">224</span>  test(&quot;a refused action never reaches the computer&quot;, async () =&gt; {
+<span class="ln">225</span>    const { gateway, calls, rows } = await gatewayWith({
+<span class="ln">226</span>      ...PERMISSIVE,
+<span class="ln">227</span>      deny: [&#x27;contains(element.name, &quot;submit&quot;)&#x27;],
+<span class="ln">228</span>    });
+<span class="ln">229</span>
+<span class="ln">230</span>    await expect(
+<span class="ln">231</span>      gateway.click(&quot;bot-1&quot;, ACTOR, { ref: &quot;e9&quot;, snapshotId: 7 }),
+<span class="ln">232</span>    ).rejects.toThrow(ActionRefusedError);
+<span class="ln">233</span>
+<span class="ln">234</span>    // The decision happens before the effect.
+<span class="ln">235</span>    expect(calls).toEqual([]);
+<span class="ln">236</span>    expect(rows).toHaveLength(1);
+<span class="ln">237</span>    expect(rows[0]?.eventType).toBe(&quot;computer.action_refused&quot;);
+<span class="ln">238</span>    expect(rows[0]?.targetId).toBe(&quot;bot-1&quot;);
+<span class="ln">239</span>  });
+<span class="ln">240</span>
+<span class="ln">241</span>  test(&quot;the refusal names the rule, so an operator can find it&quot;, async () =&gt; {
+<span class="ln">242</span>    const { gateway } = await gatewayWith({
+<span class="ln">243</span>      ...PERMISSIVE,
+<span class="ln">244</span>      deny: [&#x27;contains(element.name, &quot;submit&quot;)&#x27;],
+<span class="ln">245</span>    });
+<span class="ln">246</span>
+<span class="ln">247</span>    const error = await gateway
+<span class="ln">248</span>      .click(&quot;bot-1&quot;, ACTOR, { ref: &quot;e9&quot;, snapshotId: 7 })
+<span class="ln">249</span>      .catch((caught: unknown) =&gt; caught);
+<span class="ln">250</span>
+<span class="ln">251</span>    expect(error).toBeInstanceOf(ActionRefusedError);
+<span class="ln">252</span>    expect((error as ActionRefusedError).rule).toBe(
+<span class="ln">253</span>      &#x27;contains(element.name, &quot;submit&quot;)&#x27;,
+<span class="ln">254</span>    );
+<span class="ln">255</span>  });
+<span class="ln">256</span>
+<span class="ln">257</span>  test(&quot;the policy sees the element the SERVER resolved, not what the caller claimed&quot;, async () =&gt; {
+<span class="ln">258</span>    // The evasion this prevents: calling the Submit button something harmless in the request. The
+<span class="ln">259</span>    // caller only ever sends a ref, and the gateway looks it up in the snapshot it fetched itself.
+<span class="ln">260</span>    const { gateway, calls } = await gatewayWith({
+<span class="ln">261</span>      ...PERMISSIVE,
+<span class="ln">262</span>      deny: [&#x27;contains(element.name, &quot;submit&quot;)&#x27;],
+<span class="ln">263</span>    });
+<span class="ln">264</span>
+<span class="ln">265</span>    await expect(
+<span class="ln">266</span>      gateway.click(&quot;bot-1&quot;, ACTOR, {
+<span class="ln">267</span>        ref: &quot;e9&quot;,
+<span class="ln">268</span>        snapshotId: 7,
+<span class="ln">269</span>        // Not part of the input contract, and must not influence anything even when supplied.
+<span class="ln">270</span>        ...({ name: &quot;Continue&quot;, element: { name: &quot;Continue&quot; } } as object),
+<span class="ln">271</span>      }),
+<span class="ln">272</span>    ).rejects.toThrow(ActionRefusedError);
+<span class="ln">273</span>    expect(calls).toEqual([]);
+<span class="ln">274</span>  });</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>亮点</h3><div class="g2"><div class="card"><div class="card-h">源码亮点 1</div><div class="card-d">Policy gateway 把 ref 解析、策略判断、审计写入和真实动作串成唯一通道，拒绝动作不会到达 computer。</div></div>
+<div class="card"><div class="card-h">源码亮点 2</div><div class="card-d">Computer supervisor 把 Docker socket 缩成 Bot 语义词汇，API server 即使被打穿也不能任意操作 Docker。</div></div>
+<div class="card"><div class="card-h">源码亮点 3</div><div class="card-d">Human handoff 是独立 state machine，拒绝两个驾驶者同时控制同一页面，secret value 不进状态。</div></div>
+<div class="card"><div class="card-h">源码亮点 4</div><div class="card-d">Connector runner 支持 batch 或逐条持久化，并且失败时不推进 cursor，适合知识源同步。</div></div></div>
+      <h3><span class="arr">▸</span>风险</h3><div class="g2"><div class="card"><div class="card-h">部署复杂度</div><div class="card-d">OpenBot 横跨 server、worker、supervisor、agent-computer、app 和数据库，首次部署比单进程 agent harness 重。</div></div>
+<div class="card"><div class="card-h">策略表达能力</div><div class="card-d">CEL 带来灵活性，也要求运营方理解规则失败会 fail-closed；误写规则可能阻塞真实工作。</div></div>
+<div class="card"><div class="card-h">共享电脑模式</div><div class="card-d">provider.ts 明确指出 shared provider 会共享浏览器会话、文件和登录，生产应使用 per-bot supervisor。</div></div>
+<div class="card"><div class="card-h">源码体量快速增长</div><div class="card-d">项目刚创建几天已有大量测试和子包，架构在快速变动，二次开发需要紧跟接口变化。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-21</span>
+      <span>Source · <a href="https://github.com/CopilotKit/OpenBot">CopilotKit/OpenBot</a></span>
+      <span><a href="index.html">← 返回 Trending 索引</a></span>
+    </div>
+  </main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el && map.get(el)) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:60}, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*1.4+0.2, a: Math.random(), s: Math.random()*0.02+0.005 }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#62d6c8'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

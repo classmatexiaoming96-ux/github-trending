@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Human Handoff · 深度解析 · openbot</title>
+<meta name="description" content="CopilotKit/OpenBot 源码级深度解析：AI coworker、per-bot computer、policy gateway 与 human handoff。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star:       #62d6c8;
+  --star-soft:  #9af0e4;
+  --star-deep:  #2aa99b;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar">
+  <div class="glyph">open<b>bot</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">open<b>bot</b></div>
+      <div class="sub">Human Handoff</div>
+    </div>
+    <span class="nav-ver">TypeScript · Bun monorepo</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+<li><a href="#core"><span class="idx">01</span>核心实现</a></li>
+<li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界失败</a></li>
+<li><a href="#related"><span class="idx">04</span>关联模块</a></li></ul></nav>
+    <div class="nav-foot">
+      <div>Stars ★1,693 · created 2026-08-17</div>
+      <div><a href="https://github.com/CopilotKit/OpenBot" target="_blank">CopilotKit/OpenBot</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+  <main class="main">
+
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Human Handoff <em>深度解析</em></h1>
+      <p class="hero-desc">这一页只看 OpenBot 的一个局部模块，用真实源码行号解释它承担的契约、失败路径和与主架构的关系。</p>
+    </div>
+
+    <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2>
+      <h3><span class="arr">▸</span>状态机可单测</h3><p>human handoff 的关键是状态机独立于 Playwright。ControlState 定义在 <code>agent-computer/src/control.ts:17</code>，ControlError 是 <code>agent-computer/src/control.ts:43</code>，ControlRequestError 是 <code>agent-computer/src/control.ts:51</code>；常量 NO_SECRET_PENDING 在 <code>agent-computer/src/control.ts:59</code>，状态机工厂从 <code>agent-computer/src/control.ts:72</code> 开始，get 副本是 <code>agent-computer/src/control.ts:83</code>，requestHelp 和 requestSecret 分别是 <code>agent-computer/src/control.ts:93</code> 与 <code>agent-computer/src/control.ts:106</code> 显示 control.ts 只定义状态、错误、工厂和操作，浏览器执行留在 agent-computer index。这样 <code>agent-computer/tests/control.test.ts:1</code> 的 bun tests 可以不启动 Chrome 就覆盖拒绝路径。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/control.ts</span> · L17-85</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">17</span>export type ControlState = {
+<span class="ln">18</span>  holder: &quot;bot&quot; | &quot;human&quot;;
+<span class="ln">19</span>  since: string;
+<span class="ln">20</span>  /** Why the Bot asked, so the person knows what they are being handed. Set when the Bot requests. */
+<span class="ln">21</span>  reason?: string;
+<span class="ln">22</span>  /** True once the Bot has asked for help and no person has taken the wheel yet. */
+<span class="ln">23</span>  requested: boolean;
+<span class="ln">24</span>  /**
+<span class="ln">25</span>   * A secret the Bot is waiting for, described by its label only.
+<span class="ln">26</span>   *
+<span class="ln">27</span>   * Secret entry is scoped rather than a full takeover. The Bot names the field, says what it needs,
+<span class="ln">28</span>   * and the person types into a masked box that goes straight to the page.
+<span class="ln">29</span>   *
+<span class="ln">30</span>   * The label is all that is ever stored. The value passes through one request and is not kept here,
+<span class="ln">31</span>   * not returned, and not on any path the model reads.
+<span class="ln">32</span>   */
+<span class="ln">33</span>  secretWanted?: string;
+<span class="ln">34</span>  /**
+<span class="ln">35</span>   * Which field the secret goes in, as a ref from the Bot&#x27;s snapshot.
+<span class="ln">36</span>   *
+<span class="ln">37</span>   * Required so a secret cannot be sent to whichever field happens to have focus.
+<span class="ln">38</span>   */
+<span class="ln">39</span>  secretRef?: string;
+<span class="ln">40</span>  secretSnapshotId?: number;
+<span class="ln">41</span>};
+<span class="ln">42</span>
+<span class="ln">43</span>/** Refusal because a person is driving. Distinct from a failure, so the Bot can be told to wait. */
+<span class="ln">44</span>export class ControlError extends Error {
+<span class="ln">45</span>  constructor(message: string) {
+<span class="ln">46</span>    super(message);
+<span class="ln">47</span>    this.name = &quot;ControlError&quot;;
+<span class="ln">48</span>  }
+<span class="ln">49</span>}
+<span class="ln">50</span>
+<span class="ln">51</span>/** What a caller must say to ask for a secret. Rejected as a request error, not thrown. */
+<span class="ln">52</span>export class ControlRequestError extends Error {
+<span class="ln">53</span>  constructor(message: string) {
+<span class="ln">54</span>    super(message);
+<span class="ln">55</span>    this.name = &quot;ControlRequestError&quot;;
+<span class="ln">56</span>  }
+<span class="ln">57</span>}
+<span class="ln">58</span>
+<span class="ln">59</span>export const NO_SECRET_PENDING = &quot;Nothing is waiting for a secret.&quot;;
+<span class="ln">60</span>export const HUMAN_HAS_CONTROL =
+<span class="ln">61</span>  &quot;A person has control of the computer right now. Wait for them to hand it back before acting.&quot;;
+<span class="ln">62</span>export const TAKE_CONTROL_FIRST =
+<span class="ln">63</span>  &quot;Take control before driving the computer yourself.&quot;;
+<span class="ln">64</span>
+<span class="ln">65</span>/**
+<span class="ln">66</span> * The wheel, as a state machine.
+<span class="ln">67</span> *
+<span class="ln">68</span> * A factory rather than a module-level `let` so a test can have its own, and so two of these cannot
+<span class="ln">69</span> * accidentally share state. `now` is injected for the same reason: `since` is part of the published
+<span class="ln">70</span> * state, and a test that cannot control the clock has to either skip it or match it loosely.
+<span class="ln">71</span> */
+<span class="ln">72</span>export function createControl(
+<span class="ln">73</span>  now: () =&gt; string = () =&gt; new Date().toISOString(),
+<span class="ln">74</span>) {
+<span class="ln">75</span>  let state: ControlState = {
+<span class="ln">76</span>    holder: &quot;bot&quot;,
+<span class="ln">77</span>    since: now(),
+<span class="ln">78</span>    requested: false,
+<span class="ln">79</span>  };
+<span class="ln">80</span>
+<span class="ln">81</span>  return {
+<span class="ln">82</span>    /** The current state, as the surface polls it. A copy, so a caller cannot mutate the machine. */
+<span class="ln">83</span>    get(): ControlState {
+<span class="ln">84</span>      return { ...state };
+<span class="ln">85</span>    },</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="core"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      <h3><span class="arr">▸</span>Bot 请求帮助，不等于人已经接管</h3><p>空 ref 在 <code>agent-computer/src/control.ts:111</code> 拒绝，secret 状态写入从 <code>agent-computer/src/control.ts:116</code> 开始；pendingSecret 在 <code>agent-computer/src/control.ts:135</code> 返回受限字段，secretSupplied 在 <code>agent-computer/src/control.ts:146</code> 清理；take/release 分别是 <code>agent-computer/src/control.ts:162</code> 和 <code>agent-computer/src/control.ts:180</code>，Bot 行动拒绝与 human driving 判断是 <code>agent-computer/src/control.ts:195</code>、<code>agent-computer/src/control.ts:200</code> 说明 state machine 的细节：<code>agent-computer/src/control.ts:93</code> 只设置 requested/reason，<code>agent-computer/src/control.ts:162</code> 才切 holder，<code>agent-computer/src/control.ts:195</code> 在 human holder 下拒绝 Bot 动作。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/control.ts</span> · L87-127</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">87</span>    /**
+<span class="ln">88</span>     * The Bot asking for help.
+<span class="ln">89</span>     *
+<span class="ln">90</span>     * It does not take control: it says it is stuck and why, and a person decides. A Bot that could
+<span class="ln">91</span>     * hand itself to a human could also hand a human a page they never asked to see.
+<span class="ln">92</span>     */
+<span class="ln">93</span>    requestHelp(reason: unknown): ControlState {
+<span class="ln">94</span>      state = {
+<span class="ln">95</span>        ...state,
+<span class="ln">96</span>        requested: true,
+<span class="ln">97</span>        reason:
+<span class="ln">98</span>          typeof reason === &quot;string&quot; &amp;&amp; reason.trim()
+<span class="ln">99</span>            ? reason.trim()
+<span class="ln">100</span>            : &quot;The assistant needs a person to continue.&quot;,
+<span class="ln">101</span>      };
+<span class="ln">102</span>      return this.get();
+<span class="ln">103</span>    },
+<span class="ln">104</span>
+<span class="ln">105</span>    /** The Bot asking for one value it must not be told, naming the field it goes in. */
+<span class="ln">106</span>    requestSecret(input: {
+<span class="ln">107</span>      label?: unknown;
+<span class="ln">108</span>      ref?: unknown;
+<span class="ln">109</span>      snapshotId?: unknown;
+<span class="ln">110</span>    }): ControlState {
+<span class="ln">111</span>      if (typeof input.ref !== &quot;string&quot; || !input.ref.trim()) {
+<span class="ln">112</span>        throw new ControlRequestError(
+<span class="ln">113</span>          &quot;Say which field the value goes in, using a ref from your snapshot.&quot;,
+<span class="ln">114</span>        );
+<span class="ln">115</span>      }
+<span class="ln">116</span>      state = {
+<span class="ln">117</span>        ...state,
+<span class="ln">118</span>        secretWanted:
+<span class="ln">119</span>          typeof input.label === &quot;string&quot; &amp;&amp; input.label.trim()
+<span class="ln">120</span>            ? input.label.trim()
+<span class="ln">121</span>            : &quot;the value this page is asking for&quot;,
+<span class="ln">122</span>        secretRef: input.ref.trim(),
+<span class="ln">123</span>        secretSnapshotId:
+<span class="ln">124</span>          typeof input.snapshotId === &quot;number&quot; ? input.snapshotId : undefined,
+<span class="ln">125</span>      };
+<span class="ln">126</span>      return this.get();
+<span class="ln">127</span>    },</pre>
+      </div>
+    
+      <h3><span class="arr">▸</span>secret 是一次性、定字段、无值状态</h3><p><code>agent-computer/src/control.ts:106</code> 要求 label/ref/snapshotId，<code>agent-computer/src/control.ts:111</code> 对空 ref 抛 request error，<code>agent-computer/src/control.ts:135</code> 只返回 ref 和 snapshotId，<code>agent-computer/src/control.ts:146</code> 供应后清空请求。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/agent-computer/src/control.ts</span> · L129-203</span><span>TypeScript</span></div>
+        <pre class="code"><span class="ln">129</span>    /**
+<span class="ln">130</span>     * The pending secret request, or null.
+<span class="ln">131</span>     *
+<span class="ln">132</span>     * Read before typing so the caller can refuse when nothing asked for one: this is what keeps the
+<span class="ln">133</span>     * masked box from being a general-purpose way to type into the page.
+<span class="ln">134</span>     */
+<span class="ln">135</span>    pendingSecret(): { ref: string; snapshotId?: number } | null {
+<span class="ln">136</span>      if (!state.secretWanted || !state.secretRef) return null;
+<span class="ln">137</span>      return { ref: state.secretRef, snapshotId: state.secretSnapshotId };
+<span class="ln">138</span>    },
+<span class="ln">139</span>
+<span class="ln">140</span>    /**
+<span class="ln">141</span>     * The secret landed, so the request is closed.
+<span class="ln">142</span>     *
+<span class="ln">143</span>     * Called only after the value reaches the field. A failure leaves the request open so the person
+<span class="ln">144</span>     * can try again.
+<span class="ln">145</span>     */
+<span class="ln">146</span>    secretSupplied(): void {
+<span class="ln">147</span>      state = {
+<span class="ln">148</span>        ...state,
+<span class="ln">149</span>        secretWanted: undefined,
+<span class="ln">150</span>        secretRef: undefined,
+<span class="ln">151</span>        secretSnapshotId: undefined,
+<span class="ln">152</span>      };
+<span class="ln">153</span>    },
+<span class="ln">154</span>
+<span class="ln">155</span>    /**
+<span class="ln">156</span>     * A person taking the wheel.
+<span class="ln">157</span>     *
+<span class="ln">158</span>     * `reason` survives, because it is the thing they were just asked to do. Any pending secret is
+<span class="ln">159</span>     * cleared: a person with full browser control can type the password into the page, and a masked
+<span class="ln">160</span>     * box left open behind them no longer corresponds to an active request.
+<span class="ln">161</span>     */
+<span class="ln">162</span>    take(): ControlState {
+<span class="ln">163</span>      state = {
+<span class="ln">164</span>        holder: &quot;human&quot;,
+<span class="ln">165</span>        since: now(),
+<span class="ln">166</span>        reason: state.reason,
+<span class="ln">167</span>        requested: false,
+<span class="ln">168</span>      };
+<span class="ln">169</span>      return this.get();
+<span class="ln">170</span>    },
+<span class="ln">171</span>
+<span class="ln">172</span>    /**
+<span class="ln">173</span>     * A person handing back.
+<span class="ln">174</span>     *
+<span class="ln">175</span>     * `reason` is dropped: it described the thing the person was asked to do, and once they have done
+<span class="ln">176</span>     * it, leaving it set would have the surface still showing the old request. Any pending secret goes
+<span class="ln">177</span>     * with it, a person who took the whole wheel and handed it back has dealt with the login, and a
+<span class="ln">178</span>     * secret box left open afterwards is asking for a password nothing is waiting for.
+<span class="ln">179</span>     */
+<span class="ln">180</span>    release(): ControlState {
+<span class="ln">181</span>      state = {
+<span class="ln">182</span>        holder: &quot;bot&quot;,
+<span class="ln">183</span>        since: now(),
+<span class="ln">184</span>        requested: false,
+<span class="ln">185</span>      };
+<span class="ln">186</span>      return this.get();
+<span class="ln">187</span>    },
+<span class="ln">188</span>
+<span class="ln">189</span>    /**
+<span class="ln">190</span>     * The Bot may not act while a person holds the wheel.
+<span class="ln">191</span>     *
+<span class="ln">192</span>     * Refused rather than queued. A queued click lands after the person has moved on and is worse than
+<span class="ln">193</span>     * a refusal, which the Bot can explain and wait out.
+<span class="ln">194</span>     */
+<span class="ln">195</span>    assertBotMayAct(): void {
+<span class="ln">196</span>      if (state.holder === &quot;human&quot;) throw new ControlError(HUMAN_HAS_CONTROL);
+<span class="ln">197</span>    },
+<span class="ln">198</span>
+<span class="ln">199</span>    /** Whether a person&#x27;s input should be applied. The socket being open is not permission. */
+<span class="ln">200</span>    humanMayDrive(): boolean {
+<span class="ln">201</span>      return state.holder === &quot;human&quot;;
+<span class="ln">202</span>    },
+<span class="ln">203</span>  };</pre>
+      </div>
+    
+    </section>
+    <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2>
+      <h3><span class="arr">▸</span>接管流程</h3><div class="flow">Bot stuck → requestHelp(reason)
+  → UI shows request → human take()
+  → Bot actions refused → human release()
+  → Bot may act again</div>
+      <p>server gateway 也把接管写审计：<code>server/src/computer/gateway.ts:428</code> 记录 help requested，<code>server/src/computer/gateway.ts:440</code> 记录 control taken，<code>server/src/computer/gateway.ts:452</code> 记录 release，<code>server/src/computer/gateway.ts:526</code> 到 <code>server/src/computer/gateway.ts:548</code> 记录 secret request/supply 但不记录值。</p>
+    </section>
+    <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <h3><span class="arr">▸</span>测试覆盖拒绝路径</h3><ul><li><code>agent-computer/tests/control.test.ts:103</code> 验证 open socket 不是驾驶权限。</li><li><code>agent-computer/tests/control.test.ts:150</code> 验证 secret request 必须命名字段。</li><li><code>agent-computer/tests/control.test.ts:196</code> 验证 supplied secret 会关闭请求。</li><li><code>agent-computer/tests/control.test.ts:225</code> 验证 secret value 不会进入 state。</li></ul>
+    </section>
+    <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2>
+      <h3><span class="arr">▸</span>状态不保存 secret value</h3><p>测试范围见 happy path suite 从 <code>agent-computer/tests/control.test.ts:28</code> 开始，求助不提权由 <code>agent-computer/tests/control.test.ts:40</code> 验证，take 和 release 分别由 <code>agent-computer/tests/control.test.ts:52</code>、<code>agent-computer/tests/control.test.ts:64</code> 覆盖；two drivers suite 是 <code>agent-computer/tests/control.test.ts:87</code>，open socket 非权限由 <code>agent-computer/tests/control.test.ts:103</code> 验证，secret suite 和无值状态测试分别在 <code>agent-computer/tests/control.test.ts:149</code>、<code>agent-computer/tests/control.test.ts:225</code>，覆盖 happy path、two drivers、secret lifecycle 和状态不可变。UI 侧的 tool line 则在 <code>app/src/components/channels/tool-line.tsx:13</code> 到 <code>app/src/components/channels/tool-line.tsx:78</code> 把 blocked/failed/running 显示成统一 transcript 事件。</p>
+      <p>这组设计把人类输入分成两种：<code>agent-computer/src/control.ts:200</code> 判断人是否可驾驶整页，<code>agent-computer/src/control.ts:135</code> 则只允许向已请求的字段送入 secret。一个是控制权，一个是一次性凭据通道，混在一起会扩大权限面。</p><div class="g2"><div class="card"><div class="card-h">agent-computer/src/index.ts</div><div class="card-d">HTTP routes 调用 control state machine，并持有实际 browser/page。</div></div><div class="card"><div class="card-h">app/tests/take-the-wheel.test.ts</div><div class="card-d">验证截图坐标缩放和 offset，避免人工点击映射到错误页面位置。</div></div></div>
+      <p>从审计角度看，<code>server/src/computer/gateway.ts:440</code> 记录 control_taken 时会带上 reason，而 <code>server/src/computer/gateway.ts:452</code> 记录 release 时只说明控制权归还；这让调查者能还原“为什么交给人”和“什么时候交回 Bot”，但不会把人的具体输入扩大成模型可读上下文。</p>
+    </section>
+
+
+    <div class="foot">
+      <span>Generated · 2026-08-21</span>
+      <span>Source · <a href="https://github.com/CopilotKit/OpenBot">CopilotKit/OpenBot</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+    </div>
+  </main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el && map.get(el)) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const stars = Array.from({length:60}, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*1.4+0.2, a: Math.random(), s: Math.random()*0.02+0.005 }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#62d6c8'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
