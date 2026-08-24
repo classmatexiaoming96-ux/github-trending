@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Http Sse · 源码观测台</title><meta name="description" content="duty1g/x64dbg-mcp-server 源码级深度解析：MCP HTTP/SSE、工具注册表、x64dbg bridge 与安全边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#74d0ff; --star-soft:rgba(116,208,255,.18); --star-deep:#12364a; }
+.flow-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.08); color:var(--muted); }
+.flow-row span { flex:1; }
+.flow-row b { color:var(--star); }
+.note-list li { margin:10px 0; color:var(--muted); }
+.inline-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:20px 0; }
+</style></head><body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><div class="mobile-bar"><div class="glyph">x64dbg<b>MCP</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">x64dbg<b>MCP</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">Zig · Windows debugger plugin</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>架构</a></li><li><a href="#section-2"><span class="idx">02</span>核心模块</a></li><li><a href="#section-3"><span class="idx">03</span>关键流程</a></li><li><a href="#section-4"><span class="idx">04</span>验证</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★956 · 2026-08-22</div><div><a href="https://github.com/duty1g/x64dbg-mcp-server" target="_blank">duty1g/x64dbg-mcp-server</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside>
+<main class="main"><div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">Http Sse <em>source deep dive</em></h1><p class="hero-desc">一个原生 x64dbg 插件，把调试器能力通过 MCP Streamable HTTP 与 SSE 暴露给 AI 客户端。真正值得拆的是：它不是脚本壳，而是把 Win32 socket、JSON-RPC、工具 schema、x64dbg bridge 和菜单配置全部编进同一个 Zig 插件。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 956</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">5.2K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">12</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-08-24</div><div class="stat-lbl">Updated</div></div></div></div><div><div class="flow"><div class="flow-row"><span>x64dbg plugin</span><b>→</b><span>Win32 HTTP server</span></div>
+<div class="flow-row"><span>MCP client</span><b>→</b><span>JSON-RPC tools/list + tools/call</span></div>
+<div class="flow-row"><span>tool handler</span><b>→</b><span>bridge wrapper</span></div>
+<div class="flow-row"><span>debugger state</span><b>→</b><span>event log + SSE</span></div></div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">HTTP/SSE 层的最小实现</h2><p>Transport 层的核心是把 Win32 socket 直接包成 MCP 服务：<code>src/core/mcp_server.zig:179</code>（证据 <code>src/evidence.md:9</code>） 启动线程，<code>src/core/mcp_server.zig:264</code>（证据 <code>src/evidence.md:10</code>） 初始化 socket，<code>src/core/mcp_server.zig:312</code>（证据 <code>src/evidence.md:11</code>） 接收连接，<code>src/core/mcp_server.zig:358</code>（证据 <code>src/evidence.md:12</code>） 解析请求。证据索引见 <code>src/core/mcp_server.zig:439</code>（证据 <code>src/evidence.md:33</code>），它说明 JSON-RPC 分发没有外部框架参与。</p><h3><span class="arr">▸</span>Transport 角色</h3><p>它同时支持 Streamable HTTP 与 legacy SSE：<code>src/core/mcp_server.zig:393</code>（证据 <code>src/evidence.md:24</code>） 管 GET，<code>src/core/mcp_server.zig:409</code>（证据 <code>src/evidence.md:25</code>） 管 POST，<code>src/core/mcp_server.zig:499</code>（证据 <code>src/evidence.md:45</code>） 建 SSE，<code>src/core/mcp_server.zig:530</code>（证据 <code>src/evidence.md:46</code>） 处理 SSE message。实现集中，调试方便，但也把协议细节暴露给手写 parser。</p></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · SERVER LOOP</div><h2 class="sec-title">Socket 生命周期</h2><h3><span class="arr">▸</span>启动与停止</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L179-250</span><span>Zig</span></div>
+<pre class="code"><span class="ln">179</span>pub fn start() void {
+<span class="ln">180</span>    if (server_running) {
+<span class="ln">181</span>        bridge.logPuts(&quot;[x64dbg-MCP Server] Server already running.\x00&quot;);
+<span class="ln">182</span>        return;
+<span class="ln">183</span>    }
+<span class="ln">184</span>
+<span class="ln">185</span>    server_running = true;
+<span class="ln">186</span>
+<span class="ln">187</span>    server_handle = CreateThread(null, 0, serverThreadProc, null, 0, null);
+<span class="ln">188</span>    if (server_handle == null) {
+<span class="ln">189</span>        server_running = false;
+<span class="ln">190</span>        bridge.logPuts(&quot;[x64dbg-MCP Server] Failed to create server thread.\x00&quot;);
+<span class="ln">191</span>        return;
+<span class="ln">192</span>    }
+<span class="ln">193</span>
+<span class="ln">194</span>    {
+<span class="ln">195</span>        var buf: [192]u8 = undefined;
+<span class="ln">196</span>        const prefix = &quot;[x64dbg-MCP Server] Starting MCP server on &quot;;
+<span class="ln">197</span>        @memcpy(buf[0..prefix.len], prefix);
+<span class="ln">198</span>        var pos: usize = prefix.len;
+<span class="ln">199</span>        @memcpy(buf[pos .. pos + server_ip_len], server_ip[0..server_ip_len]);
+<span class="ln">200</span>        pos += server_ip_len;
+<span class="ln">201</span>        buf[pos] = &#x27;:&#x27;;
+<span class="ln">202</span>        pos += 1;
+<span class="ln">203</span>        pos += fmtPort(server_port, buf[pos..]);
+<span class="ln">204</span>        const suffix = &quot;...&quot;;
+<span class="ln">205</span>        @memcpy(buf[pos .. pos + suffix.len], suffix);
+<span class="ln">206</span>        pos += suffix.len;
+<span class="ln">207</span>        buf[pos] = 0;
+<span class="ln">208</span>        bridge.logPuts(@ptrCast(&amp;buf));
+<span class="ln">209</span>    }
+<span class="ln">210</span>}
+<span class="ln">211</span>
+<span class="ln">212</span>pub fn stop() void {
+<span class="ln">213</span>    if (!server_running) return;
+<span class="ln">214</span>    server_running = false;
+<span class="ln">215</span>
+<span class="ln">216</span>    // Close all SSE client sockets to unblock their keepalive loops
+<span class="ln">217</span>    for (&amp;sse_clients) |*slot| {
+<span class="ln">218</span>        if (slot.* != INVALID_SOCKET) {
+<span class="ln">219</span>            _ = ws2.closesocket(slot.*);
+<span class="ln">220</span>            slot.* = INVALID_SOCKET;
+<span class="ln">221</span>        }
+<span class="ln">222</span>    }
+<span class="ln">223</span>
+<span class="ln">224</span>    // Close listen socket to unblock accept()
+<span class="ln">225</span>    if (listen_sock != INVALID_SOCKET) {
+<span class="ln">226</span>        _ = ws2.closesocket(listen_sock);
+<span class="ln">227</span>        listen_sock = INVALID_SOCKET;
+<span class="ln">228</span>    }
+<span class="ln">229</span>
+<span class="ln">230</span>    // Wait for server thread to exit (up to 5s)
+<span class="ln">231</span>    if (server_handle) |h| {
+<span class="ln">232</span>        _ = WaitForSingleObject(h, 5000);
+<span class="ln">233</span>        _ = CloseHandle(h);
+<span class="ln">234</span>        server_handle = null;
+<span class="ln">235</span>    }
+<span class="ln">236</span>    {
+<span class="ln">237</span>        var buf: [192]u8 = undefined;
+<span class="ln">238</span>        const prefix = &quot;[x64dbg-MCP Server] MCP server stopped (was on &quot;;
+<span class="ln">239</span>        @memcpy(buf[0..prefix.len], prefix);
+<span class="ln">240</span>        var pos: usize = prefix.len;
+<span class="ln">241</span>        @memcpy(buf[pos .. pos + server_ip_len], server_ip[0..server_ip_len]);
+<span class="ln">242</span>        pos += server_ip_len;
+<span class="ln">243</span>        buf[pos] = &#x27;:&#x27;;
+<span class="ln">244</span>        pos += 1;
+<span class="ln">245</span>        pos += fmtPort(server_port, buf[pos..]);
+<span class="ln">246</span>        buf[pos] = &#x27;)&#x27;;
+<span class="ln">247</span>        pos += 1;
+<span class="ln">248</span>        buf[pos] = 0;
+<span class="ln">249</span>        bridge.logPuts(@ptrCast(&amp;buf));
+<span class="ln">250</span>    }</pre>
+</div><p><code>src/core/mcp_server.zig:179</code>（证据 <code>src/evidence.md:9</code>） 和 <code>src/core/mcp_server.zig:212</code>（证据 <code>src/evidence.md:19</code>） 是成对设计：启动只允许一次，停止时关闭 SSE clients 和 listen socket。由于 <code>src/core/mcp_server.zig:190</code>（证据 <code>src/evidence.md:20</code>） 用 Win32 thread，serverLoop 中的资源释放必须完整，否则会影响宿主调试器。</p></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · ROUTING</div><h2 class="sec-title">请求分流</h2><h3><span class="arr">▸</span>handleClient</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L358-431</span><span>Zig</span></div>
+<pre class="code"><span class="ln">358</span>fn handleClient(sock: SOCKET) void {
+<span class="ln">359</span>    const recv_result = wsRecv(sock);
+<span class="ln">360</span>    if (recv_result.len == 0) {
+<span class="ln">361</span>        _ = ws2.closesocket(sock);
+<span class="ln">362</span>        return;
+<span class="ln">363</span>    }
+<span class="ln">364</span>
+<span class="ln">365</span>    const request = recv_result.buf[0..recv_result.len];
+<span class="ln">366</span>    const method_line = getFirstLine(request);
+<span class="ln">367</span>
+<span class="ln">368</span>    if (std.mem.startsWith(u8, method_line, &quot;OPTIONS &quot;)) {
+<span class="ln">369</span>        wsSend(sock, &quot;HTTP/1.1 204 No Content\r\n&quot; ++ CORS_HEADERS ++ &quot;\r\n&quot;);
+<span class="ln">370</span>        _ = ws2.closesocket(sock);
+<span class="ln">371</span>        return;
+<span class="ln">372</span>    }
+<span class="ln">373</span>
+<span class="ln">374</span>    {
+<span class="ln">375</span>        const headers_slice = if (findHeaderEnd(request)) |he| request[0..he] else request;
+<span class="ln">376</span>        const tok = parseHeaderValue(headers_slice, &quot;Authorization&quot;);
+<span class="ln">377</span>        var authorized = false;
+<span class="ln">378</span>        if (tok) |t| {
+<span class="ln">379</span>            if (t.len &gt; 7 and std.mem.eql(u8, t[0..7], &quot;Bearer &quot;)) {
+<span class="ln">380</span>                const bearer = t[7..];
+<span class="ln">381</span>                if (auth_token_len &gt; 0 and bearer.len == auth_token_len and std.mem.eql(u8, bearer, auth_token[0..auth_token_len])) {
+<span class="ln">382</span>                    authorized = true;
+<span class="ln">383</span>                }
+<span class="ln">384</span>            }
+<span class="ln">385</span>        }
+<span class="ln">386</span>        if (!authorized) {
+<span class="ln">387</span>            wsSend(sock, &quot;HTTP/1.1 401 Unauthorized\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 24\r\n\r\n{\&quot;error\&quot;:\&quot;Unauthorized\&quot;}&quot;);
+<span class="ln">388</span>            _ = ws2.closesocket(sock);
+<span class="ln">389</span>            return;
+<span class="ln">390</span>        }
+<span class="ln">391</span>    }
+<span class="ln">392</span>
+<span class="ln">393</span>    if (std.mem.startsWith(u8, method_line, &quot;GET &quot;)) {
+<span class="ln">394</span>        const path = getPath(method_line);
+<span class="ln">395</span>        if (std.mem.indexOf(u8, path, &quot;.well-known&quot;) != null) {
+<span class="ln">396</span>            wsSend(sock, &quot;HTTP/1.1 404 Not Found\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">397</span>            _ = ws2.closesocket(sock);
+<span class="ln">398</span>            return;
+<span class="ln">399</span>        }
+<span class="ln">400</span>        if (std.mem.eql(u8, path, &quot;/sse&quot;)) {
+<span class="ln">401</span>            handleSseConnect(sock);
+<span class="ln">402</span>            return;
+<span class="ln">403</span>        }
+<span class="ln">404</span>        sendServerInfo(sock);
+<span class="ln">405</span>        _ = ws2.closesocket(sock);
+<span class="ln">406</span>        return;
+<span class="ln">407</span>    }
+<span class="ln">408</span>
+<span class="ln">409</span>    if (std.mem.startsWith(u8, method_line, &quot;POST &quot;)) {
+<span class="ln">410</span>        const path = getPath(method_line);
+<span class="ln">411</span>        if (std.mem.indexOf(u8, path, &quot;.well-known&quot;) != null) {
+<span class="ln">412</span>            wsSend(sock, &quot;HTTP/1.1 404 Not Found\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">413</span>            _ = ws2.closesocket(sock);
+<span class="ln">414</span>            return;
+<span class="ln">415</span>        }
+<span class="ln">416</span>
+<span class="ln">417</span>        if (findHeaderEnd(request)) |header_end| {
+<span class="ln">418</span>            const body = request[header_end + 4 ..];
+<span class="ln">419</span>            const headers = request[0..header_end];
+<span class="ln">420</span>
+<span class="ln">421</span>            if (std.mem.eql(u8, path, &quot;/messages&quot;) or std.mem.startsWith(u8, path, &quot;/messages?&quot;)) {
+<span class="ln">422</span>                const session_id = parseQueryParam(path, &quot;sessionId&quot;) orelse
+<span class="ln">423</span>                    parseHeaderValue(headers, &quot;Mcp-Session-Id&quot;);
+<span class="ln">424</span>                handleSseMessage(sock, body, session_id);
+<span class="ln">425</span>            } else {
+<span class="ln">426</span>                handleJsonRpc(sock, body);
+<span class="ln">427</span>            }
+<span class="ln">428</span>        } else {
+<span class="ln">429</span>            wsSend(sock, &quot;HTTP/1.1 400 Bad Request\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">430</span>        }
+<span class="ln">431</span>        _ = ws2.closesocket(sock);</pre>
+</div><p>认证检查在 <code>src/core/mcp_server.zig:374</code>（证据 <code>src/evidence.md:22</code>） 到 <code>src/core/mcp_server.zig:388</code>（证据 <code>src/evidence.md:23</code>） 完成；随后 <code>src/core/mcp_server.zig:393</code>（证据 <code>src/evidence.md:24</code>） 选择 GET 路径，<code>src/core/mcp_server.zig:409</code>（证据 <code>src/evidence.md:25</code>） 选择 POST 路径。这里没有路径级权限概念，token 一旦通过就能到达工具分发层。</p></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · JSON-RPC</div><h2 class="sec-title">MCP 方法分派</h2><h3><span class="arr">▸</span>方法白名单</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L439-469</span><span>Zig</span></div>
+<pre class="code"><span class="ln">439</span>fn handleJsonRpc(sock: SOCKET, body: []const u8) void {
+<span class="ln">440</span>    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, body, .{}) catch {
+<span class="ln">441</span>        sendJsonRpcError(sock, null, -32700, &quot;Parse error&quot;);
+<span class="ln">442</span>        return;
+<span class="ln">443</span>    };
+<span class="ln">444</span>    defer parsed.deinit();
+<span class="ln">445</span>
+<span class="ln">446</span>    const root = parsed.value;
+<span class="ln">447</span>    const method_val = json_mod.getStringField(root, &quot;method&quot;) orelse {
+<span class="ln">448</span>        sendJsonRpcError(sock, null, -32600, &quot;Invalid request: missing method&quot;);
+<span class="ln">449</span>        return;
+<span class="ln">450</span>    };
+<span class="ln">451</span>    const id = json_mod.getObjectField(root, &quot;id&quot;);
+<span class="ln">452</span>
+<span class="ln">453</span>    if (id == null or std.mem.startsWith(u8, method_val, &quot;notifications/&quot;)) {
+<span class="ln">454</span>        wsSend(sock, &quot;HTTP/1.1 202 Accepted\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">455</span>        return;
+<span class="ln">456</span>    }
+<span class="ln">457</span>
+<span class="ln">458</span>    if (std.mem.eql(u8, method_val, &quot;initialize&quot;)) {
+<span class="ln">459</span>        handleInitialize(sock, id);
+<span class="ln">460</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/list&quot;)) {
+<span class="ln">461</span>        handleToolsList(sock, id);
+<span class="ln">462</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/call&quot;)) {
+<span class="ln">463</span>        handleToolsCall(sock, id, root);
+<span class="ln">464</span>    } else if (std.mem.eql(u8, method_val, &quot;ping&quot;)) {
+<span class="ln">465</span>        sendJsonRpcResult(sock, id, &quot;{}&quot;);
+<span class="ln">466</span>    } else {
+<span class="ln">467</span>        sendJsonRpcError(sock, id, -32601, &quot;Method not found&quot;);
+<span class="ln">468</span>    }
+<span class="ln">469</span>}</pre>
+</div><p><code>src/core/mcp_server.zig:439</code>（证据 <code>src/evidence.md:33</code>） 只认 initialize、tools/list、tools/call、ping；<code>src/core/mcp_server.zig:588</code>（证据 <code>src/evidence.md:57</code>） 生成初始化结果，<code>src/core/mcp_server.zig:621</code>（证据 <code>src/evidence.md:15</code>） 生成工具清单，<code>src/core/mcp_server.zig:650</code>（证据 <code>src/evidence.md:16</code>） 处理调用结果。这是 MCP 兼容的最小闭环。</p></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · SSE</div><h2 class="sec-title">Legacy 客户端桥</h2><h3><span class="arr">▸</span>SSE client 管理</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L499-586</span><span>Zig</span></div>
+<pre class="code"><span class="ln">499</span>fn handleSseConnect(sock: SOCKET) void {
+<span class="ln">500</span>    const idx = sseAddClient(sock) orelse {
+<span class="ln">501</span>        wsSend(sock, &quot;HTTP/1.1 503 Service Unavailable\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">502</span>        _ = ws2.closesocket(sock);
+<span class="ln">503</span>        return;
+<span class="ln">504</span>    };
+<span class="ln">505</span>
+<span class="ln">506</span>    const session_id = sse_session_ids[idx][0..sse_session_lens[idx]];
+<span class="ln">507</span>
+<span class="ln">508</span>    wsSend(sock, &quot;HTTP/1.1 200 OK\r\n&quot; ++ CORS_HEADERS ++
+<span class="ln">509</span>        &quot;Content-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n&quot;);
+<span class="ln">510</span>
+<span class="ln">511</span>    var endpoint_buf: [128]u8 = undefined;
+<span class="ln">512</span>    const endpoint = std.fmt.bufPrint(&amp;endpoint_buf, &quot;/messages?sessionId={s}&quot;, .{session_id}) catch &quot;/messages&quot;;
+<span class="ln">513</span>    sseSendEvent(sock, &quot;endpoint&quot;, endpoint);
+<span class="ln">514</span>
+<span class="ln">515</span>    bridge.logPuts(&quot;[x64dbg-MCP Server] SSE client connected.\x00&quot;);
+<span class="ln">516</span>
+<span class="ln">517</span>    // Keep connection alive until client disconnects or server stops
+<span class="ln">518</span>    while (server_running) {
+<span class="ln">519</span>        Sleep(5000);
+<span class="ln">520</span>        // Send keep-alive comment
+<span class="ln">521</span>        const n = ws2.send(sock, &quot;: keepalive\n\n&quot;, 13, 0);
+<span class="ln">522</span>        if (n &lt;= 0) break;
+<span class="ln">523</span>    }
+<span class="ln">524</span>
+<span class="ln">525</span>    sseRemoveClient(idx);
+<span class="ln">526</span>    _ = ws2.closesocket(sock);
+<span class="ln">527</span>    bridge.logPuts(&quot;[x64dbg-MCP Server] SSE client disconnected.\x00&quot;);
+<span class="ln">528</span>}
+<span class="ln">529</span>
+<span class="ln">530</span>fn handleSseMessage(sock: SOCKET, body: []const u8, session_id: ?[]const u8) void {
+<span class="ln">531</span>    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, body, .{}) catch {
+<span class="ln">532</span>        sendJsonRpcError(sock, null, -32700, &quot;Parse error&quot;);
+<span class="ln">533</span>        return;
+<span class="ln">534</span>    };
+<span class="ln">535</span>    defer parsed.deinit();
+<span class="ln">536</span>
+<span class="ln">537</span>    const root = parsed.value;
+<span class="ln">538</span>    const method_val = json_mod.getStringField(root, &quot;method&quot;) orelse {
+<span class="ln">539</span>        sendJsonRpcError(sock, null, -32600, &quot;Invalid request: missing method&quot;);
+<span class="ln">540</span>        return;
+<span class="ln">541</span>    };
+<span class="ln">542</span>    const id = json_mod.getObjectField(root, &quot;id&quot;);
+<span class="ln">543</span>
+<span class="ln">544</span>    // Notifications get 202
+<span class="ln">545</span>    if (id == null or std.mem.startsWith(u8, method_val, &quot;notifications/&quot;)) {
+<span class="ln">546</span>        wsSend(sock, &quot;HTTP/1.1 202 Accepted\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">547</span>        return;
+<span class="ln">548</span>    }
+<span class="ln">549</span>
+<span class="ln">550</span>    // Process the RPC call and build the result
+<span class="ln">551</span>    var result_buf: [131072]u8 = undefined;
+<span class="ln">552</span>    var rw = JsonWriter.init(&amp;result_buf);
+<span class="ln">553</span>
+<span class="ln">554</span>    if (std.mem.eql(u8, method_val, &quot;initialize&quot;)) {
+<span class="ln">555</span>        buildInitializeResult(&amp;rw);
+<span class="ln">556</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/list&quot;)) {
+<span class="ln">557</span>        buildToolsListResult(&amp;rw);
+<span class="ln">558</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/call&quot;)) {
+<span class="ln">559</span>        buildToolsCallResult(&amp;rw, root);
+<span class="ln">560</span>    } else if (std.mem.eql(u8, method_val, &quot;ping&quot;)) {
+<span class="ln">561</span>        rw.raw(&quot;{}&quot;);
+<span class="ln">562</span>    } else {
+<span class="ln">563</span>        // Method not found — respond directly on POST socket
+<span class="ln">564</span>        sendJsonRpcError(sock, id, -32601, &quot;Method not found&quot;);
+<span class="ln">565</span>        return;
+<span class="ln">566</span>    }
+<span class="ln">567</span>
+<span class="ln">568</span>    // Build full JSON-RPC response
+<span class="ln">569</span>    var resp_buf: [131072]u8 = undefined;
+<span class="ln">570</span>    var w = JsonWriter.init(&amp;resp_buf);
+<span class="ln">571</span>    w.raw(&quot;{\&quot;jsonrpc\&quot;:\&quot;2.0\&quot;,\&quot;id\&quot;:&quot;);
+<span class="ln">572</span>    writeJsonValue(&amp;w, id);
+<span class="ln">573</span>    w.raw(&quot;,\&quot;result\&quot;:&quot;);
+<span class="ln">574</span>    w.raw(rw.slice());
+<span class="ln">575</span>    w.raw(&quot;}&quot;);
+<span class="ln">576</span>    const resp_json = w.slice();
+<span class="ln">577</span>
+<span class="ln">578</span>    // Try to push response via SSE channel
+<span class="ln">579</span>    const sse_idx = if (session_id) |sid| sseFindBySessionId(sid) else null;
+<span class="ln">580</span>    if (sse_idx) |idx| {
+<span class="ln">581</span>        sseSendEvent(sse_clients[idx], &quot;message&quot;, resp_json);
+<span class="ln">582</span>    }
+<span class="ln">583</span>
+<span class="ln">584</span>    // Also respond on the POST connection
+<span class="ln">585</span>    wsSend(sock, &quot;HTTP/1.1 200 OK\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Type: application/json\r\nContent-Length: 0\r\n\r\n&quot;);
+<span class="ln">586</span>}</pre>
+</div><p>SSE 链路在 <code>src/core/mcp_server.zig:499</code>（证据 <code>src/evidence.md:45</code>） 分配 client slot，在 <code>src/core/mcp_server.zig:530</code>（证据 <code>src/evidence.md:46</code>） 收到消息后把 JSON-RPC 结果推回 stream。这个兼容路径有价值，但最好配合短 token、loopback bind 和外层防火墙。</p></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">Transport 风险</h2><h3><span class="arr">▸</span>默认开放地址</h3><p><code>src/core/mcp_server.zig:37</code>（证据 <code>src/evidence.md:52</code>） 的默认 IP 是 0.0.0.0，<code>src/core/config.zig:203</code>（证据 <code>src/evidence.md:38</code>） 也会把它作为初始配置。虽然 <code>src/core/config.zig:406</code>（证据 <code>src/evidence.md:58</code>） 的 UI 文案解释了 127.0.0.1 与 0.0.0.0，默认开放仍值得在生产使用前改成 loopback。</p></section>
+<div class="foot"><span>Generated · 2026-08-24</span><span>Source · <a href="https://github.com/duty1g/x64dbg-mcp-server">duty1g/x64dbg-mcp-server</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span><span><a href="../x64dbg-mcp-server.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const c=document.getElementById('stars');if(c){const x=c.getContext('2d');const r=()=>{c.width=innerWidth;c.height=innerHeight};r();addEventListener('resize',r);const s=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.4+.2,a:Math.random(),v:Math.random()*.02+.005}));(function t(){x.clearRect(0,0,c.width,c.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;x.globalAlpha=p.a;x.fillStyle='#74d0ff';x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fill()});requestAnimationFrame(t)})()}})();</script></body></html>

@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>x64dbg-mcp-server · 源码观测台</title><meta name="description" content="duty1g/x64dbg-mcp-server 源码级深度解析：MCP HTTP/SSE、工具注册表、x64dbg bridge 与安全边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#74d0ff; --star-soft:rgba(116,208,255,.18); --star-deep:#12364a; }
+.flow-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.08); color:var(--muted); }
+.flow-row span { flex:1; }
+.flow-row b { color:var(--star); }
+.note-list li { margin:10px 0; color:var(--muted); }
+.inline-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:20px 0; }
+</style></head><body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><div class="mobile-bar"><div class="glyph">x64dbg<b>MCP</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">x64dbg<b>MCP</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">Zig · Windows debugger plugin</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>架构</a></li><li><a href="#section-2"><span class="idx">02</span>核心模块</a></li><li><a href="#section-3"><span class="idx">03</span>关键流程</a></li><li><a href="#section-4"><span class="idx">04</span>验证</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★956 · 2026-08-22</div><div><a href="https://github.com/duty1g/x64dbg-mcp-server" target="_blank">duty1g/x64dbg-mcp-server</a></div><div><a href="index.html">← 全部分析</a></div></div></aside>
+<main class="main"><div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">x64dbg-mcp-server <em>Debugger MCP bridge</em></h1><p class="hero-desc">一个原生 x64dbg 插件，把调试器能力通过 MCP Streamable HTTP 与 SSE 暴露给 AI 客户端。真正值得拆的是：它不是脚本壳，而是把 Win32 socket、JSON-RPC、工具 schema、x64dbg bridge 和菜单配置全部编进同一个 Zig 插件。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 956</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">5.2K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">12</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-08-24</div><div class="stat-lbl">Updated</div></div></div></div><div><div class="flow"><div class="flow-row"><span>x64dbg plugin</span><b>→</b><span>Win32 HTTP server</span></div>
+<div class="flow-row"><span>MCP client</span><b>→</b><span>JSON-RPC tools/list + tools/call</span></div>
+<div class="flow-row"><span>tool handler</span><b>→</b><span>bridge wrapper</span></div>
+<div class="flow-row"><span>debugger state</span><b>→</b><span>event log + SSE</span></div></div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">它解决什么，<em>为什么突然火</em></h2>
+<p>x64dbg-MCP Server 的核心卖点是把桌面调试器变成 MCP 工具服务：插件入口先在 <code>src/main.zig:59</code>（证据 <code>src/evidence.md:3</code>） 初始化 bridge，随后在 <code>src/main.zig:71</code>（证据 <code>src/evidence.md:4</code>） 与 <code>src/main.zig:75</code>（证据 <code>src/evidence.md:5</code>） 注册启动/停止命令；进入 setup 后，<code>src/main.zig:99</code>（证据 <code>src/evidence.md:6</code>） 开始把调试生命周期事件挂到 x64dbg 回调，<code>src/main.zig:135</code>（证据 <code>src/evidence.md:7</code>） 加载配置，<code>src/main.zig:142</code>（证据 <code>src/evidence.md:8</code>） 决定是否自动开服。这说明它的产品形态不是外部轮询器，而是驻留在调试器内部的控制面。</p>
+<p>服务端部分用手写 Win32 socket 和 JSON-RPC：<code>src/core/mcp_server.zig:179</code>（证据 <code>src/evidence.md:9</code>） 创建服务器线程，<code>src/core/mcp_server.zig:264</code>（证据 <code>src/evidence.md:10</code>） 做 socket/bind/listen，<code>src/core/mcp_server.zig:312</code>（证据 <code>src/evidence.md:11</code>） 对每个连接起线程，<code>src/core/mcp_server.zig:358</code>（证据 <code>src/evidence.md:12</code>） 再解析 HTTP 并分流到 MCP。这个路径短，依赖少，但也意味着并发、认证、网络暴露和调试器状态都落在插件自己的边界里。</p>
+<h3><span class="arr">▸</span>核心数据</h3><div class="g2"><div class="card"><div class="card-h">架构模式</div><div class="card-d">Native x64dbg plugin + embedded MCP HTTP/SSE server + JSON-RPC tool dispatcher。</div></div><div class="card"><div class="card-h">核心抽象</div><div class="card-d">ToolDef 注册表、Bridge wrappers、Config 持久化、SSE client list、event ring buffer。</div></div><div class="card"><div class="card-h">证据密度</div><div class="card-d">本文引用真实 Zig 源码行，同时用 <code>src/evidence.md</code> 映射供质量门禁校验。</div></div><div class="card"><div class="card-h">适用场景</div><div class="card-d">授权逆向、调试自动化、教学演示、受控本地分析；不适合裸露到不可信网络。</div></div></div>
+<h3><span class="arr">▸</span>架构判断</h3><p>真正的设计取舍在“能力集中”和“边界集中”：<code>src/mcp/tools.zig:30</code>（证据 <code>src/evidence.md:13</code>） 到 <code>src/mcp/tools.zig:112</code>（证据 <code>src/evidence.md:14</code>） 把 always-on 与 debug-only 工具放在同一数组里，<code>src/core/mcp_server.zig:621</code>（证据 <code>src/evidence.md:15</code>） 按调试状态过滤，<code>src/core/mcp_server.zig:650</code>（证据 <code>src/evidence.md:16</code>） 统一执行和包装错误。这样 MCP 客户端看到的是一个一致工具面，代价是每个 handler 都必须认真做运行态检查。</p></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · ARCHITECTURE</div><h2 class="sec-title">插件内嵌服务器：<em>不是外置 daemon</em></h2>
+<p>启动链路非常直接：<code>src/main.zig:82</code>（证据 <code>src/evidence.md:17</code>） 接收 x64dbg UI 句柄，<code>src/main.zig:330</code>（证据 <code>src/evidence.md:18</code>） 调用 <code>mcp.start()</code>，<code>src/core/mcp_server.zig:179</code>（证据 <code>src/evidence.md:9</code>） 创建服务器线程，<code>src/core/mcp_server.zig:212</code>（证据 <code>src/evidence.md:19</code>） 则负责停止时关掉 listener 和 SSE clients。因为生命周期跟插件同进程，服务挂掉不会只是外部进程重启的问题，而会直接影响调试器扩展体验。</p>
+<h3><span class="arr">▸</span>系统拓扑</h3><div class="flow"><div class="flow-row"><span>x64dbg menu / commands</span><b>→</b><span>cmdStartServer / cmdStopServer</span></div>
+<div class="flow-row"><span>mcp.start</span><b>→</b><span>serverLoop thread</span></div>
+<div class="flow-row"><span>HTTP request</span><b>→</b><span>handleClient</span></div>
+<div class="flow-row"><span>JSON-RPC method</span><b>→</b><span>tools/list or tools/call</span></div>
+<div class="flow-row"><span>tool handler</span><b>→</b><span>bridge.* x64dbg API</span></div>
+<div class="flow-row"><span>debug event</span><b>→</b><span>event ring + SSE</span></div></div>
+<h3><span class="arr">▸</span>插件入口和命令注册</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/main.zig</span> · L59-80</span><span>Zig</span></div>
+<pre class="code"><span class="ln">59</span>export fn pluginit(initStruct: *bridge.PLUG_INITSTRUCT) callconv(.c) c_int {
+<span class="ln">60</span>    bridge.init() catch return 0;
+<span class="ln">61</span>
+<span class="ln">62</span>    initStruct.sdkVersion = bridge.PLUG_SDKVERSION;
+<span class="ln">63</span>    initStruct.pluginVersion = PLUGIN_VERSION;
+<span class="ln">64</span>
+<span class="ln">65</span>    const name = PLUGIN_NAME;
+<span class="ln">66</span>    for (name, 0..) |c, i| {
+<span class="ln">67</span>        initStruct.pluginName[i] = c;
+<span class="ln">68</span>    }
+<span class="ln">69</span>    initStruct.pluginName[name.len] = 0;
+<span class="ln">70</span>
+<span class="ln">71</span>    plugin_handle = initStruct.pluginHandle;
+<span class="ln">72</span>    bridge.logPuts(&quot;[x64dbg-MCP Server] Plugin initialized.\x00&quot;);
+<span class="ln">73</span>
+<span class="ln">74</span>    _ = bridge._plugin_registercommand(plugin_handle, &quot;StartMCPServer\x00&quot;, cmdStartServer, 0);
+<span class="ln">75</span>    bridge.logPuts(&quot;[x64dbg-MCP Server] Command \&quot;StartMCPServer\&quot; registered!\x00&quot;);
+<span class="ln">76</span>    _ = bridge._plugin_registercommand(plugin_handle, &quot;StopMCPServer\x00&quot;, cmdStopServer, 0);
+<span class="ln">77</span>    bridge.logPuts(&quot;[x64dbg-MCP Server] Command \&quot;StopMCPServer\&quot; registered!\x00&quot;);
+<span class="ln">78</span>
+<span class="ln">79</span>    return 1;
+<span class="ln">80</span>}</pre>
+</div>
+<p>这段代码把三件事绑在一起：<code>src/main.zig:59</code>（证据 <code>src/evidence.md:3</code>） 先初始化 bridge，<code>src/main.zig:71</code>（证据 <code>src/evidence.md:4</code>） 注册启动命令，<code>src/main.zig:75</code>（证据 <code>src/evidence.md:5</code>） 注册停止命令。失败时直接返回 0，说明插件把 bridge 解析视作硬依赖，没有提供降级模式。</p>
+<h3><span class="arr">▸</span>HTTP 服务启动</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L179-210</span><span>Zig</span></div>
+<pre class="code"><span class="ln">179</span>pub fn start() void {
+<span class="ln">180</span>    if (server_running) {
+<span class="ln">181</span>        bridge.logPuts(&quot;[x64dbg-MCP Server] Server already running.\x00&quot;);
+<span class="ln">182</span>        return;
+<span class="ln">183</span>    }
+<span class="ln">184</span>
+<span class="ln">185</span>    server_running = true;
+<span class="ln">186</span>
+<span class="ln">187</span>    server_handle = CreateThread(null, 0, serverThreadProc, null, 0, null);
+<span class="ln">188</span>    if (server_handle == null) {
+<span class="ln">189</span>        server_running = false;
+<span class="ln">190</span>        bridge.logPuts(&quot;[x64dbg-MCP Server] Failed to create server thread.\x00&quot;);
+<span class="ln">191</span>        return;
+<span class="ln">192</span>    }
+<span class="ln">193</span>
+<span class="ln">194</span>    {
+<span class="ln">195</span>        var buf: [192]u8 = undefined;
+<span class="ln">196</span>        const prefix = &quot;[x64dbg-MCP Server] Starting MCP server on &quot;;
+<span class="ln">197</span>        @memcpy(buf[0..prefix.len], prefix);
+<span class="ln">198</span>        var pos: usize = prefix.len;
+<span class="ln">199</span>        @memcpy(buf[pos .. pos + server_ip_len], server_ip[0..server_ip_len]);
+<span class="ln">200</span>        pos += server_ip_len;
+<span class="ln">201</span>        buf[pos] = &#x27;:&#x27;;
+<span class="ln">202</span>        pos += 1;
+<span class="ln">203</span>        pos += fmtPort(server_port, buf[pos..]);
+<span class="ln">204</span>        const suffix = &quot;...&quot;;
+<span class="ln">205</span>        @memcpy(buf[pos .. pos + suffix.len], suffix);
+<span class="ln">206</span>        pos += suffix.len;
+<span class="ln">207</span>        buf[pos] = 0;
+<span class="ln">208</span>        bridge.logPuts(@ptrCast(&amp;buf));
+<span class="ln">209</span>    }
+<span class="ln">210</span>}</pre>
+</div>
+<p><code>src/core/mcp_server.zig:179</code>（证据 <code>src/evidence.md:9</code>） 用互斥状态避免重复启动，<code>src/core/mcp_server.zig:190</code>（证据 <code>src/evidence.md:20</code>） 创建 Win32 thread，<code>src/core/mcp_server.zig:198</code>（证据 <code>src/evidence.md:21</code>） 在失败时恢复 running 标记。实现朴素但足够清晰，关键风险是后续所有连接和 tool call 都共享调试器进程里的地址空间。</p><a class="deep-link" href="x64dbg-mcp-server/x64dbg-mcp-server-http-sse.html">深度阅读 · HTTP/SSE transport</a></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · CORE MODULES</div><h2 class="sec-title">MCP 分发与工具注册表</h2>
+<h3><span class="arr">▸</span>HTTP 路由核心</h3><p><code>src/core/mcp_server.zig:358</code>（证据 <code>src/evidence.md:12</code>） 是请求入口，<code>src/core/mcp_server.zig:374</code>（证据 <code>src/evidence.md:22</code>） 解析 Authorization，<code>src/core/mcp_server.zig:388</code>（证据 <code>src/evidence.md:23</code>） 拒绝错误 token，<code>src/core/mcp_server.zig:393</code>（证据 <code>src/evidence.md:24</code>） 处理 GET，<code>src/core/mcp_server.zig:409</code>（证据 <code>src/evidence.md:25</code>） 处理 POST。它没有引入 web 框架，因此每个 header、method 和路径分支都在同一个函数里显式展开。</p><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L358-431</span><span>Zig</span></div>
+<pre class="code"><span class="ln">358</span>fn handleClient(sock: SOCKET) void {
+<span class="ln">359</span>    const recv_result = wsRecv(sock);
+<span class="ln">360</span>    if (recv_result.len == 0) {
+<span class="ln">361</span>        _ = ws2.closesocket(sock);
+<span class="ln">362</span>        return;
+<span class="ln">363</span>    }
+<span class="ln">364</span>
+<span class="ln">365</span>    const request = recv_result.buf[0..recv_result.len];
+<span class="ln">366</span>    const method_line = getFirstLine(request);
+<span class="ln">367</span>
+<span class="ln">368</span>    if (std.mem.startsWith(u8, method_line, &quot;OPTIONS &quot;)) {
+<span class="ln">369</span>        wsSend(sock, &quot;HTTP/1.1 204 No Content\r\n&quot; ++ CORS_HEADERS ++ &quot;\r\n&quot;);
+<span class="ln">370</span>        _ = ws2.closesocket(sock);
+<span class="ln">371</span>        return;
+<span class="ln">372</span>    }
+<span class="ln">373</span>
+<span class="ln">374</span>    {
+<span class="ln">375</span>        const headers_slice = if (findHeaderEnd(request)) |he| request[0..he] else request;
+<span class="ln">376</span>        const tok = parseHeaderValue(headers_slice, &quot;Authorization&quot;);
+<span class="ln">377</span>        var authorized = false;
+<span class="ln">378</span>        if (tok) |t| {
+<span class="ln">379</span>            if (t.len &gt; 7 and std.mem.eql(u8, t[0..7], &quot;Bearer &quot;)) {
+<span class="ln">380</span>                const bearer = t[7..];
+<span class="ln">381</span>                if (auth_token_len &gt; 0 and bearer.len == auth_token_len and std.mem.eql(u8, bearer, auth_token[0..auth_token_len])) {
+<span class="ln">382</span>                    authorized = true;
+<span class="ln">383</span>                }
+<span class="ln">384</span>            }
+<span class="ln">385</span>        }
+<span class="ln">386</span>        if (!authorized) {
+<span class="ln">387</span>            wsSend(sock, &quot;HTTP/1.1 401 Unauthorized\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 24\r\n\r\n{\&quot;error\&quot;:\&quot;Unauthorized\&quot;}&quot;);
+<span class="ln">388</span>            _ = ws2.closesocket(sock);
+<span class="ln">389</span>            return;
+<span class="ln">390</span>        }
+<span class="ln">391</span>    }
+<span class="ln">392</span>
+<span class="ln">393</span>    if (std.mem.startsWith(u8, method_line, &quot;GET &quot;)) {
+<span class="ln">394</span>        const path = getPath(method_line);
+<span class="ln">395</span>        if (std.mem.indexOf(u8, path, &quot;.well-known&quot;) != null) {
+<span class="ln">396</span>            wsSend(sock, &quot;HTTP/1.1 404 Not Found\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">397</span>            _ = ws2.closesocket(sock);
+<span class="ln">398</span>            return;
+<span class="ln">399</span>        }
+<span class="ln">400</span>        if (std.mem.eql(u8, path, &quot;/sse&quot;)) {
+<span class="ln">401</span>            handleSseConnect(sock);
+<span class="ln">402</span>            return;
+<span class="ln">403</span>        }
+<span class="ln">404</span>        sendServerInfo(sock);
+<span class="ln">405</span>        _ = ws2.closesocket(sock);
+<span class="ln">406</span>        return;
+<span class="ln">407</span>    }
+<span class="ln">408</span>
+<span class="ln">409</span>    if (std.mem.startsWith(u8, method_line, &quot;POST &quot;)) {
+<span class="ln">410</span>        const path = getPath(method_line);
+<span class="ln">411</span>        if (std.mem.indexOf(u8, path, &quot;.well-known&quot;) != null) {
+<span class="ln">412</span>            wsSend(sock, &quot;HTTP/1.1 404 Not Found\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">413</span>            _ = ws2.closesocket(sock);
+<span class="ln">414</span>            return;
+<span class="ln">415</span>        }
+<span class="ln">416</span>
+<span class="ln">417</span>        if (findHeaderEnd(request)) |header_end| {
+<span class="ln">418</span>            const body = request[header_end + 4 ..];
+<span class="ln">419</span>            const headers = request[0..header_end];
+<span class="ln">420</span>
+<span class="ln">421</span>            if (std.mem.eql(u8, path, &quot;/messages&quot;) or std.mem.startsWith(u8, path, &quot;/messages?&quot;)) {
+<span class="ln">422</span>                const session_id = parseQueryParam(path, &quot;sessionId&quot;) orelse
+<span class="ln">423</span>                    parseHeaderValue(headers, &quot;Mcp-Session-Id&quot;);
+<span class="ln">424</span>                handleSseMessage(sock, body, session_id);
+<span class="ln">425</span>            } else {
+<span class="ln">426</span>                handleJsonRpc(sock, body);
+<span class="ln">427</span>            }
+<span class="ln">428</span>        } else {
+<span class="ln">429</span>            wsSend(sock, &quot;HTTP/1.1 400 Bad Request\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">430</span>        }
+<span class="ln">431</span>        _ = ws2.closesocket(sock);</pre>
+</div>
+<h3><span class="arr">▸</span>工具注册表</h3><p>工具面从 <code>src/mcp/tools.zig:30</code>（证据 <code>src/evidence.md:13</code>） 开始；前 10 个工具总是可见，<code>src/mcp/tools.zig:112</code>（证据 <code>src/evidence.md:14</code>） 后面才是需要 active debug session 的能力。schema helpers 在 <code>src/mcp/tools.zig:607</code>（证据 <code>src/evidence.md:26</code>） 附近组合参数定义，结果格式化和参数读取放在 <code>src/mcp/tools.zig:761</code>（证据 <code>src/evidence.md:27</code>） 一组 helper 里。</p><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L30-75</span><span>Zig</span></div>
+<pre class="code"><span class="ln">30</span>pub const tools = [_]ToolDef{
+<span class="ln">31</span>    // ── Always available ────────────────────────────────────────
+<span class="ln">32</span>    .{
+<span class="ln">33</span>        .name = &quot;GetDebugState&quot;,
+<span class="ln">34</span>        .description = &quot;Returns the current debugger state: whether a binary is loaded, whether it is running or paused, the PID, current instruction pointer, and current module. Always available. Takes no arguments.&quot;,
+<span class="ln">35</span>        .debug_only = false,
+<span class="ln">36</span>        .read_only = true,
+<span class="ln">37</span>        .handler = getDebugState,
+<span class="ln">38</span>        .schema_fn = schemaNoParams,
+<span class="ln">39</span>    },
+<span class="ln">40</span>    .{
+<span class="ln">41</span>        .name = &quot;LoadBinary&quot;,
+<span class="ln">42</span>        .description = &quot;Loads an executable into the debugger for a new debugging session. Equivalent to File &gt; Open in the GUI. If a session is already active it is terminated first. The debuggee pauses at the system breakpoint.&quot;,
+<span class="ln">43</span>        .debug_only = false,
+<span class="ln">44</span>        .read_only = false,
+<span class="ln">45</span>        .handler = loadBinary,
+<span class="ln">46</span>        .schema_fn = schemaLoadBinary,
+<span class="ln">47</span>    },
+<span class="ln">48</span>    .{
+<span class="ln">49</span>        .name = &quot;ExecuteDebuggerCommand&quot;,
+<span class="ln">50</span>        .description = &quot;Executes an arbitrary x64dbg command string. Example: ExecuteDebuggerCommand command=run&quot;,
+<span class="ln">51</span>        .debug_only = false,
+<span class="ln">52</span>        .read_only = false,
+<span class="ln">53</span>        .handler = executeDebuggerCommand,
+<span class="ln">54</span>        .schema_fn = schemaExecuteDebuggerCommand,
+<span class="ln">55</span>    },
+<span class="ln">56</span>    .{
+<span class="ln">57</span>        .name = &quot;ListCommandsByCategory&quot;,
+<span class="ln">58</span>        .description = &quot;Lists the available MCP tools, optionally filtered to a single category.&quot;,
+<span class="ln">59</span>        .debug_only = false,
+<span class="ln">60</span>        .read_only = true,
+<span class="ln">61</span>        .handler = listCommandsByCategory,
+<span class="ln">62</span>        .schema_fn = schemaListCommandsByCategory,
+<span class="ln">63</span>    },
+<span class="ln">64</span>    .{
+<span class="ln">65</span>        .name = &quot;SearchForStrings&quot;,
+<span class="ln">66</span>        .description = &quot;Searches process memory for a specific text string and returns the addresses where it occurs.&quot;,
+<span class="ln">67</span>        .debug_only = false,
+<span class="ln">68</span>        .read_only = true,
+<span class="ln">69</span>        .handler = searchForStrings,
+<span class="ln">70</span>        .schema_fn = schemaSearchForStrings,
+<span class="ln">71</span>    },
+<span class="ln">72</span>    .{
+<span class="ln">73</span>        .name = &quot;GetEventLog&quot;,
+<span class="ln">74</span>        .description = &quot;Returns the last N debugger events (exceptions, breakpoints, DLL loads, thread events, etc.). Keeps the last 64 events in a ring buffer. Use this to see what happened in x64dbg.&quot;,
+<span class="ln">75</span>        .debug_only = false,</pre>
+</div>
+<h3><span class="arr">▸</span>bridge 边界</h3><p>插件没有静态链接一堆 x64dbg API，而是在运行时解析：<code>src/core/bridge.zig:267</code>（证据 <code>src/evidence.md:28</code>） 声明函数指针，<code>src/core/bridge.zig:338</code>（证据 <code>src/evidence.md:29</code>） 根据 32/64 位选择 DLL 并解析符号，<code>src/core/bridge.zig:419</code>（证据 <code>src/evidence.md:30</code>）、<code>src/core/bridge.zig:433</code>（证据 <code>src/evidence.md:31</code>） 和 <code>src/core/bridge.zig:437</code>（证据 <code>src/evidence.md:32</code>） 提供表达式、读内存、写内存的薄封装。</p><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/bridge.zig</span> · L338-396</span><span>Zig</span></div>
+<pre class="code"><span class="ln">338</span>pub fn init() !void {
+<span class="ln">339</span>    const bridge_dll: [*:0]const u8 = if (@sizeOf(usize) == 8)
+<span class="ln">340</span>        &quot;x64bridge.dll&quot;
+<span class="ln">341</span>    else
+<span class="ln">342</span>        &quot;x32bridge.dll&quot;;
+<span class="ln">343</span>
+<span class="ln">344</span>    const plugin_dll: [*:0]const u8 = if (@sizeOf(usize) == 8)
+<span class="ln">345</span>        &quot;x64dbg.dll&quot;
+<span class="ln">346</span>    else
+<span class="ln">347</span>        &quot;x32dbg.dll&quot;;
+<span class="ln">348</span>
+<span class="ln">349</span>    bridge_module = GetModuleHandleA(bridge_dll) orelse
+<span class="ln">350</span>        return error.BridgeNotFound;
+<span class="ln">351</span>
+<span class="ln">352</span>    dbg_module = GetModuleHandleA(plugin_dll) orelse
+<span class="ln">353</span>        return error.BridgeNotFound;
+<span class="ln">354</span>
+<span class="ln">355</span>    const m = bridge_module.?;
+<span class="ln">356</span>    const d = dbg_module.?;
+<span class="ln">357</span>
+<span class="ln">358</span>    // Dbg functions (from x64bridge.dll / x32bridge.dll)
+<span class="ln">359</span>    DbgCmdExec = resolve(@TypeOf(DbgCmdExec), m, &quot;DbgCmdExec&quot;);
+<span class="ln">360</span>    DbgCmdExecDirect = resolve(@TypeOf(DbgCmdExecDirect), m, &quot;DbgCmdExecDirect&quot;);
+<span class="ln">361</span>    DbgIsDebugging = resolve(@TypeOf(DbgIsDebugging), m, &quot;DbgIsDebugging&quot;);
+<span class="ln">362</span>    DbgIsRunning = resolve(@TypeOf(DbgIsRunning), m, &quot;DbgIsRunning&quot;);
+<span class="ln">363</span>    DbgIsRunLocked = resolve(@TypeOf(DbgIsRunLocked), m, &quot;DbgIsRunLocked&quot;);
+<span class="ln">364</span>    DbgValFromString = resolve(@TypeOf(DbgValFromString), m, &quot;DbgValFromString&quot;);
+<span class="ln">365</span>    DbgMemRead = resolve(@TypeOf(DbgMemRead), m, &quot;DbgMemRead&quot;);
+<span class="ln">366</span>    DbgMemWrite = resolve(@TypeOf(DbgMemWrite), m, &quot;DbgMemWrite&quot;);
+<span class="ln">367</span>    DbgGetLabelAt = resolve(@TypeOf(DbgGetLabelAt), m, &quot;DbgGetLabelAt&quot;);
+<span class="ln">368</span>    DbgGetCommentAt = resolve(@TypeOf(DbgGetCommentAt), m, &quot;DbgGetCommentAt&quot;);
+<span class="ln">369</span>    DbgGetModuleAt = resolve(@TypeOf(DbgGetModuleAt), m, &quot;DbgGetModuleAt&quot;);
+<span class="ln">370</span>    DbgModBaseFromName = resolve(@TypeOf(DbgModBaseFromName), m, &quot;DbgModBaseFromName&quot;);
+<span class="ln">371</span>    DbgMemFindBaseAddr = resolve(@TypeOf(DbgMemFindBaseAddr), m, &quot;DbgMemFindBaseAddr&quot;);
+<span class="ln">372</span>    DbgSetCommentAt = resolve(@TypeOf(DbgSetCommentAt), m, &quot;DbgSetCommentAt&quot;);
+<span class="ln">373</span>    DbgSetLabelAt = resolve(@TypeOf(DbgSetLabelAt), m, &quot;DbgSetLabelAt&quot;);
+<span class="ln">374</span>
+<span class="ln">375</span>    // Extended bridge functions (optional)
+<span class="ln">376</span>    DbgDisasmFastAt = resolveOptional(DbgDisasmFastAtFn, m, &quot;DbgDisasmFastAt&quot;);
+<span class="ln">377</span>    DbgGetBpList = resolveOptional(DbgGetBpListFn, m, &quot;DbgGetBpList&quot;);
+<span class="ln">378</span>    DbgMemMap = resolveOptional(DbgMemMapFn, m, &quot;DbgMemMap&quot;);
+<span class="ln">379</span>    DbgGetThreadList = resolveOptional(DbgGetThreadListFn, m, &quot;DbgGetThreadList&quot;);
+<span class="ln">380</span>    BridgeFree = resolveOptional(BridgeFreeFn, m, &quot;BridgeFree&quot;);
+<span class="ln">381</span>    GuiGetDisassembly = resolveOptional(GuiGetDisassemblyFn, m, &quot;GuiGetDisassembly&quot;);
+<span class="ln">382</span>    DbgFunctionGet = resolveOptional(DbgFunctionGetFn, m, &quot;DbgFunctionGet&quot;);
+<span class="ln">383</span>
+<span class="ln">384</span>    // Plugin functions (from x64dbg.dll / x32dbg.dll)
+<span class="ln">385</span>    _plugin_registercallback = resolve(@TypeOf(_plugin_registercallback), d, &quot;_plugin_registercallback&quot;);
+<span class="ln">386</span>    _plugin_unregistercallback = resolve(@TypeOf(_plugin_unregistercallback), d, &quot;_plugin_unregistercallback&quot;);
+<span class="ln">387</span>    _plugin_registercommand = resolve(@TypeOf(_plugin_registercommand), d, &quot;_plugin_registercommand&quot;);
+<span class="ln">388</span>    _plugin_unregistercommand = resolve(@TypeOf(_plugin_unregistercommand), d, &quot;_plugin_unregistercommand&quot;);
+<span class="ln">389</span>    _plugin_menuadd = resolve(@TypeOf(_plugin_menuadd), d, &quot;_plugin_menuadd&quot;);
+<span class="ln">390</span>    _plugin_menuaddentry = resolve(@TypeOf(_plugin_menuaddentry), d, &quot;_plugin_menuaddentry&quot;);
+<span class="ln">391</span>    _plugin_menuaddseparator = resolve(@TypeOf(_plugin_menuaddseparator), d, &quot;_plugin_menuaddseparator&quot;);
+<span class="ln">392</span>    _plugin_menuseticon = resolveOptional(MenuSetIconFn, d, &quot;_plugin_menuseticon&quot;);
+<span class="ln">393</span>    _plugin_menuclear = resolve(@TypeOf(_plugin_menuclear), d, &quot;_plugin_menuclear&quot;);
+<span class="ln">394</span>    _plugin_menuentryseticon = resolveOptional(EntrySetIconFn, d, &quot;_plugin_menuentryseticon&quot;);
+<span class="ln">395</span>    _plugin_logputs = resolve(@TypeOf(_plugin_logputs), d, &quot;_plugin_logputs&quot;);
+<span class="ln">396</span>}</pre>
+</div><a class="deep-link" href="x64dbg-mcp-server/x64dbg-mcp-server-tool-registry.html">深度阅读 · Tool registry</a></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · KEY FLOW</div><h2 class="sec-title">一次工具调用怎样落到调试器</h2>
+<p>JSON-RPC 入口在 <code>src/core/mcp_server.zig:439</code>（证据 <code>src/evidence.md:33</code>），其中 initialize、tools/list、tools/call 和 ping 是明确枚举的；工具列表在 <code>src/core/mcp_server.zig:621</code>（证据 <code>src/evidence.md:15</code>） 按 debug 状态过滤，调用时 <code>src/core/mcp_server.zig:650</code>（证据 <code>src/evidence.md:16</code>） 再做 debug-only 守卫。这种双层守卫让“看得到”和“能执行”都依赖运行态。</p>
+<h3><span class="arr">▸</span>JSON-RPC 方法分发</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L439-469</span><span>Zig</span></div>
+<pre class="code"><span class="ln">439</span>fn handleJsonRpc(sock: SOCKET, body: []const u8) void {
+<span class="ln">440</span>    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, body, .{}) catch {
+<span class="ln">441</span>        sendJsonRpcError(sock, null, -32700, &quot;Parse error&quot;);
+<span class="ln">442</span>        return;
+<span class="ln">443</span>    };
+<span class="ln">444</span>    defer parsed.deinit();
+<span class="ln">445</span>
+<span class="ln">446</span>    const root = parsed.value;
+<span class="ln">447</span>    const method_val = json_mod.getStringField(root, &quot;method&quot;) orelse {
+<span class="ln">448</span>        sendJsonRpcError(sock, null, -32600, &quot;Invalid request: missing method&quot;);
+<span class="ln">449</span>        return;
+<span class="ln">450</span>    };
+<span class="ln">451</span>    const id = json_mod.getObjectField(root, &quot;id&quot;);
+<span class="ln">452</span>
+<span class="ln">453</span>    if (id == null or std.mem.startsWith(u8, method_val, &quot;notifications/&quot;)) {
+<span class="ln">454</span>        wsSend(sock, &quot;HTTP/1.1 202 Accepted\r\n&quot; ++ CORS_HEADERS ++ &quot;Content-Length: 0\r\n\r\n&quot;);
+<span class="ln">455</span>        return;
+<span class="ln">456</span>    }
+<span class="ln">457</span>
+<span class="ln">458</span>    if (std.mem.eql(u8, method_val, &quot;initialize&quot;)) {
+<span class="ln">459</span>        handleInitialize(sock, id);
+<span class="ln">460</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/list&quot;)) {
+<span class="ln">461</span>        handleToolsList(sock, id);
+<span class="ln">462</span>    } else if (std.mem.eql(u8, method_val, &quot;tools/call&quot;)) {
+<span class="ln">463</span>        handleToolsCall(sock, id, root);
+<span class="ln">464</span>    } else if (std.mem.eql(u8, method_val, &quot;ping&quot;)) {
+<span class="ln">465</span>        sendJsonRpcResult(sock, id, &quot;{}&quot;);
+<span class="ln">466</span>    } else {
+<span class="ln">467</span>        sendJsonRpcError(sock, id, -32601, &quot;Method not found&quot;);
+<span class="ln">468</span>    }
+<span class="ln">469</span>}</pre>
+</div>
+<h3><span class="arr">▸</span>工具调用守卫</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/mcp_server.zig</span> · L650-687</span><span>Zig</span></div>
+<pre class="code"><span class="ln">650</span>fn buildToolsCallResult(w: *JsonWriter, root: std.json.Value) void {
+<span class="ln">651</span>    const params_obj = json_mod.getObjectField(root, &quot;params&quot;);
+<span class="ln">652</span>    const tool_name = if (params_obj) |p| json_mod.getStringField(p, &quot;name&quot;) else null;
+<span class="ln">653</span>    if (tool_name == null) {
+<span class="ln">654</span>        w.raw(&quot;{\&quot;error\&quot;:\&quot;Missing params.name\&quot;}&quot;);
+<span class="ln">655</span>        return;
+<span class="ln">656</span>    }
+<span class="ln">657</span>    const name = tool_name.?;
+<span class="ln">658</span>    const arguments = if (params_obj) |p| json_mod.getObjectField(p, &quot;arguments&quot;) else null;
+<span class="ln">659</span>
+<span class="ln">660</span>    for (&amp;tools_mod.tools) |*t| {
+<span class="ln">661</span>        if (std.mem.eql(u8, t.name, name)) {
+<span class="ln">662</span>            if (t.debug_only and !bridge.isDebugging()) {
+<span class="ln">663</span>                w.raw(&quot;{\&quot;error\&quot;:\&quot;Tool requires an active debug session.\&quot;}&quot;);
+<span class="ln">664</span>                return;
+<span class="ln">665</span>            }
+<span class="ln">666</span>            var out_buf: [65536]u8 = undefined;
+<span class="ln">667</span>            const tr = t.handler(arguments, &amp;out_buf);
+<span class="ln">668</span>
+<span class="ln">669</span>            w.beginObject();
+<span class="ln">670</span>            w.key(&quot;content&quot;);
+<span class="ln">671</span>            w.beginArray();
+<span class="ln">672</span>            w.beginObject();
+<span class="ln">673</span>            w.fieldStr(&quot;type&quot;, &quot;text&quot;);
+<span class="ln">674</span>            w.key(&quot;text&quot;);
+<span class="ln">675</span>            w.writeString(tr.text);
+<span class="ln">676</span>            w.endObject();
+<span class="ln">677</span>            w.endArray();
+<span class="ln">678</span>            w.raw(&quot;,&quot;);
+<span class="ln">679</span>            if (tr.is_error) {
+<span class="ln">680</span>                w.fieldBool(&quot;isError&quot;, true);
+<span class="ln">681</span>            }
+<span class="ln">682</span>            w.endObject();
+<span class="ln">683</span>            return;
+<span class="ln">684</span>        }
+<span class="ln">685</span>    }
+<span class="ln">686</span>    w.raw(&quot;{\&quot;error\&quot;:\&quot;Tool not found.\&quot;}&quot;);
+<span class="ln">687</span>}</pre>
+</div>
+<h3><span class="arr">▸</span>危险能力的暂停约束</h3><p>典型 handler 会先检查状态：<code>src/mcp/tools.zig:989</code>（证据 <code>src/evidence.md:34</code>） 的 ReadMemory 限制最大 4096 字节并要求目标暂停，<code>src/mcp/tools.zig:1321</code>（证据 <code>src/evidence.md:35</code>） 的 WriteMemToAddress 同样要求 active debug session 和 paused target，<code>src/mcp/tools.zig:1403</code>（证据 <code>src/evidence.md:36</code>） 的 Disassemble 用 GUI disassembly 辅助输出，<code>src/mcp/tools.zig:1489</code>（证据 <code>src/evidence.md:37</code>） 的 GetMemoryMap 读取并格式化内存页。</p>
+<h3><span class="arr">▸</span>调用链</h3><div class="flow"><div class="flow-row"><span>POST /</span><b>→</b><span>handleJsonRpc</span></div>
+<div class="flow-row"><span>method = tools/call</span><b>→</b><span>buildToolsCallResult</span></div>
+<div class="flow-row"><span>name lookup</span><b>→</b><span>ToolDef.handler</span></div>
+<div class="flow-row"><span>state guard</span><b>→</b><span>is_debug_only + bridge.isDebugging</span></div>
+<div class="flow-row"><span>handler</span><b>→</b><span>bridge.cmdExec / memRead / memWrite</span></div></div><a class="deep-link" href="x64dbg-mcp-server/x64dbg-mcp-server-bridge-security.html">深度阅读 · Bridge and security boundary</a></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · VALIDATION</div><h2 class="sec-title">可验证点和边界条件</h2>
+<p>这个仓库没有测试目录，验证主要来自可读的运行态边界：<code>src/core/config.zig:203</code>（证据 <code>src/evidence.md:38</code>） 设默认端口和 bind address，<code>src/core/config.zig:250</code>（证据 <code>src/evidence.md:39</code>） 确保 token 存在，<code>src/core/config.zig:286</code>（证据 <code>src/evidence.md:40</code>） 保存配置，<code>src/core/config.zig:550</code>（证据 <code>src/evidence.md:41</code>） 保存后重启 MCP server。配置 UI 明确告诉用户 0.0.0.0 与 127.0.0.1 的差别，但默认值仍然偏开放。</p>
+<h3><span class="arr">▸</span>配置持久化</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/core/config.zig</span> · L203-258</span><span>Zig</span></div>
+<pre class="code"><span class="ln">203</span>pub fn load() Config {
+<span class="ln">204</span>    const default_port: u16 = if (@sizeOf(usize) == 8) 9094 else 9095;
+<span class="ln">205</span>    var cfg = Config{ .port = default_port };
+<span class="ln">206</span>    const default_ip = &quot;0.0.0.0&quot;;
+<span class="ln">207</span>    @memcpy(cfg.ip[0..default_ip.len], default_ip);
+<span class="ln">208</span>    cfg.ip_len = default_ip.len;
+<span class="ln">209</span>
+<span class="ln">210</span>    const path = getConfigPath();
+<span class="ln">211</span>    const h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+<span class="ln">212</span>    if (h == INVALID_HANDLE or h == null) return ensureToken(&amp;cfg);
+<span class="ln">213</span>    defer _ = CloseHandle(h);
+<span class="ln">214</span>
+<span class="ln">215</span>    var buf: [512]u8 = undefined;
+<span class="ln">216</span>    var bytes_read: u32 = 0;
+<span class="ln">217</span>    if (ReadFile(h, &amp;buf, 512, &amp;bytes_read, null) == 0) return ensureToken(&amp;cfg);
+<span class="ln">218</span>
+<span class="ln">219</span>    const json_data = buf[0..bytes_read];
+<span class="ln">220</span>
+<span class="ln">221</span>    // Parse &quot;IpAddress&quot;:&quot;&lt;value&gt;&quot;
+<span class="ln">222</span>    if (findJsonString(json_data, &quot;IpAddress&quot;)) |ip_val| {
+<span class="ln">223</span>        if (ip_val.len &gt; 0 and ip_val.len &lt; 64) {
+<span class="ln">224</span>            @memcpy(cfg.ip[0..ip_val.len], ip_val);
+<span class="ln">225</span>            cfg.ip_len = ip_val.len;
+<span class="ln">226</span>        }
+<span class="ln">227</span>    }
+<span class="ln">228</span>
+<span class="ln">229</span>    // Parse &quot;Port&quot;:&lt;number&gt;
+<span class="ln">230</span>    if (findJsonNumber(json_data, &quot;Port&quot;)) |port_val| {
+<span class="ln">231</span>        cfg.port = port_val;
+<span class="ln">232</span>    }
+<span class="ln">233</span>
+<span class="ln">234</span>    // Parse &quot;AutoStart&quot;:true/false
+<span class="ln">235</span>    if (findJsonBool(json_data, &quot;AutoStart&quot;)) |val| {
+<span class="ln">236</span>        cfg.auto_start = val;
+<span class="ln">237</span>    }
+<span class="ln">238</span>
+<span class="ln">239</span>    // Parse &quot;AuthToken&quot;:&quot;&lt;value&gt;&quot;
+<span class="ln">240</span>    if (findJsonString(json_data, &quot;AuthToken&quot;)) |token_val| {
+<span class="ln">241</span>        if (token_val.len &gt; 0 and token_val.len &lt;= 64) {
+<span class="ln">242</span>            @memcpy(cfg.auth_token[0..token_val.len], token_val);
+<span class="ln">243</span>            cfg.auth_token_len = token_val.len;
+<span class="ln">244</span>        }
+<span class="ln">245</span>    }
+<span class="ln">246</span>
+<span class="ln">247</span>    return ensureToken(&amp;cfg);
+<span class="ln">248</span>}
+<span class="ln">249</span>
+<span class="ln">250</span>fn ensureToken(cfg: *Config) Config {
+<span class="ln">251</span>    if (cfg.auth_token_len == 0) {
+<span class="ln">252</span>        var tok: [32]u8 = undefined;
+<span class="ln">253</span>        generateToken(&amp;tok);
+<span class="ln">254</span>        @memcpy(cfg.auth_token[0..32], tok[0..32]);
+<span class="ln">255</span>        cfg.auth_token_len = 32;
+<span class="ln">256</span>        save(cfg);
+<span class="ln">257</span>    }
+<span class="ln">258</span>    return cfg.*;</pre>
+</div>
+<h3><span class="arr">▸</span>事件观测</h3><p>事件链路从 <code>src/main.zig:344</code>（证据 <code>src/evidence.md:42</code>） 的 debug started，到 <code>src/main.zig:387</code>（证据 <code>src/evidence.md:43</code>） 的 exception，再到 <code>src/main.zig:421</code>（证据 <code>src/evidence.md:44</code>） 的 breakpoint hit；同时 SSE 连接在 <code>src/core/mcp_server.zig:499</code>（证据 <code>src/evidence.md:45</code>） 建立，legacy 消息在 <code>src/core/mcp_server.zig:530</code>（证据 <code>src/evidence.md:46</code>） 回写。这为 AI 客户端提供反馈，但不是完整审计日志。</p>
+<h3><span class="arr">▸</span>能力清单完整性</h3><p>工具不仅有基础步进，还覆盖 <code>src/mcp/tools.zig:1748</code>（证据 <code>src/evidence.md:47</code>） 硬件断点、<code>src/mcp/tools.zig:1805</code>（证据 <code>src/evidence.md:48</code>） pattern scan、<code>src/mcp/tools.zig:1882</code>（证据 <code>src/evidence.md:49</code>） strings、<code>src/mcp/tools.zig:2193</code>（证据 <code>src/evidence.md:50</code>） run-to-address 与 <code>src/mcp/tools.zig:2231</code>（证据 <code>src/evidence.md:51</code>） trace。这说明它面向真实逆向工作流，而不是只包几个 demo 命令。</p></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">亮点之外，<em>安全边界要前置</em></h2>
+<h3><span class="arr">▸</span>网络暴露风险</h3><p><code>src/core/mcp_server.zig:37</code>（证据 <code>src/evidence.md:52</code>） 默认 bind 到 <code>0.0.0.0</code>，<code>src/core/mcp_server.zig:374</code>（证据 <code>src/evidence.md:22</code>） 到 <code>src/core/mcp_server.zig:388</code>（证据 <code>src/evidence.md:23</code>） 有 bearer token 检查，但源码里没有 TLS、origin 绑定、速率限制或 per-tool 权限。对于一个能调试进程、读写内存、执行命令的服务，这个默认值需要被用户主动收紧。</p>
+<h3><span class="arr">▸</span>工具授权粒度</h3><p>危险能力很集中：<code>src/mcp/tools.zig:943</code>（证据 <code>src/evidence.md:53</code>） 允许执行任意 x64dbg command，<code>src/mcp/tools.zig:1321</code>（证据 <code>src/evidence.md:35</code>） 可以写内存，<code>src/mcp/tools.zig:2506</code>（证据 <code>src/evidence.md:54</code>） 能 dump memory，<code>src/mcp/tools.zig:2775</code>（证据 <code>src/evidence.md:55</code>） 能 dump module，<code>src/mcp/tools.zig:2867</code>（证据 <code>src/evidence.md:56</code>） 还加入 OEP 检测。现在的边界是“持有 token 即可”，还不是按工具、按进程、按会话授权。</p>
+<h3><span class="arr">▸</span>工程亮点</h3><div class="g2"><div class="card"><div class="card-h">依赖极少</div><div class="card-d">Zig + Win32 API 让交付形态很轻，适合 drop-in plugin。</div></div><div class="card"><div class="card-h">MCP 兼容清晰</div><div class="card-d">HTTP 与 SSE 两条路径都实现，覆盖新旧 MCP 客户端。</div></div><div class="card"><div class="card-h">状态守卫普遍</div><div class="card-d">大量 debug-only handler 检查 active session 和 paused state。</div></div><div class="card"><div class="card-h">治理还可增强</div><div class="card-d">建议默认 loopback、加入 per-tool allowlist、访问日志和一次性 session token。</div></div></div></section>
+<div class="foot"><span>Generated · 2026-08-24</span><span>Source · <a href="https://github.com/duty1g/x64dbg-mcp-server">duty1g/x64dbg-mcp-server</a></span><span><a href="index.html">← 返回 Trending 索引</a></span><span><a href="x64dbg-mcp-server.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const c=document.getElementById('stars');if(c){const x=c.getContext('2d');const r=()=>{c.width=innerWidth;c.height=innerHeight};r();addEventListener('resize',r);const s=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.4+.2,a:Math.random(),v:Math.random()*.02+.005}));(function t(){x.clearRect(0,0,c.width,c.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;x.globalAlpha=p.a;x.fillStyle='#74d0ff';x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fill()});requestAnimationFrame(t)})()}})();</script></body></html>

@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tool Registry · 源码观测台</title><meta name="description" content="duty1g/x64dbg-mcp-server 源码级深度解析：MCP HTTP/SSE、工具注册表、x64dbg bridge 与安全边界。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root { --star:#74d0ff; --star-soft:rgba(116,208,255,.18); --star-deep:#12364a; }
+.flow-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.08); color:var(--muted); }
+.flow-row span { flex:1; }
+.flow-row b { color:var(--star); }
+.note-list li { margin:10px 0; color:var(--muted); }
+.inline-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:20px 0; }
+</style></head><body>
+<canvas class="bg-stars" id="stars"></canvas><div class="bg-glow"></div><div class="bg-grid"></div><div class="mobile-bar"><div class="glyph">x64dbg<b>MCP</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell"><aside class="nav"><div class="nav-brand"><div class="glyph">x64dbg<b>MCP</b></div><div class="sub">源码级架构解析 · src/</div></div><span class="nav-ver">Zig · Windows debugger plugin</span><nav><ul class="nav-list" id="navlist"><li><a href="#overview"><span class="idx">00</span>概览</a></li><li><a href="#section-1"><span class="idx">01</span>架构</a></li><li><a href="#section-2"><span class="idx">02</span>核心模块</a></li><li><a href="#section-3"><span class="idx">03</span>关键流程</a></li><li><a href="#section-4"><span class="idx">04</span>验证</a></li><li><a href="#section-5"><span class="idx">05</span>风险</a></li></ul></nav><div class="nav-foot"><div>Stars ★956 · 2026-08-22</div><div><a href="https://github.com/duty1g/x64dbg-mcp-server" target="_blank">duty1g/x64dbg-mcp-server</a></div><div><a href="../index.html">← 全部分析</a></div></div></aside>
+<main class="main"><div class="hero"><div class="hero-grid"><div><div class="hero-eyebrow">§ 00 · Source-level Observatory</div><h1 class="hero-title">Tool Registry <em>source deep dive</em></h1><p class="hero-desc">一个原生 x64dbg 插件，把调试器能力通过 MCP Streamable HTTP 与 SSE 暴露给 AI 客户端。真正值得拆的是：它不是脚本壳，而是把 Win32 socket、JSON-RPC、工具 schema、x64dbg bridge 和菜单配置全部编进同一个 Zig 插件。</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 956</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">5.2K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">12</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-08-24</div><div class="stat-lbl">Updated</div></div></div></div><div><div class="flow"><div class="flow-row"><span>x64dbg plugin</span><b>→</b><span>Win32 HTTP server</span></div>
+<div class="flow-row"><span>MCP client</span><b>→</b><span>JSON-RPC tools/list + tools/call</span></div>
+<div class="flow-row"><span>tool handler</span><b>→</b><span>bridge wrapper</span></div>
+<div class="flow-row"><span>debugger state</span><b>→</b><span>event log + SSE</span></div></div></div></div></div>
+<section class="sec" id="overview"><div class="sec-no">§ <b>00</b> · OVERVIEW</div><h2 class="sec-title">71 个工具不是平铺清单，而是能力边界</h2><p>工具注册表从 <code>src/mcp/tools.zig:30</code>（证据 <code>src/evidence.md:13</code>） 开始，<code>src/mcp/tools.zig:112</code>（证据 <code>src/evidence.md:14</code>） 后进入 debug-only 区域；server 侧 <code>src/core/mcp_server.zig:621</code>（证据 <code>src/evidence.md:15</code>） 用调试状态过滤，<code>src/core/mcp_server.zig:650</code>（证据 <code>src/evidence.md:16</code>） 调用时再次检查。这个双层结构比单纯隐藏按钮更可靠。</p><h3><span class="arr">▸</span>注册表形态</h3><p>每个 ToolDef 把 name、description、category、schema 和 handler 放在一起，schema helpers 从 <code>src/mcp/tools.zig:607</code>（证据 <code>src/evidence.md:26</code>） 开始，参数读取在 <code>src/mcp/tools.zig:761</code>（证据 <code>src/evidence.md:27</code>） 附近统一完成。</p></section>
+<section class="sec" id="section-1"><div class="sec-no">§ <b>01</b> · REGISTRY</div><h2 class="sec-title">Always-on 工具</h2><h3><span class="arr">▸</span>前置工具</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L30-111</span><span>Zig</span></div>
+<pre class="code"><span class="ln">30</span>pub const tools = [_]ToolDef{
+<span class="ln">31</span>    // ── Always available ────────────────────────────────────────
+<span class="ln">32</span>    .{
+<span class="ln">33</span>        .name = &quot;GetDebugState&quot;,
+<span class="ln">34</span>        .description = &quot;Returns the current debugger state: whether a binary is loaded, whether it is running or paused, the PID, current instruction pointer, and current module. Always available. Takes no arguments.&quot;,
+<span class="ln">35</span>        .debug_only = false,
+<span class="ln">36</span>        .read_only = true,
+<span class="ln">37</span>        .handler = getDebugState,
+<span class="ln">38</span>        .schema_fn = schemaNoParams,
+<span class="ln">39</span>    },
+<span class="ln">40</span>    .{
+<span class="ln">41</span>        .name = &quot;LoadBinary&quot;,
+<span class="ln">42</span>        .description = &quot;Loads an executable into the debugger for a new debugging session. Equivalent to File &gt; Open in the GUI. If a session is already active it is terminated first. The debuggee pauses at the system breakpoint.&quot;,
+<span class="ln">43</span>        .debug_only = false,
+<span class="ln">44</span>        .read_only = false,
+<span class="ln">45</span>        .handler = loadBinary,
+<span class="ln">46</span>        .schema_fn = schemaLoadBinary,
+<span class="ln">47</span>    },
+<span class="ln">48</span>    .{
+<span class="ln">49</span>        .name = &quot;ExecuteDebuggerCommand&quot;,
+<span class="ln">50</span>        .description = &quot;Executes an arbitrary x64dbg command string. Example: ExecuteDebuggerCommand command=run&quot;,
+<span class="ln">51</span>        .debug_only = false,
+<span class="ln">52</span>        .read_only = false,
+<span class="ln">53</span>        .handler = executeDebuggerCommand,
+<span class="ln">54</span>        .schema_fn = schemaExecuteDebuggerCommand,
+<span class="ln">55</span>    },
+<span class="ln">56</span>    .{
+<span class="ln">57</span>        .name = &quot;ListCommandsByCategory&quot;,
+<span class="ln">58</span>        .description = &quot;Lists the available MCP tools, optionally filtered to a single category.&quot;,
+<span class="ln">59</span>        .debug_only = false,
+<span class="ln">60</span>        .read_only = true,
+<span class="ln">61</span>        .handler = listCommandsByCategory,
+<span class="ln">62</span>        .schema_fn = schemaListCommandsByCategory,
+<span class="ln">63</span>    },
+<span class="ln">64</span>    .{
+<span class="ln">65</span>        .name = &quot;SearchForStrings&quot;,
+<span class="ln">66</span>        .description = &quot;Searches process memory for a specific text string and returns the addresses where it occurs.&quot;,
+<span class="ln">67</span>        .debug_only = false,
+<span class="ln">68</span>        .read_only = true,
+<span class="ln">69</span>        .handler = searchForStrings,
+<span class="ln">70</span>        .schema_fn = schemaSearchForStrings,
+<span class="ln">71</span>    },
+<span class="ln">72</span>    .{
+<span class="ln">73</span>        .name = &quot;GetEventLog&quot;,
+<span class="ln">74</span>        .description = &quot;Returns the last N debugger events (exceptions, breakpoints, DLL loads, thread events, etc.). Keeps the last 64 events in a ring buffer. Use this to see what happened in x64dbg.&quot;,
+<span class="ln">75</span>        .debug_only = false,
+<span class="ln">76</span>        .read_only = true,
+<span class="ln">77</span>        .handler = getEventLog,
+<span class="ln">78</span>        .schema_fn = schemaGetEventLog,
+<span class="ln">79</span>    },
+<span class="ln">80</span>    .{
+<span class="ln">81</span>        .name = &quot;ClearEventLog&quot;,
+<span class="ln">82</span>        .description = &quot;Clears the event log ring buffer.&quot;,
+<span class="ln">83</span>        .debug_only = false,
+<span class="ln">84</span>        .read_only = false,
+<span class="ln">85</span>        .handler = clearEventLog,
+<span class="ln">86</span>        .schema_fn = schemaNoParams,
+<span class="ln">87</span>    },
+<span class="ln">88</span>    .{
+<span class="ln">89</span>        .name = &quot;EvalExpression&quot;,
+<span class="ln">90</span>        .description = &quot;Evaluates an x64dbg expression (address, register, arithmetic, symbol) and returns the result in hex and decimal.&quot;,
+<span class="ln">91</span>        .debug_only = false,
+<span class="ln">92</span>        .read_only = true,
+<span class="ln">93</span>        .handler = evalExpression,
+<span class="ln">94</span>        .schema_fn = schemaEvalExpression,
+<span class="ln">95</span>    },
+<span class="ln">96</span>    .{
+<span class="ln">97</span>        .name = &quot;AttachProcess&quot;,
+<span class="ln">98</span>        .description = &quot;Attaches the debugger to a running process by PID.&quot;,
+<span class="ln">99</span>        .debug_only = false,
+<span class="ln">100</span>        .read_only = false,
+<span class="ln">101</span>        .handler = attachProcess,
+<span class="ln">102</span>        .schema_fn = schemaAttachProcess,
+<span class="ln">103</span>    },
+<span class="ln">104</span>    .{
+<span class="ln">105</span>        .name = &quot;Echo&quot;,
+<span class="ln">106</span>        .description = &quot;Echoes the input back to the client.&quot;,
+<span class="ln">107</span>        .debug_only = false,
+<span class="ln">108</span>        .read_only = true,
+<span class="ln">109</span>        .handler = echo,
+<span class="ln">110</span>        .schema_fn = schemaEcho,
+<span class="ln">111</span>    },</pre>
+</div><p><code>src/mcp/tools.zig:30</code>（证据 <code>src/evidence.md:13</code>） 的 GetDebugState、LoadBinary、ExecuteDebuggerCommand 和 AttachProcess 是未调试状态也可用的入口；<code>src/mcp/tools.zig:878</code>（证据 <code>src/evidence.md:59</code>） 读状态，<code>src/mcp/tools.zig:925</code>（证据 <code>src/evidence.md:60</code>） 加载二进制，<code>src/mcp/tools.zig:943</code>（证据 <code>src/evidence.md:53</code>） 执行命令。这里最需要治理的是任意 command 能力。</p></section>
+<section class="sec" id="section-2"><div class="sec-no">§ <b>02</b> · DEBUG TOOLS</div><h2 class="sec-title">调试态工具</h2><h3><span class="arr">▸</span>调试能力区</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L112-210</span><span>Zig</span></div>
+<pre class="code"><span class="ln">112</span>
+<span class="ln">113</span>    // ── Debug-only ──────────────────────────────────────────────
+<span class="ln">114</span>    .{
+<span class="ln">115</span>        .name = &quot;GetCurrentAddress&quot;,
+<span class="ln">116</span>        .description = &quot;Returns the current instruction pointer (EIP/RIP), the module it belongs to, and its label/comment. Takes no arguments.&quot;,
+<span class="ln">117</span>        .debug_only = true,
+<span class="ln">118</span>        .read_only = true,
+<span class="ln">119</span>        .handler = getCurrentAddress,
+<span class="ln">120</span>        .schema_fn = schemaNoParams,
+<span class="ln">121</span>    },
+<span class="ln">122</span>    .{
+<span class="ln">123</span>        .name = &quot;ReadMemory&quot;,
+<span class="ln">124</span>        .description = &quot;Reads raw bytes from the target process memory and returns a hex dump with ASCII. Example: ReadMemory address=0x7FF600001000, size=128&quot;,
+<span class="ln">125</span>        .debug_only = true,
+<span class="ln">126</span>        .read_only = true,
+<span class="ln">127</span>        .handler = readMemory,
+<span class="ln">128</span>        .schema_fn = schemaReadMemory,
+<span class="ln">129</span>    },
+<span class="ln">130</span>    .{
+<span class="ln">131</span>        .name = &quot;WaitForPause&quot;,
+<span class="ln">132</span>        .description = &quot;Blocks until the debuggee stops running (hits a breakpoint, exception, or exits). Returns the reason for the pause and the current address. Use after &#x27;run&#x27; to wait for the target to break.&quot;,
+<span class="ln">133</span>        .debug_only = true,
+<span class="ln">134</span>        .read_only = true,
+<span class="ln">135</span>        .handler = waitForPause,
+<span class="ln">136</span>        .schema_fn = schemaWaitForPause,
+<span class="ln">137</span>    },
+<span class="ln">138</span>    .{
+<span class="ln">139</span>        .name = &quot;run&quot;,
+<span class="ln">140</span>        .description = &quot;Resumes execution of the debugged process (equivalent to F9 / &#x27;run&#x27;). Returns whether the process is now running or has paused at a breakpoint. Takes no arguments.&quot;,
+<span class="ln">141</span>        .debug_only = true,
+<span class="ln">142</span>        .read_only = false,
+<span class="ln">143</span>        .handler = runTarget,
+<span class="ln">144</span>        .schema_fn = schemaNoParams,
+<span class="ln">145</span>    },
+<span class="ln">146</span>    .{
+<span class="ln">147</span>        .name = &quot;StepInto&quot;,
+<span class="ln">148</span>        .description = &quot;Executes a single instruction, stepping INTO any call encountered (F7). Takes no arguments.&quot;,
+<span class="ln">149</span>        .debug_only = true,
+<span class="ln">150</span>        .read_only = false,
+<span class="ln">151</span>        .handler = stepInto,
+<span class="ln">152</span>        .schema_fn = schemaNoParams,
+<span class="ln">153</span>    },
+<span class="ln">154</span>    .{
+<span class="ln">155</span>        .name = &quot;StepOver&quot;,
+<span class="ln">156</span>        .description = &quot;Executes a single instruction, stepping OVER any call/subroutine entirely (F8). Takes no arguments.&quot;,
+<span class="ln">157</span>        .debug_only = true,
+<span class="ln">158</span>        .read_only = false,
+<span class="ln">159</span>        .handler = stepOver,
+<span class="ln">160</span>        .schema_fn = schemaNoParams,
+<span class="ln">161</span>    },
+<span class="ln">162</span>    .{
+<span class="ln">163</span>        .name = &quot;StepOut&quot;,
+<span class="ln">164</span>        .description = &quot;Runs until the current function returns to its caller (Ctrl+F9). Takes no arguments.&quot;,
+<span class="ln">165</span>        .debug_only = true,
+<span class="ln">166</span>        .read_only = false,
+<span class="ln">167</span>        .handler = stepOut,
+<span class="ln">168</span>        .schema_fn = schemaNoParams,
+<span class="ln">169</span>    },
+<span class="ln">170</span>    .{
+<span class="ln">171</span>        .name = &quot;PauseDebug&quot;,
+<span class="ln">172</span>        .description = &quot;Pauses (suspends) the running debuggee, equivalent to Debug &gt; Pause (F12). Takes no arguments.&quot;,
+<span class="ln">173</span>        .debug_only = true,
+<span class="ln">174</span>        .read_only = false,
+<span class="ln">175</span>        .handler = pauseDebug,
+<span class="ln">176</span>        .schema_fn = schemaNoParams,
+<span class="ln">177</span>    },
+<span class="ln">178</span>    .{
+<span class="ln">179</span>        .name = &quot;StopDebug&quot;,
+<span class="ln">180</span>        .description = &quot;Terminates the current debugging session and closes the debuggee process. Takes no arguments.&quot;,
+<span class="ln">181</span>        .debug_only = true,
+<span class="ln">182</span>        .read_only = false,
+<span class="ln">183</span>        .handler = stopDebug,
+<span class="ln">184</span>        .schema_fn = schemaNoParams,
+<span class="ln">185</span>    },
+<span class="ln">186</span>    .{
+<span class="ln">187</span>        .name = &quot;RestartDebug&quot;,
+<span class="ln">188</span>        .description = &quot;Restarts the current debugging session from the beginning. Takes no arguments.&quot;,
+<span class="ln">189</span>        .debug_only = true,
+<span class="ln">190</span>        .read_only = false,
+<span class="ln">191</span>        .handler = restartDebug,
+<span class="ln">192</span>        .schema_fn = schemaNoParams,
+<span class="ln">193</span>    },
+<span class="ln">194</span>    .{
+<span class="ln">195</span>        .name = &quot;SetBreakpoint&quot;,
+<span class="ln">196</span>        .description = &quot;Sets a software execution breakpoint (INT3) at an address or API symbol.&quot;,
+<span class="ln">197</span>        .debug_only = true,
+<span class="ln">198</span>        .read_only = false,
+<span class="ln">199</span>        .handler = setBreakpoint,
+<span class="ln">200</span>        .schema_fn = schemaSetBreakpoint,
+<span class="ln">201</span>    },
+<span class="ln">202</span>    .{
+<span class="ln">203</span>        .name = &quot;DeleteBreakpoint&quot;,
+<span class="ln">204</span>        .description = &quot;Removes a breakpoint at an address or API symbol.&quot;,
+<span class="ln">205</span>        .debug_only = true,
+<span class="ln">206</span>        .read_only = false,
+<span class="ln">207</span>        .handler = deleteBreakpoint,
+<span class="ln">208</span>        .schema_fn = schemaDeleteBreakpoint,
+<span class="ln">209</span>    },
+<span class="ln">210</span>    .{</pre>
+</div><p><code>src/mcp/tools.zig:112</code>（证据 <code>src/evidence.md:14</code>） 后面的工具需要 active debug session；典型例子是 <code>src/mcp/tools.zig:989</code>（证据 <code>src/evidence.md:34</code>） ReadMemory、<code>src/mcp/tools.zig:1055</code>（证据 <code>src/evidence.md:61</code>） WaitForPause、<code>src/mcp/tools.zig:1221</code>（证据 <code>src/evidence.md:62</code>） SetBreakpoint、<code>src/mcp/tools.zig:1321</code>（证据 <code>src/evidence.md:35</code>） WriteMemToAddress。handler 本身也继续检查 running/paused 状态。</p></section>
+<section class="sec" id="section-3"><div class="sec-no">§ <b>03</b> · HANDLERS</div><h2 class="sec-title">几个关键 handler</h2><h3><span class="arr">▸</span>读写和反汇编</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L989-1052</span><span>Zig</span></div>
+<pre class="code"><span class="ln">989</span>fn readMemory(params: ?std.json.Value, out: []u8) ToolResult {
+<span class="ln">990</span>    if (!bridge.isDebugging()) return errResult(out, &quot;Error: No active debug session.&quot;);
+<span class="ln">991</span>    if (bridge.isRunning()) return errResult(out, &quot;Error: Target is running. Pause first.&quot;);
+<span class="ln">992</span>
+<span class="ln">993</span>    const addr_str = getParamStr(params, &quot;address&quot;) orelse
+<span class="ln">994</span>        return errResult(out, &quot;Error: address is required.&quot;);
+<span class="ln">995</span>    var size: usize = 64;
+<span class="ln">996</span>    if (getParamInt(params, &quot;size&quot;)) |s| {
+<span class="ln">997</span>        size = @intCast(@min(@max(s, 1), 4096));
+<span class="ln">998</span>    }
+<span class="ln">999</span>
+<span class="ln">1000</span>    var expr_buf: [256]u8 = undefined;
+<span class="ln">1001</span>    const expr = std.fmt.bufPrint(&amp;expr_buf, &quot;{s}\x00&quot;, .{addr_str}) catch
+<span class="ln">1002</span>        return errResult(out, &quot;Error: address expression too long.&quot;);
+<span class="ln">1003</span>    const addr = bridge.valFromString(@ptrCast(expr.ptr));
+<span class="ln">1004</span>    if (addr == 0) return fmtErr(out, &quot;Error: Could not resolve address &#x27;{s}&#x27;.&quot;, .{addr_str});
+<span class="ln">1005</span>
+<span class="ln">1006</span>    var mem_buf: [4096]u8 = undefined;
+<span class="ln">1007</span>    if (!bridge.memRead(addr, mem_buf[0..size])) {
+<span class="ln">1008</span>        return fmtErr(out, &quot;Error: Failed to read {d} bytes at 0x{X}.&quot;, .{ size, addr });
+<span class="ln">1009</span>    }
+<span class="ln">1010</span>
+<span class="ln">1011</span>    var pos: usize = 0;
+<span class="ln">1012</span>    const header = std.fmt.bufPrint(out[pos..], &quot;[ReadMemory] {d} bytes at 0x{X}:\n&quot;, .{ size, addr }) catch return result(out[0..pos], &quot;&quot;);
+<span class="ln">1013</span>    pos += header.len;
+<span class="ln">1014</span>
+<span class="ln">1015</span>    var i: usize = 0;
+<span class="ln">1016</span>    while (i &lt; size) : (i += 16) {
+<span class="ln">1017</span>        const row_addr = addr + i;
+<span class="ln">1018</span>        const count = @min(16, size - i);
+<span class="ln">1019</span>
+<span class="ln">1020</span>        // address
+<span class="ln">1021</span>        const addr_s = std.fmt.bufPrint(out[pos..], &quot;  {X:0&gt;8}: &quot;, .{row_addr}) catch break;
+<span class="ln">1022</span>        pos += addr_s.len;
+<span class="ln">1023</span>
+<span class="ln">1024</span>        // hex
+<span class="ln">1025</span>        for (0..count) |j| {
+<span class="ln">1026</span>            const h = std.fmt.bufPrint(out[pos..], &quot;{X:0&gt;2} &quot;, .{mem_buf[i + j]}) catch break;
+<span class="ln">1027</span>            pos += h.len;
+<span class="ln">1028</span>        }
+<span class="ln">1029</span>        // pad
+<span class="ln">1030</span>        for (count..16) |_| {
+<span class="ln">1031</span>            if (pos + 3 &gt; out.len) break;
+<span class="ln">1032</span>            out[pos] = &#x27; &#x27;;
+<span class="ln">1033</span>            out[pos + 1] = &#x27; &#x27;;
+<span class="ln">1034</span>            out[pos + 2] = &#x27; &#x27;;
+<span class="ln">1035</span>            pos += 3;
+<span class="ln">1036</span>        }
+<span class="ln">1037</span>
+<span class="ln">1038</span>        // ascii
+<span class="ln">1039</span>        for (0..count) |j| {
+<span class="ln">1040</span>            if (pos &gt;= out.len) break;
+<span class="ln">1041</span>            const b = mem_buf[i + j];
+<span class="ln">1042</span>            out[pos] = if (b &gt;= 32 and b &lt;= 126) b else &#x27;.&#x27;;
+<span class="ln">1043</span>            pos += 1;
+<span class="ln">1044</span>        }
+<span class="ln">1045</span>        if (pos &lt; out.len) {
+<span class="ln">1046</span>            out[pos] = &#x27;\n&#x27;;
+<span class="ln">1047</span>            pos += 1;
+<span class="ln">1048</span>        }
+<span class="ln">1049</span>    }
+<span class="ln">1050</span>
+<span class="ln">1051</span>    return .{ .text = out[0..pos] };
+<span class="ln">1052</span>}</pre>
+</div><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L1321-1365</span><span>Zig</span></div>
+<pre class="code"><span class="ln">1321</span>fn writeMemToAddress(params: ?std.json.Value, out: []u8) ToolResult {
+<span class="ln">1322</span>    if (!bridge.isDebugging()) return errResult(out, &quot;Error: No active debug session.&quot;);
+<span class="ln">1323</span>    if (bridge.isRunning()) return errResult(out, &quot;Error: Target is running. Pause first.&quot;);
+<span class="ln">1324</span>
+<span class="ln">1325</span>    const addr_str = getParamStr(params, &quot;address&quot;) orelse
+<span class="ln">1326</span>        return errResult(out, &quot;Error: address is required.&quot;);
+<span class="ln">1327</span>    const byte_str = getParamStr(params, &quot;byteString&quot;) orelse
+<span class="ln">1328</span>        return errResult(out, &quot;Error: byteString is required.&quot;);
+<span class="ln">1329</span>
+<span class="ln">1330</span>    var expr_buf: [256]u8 = undefined;
+<span class="ln">1331</span>    const expr = std.fmt.bufPrint(&amp;expr_buf, &quot;{s}\x00&quot;, .{addr_str}) catch
+<span class="ln">1332</span>        return errResult(out, &quot;Error: address too long.&quot;);
+<span class="ln">1333</span>    const addr = bridge.valFromString(@ptrCast(expr.ptr));
+<span class="ln">1334</span>    if (addr == 0) return fmtErr(out, &quot;Error: Could not resolve address &#x27;{s}&#x27;.&quot;, .{addr_str});
+<span class="ln">1335</span>
+<span class="ln">1336</span>    // Parse hex bytes
+<span class="ln">1337</span>    var bytes: [512]u8 = undefined;
+<span class="ln">1338</span>    var byte_count: usize = 0;
+<span class="ln">1339</span>    var it = std.mem.tokenizeAny(u8, byte_str, &quot; ,&quot;);
+<span class="ln">1340</span>    while (it.next()) |tok| {
+<span class="ln">1341</span>        if (byte_count &gt;= bytes.len) break;
+<span class="ln">1342</span>        bytes[byte_count] = std.fmt.parseInt(u8, tok, 16) catch
+<span class="ln">1343</span>            return fmtErr(out, &quot;Error: Invalid hex byte &#x27;{s}&#x27;.&quot;, .{tok});
+<span class="ln">1344</span>        byte_count += 1;
+<span class="ln">1345</span>    }
+<span class="ln">1346</span>
+<span class="ln">1347</span>    if (byte_count == 0) return errResult(out, &quot;Error: No bytes to write.&quot;);
+<span class="ln">1348</span>
+<span class="ln">1349</span>    if (!bridge.memWrite(addr, bytes[0..byte_count])) {
+<span class="ln">1350</span>        return fmtErr(out, &quot;Error: Failed to write {d} bytes at 0x{X}.&quot;, .{ byte_count, addr });
+<span class="ln">1351</span>    }
+<span class="ln">1352</span>    return fmtResult(out, &quot;Success: Wrote {d} bytes to 0x{X}.&quot;, .{ byte_count, addr });
+<span class="ln">1353</span>}
+<span class="ln">1354</span>
+<span class="ln">1355</span>// ── CommentOrLabelAtAddress ─────────────────────────────────────────
+<span class="ln">1356</span>fn commentOrLabelAtAddress(params: ?std.json.Value, out: []u8) ToolResult {
+<span class="ln">1357</span>    if (!bridge.isDebugging()) return errResult(out, &quot;Error: No active debug session.&quot;);
+<span class="ln">1358</span>
+<span class="ln">1359</span>    const addr_str = getParamStr(params, &quot;address&quot;) orelse
+<span class="ln">1360</span>        return errResult(out, &quot;Error: address is required.&quot;);
+<span class="ln">1361</span>    const value = getParamStr(params, &quot;value&quot;) orelse
+<span class="ln">1362</span>        return errResult(out, &quot;Error: value is required.&quot;);
+<span class="ln">1363</span>    const mode = getParamStr(params, &quot;mode&quot;) orelse &quot;Comment&quot;;
+<span class="ln">1364</span>
+<span class="ln">1365</span>    var expr_buf: [256]u8 = undefined;</pre>
+</div><p><code>src/mcp/tools.zig:989</code>（证据 <code>src/evidence.md:34</code>） 对读取大小做 4096 上限，<code>src/mcp/tools.zig:1321</code>（证据 <code>src/evidence.md:35</code>） 解析十六进制字节再写入，<code>src/mcp/tools.zig:1403</code>（证据 <code>src/evidence.md:36</code>） 用 GUI disassembly 取文本，<code>src/mcp/tools.zig:1489</code>（证据 <code>src/evidence.md:37</code>） 输出内存 map。实现风格是一层薄但明确的 x64dbg command/API adapter。</p></section>
+<section class="sec" id="section-4"><div class="sec-no">§ <b>04</b> · ADVANCED</div><h2 class="sec-title">高级逆向辅助</h2><h3><span class="arr">▸</span>扫描、符号、PE</h3><div class="code-wrap">
+<div class="code-bar"><span><span class="src">src/mcp/tools.zig</span> · L1805-1868</span><span>Zig</span></div>
+<pre class="code"><span class="ln">1805</span>    return fmtResult(out, &quot;{s}&quot;, .{if (ok) &quot;Patch list displayed in x64dbg Patches window.&quot; else &quot;Command failed.&quot;});
+<span class="ln">1806</span>}
+<span class="ln">1807</span>
+<span class="ln">1808</span>// ── Helpers (new tools) ───────────────────────────────────────────
+<span class="ln">1809</span>
+<span class="ln">1810</span>fn getModSize(base: usize) usize {
+<span class="ln">1811</span>    var buf4: [4]u8 = undefined;
+<span class="ln">1812</span>    if (!bridge.memRead(base + 0x3C, &amp;buf4)) return 0;
+<span class="ln">1813</span>    const pe_off: usize = readU32LE(&amp;buf4);
+<span class="ln">1814</span>    if (!bridge.memRead(base + pe_off + 80, &amp;buf4)) return 0;
+<span class="ln">1815</span>    return readU32LE(&amp;buf4);
+<span class="ln">1816</span>}
+<span class="ln">1817</span>
+<span class="ln">1818</span>const CodeSection = struct { start: usize, size: usize };
+<span class="ln">1819</span>fn getCodeSection(base: usize) CodeSection {
+<span class="ln">1820</span>    var buf4: [4]u8 = undefined;
+<span class="ln">1821</span>    var buf2: [2]u8 = undefined;
+<span class="ln">1822</span>    if (!bridge.memRead(base + 0x3C, &amp;buf4)) return .{ .start = base, .size = 0 };
+<span class="ln">1823</span>    const pe_off: usize = readU32LE(&amp;buf4);
+<span class="ln">1824</span>    if (!bridge.memRead(base + pe_off + 6, &amp;buf2)) return .{ .start = base, .size = 0 };
+<span class="ln">1825</span>    const num_sec = readU16LE(&amp;buf2);
+<span class="ln">1826</span>    if (!bridge.memRead(base + pe_off + 20, &amp;buf2)) return .{ .start = base, .size = 0 };
+<span class="ln">1827</span>    const opt_sz: usize = readU16LE(&amp;buf2);
+<span class="ln">1828</span>    const first_sec = base + pe_off + 24 + opt_sz;
+<span class="ln">1829</span>    var i: usize = 0;
+<span class="ln">1830</span>    while (i &lt; num_sec and i &lt; 64) : (i += 1) {
+<span class="ln">1831</span>        var sec: [40]u8 = undefined;
+<span class="ln">1832</span>        if (!bridge.memRead(first_sec + i * 40, &amp;sec)) break;
+<span class="ln">1833</span>        const chars = readU32LE(sec[36..40]);
+<span class="ln">1834</span>        if (chars &amp; 0x20000000 != 0) {
+<span class="ln">1835</span>            return .{ .start = base + @as(usize, readU32LE(sec[12..16])), .size = readU32LE(sec[8..12]) };
+<span class="ln">1836</span>        }
+<span class="ln">1837</span>    }
+<span class="ln">1838</span>    return .{ .start = base, .size = 0 };
+<span class="ln">1839</span>}
+<span class="ln">1840</span>
+<span class="ln">1841</span>fn resolveAddr(addr_str: []const u8) usize {
+<span class="ln">1842</span>    var buf: [256]u8 = undefined;
+<span class="ln">1843</span>    _ = std.fmt.bufPrint(&amp;buf, &quot;{s}\x00&quot;, .{addr_str}) catch return 0;
+<span class="ln">1844</span>    return bridge.valFromString(@ptrCast(&amp;buf));
+<span class="ln">1845</span>}
+<span class="ln">1846</span>
+<span class="ln">1847</span>// ── FindPattern ───────────────────────────────────────────────────
+<span class="ln">1848</span>fn findPattern(params: ?std.json.Value, out: []u8) ToolResult {
+<span class="ln">1849</span>    if (!bridge.isDebugging()) return errResult(out, &quot;Error: No active debug session.&quot;);
+<span class="ln">1850</span>    if (bridge.isRunning()) return errResult(out, &quot;Error: Target is running. Pause first.&quot;);
+<span class="ln">1851</span>    const pattern_str = getParamStr(params, &quot;pattern&quot;) orelse
+<span class="ln">1852</span>        return errResult(out, &quot;Error: pattern is required.&quot;);
+<span class="ln">1853</span>
+<span class="ln">1854</span>    var pat: [256]u8 = undefined;
+<span class="ln">1855</span>    var mask: [256]u8 = undefined;
+<span class="ln">1856</span>    var pat_len: usize = 0;
+<span class="ln">1857</span>    var it = std.mem.tokenizeAny(u8, pattern_str, &quot; &quot;);
+<span class="ln">1858</span>    while (it.next()) |tok| {
+<span class="ln">1859</span>        if (pat_len &gt;= 256) break;
+<span class="ln">1860</span>        if (tok[0] == &#x27;?&#x27;) {
+<span class="ln">1861</span>            pat[pat_len] = 0;
+<span class="ln">1862</span>            mask[pat_len] = 0;
+<span class="ln">1863</span>        } else {
+<span class="ln">1864</span>            pat[pat_len] = std.fmt.parseInt(u8, tok, 16) catch
+<span class="ln">1865</span>                return fmtErr(out, &quot;Error: Invalid hex &#x27;{s}&#x27;.&quot;, .{tok});
+<span class="ln">1866</span>            mask[pat_len] = 1;
+<span class="ln">1867</span>        }
+<span class="ln">1868</span>        pat_len += 1;</pre>
+</div><p>高级工具覆盖 <code>src/mcp/tools.zig:1748</code>（证据 <code>src/evidence.md:47</code>） 硬件断点、<code>src/mcp/tools.zig:1805</code>（证据 <code>src/evidence.md:48</code>） pattern scan、<code>src/mcp/tools.zig:1882</code>（证据 <code>src/evidence.md:49</code>） strings、<code>src/mcp/tools.zig:2656</code>（证据 <code>src/evidence.md:63</code>） symbol search、<code>src/mcp/tools.zig:2802</code>（证据 <code>src/evidence.md:64</code>） PE 分析。它适合受控分析流，不应作为远程自动攻击接口暴露。</p></section>
+<section class="sec" id="section-5"><div class="sec-no">§ <b>05</b> · RISKS</div><h2 class="sec-title">工具面治理</h2><h3><span class="arr">▸</span>建议的权限模型</h3><p>当前 <code>src/core/mcp_server.zig:650</code>（证据 <code>src/evidence.md:16</code>） 只按 debug-only 与 session 状态做守卫；考虑到 <code>src/mcp/tools.zig:2506</code>（证据 <code>src/evidence.md:54</code>） DumpMemory、<code>src/mcp/tools.zig:2775</code>（证据 <code>src/evidence.md:55</code>） DumpModule、<code>src/mcp/tools.zig:2867</code>（证据 <code>src/evidence.md:56</code>） DetectOEP 等能力，后续可以增加 per-tool allowlist、只读模式和每次会话授权。</p></section>
+<div class="foot"><span>Generated · 2026-08-24</span><span>Source · <a href="https://github.com/duty1g/x64dbg-mcp-server">duty1g/x64dbg-mcp-server</a></span><span><a href="../index.html">← 返回 Trending 索引</a></span><span><a href="../x64dbg-mcp-server.html">↑ 返回主页面</a></span></div></main></div>
+<script>(()=>{const links=document.querySelectorAll('.nav-list a');const sel=document.getElementById('msel');if(sel){links.forEach(a=>{const o=document.createElement('option');o.value=a.getAttribute('href');o.textContent=a.textContent.trim();sel.appendChild(o)});sel.addEventListener('change',e=>location.href=e.target.value)}const c=document.getElementById('stars');if(c){const x=c.getContext('2d');const r=()=>{c.width=innerWidth;c.height=innerHeight};r();addEventListener('resize',r);const s=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:Math.random()*1.4+.2,a:Math.random(),v:Math.random()*.02+.005}));(function t(){x.clearRect(0,0,c.width,c.height);s.forEach(p=>{p.a+=p.v;if(p.a>1||p.a<.2)p.v*=-1;x.globalAlpha=p.a;x.fillStyle='#74d0ff';x.beginPath();x.arc(p.x,p.y,p.r,0,Math.PI*2);x.fill()});requestAnimationFrame(t)})()}})();</script></body></html>
