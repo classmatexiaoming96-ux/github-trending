@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Doop Resident Agent：从设计卡片到后台执行 · GitHub Trending 源码拆解</title>
+<meta name="description" content="拆解 Doop 如何把 Board、角色 pipeline、反馈队列和 resident worker 串成可恢复的 agent 流程。" />
+<style>
+:root {
+  --star: #70d6c9;
+  --star-soft: rgba(112, 214, 201, .18);
+  --star-deep: #1f8f84;
+}
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+.hero-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(280px,.8fr); gap:22px; align-items:stretch; }
+.metric-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:20px; }
+.metric { border:1px solid var(--line); background:var(--panel); border-radius:18px; padding:16px; }
+.metric strong { display:block; font:700 1.35rem var(--sans); color:var(--text); }
+.metric span { color:var(--muted); font:500 .78rem var(--mono); }
+.card-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.card { border:1px solid var(--line); background:var(--panel); border-radius:20px; padding:18px; }
+.card h3 { margin-bottom:10px; }
+.deep-links { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.deep-link { border:1px solid var(--line); background:linear-gradient(145deg,var(--panel),rgba(112,214,201,.08)); border-radius:18px; padding:16px; display:block; min-height:126px; }
+.deep-link strong { display:block; color:var(--text); margin-bottom:8px; }
+.deep-link span { color:var(--muted); font-size:.92rem; }
+.flow { border:1px solid var(--line); border-radius:18px; padding:18px; background:rgba(255,255,255,.03); font-family:var(--mono); color:var(--muted); overflow:auto; }
+.code-head { display:flex; justify-content:space-between; gap:12px; padding:10px 14px; border-bottom:1px solid var(--line); color:var(--muted); font-family:var(--mono); font-size:.78rem; }
+.code { margin:0; padding:14px; overflow:auto; }
+.ln { display:inline-block; width:3.4em; color:var(--muted); user-select:none; }
+p code, li code { color:var(--star); }
+@media (max-width: 860px) { .hero-grid,.card-grid,.deep-links,.metric-grid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div id="progress"></div>
+<div class="shell">
+  <aside class="nav">
+    <a class="brand" href="../doop.html"><span class="brand-mark">DP</span><span>Doop Teardown</span></a>
+    <a class="" href="../doop.html">概览</a>
+<a class="" href="../doop/doop-mcp-canvas-tools.html">MCP 工具面</a>
+<a class="active" href="../doop/doop-resident-agent-board.html">Resident 队列</a>
+<a class="" href="../doop/doop-realtime-access.html">实时与访问</a>
+<a class="" href="../index.html">索引</a>
+  </aside>
+  <main>
+    <section class="hero">
+      <span class="eyebrow">GitHub Trending · kgoedecke/doop · 2026-08-25</span>
+      <h1>Doop Resident Agent：从设计卡片到后台执行</h1>
+      <p class="lead">拆解 Doop 如何把 Board、角色 pipeline、反馈队列和 resident worker 串成可恢复的 agent 流程。</p>
+    </section>
+    
+    <section class="sec">
+      <div class="sec-no">01</div>
+      <h2 class="sec-title">后台 agent 的调度边界</h2>
+      <h3>不是无限自动执行</h3>
+      <p>resident agent 的第一道边界是配置和并发。<code>server/resident.ts:42</code> 在缺少 OpenAI key 时跳过运行，<code>server/resident.ts:56</code> 使用 runningCanvases 防止同一 canvas 并发，<code>server/resident.ts:69</code> 的 sweep 只处理等待中的 work，<code>server/resident.ts:75</code> 从 pendingWorkAgents 取任务。这让后台自动化更像队列 worker，而不是浏览器里突然出现的自由 agent。</p>
+      
+      <div class="code-wrap">
+        <div class="code-head"><code>server/resident.ts:69</code><span>后台 sweep 限制每个 canvas 的运行</span></div>
+        <pre class="code"><code><span class="ln">69</span>/** Work every agent that has something waiting, one at a time. Re-checking the
+<span class="ln">70</span> *  queue between runs is what carries a card into its next pipeline stage. */
+<span class="ln">71</span>async function sweep(canvasId: string) {
+<span class="ln">72</span>  running.add(canvasId)
+<span class="ln">73</span>  try {
+<span class="ln">74</span>    for (let i = 0; i &lt; MAX_SWEEP_RUNS; i++) {
+<span class="ln">75</span>      const next = actions.pendingWorkAgents(canvasId)[0]
+<span class="ln">76</span>      if (!next) break
+<span class="ln">77</span>      await runAgent(canvasId, next)
+<span class="ln">78</span>    }
+<span class="ln">79</span>  } finally {
+<span class="ln">80</span>    running.delete(canvasId)
+<span class="ln">81</span>    if (queued.delete(canvasId)) onFeedback(canvasId)
+<span class="ln">82</span>  }
+<span class="ln">83</span>}</code></pre>
+      </div>
+    
+      <p>enqueueCanvas 才会真正排队 <code>server/resident.ts:77</code>。 失败只记录 warning <code>server/resident.ts:81</code>。 系统 prompt 规定 resident 工作职责 <code>server/resident.ts:85</code>。 pendingWorkAgents 负责发现待处理角色 <code>server/actions.ts:168</code>。 只返回状态为 waiting 的 agent <code>server/actions.ts:183</code>。</p>
+    </section>
+    <section class="sec">
+      <div class="sec-no">02</div>
+      <h2 class="sec-title">任务卡片进入队列</h2>
+      <h3>Board 是 agent pipeline 的产品入口</h3>
+      <p>用户从 Board 创建卡片，<code>src/components/Board.tsx:119</code> 收集 brief，<code>src/components/Board.tsx:125</code> 通过 API 入队；服务端的 <code>server/actions.ts:569</code> 创建 queued card，<code>server/actions.ts:605</code> 写成 task event，<code>server/actions.ts:616</code> 广播。这个路径让设计需求先成为产品状态，再交给 agent，而不是直接塞进一次模型调用。</p>
+      
+      <div class="code-wrap">
+        <div class="code-head"><code>server/actions.ts:569</code><span>用户卡片变成 agent queued work</span></div>
+        <pre class="code"><code><span class="ln">569</span>export function addQueuedCard(
+<span class="ln">570</span>  canvasId: string,
+<span class="ln">571</span>  title: string,
+<span class="ln">572</span>  from: string,
+<span class="ln">573</span>  agents?: unknown,
+<span class="ln">574</span>  attachments?: unknown,
+<span class="ln">575</span>): AgentTask | undefined {
+<span class="ln">576</span>  const clean = title.trim().slice(0, 200)
+<span class="ln">577</span>  if (!clean || !store.getCanvas(canvasId)) return undefined
+<span class="ln">578</span>  const pipeline = normalizePipeline(agents)
+<span class="ln">579</span>  /* reference-image frame ids: only frames that actually live on this canvas */
+<span class="ln">580</span>  const refs = (Array.isArray(attachments) ? attachments : [])
+<span class="ln">581</span>    .filter((a): a is string =&gt; typeof a === 'string')
+<span class="ln">582</span>    .filter((id, i, arr) =&gt; arr.indexOf(id) === i &amp;&amp; store.getFrame(id)?.canvasId === canvasId)
+<span class="ln">583</span>    .slice(0, 4)
+<span class="ln">584</span>  const list = taskLog.get(canvasId) ?? []
+<span class="ln">585</span>  const duplicate = list.find(
+<span class="ln">586</span>    (t) =&gt;
+<span class="ln">587</span>      t.queuedBy === from &amp;&amp;
+<span class="ln">588</span>      !t.endedAt &amp;&amp;
+<span class="ln">589</span>      t.status === clean &amp;&amp;
+<span class="ln">590</span>      pipelineOf(t).join(',') === pipeline.join(',') &amp;&amp;
+<span class="ln">591</span>      (t.attachments ?? []).join(',') === refs.join(','),
+<span class="ln">592</span>  )
+<span class="ln">593</span>  if (duplicate) return duplicate
+<span class="ln">594</span>  const card: AgentTask = {
+<span class="ln">595</span>    id: nanoid(8),
+<span class="ln">596</span>    agentName: '',
+<span class="ln">597</span>    color: colorFor(from),
+<span class="ln">598</span>    status: clean,
+<span class="ln">599</span>    startedAt: Date.now(),
+<span class="ln">600</span>    queuedBy: from,
+<span class="ln">601</span>    pipeline,
+<span class="ln">602</span>    stage: 0,
+<span class="ln">603</span>    ...(refs.length &gt; 0 ? { attachments: refs } : {}),
+<span class="ln">604</span>  }
+<span class="ln">605</span>  list.unshift(card)
+<span class="ln">606</span>  if (list.length &gt; 100) list.length = 100
+<span class="ln">607</span>  taskLog.set(canvasId, list)
+<span class="ln">608</span>  persist.saveTask(canvasId, card)
+<span class="ln">609</span>  broadcast(canvasId, { type: 'task', task: card })
+<span class="ln">610</span>  logActivity(
+<span class="ln">611</span>    canvasId,
+<span class="ln">612</span>    resolveActor({ name: from, kind: 'user' }),
+<span class="ln">613</span>    `queued a card for ${pipeline.map(roleName).join(' → ')}: “${clean}”`,
+<span class="ln">614</span>  )
+<span class="ln">615</span>  /* the resident agents pick queued cards up instantly (no-op without a key) */
+<span class="ln">616</span>  import('./resident.ts').then((r) =&gt; r.onFeedback(canvasId)).catch(() =&gt; {})
+<span class="ln">617</span>  return card
+<span class="ln">618</span>}</code></pre>
+      </div>
+    
+      <p>Board 按角色聚合 task <code>src/components/Board.tsx:98</code>。 待办数量影响列展示 <code>src/components/Board.tsx:105</code>。 pipeline UI 暴露角色列表 <code>src/components/Board.tsx:209</code>。 角色 selection 进入提交状态 <code>src/components/Board.tsx:224</code>。 resident 为卡片任务生成路由策略 <code>server/resident.ts:216</code>。</p>
+    </section>
+    <section class="sec">
+      <div class="sec-no">03</div>
+      <h2 class="sec-title">反馈和评论汇入同一轮</h2>
+      <h3>Agent 看到的是合并后的工作包</h3>
+      <p>runAgent 开始后，<code>server/resident.ts:176</code> 领取任务反馈，<code>server/resident.ts:179</code> 领取元素评论，<code>server/resident.ts:181</code> 领取卡片任务，随后 <code>server/resident.ts:186</code> 写入 heartbeat。它把三种输入合并到同一轮推理里，避免“反馈系统”和“卡片系统”变成两个互相抢状态的执行器。</p>
+      
+      <div class="code-wrap">
+        <div class="code-head"><code>server/resident.ts:170</code><span>runAgent 合并反馈、评论和卡片任务</span></div>
+        <pre class="code"><code><span class="ln">170</span>async function runAgent(canvasId: string, agentName: string) {
+<span class="ln">171</span>  const anthropic = getClient()
+<span class="ln">172</span>  if (!anthropic) return
+<span class="ln">173</span>  const role = roleByAgentName(agentName) ?? roleById(DEFAULT_ROLE_ID)!
+<span class="ln">174</span>  const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
+<span class="ln">175</span>
+<span class="ln">176</span>  /* claim this agent's open work — the UI flips to "picked up" instantly.
+<span class="ln">177</span>     Claiming happens before the try so an agent with nothing to do never
+<span class="ln">178</span>     shows up in presence. */
+<span class="ln">179</span>  const claimed = actions.takeFeedbackFor(canvasId, role.name)
+<span class="ln">180</span>  const comments = actions.takeAgentCommentsFor(canvasId, role.name)
+<span class="ln">181</span>  const cards = actions.takeQueuedCardsFor(canvasId, role.name)
+<span class="ln">182</span>  if (claimed.length === 0 &amp;&amp; comments.length === 0 &amp;&amp; cards.length === 0) return
+<span class="ln">183</span>
+<span class="ln">184</span>  /* presence otherwise only refreshes on tool activity, and the sweep's TTL
+<span class="ln">185</span>     is shorter than a big generation turn */
+<span class="ln">186</span>  const heartbeat = setInterval(() =&gt; actions.heartbeatAgent(canvasId, actor), 15_000)</code></pre>
+      </div>
+    
+      <p>任务反馈有独立记录 <code>server/actions.ts:259</code>。 agent 可以 take feedback <code>server/actions.ts:300</code>。 反馈完成后被标记 resolved <code>server/actions.ts:326</code>。 元素评论带 selector <code>server/actions.ts:397</code>。 agent 可以领取元素评论 <code>server/actions.ts:430</code>。</p>
+    </section>
+    <section class="sec">
+      <div class="sec-no">04</div>
+      <h2 class="sec-title">角色模型</h2>
+      <h3>预设角色让队列更像设计团队</h3>
+      <p>虽然角色定义在共享类型里，但实际消费发生在服务端和 Board：<code>server/resident.ts:142</code> 根据角色选择策略，<code>server/resident.ts:226</code> 把路由结果写入上下文，<code>src/components/Board.tsx:209</code> 让用户选择 pipeline。结合 <code>server/actions.ts:546</code> 的 endAgentTasks，这套设计支持“某个角色完成某段工作”的可见过程。</p>
+      
+      <div class="code-wrap">
+        <div class="code-head"><code>shared/agents.ts:26</code><span>内置设计团队角色与 pipeline presets</span></div>
+        <pre class="code"><code><span class="ln">26</span>export const AGENT_ROLES: AgentRole[] = [
+<span class="ln">27</span>  {
+<span class="ln">28</span>    id: 'doop',
+<span class="ln">29</span>    name: 'Doop',
+<span class="ln">30</span>    emoji: '✦',
+<span class="ln">31</span>    blurb: 'Generalist designer — makes the thing',
+<span class="ln">32</span>    brief:
+<span class="ln">33</span>      'You are the generalist designer. You originate work: new frames, layouts, full redesigns, and any change that does not belong to a specialist. Build the deliverable the card asks for, complete and presentable.',
+<span class="ln">34</span>    aliases: ['design', 'designer'],
+<span class="ln">35</span>  },
+<span class="ln">36</span>  {
+<span class="ln">37</span>    id: 'ux',
+<span class="ln">38</span>    name: 'UX Lead',
+<span class="ln">39</span>    emoji: '⌘',
+<span class="ln">40</span>    blurb: 'Flow, hierarchy, states, affordances',
+<span class="ln">41</span>    brief:
+<span class="ln">42</span>      'You are the UX lead. Judge the design as an interface someone has to use: is the primary action obvious, is the reading order the decision order, are labels unambiguous, are empty/loading/error/disabled states accounted for, are targets and affordances legible as interactive? Fix structure and hierarchy — do not restyle for taste.',
+<span class="ln">43</span>    aliases: ['usability'],
+<span class="ln">44</span>  },
+<span class="ln">45</span>  {
+<span class="ln">46</span>    id: 'copy',
+<span class="ln">47</span>    name: 'Copywriter',
+<span class="ln">48</span>    emoji: '✎',
+<span class="ln">49</span>    blurb: 'Headlines, microcopy, labels, CTAs',
+<span class="ln">50</span>    brief:
+<span class="ln">51</span>      'You are the copywriter. Own every word in the frame: headline, subhead, body, labels, button text, empty states, error messages. Make it specific, human and short — cut filler, kill vague verbs, prefer concrete nouns. Keep the layout intact; if a rewrite changes the line count, keep it inside the existing box.',
+<span class="ln">52</span>    aliases: ['content', 'words'],
+<span class="ln">53</span>  },
+<span class="ln">54</span>  {
+<span class="ln">55</span>    id: 'brand',
+<span class="ln">56</span>    name: 'Brand Compliance',
+<span class="ln">57</span>    emoji: '◈',
+<span class="ln">58</span>    blurb: 'Palette, type, logo, tone of voice',
+<span class="ln">59</span>    brief:
+<span class="ln">60</span>      'You are brand compliance. Check the frame against the brand as it is established on this canvas — take the dominant palette, type family, scale, radii and tone from the other frames and any frame that reads as a brand or style guide. Flag and fix off-palette colours, stray fonts, inconsistent radii or shadows, misused logo treatment, and off-tone voice. Do not redesign; bring the frame into line.',
+<span class="ln">61</span>    reviewer: true,
+<span class="ln">62</span>    aliases: ['branding'],
+<span class="ln">63</span>  },
+<span class="ln">64</span>  {
+<span class="ln">65</span>    id: 'a11y',
+<span class="ln">66</span>    name: 'Accessibility',
+<span class="ln">67</span>    emoji: '◎',
+<span class="ln">68</span>    blurb: 'Contrast, semantics, focus, target size',
+<span class="ln">69</span>    brief:
+<span class="ln">70</span>      'You are the accessibility reviewer. Check contrast against WCAG AA (4.5:1 body, 3:1 large text and meaningful UI edges), semantic structure (one h1, ordered headings, landmarks, real buttons and labels over styled divs), alt text on meaningful images, visible focus styles, and touch targets of at least 44px. Fix what fails without changing the design intent.',
+<span class="ln">71</span>    reviewer: true,
+<span class="ln">72</span>    aliases: ['accessible', 'accessibility'],
+<span class="ln">73</span>  },
+<span class="ln">74</span>  {
+<span class="ln">75</span>    id: 'polish',
+<span class="ln">76</span>    name: 'Visual Polish',
+<span class="ln">77</span>    emoji: '✧',
+<span class="ln">78</span>    blurb: 'Spacing rhythm, alignment, final detail',
+<span class="ln">79</span>    brief:
+<span class="ln">80</span>      'You are the polish pass, and you go last. Tighten optical alignment, enforce one spacing scale, even out the type ramp, balance weights and densities, fix ragged edges and orphaned words, and make sure nothing overflows or collides at the frame size. Small, surgical changes only — never restructure.',
+<span class="ln">81</span>    reviewer: true,
+<span class="ln">82</span>    aliases: ['polish', 'detail'],
+<span class="ln">83</span>  },
+<span class="ln">84</span>]
+<span class="ln">85</span>
+<span class="ln">86</span>export const DEFAULT_ROLE_ID = 'doop'
+<span class="ln">87</span>
+<span class="ln">88</span>/** Ready-made pipelines for the board's compose box. */
+<span class="ln">89</span>export const PIPELINE_PRESETS: { id: string; label: string; roles: string[] }[] = [
+<span class="ln">90</span>  { id: 'solo', label: 'Just Doop', roles: ['doop'] },
+<span class="ln">91</span>  { id: 'ship', label: 'Design → polish', roles: ['doop', 'polish'] },
+<span class="ln">92</span>  { id: 'full', label: 'Full pipeline', roles: ['doop', 'copy', 'brand', 'a11y', 'polish'] },
+<span class="ln">93</span>  { id: 'audit', label: 'Review only', roles: ['ux', 'brand', 'a11y'] },
+<span class="ln">94</span>]</code></pre>
+      </div>
+    
+      <p>任务可以按 agent role 结束 <code>server/actions.ts:546</code>。 结束事件会进入 log <code>server/actions.ts:556</code>。 结束后继续广播 <code>server/actions.ts:562</code>。 任务状态进入前端 store <code>src/lib/store.ts:123</code>。 反馈状态也在同一 store <code>src/lib/store.ts:150</code>。</p>
+    </section>
+    
+  </main>
+</div>
+<script>
+const bar = document.getElementById('progress');
+addEventListener('scroll', () => {
+  const h = document.documentElement;
+  const pct = h.scrollTop / (h.scrollHeight - h.clientHeight || 1);
+  bar.style.transform = `scaleX(${pct})`;
+});
+</script>
+</body>
+</html>
