@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fan-in、trace 与恢复路径 · 深度解析 · frontieragent</title>
+<meta name="description" content="frontieragent Fan-in & Recovery 子模块完整解析 — ApodexAI/FrontierAgent 源码级解析：Agent Team、AgentBus、工具权限、TUI 会话与评测运行时" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #6ec6ff;
+  --star-soft:  #a7ddff;
+  --star-deep:  #2689c9;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">frontieragent<b>Agent</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">frontieragent<b>Agent</b></div>
+      <div class="sub">Fan-in & Recovery · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../frontieragent.html">← 返回 frontieragent 主页面</a></div>
+      <div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Fan-in、trace 与恢复路径 <em>深度解析</em></h1>
+      <p class="hero-desc">这一页拆 collect_reports 如何避免轮询风暴、AgentBus 如何保留 session 边界，以及 trace/checkpoint 如何让长任务可恢复。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>报告收集不是简单 await all。<code>sources/frontieragent/plugins/tools/collect_reports.py:130</code> 的工具文档明确 FIRST completion 语义；<code>sources/frontieragent/plugins/tools/collect_reports.py:139</code> 到 <code>sources/frontieragent/plugins/tools/collect_reports.py:169</code> 把 drain、状态分类、running wait 和 status-only block 全部写进模型可见说明。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/plugins/tools/collect_reports.py</span> · L130-170</span><span>Python</span></div>
+        <pre class="code"><span class="ln">130</span>@tool
+<span class="ln">131</span>async def collect_reports(timeout: int = 1800) -&gt; str:
+<span class="ln">132</span>    &quot;&quot;&quot;Collect reports from any sub-agents that have finished their tasks.
+<span class="ln">133</span>
+<span class="ln">134</span>    Reports also drain automatically between turns when agents finish
+<span class="ln">135</span>    *during* a turn, but agents still running at the start of a new turn
+<span class="ln">136</span>    won&#x27;t appear unless you call this. Block-wait here is the right move
+<span class="ln">137</span>    whenever you need a running agent&#x27;s output to proceed.
+<span class="ln">138</span>
+<span class="ln">139</span>    Behaviour:
+<span class="ln">140</span>      1. Non-blocking drain: any sub-agent that already finished returns
+<span class="ln">141</span>         its ``&lt;report&gt;`` immediately, regardless of ``timeout``.
+<span class="ln">142</span>      2. If the drain found nothing, classify the session state:
+<span class="ln">143</span>         * no agents at all → ``&quot;create_subagent first&quot;``.
+<span class="ln">144</span>         * agents created but never assigned → ``[status] no_work_queued``,
+<span class="ln">145</span>           call ``assign_task`` (do NOT poll again).
+<span class="ln">146</span>         * all submitted work already collected → ``[status] all_collected``,
+<span class="ln">147</span>           synthesize or assign a follow-up (do NOT poll again).
+<span class="ln">148</span>         * at least one session running → wait up to ``timeout`` seconds
+<span class="ln">149</span>           for the FIRST completion, then drain any others that
+<span class="ln">150</span>           completed during the wait.
+<span class="ln">151</span>
+<span class="ln">152</span>    Reports come back as
+<span class="ln">153</span>    ``&lt;report agent=&quot;NAME&quot; status=&quot;complete|incomplete|failed|paused&quot;
+<span class="ln">154</span>    reason=&quot;...&quot;&gt;…&lt;/report&gt;`` — treat ``incomplete`` / ``failed`` as
+<span class="ln">155</span>    partial evidence, not a final answer.
+<span class="ln">156</span>
+<span class="ln">157</span>    Args:
+<span class="ln">158</span>        timeout: Max seconds to wait for the first completion when
+<span class="ln">159</span>                 something is genuinely running. Default 1800 (30 min).
+<span class="ln">160</span>                 Sub-agents on hard BrowseComp-style questions routinely
+<span class="ln">161</span>                 take 3-10 minutes — short timeouts are a poll, not a
+<span class="ln">162</span>                 wait. Pass a smaller value only when you specifically
+<span class="ln">163</span>                 want a cheap poll.
+<span class="ln">164</span>
+<span class="ln">165</span>    Returns:
+<span class="ln">166</span>        One or more ``&lt;report&gt;`` blocks plus a status line. Status-only
+<span class="ln">167</span>        outcomes (nothing to wait for / timeout) come back as a single
+<span class="ln">168</span>        ``&lt;report agent=&quot;orchestrator&quot; …&gt;`` block carrying the
+<span class="ln">169</span>        directive, followed by the ``[status]`` line.
+<span class="ln">170</span>    &quot;&quot;&quot;</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>状态短路防止 collect_reports 轮询风暴</h3>
+      <p>collect_reports 有专门的 churn counter。<code>sources/frontieragent/plugins/tools/collect_reports.py:69</code> 记录连续同状态次数，<code>sources/frontieragent/plugins/tools/collect_reports.py:86</code> 渲染 status-only return，<code>sources/frontieragent/plugins/tools/collect_reports.py:111</code> 超过阈值后直接告诉 Agent 停止轮询并 finalize 或派发具体 follow-up。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/plugins/tools/collect_reports.py</span> · L69-128</span><span>Python</span></div>
+        <pre class="code"><span class="ln">69</span>def _bump_status_churn(scope: Any, state: str) -&gt; int:
+<span class="ln">70</span>    &quot;&quot;&quot;Increment and return the consecutive count for ``state``.&quot;&quot;&quot;
+<span class="ln">71</span>    md = getattr(scope, &quot;metadata&quot;, None)
+<span class="ln">72</span>    if md is None:
+<span class="ln">73</span>        return 1
+<span class="ln">74</span>    prev_state, count = md.get(_STATUS_CHURN_KEY) or (&quot;&quot;, 0)
+<span class="ln">75</span>    count = count + 1 if prev_state == state else 1
+<span class="ln">76</span>    md[_STATUS_CHURN_KEY] = (state, count)
+<span class="ln">77</span>    return count
+<span class="ln">78</span>
+<span class="ln">79</span>
+<span class="ln">80</span>def _reset_status_churn(scope: Any) -&gt; None:
+<span class="ln">81</span>    md = getattr(scope, &quot;metadata&quot;, None)
+<span class="ln">82</span>    if md:
+<span class="ln">83</span>        md.pop(_STATUS_CHURN_KEY, None)
+<span class="ln">84</span>
+<span class="ln">85</span>
+<span class="ln">86</span>def _status_notice(
+<span class="ln">87</span>    scope: Any,
+<span class="ln">88</span>    state: str,
+<span class="ln">89</span>    body: str,
+<span class="ln">90</span>    *,
+<span class="ln">91</span>    extra_status: str | None = None,
+<span class="ln">92</span>    track_churn: bool = True,
+<span class="ln">93</span>) -&gt; str:
+<span class="ln">94</span>    &quot;&quot;&quot;Render a status-only return: ``&lt;report&gt;`` block + ``[status]`` line.
+<span class="ln">95</span>
+<span class="ln">96</span>    Every short-circuit return goes through here so SDK consumers
+<span class="ln">97</span>    parsing ``tool_finished.result_preview`` always find a well-formed
+<span class="ln">98</span>    ``&lt;report&gt;`` block (see
+<span class="ln">99</span>    :func:`workflows.agent_team._report_format.format_status_report_block`)
+<span class="ln">100</span>    — bare free-form status text used to be pasted back to end users
+<span class="ln">101</span>    verbatim with a parse-failure marker.
+<span class="ln">102</span>
+<span class="ln">103</span>    With ``track_churn`` (idle states only), the same state returned
+<span class="ln">104</span>    more than :data:`_STATUS_CHURN_LIMIT` times in a row swaps the body
+<span class="ln">105</span>    for a hard stop-polling directive and tags
+<span class="ln">106</span>    ``reason=&quot;&lt;state&gt;_stop_polling&quot;`` so trace consumers can spot the
+<span class="ln">107</span>    churn at a glance.
+<span class="ln">108</span>    &quot;&quot;&quot;
+<span class="ln">109</span>    reason = state
+<span class="ln">110</span>    if track_churn:
+<span class="ln">111</span>        count = _bump_status_churn(scope, state)
+<span class="ln">112</span>        if count &gt; _STATUS_CHURN_LIMIT:
+<span class="ln">113</span>            reason = f&quot;{state}_stop_polling&quot;
+<span class="ln">114</span>            body = (
+<span class="ln">115</span>                f&quot;This is consecutive &#x27;{state}&#x27; notice #{count}. STOP &quot;
+<span class="ln">116</span>                &quot;calling collect_reports — repeating it cannot return &quot;
+<span class="ln">117</span>                &quot;anything new. Call finalize_answer NOW with your best &quot;
+<span class="ln">118</span>                &quot;synthesis of the reports already collected, or &quot;
+<span class="ln">119</span>                &quot;assign_task with a concrete follow-up question if (and &quot;
+<span class="ln">120</span>                &quot;only if) one is genuinely needed.&quot;
+<span class="ln">121</span>            )
+<span class="ln">122</span>    else:
+<span class="ln">123</span>        _reset_status_churn(scope)
+<span class="ln">124</span>    out = f&quot;{format_status_report_block(reason, body)}\n\n[status] {state}&quot;
+<span class="ln">125</span>    if extra_status:
+<span class="ln">126</span>        out += f&quot;\n{extra_status}&quot;
+<span class="ln">127</span>    return out
+<span class="ln">128</span></pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Trace 与 checkpoint 把中断变成可复盘状态</h3>
+      <p>TraceObserver 是 append-only JSONL，<code>sources/frontieragent/apodex/trace.py:49</code> 记录 LLM response，<code>sources/frontieragent/apodex/trace.py:57</code> 记录 tool result，<code>sources/frontieragent/apodex/session.py:474</code> 每回合 checkpoint。对长程 Agent 来说，这比最终答案更重要，因为它让失败能定位到具体 turn 和 tool call。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/apodex/trace.py</span> · L30-73</span><span>Python</span></div>
+        <pre class="code"><span class="ln">30</span>class TraceObserver(BaseObserver):
+<span class="ln">31</span>    &quot;&quot;&quot;Awaited (critical) so trace lines stay ordered; never returns an
+<span class="ln">32</span>    intervention. Append-only JSONL; failures are swallowed (a broken trace
+<span class="ln">33</span>    must not break a run).&quot;&quot;&quot;
+<span class="ln">34</span>
+<span class="ln">35</span>    critical = True
+<span class="ln">36</span>
+<span class="ln">37</span>    def __init__(self, path: str, *, mode: str = &quot;&quot;, cwd: str = &quot;&quot;) -&gt; None:
+<span class="ln">38</span>        self.path = path
+<span class="ln">39</span>        self._write({&quot;t&quot;: &quot;start&quot;, &quot;mode&quot;: mode, &quot;cwd&quot;: cwd})
+<span class="ln">40</span>
+<span class="ln">41</span>    def _write(self, rec: dict[str, Any]) -&gt; None:
+<span class="ln">42</span>        try:
+<span class="ln">43</span>            with open(self.path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as f:
+<span class="ln">44</span>                f.write(json.dumps(rec, ensure_ascii=False, default=str) + &quot;\n&quot;)
+<span class="ln">45</span>                f.flush()
+<span class="ln">46</span>        except Exception:
+<span class="ln">47</span>            pass
+<span class="ln">48</span>
+<span class="ln">49</span>    async def on_llm_response(self, ctx: TurnContext) -&gt; Intervention | None:
+<span class="ln">50</span>        self._write({
+<span class="ln">51</span>            &quot;t&quot;: &quot;llm&quot;, &quot;turn&quot;: ctx.turn,
+<span class="ln">52</span>            &quot;text&quot;: ctx.ai_text or &quot;&quot;,
+<span class="ln">53</span>            &quot;tool_calls&quot;: list(ctx.tool_calls or []),
+<span class="ln">54</span>        })
+<span class="ln">55</span>        return None
+<span class="ln">56</span>
+<span class="ln">57</span>    async def on_tool_result(
+<span class="ln">58</span>        self, ctx: TurnContext, result: ToolResult,
+<span class="ln">59</span>    ) -&gt; ToolResult | None:
+<span class="ln">60</span>        self._write({
+<span class="ln">61</span>            &quot;t&quot;: &quot;tool&quot;, &quot;turn&quot;: ctx.turn, &quot;name&quot;: result.name,
+<span class="ln">62</span>            &quot;args&quot;: dict(result.args or {}),
+<span class="ln">63</span>            &quot;ms&quot;: result.duration_ms, &quot;is_error&quot;: result.is_error,
+<span class="ln">64</span>            &quot;result&quot;: result.result or &quot;&quot;,
+<span class="ln">65</span>        })
+<span class="ln">66</span>        return None
+<span class="ln">67</span>
+<span class="ln">68</span>    async def on_loop_end(self, result: AgentLoopResult) -&gt; None:
+<span class="ln">69</span>        self._write({
+<span class="ln">70</span>            &quot;t&quot;: &quot;end&quot;, &quot;stopped_by&quot;: result.stopped_by,
+<span class="ln">71</span>            &quot;turns&quot;: result.turns_used, &quot;tool_calls&quot;: result.tool_calls_count,
+<span class="ln">72</span>        })
+<span class="ln">73</span>        return None</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">collect_reports
+  ├─ wait_any_session(timeout=0) drain ready
+  ├─ classify idle/running/all_collected
+  ├─ heartbeat to TUI observers
+  ├─ wall-clock clamp
+  └─ report blocks with completion status
+
+session loop
+  ├─ on_turn checkpoint
+  ├─ JSONL trace
+  └─ resume with exact deliverable paths</div>
+      <h3><span class="arr">▸</span>恢复依赖边界事件和交付路径</h3>
+      <p>恢复路径的关键是把生命周期和产物路径都留在状态里：<code>sources/frontieragent/frontier_agent/components/agent_bus/runtime.py:143</code> 记录 session submit event，<code>sources/frontieragent/apodex/session.py:493</code> 起把 deliverable paths 重新注入下一轮上下文。</p>
+      <p>AgentBus 自己也保留 session 边界。<code>sources/frontieragent/frontier_agent/components/agent_bus/runtime.py:118</code> 的 close_session_boundary_aborted 会在取消或错误时补 abort stub，<code>sources/frontieragent/frontier_agent/components/agent_bus/runtime.py:143</code> 和 <code>sources/frontieragent/frontier_agent/components/agent_bus/runtime.py:217</code> 分别写 submit/completed lifecycle event。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul><li>剩余 wall-clock 太低时跳过阻塞等待：<code>sources/frontieragent/plugins/tools/collect_reports.py:181</code> 到 <code>sources/frontieragent/plugins/tools/collect_reports.py:202</code>。</li><li>未知 stop reason 不会被标为 complete：<code>sources/frontieragent/frontier_agent/components/agent_bus/fan_in.py:195</code>。</li><li>trace 写入失败不破坏主任务：<code>sources/frontieragent/apodex/trace.py:41</code> 到 <code>sources/frontieragent/apodex/trace.py:47</code>。</li><li>resumed follow-up 会收到已有 deliverable 路径：<code>sources/frontieragent/apodex/session.py:493</code> 到 <code>sources/frontieragent/apodex/session.py:526</code>。</li></ul>
+    </section>
+
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2"><div class="card"><div class="card-h">AgentBus runtime</div><div class="card-d">安全 metadata salvage 在 <code>sources/frontieragent/frontier_agent/components/agent_bus/runtime.py:182</code>。</div></div><div class="card"><div class="card-h">TUI steering</div><div class="card-d">中途输入进入 SteerInbox 的测试在 <code>sources/frontieragent/apodex/tests/test_tui.py:163</code>。</div></div></div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-08-26</span>
+      <span>Source · <a href="https://github.com/ApodexAI/FrontierAgent">ApodexAI/FrontierAgent</a></span>
+      <span><a href="../frontieragent.html">↑ frontieragent 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

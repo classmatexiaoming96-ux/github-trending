@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>frontieragent · 长程研究与文件工作 Agent Runtime · 源码观测台</title>
+<meta name="description" content="ApodexAI/FrontierAgent 源码级深度解析 — ApodexAI/FrontierAgent 源码级解析：Agent Team、AgentBus、工具权限、TUI 会话与评测运行时" />
+<meta property="og:title" content="frontieragent · 源码观测台" />
+<meta property="og:description" content="ApodexAI/FrontierAgent 源码级解析：Agent Team、AgentBus、工具权限、TUI 会话与评测运行时" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #6ec6ff;
+  --star-soft:  #a7ddff;
+  --star-deep:  #2689c9;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">frontieragent<b>Agent</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">frontieragent<b>Agent</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python · uv + Textual + Docker/SGLang</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>从 TUI 到 Workflow 的真实边界</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>Agent Team 与工具契约</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>任务派发、收集与恢复</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试覆盖与运行约束</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>工程亮点</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险与缺口</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★638 · 2026-08-22</div>
+      <div><a href="https://github.com/ApodexAI/FrontierAgent" target="_blank">ApodexAI/FrontierAgent</a></div>
+      <div><a href="../index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">frontieragent <em>长程研究与文件工作 Agent Runtime</em></h1>
+          <p class="hero-desc">FrontierAgent 把终端 TUI、Stateful ReAct、Agent Team、任务沙箱、审批、trace 和 benchmark runner 拆成几层可复用模块。它值得拆，是因为源码里真的有持久 sub-agent session、fan-in 状态机和面向长任务的恢复路径，而不只是 README 里的多智能体图。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 638</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">162K</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">601</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-08-26</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          <div class="flow">TUI / CLI
+  │
+  ▼
+BenchmarkSession runtime
+  ├─ Stateful ReAct
+  └─ Agent Team coordinator
+        ├─ create_subagent
+        ├─ assign_task
+        └─ collect_reports
+  ▼
+Sandboxed tools · trace · checkpoints</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>FrontierAgent 的主线不是把一个聊天机器人套上终端皮肤，而是把长程研究和文件工作拆成运行时、工作流、工具、观察者和 UI。入口层在 <code>sources/frontieragent/apodex/task_runner.py:427</code> 明确说原生 workflow 需要注册 AgentBus、workflow roles 和完整工具表；这意味着 Agent Team 不是 generic ReAct 假装并行，而是另一条真正的 pipeline。</p>
+      <p>源码里最值得关注的是它对失败的态度：任务派发有深度和并发 guard <code>sources/frontieragent/frontier_agent/components/agent_bus/bus.py:431</code>，报告收集会区分 no_work_queued、running、all_collected <code>sources/frontieragent/plugins/tools/collect_reports.py:139</code>，审批层在运行前展示 diff 或 command <code>sources/frontieragent/apodex/observers.py:469</code>，trace observer 逐行写 JSONL <code>sources/frontieragent/apodex/trace.py:30</code>。这是一套偏生产运行的 agent harness。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">分层 runtime：`apodex/` 负责 CLI/TUI/session，`workflows/` 负责 ReAct 与 Agent Team，`frontier_agent/components/agent_bus/` 负责异步 sub-agent bus，`plugins/tools/` 负责工具契约与沙箱能力。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">核心抽象是 AgentBus + SubAgentSession + workflow profile。AgentBus 保存 jobs、sessions、spawn guard、event sink 和共享 artifact pool；profile 决定 reporter、模型、工具和 workflow 绑定。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">README 展示 Apodex 1.1 benchmark 图，源码侧更硬的数字是守护逻辑中的经验值：过度复用 sub-agent session 会让模型被旧结论锚定，所以单 session 上限固定为 5。</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">下游是终端 TUI、Docker/native sandbox、SGLang/local endpoint、FrontierSearchBench/FrontierChallenge，以及可复用的 benchmark runner。</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">从 TUI 到 Workflow 的真实边界</h2>
+      <p>从入口看，FrontierAgent 把用户的终端任务包装进 workflow runtime，再让 workflow 决定是单 agent 还是 Agent Team。这里关键不是 UI，而是注册边界：<code>sources/frontieragent/apodex/task_runner.py:443</code> 引入 SteerInbox，<code>sources/frontieragent/apodex/task_runner.py:445</code> 引入 BenchmarkSession，<code>sources/frontieragent/apodex/task_runner.py:461</code> 把 profile、cwd、observers 和 session_id 放入 metadata，<code>sources/frontieragent/apodex/task_runner.py:507</code> 才真正进入 runtime.run。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">User task
+  │
+  ▼
+apodex.task_runner._run_native_workflow
+  │ metadata(profile, cwd, observers, session_id)
+  ▼
+BenchmarkSession.run(pipeline_id)
+  ├─ workflows/stateful_react_agent
+  └─ workflows/agent_team
+       ├─ AgentBus sessions
+       ├─ create_subagent / assign_task
+       └─ collect_reports fan-in
+  ▼
+TraceObserver + approvals + checkpoints</div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>这几个模块构成了项目的真实骨架：终端入口把 workflow 跑在 BenchmarkSession 中 <code>sources/frontieragent/apodex/task_runner.py:427</code>；profile loader 处理 YAML、inline profile 和 overrides <code>sources/frontieragent/workflows/agent_team/profile.py:132</code>；AgentBus 保存 jobs 与 session 状态 <code>sources/frontieragent/frontier_agent/components/agent_bus/bus.py:300</code>；assign_task 用 output_paths 作为发布授权 <code>sources/frontieragent/plugins/tools/assign_task.py:167</code>；collect_reports 是 fan-in 的模型可见工具 <code>sources/frontieragent/plugins/tools/collect_reports.py:130</code>；TerminalObserver 在 plan mode 前拦截 mutating tool <code>sources/frontieragent/apodex/observers.py:437</code>。</p>
+      <div class="g3"><div class="card"><div class="card-h">apodex runtime</div><div class="card-d">CLI/TUI/session 负责 profile、approver、trace、checkpoint 与 steering。证据在 <code>sources/frontieragent/apodex/session.py:474</code> 和 <code>sources/frontieragent/apodex/trace.py:41</code>。</div></div><div class="card"><div class="card-h">Agent Team workflow</div><div class="card-d">Agent Team 用 profile 决定 reporter backend、LLM 配置和 overrides，见 <code>sources/frontieragent/workflows/agent_team/profile.py:68</code> 与 <code>sources/frontieragent/workflows/agent_team/profile.py:132</code>。</div></div><div class="card"><div class="card-h">AgentBus</div><div class="card-d">Bus 管理 jobs、sessions、spawn guard、event sink 和 artifact aggregate，见 <code>sources/frontieragent/frontier_agent/components/agent_bus/bus.py:322</code> 到 <code>sources/frontieragent/frontier_agent/components/agent_bus/bus.py:335</code>。</div></div><div class="card"><div class="card-h">Tool layer</div><div class="card-d">工具 metadata 标注 read-only、destructive、concurrency-safe、timeout 和 overflow 策略，见 <code>sources/frontieragent/plugins/tools/meta.py:15</code>。</div></div><div class="card"><div class="card-h">Fan-in</div><div class="card-d">报告收集把 complete、incomplete、failed、paused 明确编码，见 <code>sources/frontieragent/frontier_agent/components/agent_bus/fan_in.py:147</code>。</div></div><div class="card"><div class="card-h">Tests</div><div class="card-d">测试覆盖 profile、provider、workflow mode 和 TUI busy steering，见 <code>sources/frontieragent/apodex/tests/test_profiles.py:86</code> 与 <code>sources/frontieragent/apodex/tests/test_tui.py:142</code>。</div></div></div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/frontier_agent/components/agent_bus/bus.py</span> · L300-335</span><span>Python</span></div>
+        <pre class="code"><span class="ln">300</span>    &quot;&quot;&quot;Async job model for sub-agent dispatch.
+<span class="ln">301</span>
+<span class="ln">302</span>    Core API: submit() / collect() / abort().
+<span class="ln">303</span>
+<span class="ln">304</span>    If a SpawnGuard is attached, submit() enforces concurrency/depth/token
+<span class="ln">305</span>    limits. Without a guard, only basic depth checking applies.
+<span class="ln">306</span>    &quot;&quot;&quot;
+<span class="ln">307</span>
+<span class="ln">308</span>    def __init__(
+<span class="ln">309</span>        self,
+<span class="ln">310</span>        *,
+<span class="ln">311</span>        event_sink: EventSink | None = None,
+<span class="ln">312</span>        pause_check_factory: PauseCheckFactory | None = None,
+<span class="ln">313</span>        agent_registry: AgentRegistry | None = None,
+<span class="ln">314</span>        resource_manager: Any = None,
+<span class="ln">315</span>        session_history_dir: Path | None = None,
+<span class="ln">316</span>    ) -&gt; None:
+<span class="ln">317</span>        &quot;&quot;&quot;Construct the bus with optional injected services.
+<span class="ln">318</span>
+<span class="ln">319</span>        Missing services fall back to the registry. ``session_history_dir``
+<span class="ln">320</span>        enables disk offload for messages removed by eager trimming.
+<span class="ln">321</span>        &quot;&quot;&quot;
+<span class="ln">322</span>        self._jobs: dict[str, JobEntry] = {}
+<span class="ln">323</span>        self._counter: int = 0
+<span class="ln">324</span>        self._spawn_guard: SpawnGuard | None = None
+<span class="ln">325</span>        self._sub_agent_profiles: dict[str, dict[str, SubAgentProfile]] = {}
+<span class="ln">326</span>        self._sessions: dict[str, SubAgentSession] = {}
+<span class="ln">327</span>        # Per-task evidence / assertion pool — populated when main agents
+<span class="ln">328</span>        # (or collect_reports) harvest completed SubAgentResults, drained
+<span class="ln">329</span>        # by the pipeline node at phase end for the report node to consume.
+<span class="ln">330</span>        self._task_aggregates: dict[str, dict[str, list[dict[str, Any]]]] = {}
+<span class="ln">331</span>        self._event_sink_injected: EventSink | None = event_sink
+<span class="ln">332</span>        self._pause_check_factory: PauseCheckFactory | None = pause_check_factory
+<span class="ln">333</span>        self._agent_registry_injected: AgentRegistry | None = agent_registry
+<span class="ln">334</span>        self._resource_manager_injected: Any = resource_manager
+<span class="ln">335</span>        self._session_history_dir: Path | None = session_history_dir</pre>
+      </div>
+
+      <a class="deep-link" href="frontieragent/frontieragent-agent-team.html">深度阅读 · Agent Team profile 与 session runtime</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">Agent Team 与工具契约</h2>
+
+      <h3><span class="arr">▸</span>Profile loader 是工作流配置的第一道门</h3>
+      <p>Agent Team 不把所有参数硬编码进 prompt，而是通过 profile loader 装载 YAML 或 inline profile，再做 env-var resolution、provider credential 注入、overrides deep merge 和 blacklist merge。<code>sources/frontieragent/workflows/agent_team/profile.py:132</code> 到 <code>sources/frontieragent/workflows/agent_team/profile.py:178</code> 显示了这个顺序；<code>sources/frontieragent/workflows/agent_team/profile.py:88</code> 的 deep_merge_overrides 说明 overrides 不会污染 base profile。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/workflows/agent_team/profile.py</span> · L88-120</span><span>Python</span></div>
+        <pre class="code"><span class="ln">88</span>def deep_merge_overrides(
+<span class="ln">89</span>    base: dict[str, Any], overrides: dict[str, Any],
+<span class="ln">90</span>) -&gt; dict[str, Any]:
+<span class="ln">91</span>    &quot;&quot;&quot;Deep-merge ``overrides`` onto ``base`` without mutating either.
+<span class="ln">92</span>
+<span class="ln">93</span>    Semantics chosen to match SDK caller intent (override one nested
+<span class="ln">94</span>    knob, leave siblings alone):
+<span class="ln">95</span>
+<span class="ln">96</span>    - Nested dicts merge recursively (sibling keys preserved).
+<span class="ln">97</span>    - Lists are replaced wholesale — partial list merging is almost
+<span class="ln">98</span>      never what callers want (e.g. ``fallback_api_keys: [new_key]``
+<span class="ln">99</span>      should *replace* the existing key list, not append).
+<span class="ln">100</span>    - ``None`` in the override **removes** the key, so callers can
+<span class="ln">101</span>      disable a defaulted-on feature.
+<span class="ln">102</span>    - Scalar override replacing a dict in base wins — caller asked
+<span class="ln">103</span>      for that shape, however unusual.
+<span class="ln">104</span>    &quot;&quot;&quot;
+<span class="ln">105</span>    if not overrides:
+<span class="ln">106</span>        # Returning a deep copy preserves the contract that the caller
+<span class="ln">107</span>        # can mutate the result without leaking back into ``base``.
+<span class="ln">108</span>        return _deep_copy(base)
+<span class="ln">109</span>
+<span class="ln">110</span>    out: dict[str, Any] = _deep_copy(base)
+<span class="ln">111</span>    for key, value in overrides.items():
+<span class="ln">112</span>        if value is None:
+<span class="ln">113</span>            out.pop(key, None)
+<span class="ln">114</span>            continue
+<span class="ln">115</span>        base_value = out.get(key)
+<span class="ln">116</span>        if isinstance(base_value, dict) and isinstance(value, dict):
+<span class="ln">117</span>            out[key] = deep_merge_overrides(base_value, value)
+<span class="ln">118</span>        else:
+<span class="ln">119</span>            out[key] = _deep_copy(value)
+<span class="ln">120</span>    return out</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Assignment manifest 把发布权限写进工具 schema</h3>
+      <p>Agent Team 的 assign_task 不是简单把 prompt 扔给 worker。<code>sources/frontieragent/plugins/tools/assign_task.py:155</code> 解释旧 publish 字段为什么退场，<code>sources/frontieragent/plugins/tools/assign_task.py:185</code> 到 <code>sources/frontieragent/plugins/tools/assign_task.py:208</code> 把 output_paths 明确设为发布授权，避免多个 sub-agent 同时写最终产物。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/plugins/tools/assign_task.py</span> · L155-208</span><span>Python</span></div>
+        <pre class="code"><span class="ln">155</span># ``publish`` used to be the authorization field and ``output_paths`` its
+<span class="ln">156</span># attachment. They were never independent: ``validate_publish_contract``
+<span class="ln">157</span># rejected true-without-paths and paths-without-true alike, so the boolean
+<span class="ln">158</span># carried nothing the manifest did not already carry. Requiring it only added a
+<span class="ln">159</span># key the coordinator omitted on roughly a quarter of its assignments (60/236
+<span class="ln">160</span># and 63/225 across the two arms of the 30-task APEX replay), where the default
+<span class="ln">161</span># silently absorbed it as false -- and an omission next to a correct manifest
+<span class="ln">162</span># was a hard rejection rather than a publisher. The manifest is now the grant;
+<span class="ln">163</span># ``publish`` survives only so callers that still send it are not rejected.
+<span class="ln">164</span>#
+<span class="ln">165</span># NOTE: this class&#x27;s docstring is rendered verbatim into the model-facing tool
+<span class="ln">166</span># schema, so keep it to what the coordinator needs to read.
+<span class="ln">167</span>class AgentTeamAssignmentSpec(AssignmentSpec):
+<span class="ln">168</span>    &quot;&quot;&quot;One assignment. Carrying ``output_paths`` is what authorizes it to write
+<span class="ln">169</span>    those ``/outputs`` paths; without them the task runs workspace-only.&quot;&quot;&quot;
+<span class="ln">170</span>
+<span class="ln">171</span>    model_config = ConfigDict(extra=&quot;forbid&quot;)
+<span class="ln">172</span>
+<span class="ln">173</span>    publish: StrictBool | None = Field(
+<span class="ln">174</span>        default=None,
+<span class="ln">175</span>        # Marked deprecated in the advertised schema only. Pydantic&#x27;s own
+<span class="ln">176</span>        # ``deprecated=True`` warns on every attribute read, and
+<span class="ln">177</span>        # ``validate_publish_contract`` below reads it twice per assignment --
+<span class="ln">178</span>        # that is a DeprecationWarning per validated task in every run.
+<span class="ln">179</span>        json_schema_extra={&quot;deprecated&quot;: True},
+<span class="ln">180</span>        description=(
+<span class="ln">181</span>            &quot;Deprecated, omit it. output_paths alone grants publication. If &quot;
+<span class="ln">182</span>            &quot;sent it must agree with the manifest.&quot;
+<span class="ln">183</span>        ),
+<span class="ln">184</span>    )
+<span class="ln">185</span>    output_paths: list[StrictStr] = Field(
+<span class="ln">186</span>        default_factory=list,
+<span class="ln">187</span>        description=(
+<span class="ln">188</span>            &quot;Exact absolute final file paths under /outputs. Supplying them IS &quot;
+<span class="ln">189</span>            &quot;the publication grant, so set them on exactly one final-publisher &quot;
+<span class="ln">190</span>            &quot;assignment and omit them on every other. Pass a JSON array even &quot;
+<span class="ln">191</span>            &quot;for one path.&quot;
+<span class="ln">192</span>        ),
+<span class="ln">193</span>    )
+<span class="ln">194</span>    replace_manifest: StrictBool = Field(
+<span class="ln">195</span>        default=False,
+<span class="ln">196</span>        description=(
+<span class="ln">197</span>            &quot;Set true only on a follow-up to the existing publisher when the &quot;
+<span class="ln">198</span>            &quot;required final output formats genuinely changed.&quot;
+<span class="ln">199</span>        ),
+<span class="ln">200</span>    )
+<span class="ln">201</span>
+<span class="ln">202</span>    @property
+<span class="ln">203</span>    def can_publish(self) -&gt; bool:
+<span class="ln">204</span>        &quot;&quot;&quot;Whether this assignment may write ``/outputs``.
+<span class="ln">205</span>
+<span class="ln">206</span>        Derived from the manifest alone: a path list is the grant.
+<span class="ln">207</span>        &quot;&quot;&quot;
+<span class="ln">208</span>        return bool(self.output_paths)</pre>
+      </div>
+
+      <a class="deep-link" href="frontieragent/frontieragent-tool-contract.html">深度阅读 · 工具权限、审批与沙箱契约</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">任务派发、收集与恢复</h2>
+      <p>任务流的关键在两侧：派发时要限制深度、预算和 session 污染；收集时要避免无意义轮询并保留 partial evidence。<code>sources/frontieragent/frontier_agent/components/agent_bus/bus.py:431</code> 是 submit 非阻塞入口，<code>sources/frontieragent/plugins/tools/collect_reports.py:130</code> 是模型可见 fan-in 入口，<code>sources/frontieragent/frontier_agent/components/agent_bus/fan_in.py:147</code> 定义报告状态分类。</p>
+
+      <h3><span class="arr">▸</span>AgentBus 派发路径</h3>
+      <div class="flow">assign_task
+  │ validates assignment / publish manifest
+  ▼
+AgentBus.submit_task_to_session
+  │ session boundary + job metadata
+  ▼
+_run_and_finalize
+  │ SpawnGuard + runtime observers
+  ▼
+SubAgentResult queued for collect_reports</div>
+
+      <h3><span class="arr">▸</span>报告收集与状态短路</h3>
+      <div class="flow">collect_reports(timeout)
+  ├─ drain ready reports
+  ├─ classify no_subagents / no_work_queued / all_collected
+  ├─ wait first completion when running
+  └─ render <report status="complete|incomplete|failed|paused"></div>
+
+      <h3><span class="arr">▸</span>模型可见 fan-in 契约</h3>
+      <p>collect_reports 的 docstring 本身就是工具契约。它在 <code>sources/frontieragent/plugins/tools/collect_reports.py:130</code> 进入工具定义，随后把“已有结果立即 drain、没有任务时不要轮询、运行中等待首个完成、partial evidence 继续可用”写成模型可读规则。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/plugins/tools/collect_reports.py</span> · L130-155</span><span>Python</span></div>
+        <pre class="code"><span class="ln">130</span>async def collect_reports(timeout: int = 1800) -&gt; str:
+<span class="ln">131</span>    &quot;&quot;&quot;Collect reports from any sub-agents that have finished their tasks.
+<span class="ln">132</span>
+<span class="ln">133</span>    Reports also drain automatically between turns when agents finish
+<span class="ln">134</span>    *during* a turn, but agents still running at the start of a new turn
+<span class="ln">135</span>    won&#x27;t appear unless you call this. Block-wait here is the right move
+<span class="ln">136</span>    whenever you need a running agent&#x27;s output to proceed.
+<span class="ln">137</span>
+<span class="ln">138</span>    Behaviour:
+<span class="ln">139</span>      1. Non-blocking drain: any sub-agent that already finished returns
+<span class="ln">140</span>         its ``&lt;report&gt;`` immediately, regardless of ``timeout``.
+<span class="ln">141</span>      2. If the drain found nothing, classify the session state:
+<span class="ln">142</span>         * no agents at all → ``&quot;create_subagent first&quot;``.
+<span class="ln">143</span>         * agents created but never assigned → ``[status] no_work_queued``,
+<span class="ln">144</span>           call ``assign_task`` (do NOT poll again).
+<span class="ln">145</span>         * all submitted work already collected → ``[status] all_collected``,
+<span class="ln">146</span>           synthesize or assign a follow-up (do NOT poll again).
+<span class="ln">147</span>         * at least one session running → wait up to ``timeout`` seconds
+<span class="ln">148</span>           for the FIRST completion, then drain any others that
+<span class="ln">149</span>           completed during the wait.
+<span class="ln">150</span>
+<span class="ln">151</span>    Reports come back as
+<span class="ln">152</span>    ``&lt;report agent=&quot;NAME&quot; status=&quot;complete|incomplete|failed|paused&quot;
+<span class="ln">153</span>    reason=&quot;...&quot;&gt;…&lt;/report&gt;`` — treat ``incomplete`` / ``failed`` as
+<span class="ln">154</span>    partial evidence, not a final answer.
+<span class="ln">155</span></pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Trace 是低成本恢复日志</h3>
+      <p>TraceObserver 没有引入数据库或外部服务，而是在 <code>sources/frontieragent/apodex/trace.py:30</code> 开始写 append-only JSONL，并在 <code>sources/frontieragent/apodex/trace.py:41</code> 吞掉写入异常，保证观测失败不会放大成任务失败。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/apodex/trace.py</span> · L30-57</span><span>Python</span></div>
+        <pre class="code"><span class="ln">30</span>class TraceObserver(BaseObserver):
+<span class="ln">31</span>    &quot;&quot;&quot;Awaited (critical) so trace lines stay ordered; never returns an
+<span class="ln">32</span>    intervention. Append-only JSONL; failures are swallowed (a broken trace
+<span class="ln">33</span>    must not break a run).&quot;&quot;&quot;
+<span class="ln">34</span>
+<span class="ln">35</span>    critical = True
+<span class="ln">36</span>
+<span class="ln">37</span>    def __init__(self, path: str, *, mode: str = &quot;&quot;, cwd: str = &quot;&quot;) -&gt; None:
+<span class="ln">38</span>        self.path = path
+<span class="ln">39</span>        self._write({&quot;t&quot;: &quot;start&quot;, &quot;mode&quot;: mode, &quot;cwd&quot;: cwd})
+<span class="ln">40</span>
+<span class="ln">41</span>    def _write(self, rec: dict[str, Any]) -&gt; None:
+<span class="ln">42</span>        try:
+<span class="ln">43</span>            with open(self.path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as f:
+<span class="ln">44</span>                f.write(json.dumps(rec, ensure_ascii=False, default=str) + &quot;\n&quot;)
+<span class="ln">45</span>                f.flush()
+<span class="ln">46</span>        except Exception:
+<span class="ln">47</span>            pass
+<span class="ln">48</span>
+<span class="ln">49</span>    async def on_llm_response(self, ctx: TurnContext) -&gt; Intervention | None:
+<span class="ln">50</span>        self._write({
+<span class="ln">51</span>            &quot;t&quot;: &quot;llm&quot;, &quot;turn&quot;: ctx.turn,
+<span class="ln">52</span>            &quot;text&quot;: ctx.ai_text or &quot;&quot;,
+<span class="ln">53</span>            &quot;tool_calls&quot;: list(ctx.tool_calls or []),
+<span class="ln">54</span>        })
+<span class="ln">55</span>        return None
+<span class="ln">56</span>
+<span class="ln">57</span>    async def on_tool_result(</pre>
+      </div>
+
+      <a class="deep-link" href="frontieragent/frontieragent-fanin-recovery.html">深度阅读 · Fan-in、trace 与恢复路径</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试覆盖与运行约束</h2>
+      <p>测试不是只覆盖 CLI happy path。profile 测试验证内置 react / agent_team mode 必须绑定真实 workflow profile；TUI 测试用 fake session 驱动 busy steering 和 transcript stream，保证 UI 层不会把运行中的输入误当第二个任务。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>关键断言在 <code>sources/frontieragent/apodex/tests/test_profiles.py:86</code>：TUI 不能用 generic ReAct 假装 Agent Team；<code>sources/frontieragent/apodex/tests/test_profiles.py:103</code> 验证本地 OpenAI-compatible provider 路径；<code>sources/frontieragent/apodex/tests/test_tui.py:142</code> 通过 Textual test harness 验证任务启动、流式输出和 busy-time steering。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/test_profiles.py</span> · L86-120</span><span>Python</span></div>
+        <pre class="code"><span class="ln">86</span>def test_native_workflow_modes_are_explicit_and_use_shipped_profiles(monkeypatch):
+<span class="ln">87</span>    &quot;&quot;&quot;The TUI must not silently emulate a team with its generic ReAct loop.&quot;&quot;&quot;
+<span class="ln">88</span>    monkeypatch.setenv(&quot;OPENAI_API_KEY&quot;, &quot;test&quot;)
+<span class="ln">89</span>    monkeypatch.setenv(&quot;OPENAI_BASE_URL&quot;, &quot;https://example.test/v1&quot;)
+<span class="ln">90</span>    monkeypatch.setenv(&quot;OPENAI_MODEL&quot;, &quot;test-model&quot;)
+<span class="ln">91</span>
+<span class="ln">92</span>    react = P.get_profile(&quot;react&quot;)
+<span class="ln">93</span>    team = P.get_profile(&quot;agent_team&quot;)
+<span class="ln">94</span>
+<span class="ln">95</span>    assert (react.workflow, react.workflow_profile) == (
+<span class="ln">96</span>        &quot;stateful-react-agent&quot;, &quot;tui&quot;,
+<span class="ln">97</span>    )
+<span class="ln">98</span>    assert (team.workflow, team.workflow_profile) == (
+<span class="ln">99</span>        &quot;agent_team&quot;, &quot;tui&quot;,
+<span class="ln">100</span>    )
+<span class="ln">101</span>
+<span class="ln">102</span>
+<span class="ln">103</span>def test_native_workflow_modes_accept_local_openai_compatible_provider(monkeypatch):
+<span class="ln">104</span>    &quot;&quot;&quot;The GPU Compose path needs no real API key for its local SGLang server.&quot;&quot;&quot;
+<span class="ln">105</span>    monkeypatch.setenv(&quot;OPENAI_PROVIDER&quot;, &quot;local&quot;)
+<span class="ln">106</span>    monkeypatch.setenv(&quot;OPENAI_API_KEY&quot;, &quot;EMPTY&quot;)
+<span class="ln">107</span>    monkeypatch.setenv(&quot;OPENAI_BASE_URL&quot;, &quot;http://model:30000/v1&quot;)
+<span class="ln">108</span>    monkeypatch.setenv(&quot;OPENAI_MODEL&quot;, &quot;local-model&quot;)
+<span class="ln">109</span>    monkeypatch.setenv(&quot;OPENAI_CONTEXT_WINDOW&quot;, &quot;32768&quot;)
+<span class="ln">110</span>    monkeypatch.setenv(&quot;OPENAI_MAX_TOKENS&quot;, &quot;8192&quot;)
+<span class="ln">111</span>
+<span class="ln">112</span>    for mode in (&quot;react&quot;, &quot;agent_team&quot;):
+<span class="ln">113</span>        profile = P.get_profile(mode)
+<span class="ln">114</span>        assert profile.provider == &quot;local&quot;
+<span class="ln">115</span>        assert profile.runtime_config(profile.model_config, mode=mode).ok
+<span class="ln">116</span>        assert profile.model_config.api_key == &quot;EMPTY&quot;
+<span class="ln">117</span>        assert profile.model_config.base_url == &quot;http://model:30000/v1&quot;
+<span class="ln">118</span>        assert profile.model_config.model == &quot;local-model&quot;
+<span class="ln">119</span>        assert profile.model_config.context_window == 32768
+<span class="ln">120</span>        assert profile.model_config.max_tokens == 8192</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul><li>Session 复用被限制：<code>sources/frontieragent/plugins/tools/assign_task.py:56</code> 说明 stale tool stubs 和旧结论会污染后续任务，所以 MAX_TASKS_PER_SESSION 固定为 5。</li><li>Plan mode 先拦截 mutating tool：<code>sources/frontieragent/apodex/observers.py:437</code> 到 <code>sources/frontieragent/apodex/observers.py:457</code> 保证未批准计划时不能写文件。</li><li>报告状态不能随便标 complete：<code>sources/frontieragent/frontier_agent/components/agent_bus/fan_in.py:147</code> 的 classify_completion 把未知 stop reason 归为 incomplete。</li><li>Trace 写入失败不会打断任务：<code>sources/frontieragent/apodex/trace.py:41</code> 到 <code>sources/frontieragent/apodex/trace.py:47</code> 吞掉异常，换取主流程可用性。</li></ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">工程亮点</h2>
+      <div class="g2"><div class="card"><div class="card-h">Agent Team 不是伪并行</div><div class="card-d">入口层明确通过 workflow profile 跑 BenchmarkSession，<code>sources/frontieragent/apodex/task_runner.py:507</code> 之后才进入 pipeline，而不是 generic loop 里摆几个工具名。</div></div><div class="card"><div class="card-h">发布授权细粒度</div><div class="card-d">output_paths 即 grant，<code>sources/frontieragent/plugins/tools/assign_task.py:185</code> 到 <code>sources/frontieragent/plugins/tools/assign_task.py:208</code> 让最终写入权限跟 manifest 绑定。</div></div><div class="card"><div class="card-h">失败可解释</div><div class="card-d">fan-in 的 incomplete note 表在 <code>sources/frontieragent/frontier_agent/components/agent_bus/fan_in.py:63</code>，能告诉主 Agent 是 max_turns、wall_deadline 还是 repeated_tool_calls。</div></div><div class="card"><div class="card-h">TUI 支持中途 steering</div><div class="card-d">测试在 <code>sources/frontieragent/apodex/tests/test_tui.py:163</code> 验证 busy 时输入被放入 SteerInbox，而不是启动第二个任务。</div></div></div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>源码成熟度不错，但这是 2026-08-22 新仓库，风险主要在生态稳定性和运行面复杂度。下面这些不是否定项目，而是使用前需要明确的工程边界。</p>
+      <div class="g2"><div class="card"><div class="card-h">新项目版本变化快</div><div class="card-d">最近 commit 是 2026-08-26，公开 API 与 profile schema 可能继续变化。依赖 <code>sources/frontieragent/workflows/agent_team/profile.py:27</code> 这类 alias 兼容层时要锁版本。</div></div><div class="card"><div class="card-h">权限模型仍需外部制度</div><div class="card-d">代码能在 <code>sources/frontieragent/apodex/observers.py:498</code> 请求确认，但团队仍要规定哪些命令能 remember、哪些必须人工复核。</div></div><div class="card"><div class="card-h">并行不是免费</div><div class="card-d">SpawnGuard 和 session cap 降低失控风险，但多 agent 会放大 token、网络和验证成本；<code>sources/frontieragent/plugins/tools/collect_reports.py:181</code> 还需要按 wall-clock 剩余预算截断等待。</div></div><div class="card"><div class="card-h">评测资产仍要看任务域</div><div class="card-d">benchmarks 存在不代表你的私有工作流已验证。应把 <code>sources/frontieragent/apodex/tests/test_profiles.py:112</code> 这种 provider/runtime 测试扩展到自己的模型和沙箱。</div></div></div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-08-26</span>
+      <span>Source · <a href="https://github.com/ApodexAI/FrontierAgent">ApodexAI/FrontierAgent</a></span>
+      <span><a href="../index.html">← 返回 Trending 索引</a></span>
+      <span><a href="../frontieragent.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
