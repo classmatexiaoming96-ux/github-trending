@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Halofy · 写入、审计链与删除证书</title>
+<meta name="description" content="Halofy 写入治理源码拆解：事实抽取与验证、supersede、append-only audit chain、合规 erasure 与 ed25519 删除证书。" />
+<meta property="og:title" content="Halofy · 写入、审计链与删除证书" />
+<meta property="og:description" content="Halofy 写入治理源码拆解：事实抽取与验证、supersede、append-only audit chain、合规 erasure 与 ed25519 删除证书。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#74d4b6; --star-soft:#9ee8d4; --star-deep:#3f9f87; }
+.flow{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;margin:24px 0;display:grid;gap:12px}
+.flow-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flow-node{border:1px solid var(--line-2);background:rgba(255,255,255,.035);border-radius:10px;padding:14px;font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.callouts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+.callout{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px}
+.callout h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.callout p{color:var(--text-2);line-height:1.62}
+.ref-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:20px 0}
+.ref-grid p,.ref-list p{border:1px solid var(--line-2);border-radius:10px;background:rgba(255,255,255,.026);padding:13px 14px;color:var(--text-2);line-height:1.58}
+.deep-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px;text-decoration:none;color:var(--text)}
+.deep-link h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.deep-link p{color:var(--text-2);font-size:14px;line-height:1.55}
+.code-wrap{margin:20px 0 28px}
+.code-head{display:flex;justify-content:space-between;gap:14px;color:var(--text-faint);font-family:var(--mono);font-size:11px;padding:9px 12px;border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:rgba(255,255,255,.035)}
+.code-wrap pre{margin:0;overflow:auto;border:1px solid var(--line);border-radius:0 0 10px 10px;background:#050609;padding:14px 0}
+.code-wrap code{font-family:var(--mono);font-size:12px;line-height:1.55;color:#d8deea}
+.code-wrap .line{display:block;white-space:pre;padding:0 16px}
+.code-wrap .ln{display:inline-block;width:48px;margin-right:14px;color:var(--text-faint);user-select:none}
+@media(max-width:900px){.flow-row,.callouts,.ref-grid,.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><strong>Halofy</strong><a href="../index.html">Index</a></div>
+<div class="shell">
+<aside class="nav">
+  <div class="nav-brand"><div class="glyph"><b>Halofy</b> Observatory</div><div class="sub">source-level · 2026-08-27</div></div>
+  <ol class="nav-list">
+    <li><a href="#write"><span class="idx">01</span>写入管线</a></li>
+<li><a href="#audit"><span class="idx">02</span>审计链</a></li>
+<li><a href="#erase"><span class="idx">03</span>删除证书</a></li>
+  </ol>
+  <div class="nav-foot"><a href="../index.html">Index</a><br /><a href="https://github.com/halofyai/halofy" target="_blank" rel="noopener">halofyai/halofy</a></div>
+</aside>
+<main class="main">
+<section class="hero">
+  <div class="hero-grid">
+    <div><div class="hero-eyebrow">AI agent governance · MCP/HTTP memory kernel</div><h1 class="hero-title">可修正、可审计、可证明删除的 <em>memory store</em></h1><p class="hero-desc">Halofy 写入治理源码拆解：事实抽取与验证、supersede、append-only audit chain、合规 erasure 与 ed25519 删除证书。</p></div>
+    <div class="hero-card"><h3>观察结论</h3><p>它不是又一个 prompt memory 插件，而是把身份、ACL、写入验证、检索驱动、审计链和合规删除放进同一个内核边界。</p></div>
+  </div>
+  <div class="hero-stats"><div class="stat"><div class="stat-num">25</div><div class="stat-lbl">verify batch</div></div><div class="stat"><div class="stat-num">SHA-256</div><div class="stat-lbl">audit chain</div></div><div class="stat"><div class="stat-num">ed25519</div><div class="stat-lbl">certificate</div></div><div class="stat"><div class="stat-num">1</div><div class="stat-lbl">hard-delete exception</div></div></div>
+</section>
+<section class="sec" id="write"><div class="sec-no"><b>01</b> / write</div><h2 class="sec-title">写入是候选事实的治理队列</h2><h3>源码判断</h3><p><code>src/write/index.ts:1</code> 模块注释把写入拆成治理管线，说明 LLM 抽取不是权威写入。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:61</code> index port 支持 closeValidity，新事实通过关闭旧事实有效期表达修正。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:133</code> 语义 supersede 阈值将相近冲突从普通重复里分离出来。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:321</code> write() 的入口在抽取前先处理 classification 与断言。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:354</code> 每个 candidate 单独处理，失败和 brownout 不必拖垮所有候选。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:421</code> processCandidate 对低信息事实、实体注解和目的地做过滤。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/write/index.ts:321-418</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 321</span>  async write(</span>
+<span class="line"><span class="ln"> 322</span>    req: WriteRequest,</span>
+<span class="line"><span class="ln"> 323</span>    policy: WritePolicy,</span>
+<span class="line"><span class="ln"> 324</span>    /** Agent identity for audit attribution (D4); defaults to the actor. */</span>
+<span class="line"><span class="ln"> 325</span>    agentId: string = req.actor,</span>
+<span class="line"><span class="ln"> 326</span>    hooks?: WritePathHooks,</span>
+<span class="line"><span class="ln"> 327</span>  ): Promise&lt;WriteResult&gt; {</span>
+<span class="line"><span class="ln"> 328</span>    const now = new Date().toISOString();</span>
+<span class="line"><span class="ln"> 329</span>    const inputClassification = governedClassification(req.content, req, policy);</span>
+<span class="line"><span class="ln"> 330</span>    if (!req.hints?.verbatim) {</span>
+<span class="line"><span class="ln"> 331</span>      assertDestinationAllowed(inputClassification, "llm-extraction", {</span>
+<span class="line"><span class="ln"> 332</span>        region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 333</span>      });</span>
+<span class="line"><span class="ln"> 334</span>    }</span>
+<span class="line"><span class="ln"> 335</span>    const result: WriteResult = {</span>
+<span class="line"><span class="ln"> 336</span>      stored: [],</span>
+<span class="line"><span class="ln"> 337</span>      rejected: [],</span>
+<span class="line"><span class="ln"> 338</span>      superseded: [],</span>
+<span class="line"><span class="ln"> 339</span>      deduplicated: 0,</span>
+<span class="line"><span class="ln"> 340</span>    };</span>
+<span class="line"><span class="ln"> 341</span></span>
+<span class="line"><span class="ln"> 342</span>    // a. Extraction.</span>
+<span class="line"><span class="ln"> 343</span>    await hooks?.onStage?.("extraction");</span>
+<span class="line"><span class="ln"> 344</span>    const candidates = await this.extract(req);</span>
+<span class="line"><span class="ln"> 345</span></span>
+<span class="line"><span class="ln"> 346</span>    // b (hoisted). One verifier call covers every extracted candidate —</span>
+<span class="line"><span class="ln"> 347</span>    // per-fact calls re-sent the whole transcript per candidate, which made</span>
+<span class="line"><span class="ln"> 348</span>    // verification the write path's dominant model spend on multi-fact</span>
+<span class="line"><span class="ln"> 349</span>    // documents. Runs BEFORE any candidate commits, so an LLM outage here</span>
+<span class="line"><span class="ln"> 350</span>    // propagates with zero progress and the caller's verbatim fallback stays</span>
+<span class="line"><span class="ln"> 351</span>    // safe to re-run (nothing committed to duplicate).</span>
+<span class="line"><span class="ln"> 352</span>    const verdicts = await this.verifyCandidates(req, policy, candidates, now);</span>
+<span class="line"><span class="ln"> 353</span></span>
+<span class="line"><span class="ln"> 354</span>    for (const [index, cand] of candidates.entries()) {</span>
+<span class="line"><span class="ln"> 355</span>      // M6 (D14): the caller's hard cap on STORED facts (the L4 write-back</span>
+<span class="line"><span class="ln"> 356</span>      // passes its remaining per-fault cache budget). Checked before each</span>
+<span class="line"><span class="ln"> 357</span>      // candidate — extraction fan-out can never land more rows than the cap,</span>
+<span class="line"><span class="ln"> 358</span>      // and the overflow is reported, not silently dropped.</span>
+<span class="line"><span class="ln"> 359</span>      if (req.maxFacts !== undefined &amp;&amp; result.stored.length &gt;= req.maxFacts) {</span>
+<span class="line"><span class="ln"> 360</span>        result.rejected.push({ candidate: cand.content, reason: "max-facts-cap" });</span>
+<span class="line"><span class="ln"> 361</span>        continue;</span>
+<span class="line"><span class="ln"> 362</span>      }</span>
+<span class="line"><span class="ln"> 363</span>      try {</span>
+<span class="line"><span class="ln"> 364</span>        // Entity-registry drift between prepare() and the commit transaction</span>
+<span class="line"><span class="ln"> 365</span>        // retries the whole candidate: the transaction rolled back, so a</span>
+<span class="line"><span class="ln"> 366</span>        // fresh preparation inside processCandidate re-reads current state</span>
+<span class="line"><span class="ln"> 367</span>        // and (normally) resolves the colliding mention as an exact match.</span>
+<span class="line"><span class="ln"> 368</span>        // Any other failure - and a conflict that persists past the bound -</span>
+<span class="line"><span class="ln"> 369</span>        // propagates to the handler below unchanged.</span>
+<span class="line"><span class="ln"> 370</span>        for (let entityAttempt = 1; ; entityAttempt++) {</span>
+<span class="line"><span class="ln"> 371</span>          try {</span>
+<span class="line"><span class="ln"> 372</span>            await this.processCandidate(req, policy, agentId, now, cand, verdicts[index] ?? false, result, hooks);</span>
+<span class="line"><span class="ln"> 373</span>            break;</span>
+<span class="line"><span class="ln"> 374</span>          } catch (err) {</span>
+<span class="line"><span class="ln"> 375</span>            if (</span>
+<span class="line"><span class="ln"> 376</span>              err instanceof EntityResolutionConflictError &amp;&amp;</span>
+<span class="line"><span class="ln"> 377</span>              entityAttempt &lt; MAX_ENTITY_RESOLUTION_ATTEMPTS</span>
+<span class="line"><span class="ln"> 378</span>            ) {</span>
+<span class="line"><span class="ln"> 379</span>              continue;</span>
+<span class="line"><span class="ln"> 380</span>            }</span>
+<span class="line"><span class="ln"> 381</span>            throw err;</span>
+<span class="line"><span class="ln"> 382</span>          }</span>
+<span class="line"><span class="ln"> 383</span>        }</span>
+<span class="line"><span class="ln"> 384</span>      } catch (err) {</span>
+<span class="line"><span class="ln"> 385</span>        // An LLM circuit that opens MID-write — after earlier candidates</span>
+<span class="line"><span class="ln"> 386</span>        // were already committed — must never surface as a whole-write</span>
+<span class="line"><span class="ln"> 387</span>        // failure: the caller's verbatim fallback would re-run the ENTIRE</span>
+<span class="line"><span class="ln"> 388</span>        // write, duplicating the committed facts (plus their supersede/</span>
+<span class="line"><span class="ln"> 389</span>        // audit/cost rows) and dropping their ids from the returned result.</span>
+<span class="line"><span class="ln"> 390</span>        // Record the outage per remaining candidate and keep the partial</span>
+<span class="line"><span class="ln"> 391</span>        // WriteResult accurate instead. With ZERO progress the error still</span>
+<span class="line"><span class="ln"> 392</span>        // propagates: the verbatim fallback is safe then (nothing committed</span>
+<span class="line"><span class="ln"> 393</span>        // to duplicate).</span>
+<span class="line"><span class="ln"> 394</span>        const progress =</span>
+<span class="line"><span class="ln"> 395</span>          result.stored.length +</span>
+<span class="line"><span class="ln"> 396</span>            result.superseded.length +</span>
+<span class="line"><span class="ln"> 397</span>            result.rejected.length +</span>
+<span class="line"><span class="ln"> 398</span>            (result.disputed?.length ?? 0) +</span>
+<span class="line"><span class="ln"> 399</span>            result.deduplicated &gt;</span>
+<span class="line"><span class="ln"> 400</span>          0;</span>
+<span class="line"><span class="ln"> 401</span>        if (err instanceof LlmUnavailableError &amp;&amp; progress) {</span>
+<span class="line"><span class="ln"> 402</span>          result.rejected.push({ candidate: cand.content, reason: "llm-unavailable" });</span>
+<span class="line"><span class="ln"> 403</span>          await this.audit(</span>
+<span class="line"><span class="ln"> 404</span>            req,</span>
+<span class="line"><span class="ln"> 405</span>            agentId,</span>
+<span class="line"><span class="ln"> 406</span>            now,</span>
+<span class="line"><span class="ln"> 407</span>            "reject",</span>
+<span class="line"><span class="ln"> 408</span>            null,</span>
+<span class="line"><span class="ln"> 409</span>            "error",</span>
+<span class="line"><span class="ln"> 410</span>            "llm-unavailable: circuit opened mid-write; earlier candidates already committed",</span>
+<span class="line"><span class="ln"> 411</span>          );</span>
+<span class="line"><span class="ln"> 412</span>          continue;</span>
+<span class="line"><span class="ln"> 413</span>        }</span>
+<span class="line"><span class="ln"> 414</span>        throw err;</span>
+<span class="line"><span class="ln"> 415</span>      }</span>
+<span class="line"><span class="ln"> 416</span>    }</span>
+<span class="line"><span class="ln"> 417</span></span>
+<span class="line"><span class="ln"> 418</span>    return result;</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/write/index.ts:421-520</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 421</span>  /** Steps b–f for one extracted candidate (mutates `result` in place). */</span>
+<span class="line"><span class="ln"> 422</span>  private async processCandidate(</span>
+<span class="line"><span class="ln"> 423</span>    req: WriteRequest,</span>
+<span class="line"><span class="ln"> 424</span>    policy: WritePolicy,</span>
+<span class="line"><span class="ln"> 425</span>    agentId: string,</span>
+<span class="line"><span class="ln"> 426</span>    now: string,</span>
+<span class="line"><span class="ln"> 427</span>    cand: Candidate,</span>
+<span class="line"><span class="ln"> 428</span>    /** This candidate's verdict from the hoisted batch verification. */</span>
+<span class="line"><span class="ln"> 429</span>    verdictOk: boolean,</span>
+<span class="line"><span class="ln"> 430</span>    result: WriteResult,</span>
+<span class="line"><span class="ln"> 431</span>    hooks?: WritePathHooks,</span>
+<span class="line"><span class="ln"> 432</span>  ): Promise&lt;void&gt; {</span>
+<span class="line"><span class="ln"> 433</span>    if (req.provenance !== undefined &amp;&amp; !req.hints?.verbatim &amp;&amp; isLowInformationFact(cand.content)) {</span>
+<span class="line"><span class="ln"> 434</span>      result.rejected.push({ candidate: cand.content, reason: "low-information-fact" });</span>
+<span class="line"><span class="ln"> 435</span>      await this.audit(req, agentId, now, "reject", null, "denied", "low-information-fact");</span>
+<span class="line"><span class="ln"> 436</span>      return;</span>
+<span class="line"><span class="ln"> 437</span>    }</span>
+<span class="line"><span class="ln"> 438</span></span>
+<span class="line"><span class="ln"> 439</span>    // b. Verifier verdict (computed once for the whole write in</span>
+<span class="line"><span class="ln"> 440</span>    // verifyCandidates) — SKIPPED for verbatim requests: verbatim is the</span>
+<span class="line"><span class="ln"> 441</span>    // no-LLM lane (budget brownout / LLM-outage fallback), so it must not</span>
+<span class="line"><span class="ln"> 442</span>    // call the LLM again. The candidate is the caller's own content stored</span>
+<span class="line"><span class="ln"> 443</span>    // as-is; there is nothing extracted to verify against the transcript.</span>
+<span class="line"><span class="ln"> 444</span>    if (policy.verifierEnabled &amp;&amp; !req.hints?.verbatim &amp;&amp; !verdictOk) {</span>
+<span class="line"><span class="ln"> 445</span>      result.rejected.push({</span>
+<span class="line"><span class="ln"> 446</span>        candidate: cand.content,</span>
+<span class="line"><span class="ln"> 447</span>        reason: "failed-verification",</span>
+<span class="line"><span class="ln"> 448</span>      });</span>
+<span class="line"><span class="ln"> 449</span>      await this.audit(req, agentId, now, "reject", null, "denied", "failed-verification");</span>
+<span class="line"><span class="ln"> 450</span>      return;</span>
+<span class="line"><span class="ln"> 451</span>    }</span>
+<span class="line"><span class="ln"> 452</span></span>
+<span class="line"><span class="ln"> 453</span>    // c. Entity resolution — canonical names appended as an annotation;</span>
+<span class="line"><span class="ln"> 454</span>    // the fact text itself stays verbatim.</span>
+<span class="line"><span class="ln"> 455</span>    //</span>
+<span class="line"><span class="ln"> 456</span>    // `[entities: …]` is a RESERVED write-path marker: the read side</span>
+<span class="line"><span class="ln"> 457</span>    // (DbFragmentationReader) parses canonical entities out of a trailing</span>
+<span class="line"><span class="ln"> 458</span>    // annotation. Source-controlled content (a raw doc or verbatim import) that</span>
+<span class="line"><span class="ln"> 459</span>    // legitimately ends in that bracket would otherwise inject FORGED canonical</span>
+<span class="line"><span class="ln"> 460</span>    // entities the write path never resolved. Strip any trailing occurrence off</span>
+<span class="line"><span class="ln"> 461</span>    // the base text first, so the only `[entities: …]` the read side can ever</span>
+<span class="line"><span class="ln"> 462</span>    // see is the one the write path itself appends below after real resolution.</span>
+<span class="line"><span class="ln"> 463</span>    const base = stripEntitiesAnnotation(cand.content);</span>
+<span class="line"><span class="ln"> 464</span>    // A governed localOnly ingestion write (DLP brownout: the document's</span>
+<span class="line"><span class="ln"> 465</span>    // classification denied llm-extraction / embedding-provider) must NOT</span>
+<span class="line"><span class="ln"> 466</span>    // resolve mentions through the entity registry — EntityRegistry.prepare()</span>
+<span class="line"><span class="ln"> 467</span>    // embeds with the external embedder and can call the external LLM</span>
+<span class="line"><span class="ln"> 468</span>    // tiebreak, exactly the egress localOnly exists to prevent. But landing</span>
+<span class="line"><span class="ln"> 469</span>    // with NO entity metadata makes the fact invisible to entity-grouped</span>
+<span class="line"><span class="ln"> 470</span>    // contradiction detection (organization conflict scans report</span>
+<span class="line"><span class="ln"> 471</span>    // entity_metadata_unavailable and skip it), so annotate the deterministic</span>
+<span class="line"><span class="ln"> 472</span>    // proper-noun mentions directly: zero egress, no registry mutation, same</span>
+<span class="line"><span class="ln"> 473</span>    // marker shape the read side parses. Non-ingestion localOnly writes stay</span>
+<span class="line"><span class="ln"> 474</span>    // exactly as-is, mirroring the extract() lane's provenance gate.</span>
+<span class="line"><span class="ln"> 475</span>    const deterministicMentions =</span>
+<span class="line"><span class="ln"> 476</span>      (req.hints?.localOnly || req.hints?.deterministicEntities) &amp;&amp;</span>
+<span class="line"><span class="ln"> 477</span>        req.provenance !== undefined</span>
+<span class="line"><span class="ln"> 478</span>        ? capitalizedWords(base)</span>
+<span class="line"><span class="ln"> 479</span>        : [];</span>
+<span class="line"><span class="ln"> 480</span>    // Entity resolution itself can call the embedding provider. Report the</span>
+<span class="line"><span class="ln"> 481</span>    // boundary before that work begins, not only before the final fact vector,</span>
+<span class="line"><span class="ln"> 482</span>    // so a provider failure is attributed to the real stage.</span>
+<span class="line"><span class="ln"> 483</span>    await hooks?.onStage?.("embedding");</span>
+<span class="line"><span class="ln"> 484</span>    const preparedEntities: PreparedEntityResolution[] = [];</span>
+<span class="line"><span class="ln"> 485</span>    if (this.deps.transact &amp;&amp; deterministicMentions.length === 0) {</span>
+<span class="line"><span class="ln"> 486</span>      for (const mention of cand.entities) {</span>
+<span class="line"><span class="ln"> 487</span>        preparedEntities.push(await this.entities.prepare(req.namespace, mention));</span>
+<span class="line"><span class="ln"> 488</span>      }</span>
+<span class="line"><span class="ln"> 489</span>    }</span>
+<span class="line"><span class="ln"> 490</span>    // Production writes resolve entities only after entering deps.transact so</span>
+<span class="line"><span class="ln"> 491</span>    // entity rows, alias changes, erasure fences, the memory row, and its D4</span>
+<span class="line"><span class="ln"> 492</span>    // audit evidence share one commit boundary. The non-transactional lane is</span>
+<span class="line"><span class="ln"> 493</span>    // retained for small structural unit-test implementations.</span>
+<span class="line"><span class="ln"> 494</span>    let content = deterministicMentions.length &gt; 0</span>
+<span class="line"><span class="ln"> 495</span>      ? `${base} [entities: ${deterministicMentions.join(", ")}]`</span>
+<span class="line"><span class="ln"> 496</span>      : this.deps.transact</span>
+<span class="line"><span class="ln"> 497</span>      ? base</span>
+<span class="line"><span class="ln"> 498</span>      : await this.annotateEntities(base, req.namespace, cand.entities, this.entities);</span>
+<span class="line"><span class="ln"> 499</span></span>
+<span class="line"><span class="ln"> 500</span>    // Embed the fact TEXT (un-annotated base), not the `[entities: …]` marker:</span>
+<span class="line"><span class="ln"> 501</span>    // the annotation is derived read-side metadata, so dedupe / supersedence /</span>
+<span class="line"><span class="ln"> 502</span>    // search similarity must depend only on the fact itself. This also keeps</span>
+<span class="line"><span class="ln"> 503</span>    // the verbatim lane's newly-added entity annotation from perturbing</span>
+<span class="line"><span class="ln"> 504</span>    // supersede matching between two near-identical facts.</span>
+<span class="line"><span class="ln"> 505</span>    const classification = governedClassification(content, req, policy);</span>
+<span class="line"><span class="ln"> 506</span>    if (!req.hints?.localOnly) {</span>
+<span class="line"><span class="ln"> 507</span>      assertDestinationAllowed(classification, "embedding-provider", {</span>
+<span class="line"><span class="ln"> 508</span>        region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 509</span>      });</span>
+<span class="line"><span class="ln"> 510</span>    }</span>
+<span class="line"><span class="ln"> 511</span>    assertDestinationAllowed(classification, "canonical-l2", {</span>
+<span class="line"><span class="ln"> 512</span>      region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 513</span>    });</span>
+<span class="line"><span class="ln"> 514</span>    await hooks?.onStage?.("embedding");</span>
+<span class="line"><span class="ln"> 515</span>    const [embedding] = await (</span>
+<span class="line"><span class="ln"> 516</span>      req.hints?.localOnly ? this.localEmbedder : this.deps.embedder</span>
+<span class="line"><span class="ln"> 517</span>    ).embed([base]);</span>
+<span class="line"><span class="ln"> 518</span>    if (!embedding) return; // defensive; embedders return 1:1</span>
+<span class="line"><span class="ln"> 519</span>    const sourceAccess = req.provenance?.sourceAccess ?? {</span>
+<span class="line"><span class="ln"> 520</span>      principals: [],</span></code></pre></div></section>
+<section class="sec" id="audit"><div class="sec-no"><b>02</b> / audit</div><h2 class="sec-title">审计链把事件顺序纳入哈希</h2><h3>源码判断</h3><p><code>src/audit/index.ts:92</code> auditDigest 把事件字段和 prevHash 一起哈希，事件顺序进入证明。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:109</code> appendAuditEventTx 锁链头后插入并更新 audit_chain_state。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:180</code> verifyChain 能重放整条链并发现断裂。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:225</code> audit search 用精确 namespace IN，而不是 LIKE。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/audit/index.ts:92-144</span><span>source</span></div><pre><code><span class="line"><span class="ln">  92</span>/** Low-level append primitive used by transactional and recovery paths. */</span>
+<span class="line"><span class="ln">  93</span>function auditDigest(event: AuditEvent, prevHash: string | null): string {</span>
+<span class="line"><span class="ln">  94</span>  const canonical = JSON.stringify({</span>
+<span class="line"><span class="ln">  95</span>    prevHash,</span>
+<span class="line"><span class="ln">  96</span>    ts: event.ts,</span>
+<span class="line"><span class="ln">  97</span>    actor: event.actor,</span>
+<span class="line"><span class="ln">  98</span>    agentId: event.agentId,</span>
+<span class="line"><span class="ln">  99</span>    op: event.op,</span>
+<span class="line"><span class="ln"> 100</span>    memoryId: event.memoryId,</span>
+<span class="line"><span class="ln"> 101</span>    namespace: event.namespace,</span>
+<span class="line"><span class="ln"> 102</span>    purpose: event.purpose,</span>
+<span class="line"><span class="ln"> 103</span>    result: event.result,</span>
+<span class="line"><span class="ln"> 104</span>    detail: event.detail ?? null,</span>
+<span class="line"><span class="ln"> 105</span>  });</span>
+<span class="line"><span class="ln"> 106</span>  return createHash("sha256").update(canonical).digest("hex");</span>
+<span class="line"><span class="ln"> 107</span>}</span>
+<span class="line"><span class="ln"> 108</span></span>
+<span class="line"><span class="ln"> 109</span>async function appendAuditEventTx(db: Db, event: AuditEvent): Promise&lt;number&gt; {</span>
+<span class="line"><span class="ln"> 110</span>  const head = await db.query(</span>
+<span class="line"><span class="ln"> 111</span>    `SELECT head_hash FROM audit_chain_state WHERE singleton = TRUE FOR UPDATE`,</span>
+<span class="line"><span class="ln"> 112</span>  );</span>
+<span class="line"><span class="ln"> 113</span>  const prevHash = head.rows[0]?.head_hash == null ? null : String(head.rows[0].head_hash);</span>
+<span class="line"><span class="ln"> 114</span>  const eventHash = auditDigest(event, prevHash);</span>
+<span class="line"><span class="ln"> 115</span>  const inserted = await db.query(</span>
+<span class="line"><span class="ln"> 116</span>    `INSERT INTO audit_log</span>
+<span class="line"><span class="ln"> 117</span>       (ts, actor, agent_id, op, memory_id, namespace, purpose, result, detail, prev_hash, event_hash)</span>
+<span class="line"><span class="ln"> 118</span>     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)</span>
+<span class="line"><span class="ln"> 119</span>     RETURNING seq`,</span>
+<span class="line"><span class="ln"> 120</span>    [</span>
+<span class="line"><span class="ln"> 121</span>      event.ts,</span>
+<span class="line"><span class="ln"> 122</span>      event.actor,</span>
+<span class="line"><span class="ln"> 123</span>      event.agentId,</span>
+<span class="line"><span class="ln"> 124</span>      event.op,</span>
+<span class="line"><span class="ln"> 125</span>      event.memoryId,</span>
+<span class="line"><span class="ln"> 126</span>      event.namespace,</span>
+<span class="line"><span class="ln"> 127</span>      event.purpose,</span>
+<span class="line"><span class="ln"> 128</span>      event.result,</span>
+<span class="line"><span class="ln"> 129</span>      event.detail ?? null,</span>
+<span class="line"><span class="ln"> 130</span>      prevHash,</span>
+<span class="line"><span class="ln"> 131</span>      eventHash,</span>
+<span class="line"><span class="ln"> 132</span>    ],</span>
+<span class="line"><span class="ln"> 133</span>  );</span>
+<span class="line"><span class="ln"> 134</span>  await db.query(</span>
+<span class="line"><span class="ln"> 135</span>    `UPDATE audit_chain_state SET head_hash = $1, updated_at = $2 WHERE singleton = TRUE`,</span>
+<span class="line"><span class="ln"> 136</span>    [eventHash, event.ts],</span>
+<span class="line"><span class="ln"> 137</span>  );</span>
+<span class="line"><span class="ln"> 138</span>  // seq is BIGINT: pg binds it as text, PGlite as number — coerce either way.</span>
+<span class="line"><span class="ln"> 139</span>  return Number((inserted.rows[0] as { seq: unknown }).seq);</span>
+<span class="line"><span class="ln"> 140</span>}</span>
+<span class="line"><span class="ln"> 141</span></span>
+<span class="line"><span class="ln"> 142</span>/** Standalone append: the chain-head lock and event commit atomically. */</span>
+<span class="line"><span class="ln"> 143</span>export async function appendAuditEvent(db: Db, event: AuditEvent): Promise&lt;void&gt; {</span>
+<span class="line"><span class="ln"> 144</span>  await db.transaction((tx) =&gt; appendAuditEventTx(tx, event));</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/audit/index.ts:180-209</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 180</span>  async verifyChain(): Promise&lt;{ ok: boolean; checked: number; brokenSeq?: number }&gt; {</span>
+<span class="line"><span class="ln"> 181</span>    const res = await this.db.query(</span>
+<span class="line"><span class="ln"> 182</span>      `SELECT seq, ts, actor, agent_id, op, memory_id, namespace, purpose, result,</span>
+<span class="line"><span class="ln"> 183</span>              detail, prev_hash, event_hash</span>
+<span class="line"><span class="ln"> 184</span>         FROM audit_log WHERE event_hash IS NOT NULL ORDER BY seq`,</span>
+<span class="line"><span class="ln"> 185</span>    );</span>
+<span class="line"><span class="ln"> 186</span>    let expectedPrev: string | null = null;</span>
+<span class="line"><span class="ln"> 187</span>    let checked = 0;</span>
+<span class="line"><span class="ln"> 188</span>    for (const raw of res.rows) {</span>
+<span class="line"><span class="ln"> 189</span>      const row = raw as Record&lt;string, unknown&gt;;</span>
+<span class="line"><span class="ln"> 190</span>      checked += 1;</span>
+<span class="line"><span class="ln"> 191</span>      const event = rowToAuditEvent(row);</span>
+<span class="line"><span class="ln"> 192</span>      const storedPrev = row.prev_hash == null ? null : String(row.prev_hash);</span>
+<span class="line"><span class="ln"> 193</span>      const storedHash = String(row.event_hash);</span>
+<span class="line"><span class="ln"> 194</span>      const expectedHash = auditDigest(event, expectedPrev);</span>
+<span class="line"><span class="ln"> 195</span>      if (storedPrev !== expectedPrev || storedHash !== expectedHash) {</span>
+<span class="line"><span class="ln"> 196</span>        return { ok: false, checked, brokenSeq: Number(row.seq) };</span>
+<span class="line"><span class="ln"> 197</span>      }</span>
+<span class="line"><span class="ln"> 198</span>      expectedPrev = storedHash;</span>
+<span class="line"><span class="ln"> 199</span>    }</span>
+<span class="line"><span class="ln"> 200</span>    const state = await this.db.query(</span>
+<span class="line"><span class="ln"> 201</span>      `SELECT head_hash FROM audit_chain_state WHERE singleton = TRUE`,</span>
+<span class="line"><span class="ln"> 202</span>    );</span>
+<span class="line"><span class="ln"> 203</span>    const storedHead = state.rows[0]?.head_hash == null</span>
+<span class="line"><span class="ln"> 204</span>      ? null</span>
+<span class="line"><span class="ln"> 205</span>      : String(state.rows[0].head_hash);</span>
+<span class="line"><span class="ln"> 206</span>    if (storedHead !== expectedPrev) {</span>
+<span class="line"><span class="ln"> 207</span>      return { ok: false, checked };</span>
+<span class="line"><span class="ln"> 208</span>    }</span>
+<span class="line"><span class="ln"> 209</span>    return { ok: true, checked };</span></code></pre></div></section>
+<section class="sec" id="erase"><div class="sec-no"><b>03</b> / erasure</div><h2 class="sec-title">硬删除必须带 tombstone 与签名证书</h2><h3>源码判断</h3><p><code>src/erasure/index.ts:4</code> forget 是唯一硬删除例外，但 audit_log 保持 append-only。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:117</code> isInSubtree 让删除范围与 namespace ancestor 规则一致。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:201</code> resolveTargets 对不同 target kind 先解析具体行再过滤 scope。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:306</code> entity registry 只在 caller subtree 中解析，避免 sibling alias 污染。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:374</code> usage/query trace 派生行也纳入删除证书范围。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/certificate.ts:24</code> stableStringify 保证 payload 的签名字节稳定。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/certificate.ts:75</code> verifyCertificate 要 out-of-band trusted key，证书内 publicKey 不是信任根。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/m7-audit-chain.test.ts:35</code> 审计链测试验证正常 append 的 hash 链。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/m7-audit-chain.test.ts:48</code> 篡改测试证明 verifyChain 会发现字段变动。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:165</code> actor 删除测试确认只删目标 actor 的事实。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:467</code> audit survives erasure 测试证明 erase 后审计仍可查。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:624</code> sibling alias regression 防止跨租户实体别名扩大删除面。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/erasure/index.ts:1-28</span><span>source</span></div><pre><code><span class="line"><span class="ln">   1</span>/**</span>
+<span class="line"><span class="ln">   2</span> * Module B (M4 / D3) — mem.forget erasure engine.</span>
+<span class="line"><span class="ln">   3</span> *</span>
+<span class="line"><span class="ln">   4</span> * `forget(deps, target, identity)` is the ONE governed exception to D7's "never</span>
+<span class="line"><span class="ln">   5</span> * delete": a compliance erasure. It resolves the target to a concrete id set</span>
+<span class="line"><span class="ln">   6</span> * INSIDE the caller's subtree, then in ONE database transaction:</span>
+<span class="line"><span class="ln">   7</span> *   1. nulls any dangling `supersedes` links from surviving rows into the</span>
+<span class="line"><span class="ln">   8</span> *      to-be-deleted set (the FK `memory_objects.supersedes -&gt; memory_objects.id`</span>
+<span class="line"><span class="ln">   9</span> *      would otherwise reject the DELETE);</span>
+<span class="line"><span class="ln">  10</span> *   2. HARD-DELETEs the matching rows (their inline embeddings go with them);</span>
+<span class="line"><span class="ln">  11</span> *   3. inserts one tombstone per erased id;</span>
+<span class="line"><span class="ln">  12</span> *   4. builds + ed25519-signs a DeletionCertificate (public key inline) and</span>
+<span class="line"><span class="ln">  13</span> *      inserts it.</span>
+<span class="line"><span class="ln">  14</span> * E6: derived usage rows (usage_events, query_traces for actor/namespace</span>
+<span class="line"><span class="ln">  15</span> * targets) are scrubbed in the same transaction — no tombstones (they are not</span>
+<span class="line"><span class="ln">  16</span> * memory objects), but the certificate enumerates their ids.</span>
+<span class="line"><span class="ln">  17</span> * It NEVER touches `audit_log` — the audit trail is append-only (D4); the</span>
+<span class="line"><span class="ln">  18</span> * syscall layer appends the `forget` audit row.</span>
+<span class="line"><span class="ln">  19</span> *</span>
+<span class="line"><span class="ln">  20</span> * Subtree scoping (isolation = the existing ancestor-prefix ACL, downward):</span>
+<span class="line"><span class="ln">  21</span> *   - the caller may only erase within its OWN subtree — a target whose</span>
+<span class="line"><span class="ln">  22</span> *     namespace is an ANCESTOR or a SIBLING of the caller's namespace resolves</span>
+<span class="line"><span class="ln">  23</span> *     to zero rows;</span>
+<span class="line"><span class="ln">  24</span> *   - resolution runs DOWNWARD: a namespace target matches that namespace and</span>
+<span class="line"><span class="ln">  25</span> *     its descendants (again constrained to the caller's subtree).</span>
+<span class="line"><span class="ln">  26</span> *</span>
+<span class="line"><span class="ln">  27</span> * `deps` is a STRUCTURAL slice `{ db, audit }` — no kernel import.</span>
+<span class="line"><span class="ln">  28</span> */</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/erasure/index.ts:374-425</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 374</span>async function resolveUsageTargets(</span>
+<span class="line"><span class="ln"> 375</span>  db: Db,</span>
+<span class="line"><span class="ln"> 376</span>  target: ForgetTarget,</span>
+<span class="line"><span class="ln"> 377</span>  caller: Namespace,</span>
+<span class="line"><span class="ln"> 378</span>  global: boolean,</span>
+<span class="line"><span class="ln"> 379</span>): Promise&lt;{</span>
+<span class="line"><span class="ln"> 380</span>  usageEventIds: string[];</span>
+<span class="line"><span class="ln"> 381</span>  queryTraceIds: string[];</span>
+<span class="line"><span class="ln"> 382</span>  queryTraceKeys: { namespace: string; traceId: string }[];</span>
+<span class="line"><span class="ln"> 383</span>}&gt; {</span>
+<span class="line"><span class="ln"> 384</span>  const none: {</span>
+<span class="line"><span class="ln"> 385</span>    usageEventIds: string[];</span>
+<span class="line"><span class="ln"> 386</span>    queryTraceIds: string[];</span>
+<span class="line"><span class="ln"> 387</span>    queryTraceKeys: { namespace: string; traceId: string }[];</span>
+<span class="line"><span class="ln"> 388</span>  } = { usageEventIds: [], queryTraceIds: [], queryTraceKeys: [] };</span>
+<span class="line"><span class="ln"> 389</span>  if (target.kind !== "actor" &amp;&amp; target.kind !== "namespace") return none;</span>
+<span class="line"><span class="ln"> 390</span>  if (target.kind === "namespace" &amp;&amp; !isInSubtree(target.value, caller, global)) return none;</span>
+<span class="line"><span class="ln"> 391</span>  const collect = async (</span>
+<span class="line"><span class="ln"> 392</span>    table: "usage_events" | "query_traces",</span>
+<span class="line"><span class="ln"> 393</span>    idColumn: "id" | "trace_id",</span>
+<span class="line"><span class="ln"> 394</span>  ): Promise&lt;Record&lt;string, unknown&gt;[]&gt; =&gt; {</span>
+<span class="line"><span class="ln"> 395</span>    const distinct = await db.query(`SELECT DISTINCT namespace FROM ${table}`, []);</span>
+<span class="line"><span class="ln"> 396</span>    const candidateNs = (distinct.rows as Record&lt;string, unknown&gt;[])</span>
+<span class="line"><span class="ln"> 397</span>      .map((row) =&gt; row.namespace as Namespace)</span>
+<span class="line"><span class="ln"> 398</span>      .filter((ns) =&gt; isInSubtree(ns, caller, global));</span>
+<span class="line"><span class="ln"> 399</span>    if (candidateNs.length === 0) return [];</span>
+<span class="line"><span class="ln"> 400</span>    const ph = candidateNs.map((_, i) =&gt; `$${i + 1}`).join(", ");</span>
+<span class="line"><span class="ln"> 401</span>    const params: unknown[] = [...candidateNs];</span>
+<span class="line"><span class="ln"> 402</span>    // Exact IN binds only, never LIKE. The actor predicate rides the query.</span>
+<span class="line"><span class="ln"> 403</span>    let sql = `SELECT ${idColumn} AS id, namespace, actor FROM ${table} WHERE namespace IN (${ph})`;</span>
+<span class="line"><span class="ln"> 404</span>    if (target.kind === "actor") {</span>
+<span class="line"><span class="ln"> 405</span>      params.push(target.value);</span>
+<span class="line"><span class="ln"> 406</span>      sql += ` AND actor = $${params.length}`;</span>
+<span class="line"><span class="ln"> 407</span>    }</span>
+<span class="line"><span class="ln"> 408</span>    const res = await db.query(sql, params);</span>
+<span class="line"><span class="ln"> 409</span>    return (res.rows as Record&lt;string, unknown&gt;[]).filter((row) =&gt;</span>
+<span class="line"><span class="ln"> 410</span>      target.kind === "namespace"</span>
+<span class="line"><span class="ln"> 411</span>        ? isInSubtree(row.namespace as Namespace, target.value, false)</span>
+<span class="line"><span class="ln"> 412</span>        : true,</span>
+<span class="line"><span class="ln"> 413</span>    );</span>
+<span class="line"><span class="ln"> 414</span>  };</span>
+<span class="line"><span class="ln"> 415</span>  const eventRows = await collect("usage_events", "id");</span>
+<span class="line"><span class="ln"> 416</span>  const traceRows = await collect("query_traces", "trace_id");</span>
+<span class="line"><span class="ln"> 417</span>  const queryTraceKeys = traceRows.map((row) =&gt; ({</span>
+<span class="line"><span class="ln"> 418</span>    namespace: row.namespace as string,</span>
+<span class="line"><span class="ln"> 419</span>    traceId: String(row.id),</span>
+<span class="line"><span class="ln"> 420</span>  }));</span>
+<span class="line"><span class="ln"> 421</span>  return {</span>
+<span class="line"><span class="ln"> 422</span>    usageEventIds: eventRows.map((row) =&gt; String(row.id)).sort(),</span>
+<span class="line"><span class="ln"> 423</span>    queryTraceIds: [...new Set(queryTraceKeys.map((key) =&gt; key.traceId))].sort(),</span>
+<span class="line"><span class="ln"> 424</span>    queryTraceKeys,</span>
+<span class="line"><span class="ln"> 425</span>  };</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/erasure/certificate.ts:24-103</span><span>source</span></div><pre><code><span class="line"><span class="ln">  24</span> * Deterministic JSON of an arbitrary JSON value with object keys sorted at</span>
+<span class="line"><span class="ln">  25</span> * every depth. Arrays keep their order (erasedIds ordering is meaningful and</span>
+<span class="line"><span class="ln">  26</span> * fixed by the resolver); objects (including the nested ForgetTarget) sort.</span>
+<span class="line"><span class="ln">  27</span> */</span>
+<span class="line"><span class="ln">  28</span>function stableStringify(value: unknown): string {</span>
+<span class="line"><span class="ln">  29</span>  if (value === null || typeof value !== "object") {</span>
+<span class="line"><span class="ln">  30</span>    return JSON.stringify(value);</span>
+<span class="line"><span class="ln">  31</span>  }</span>
+<span class="line"><span class="ln">  32</span>  if (Array.isArray(value)) {</span>
+<span class="line"><span class="ln">  33</span>    return `[${value.map((v) =&gt; stableStringify(v)).join(",")}]`;</span>
+<span class="line"><span class="ln">  34</span>  }</span>
+<span class="line"><span class="ln">  35</span>  const obj = value as Record&lt;string, unknown&gt;;</span>
+<span class="line"><span class="ln">  36</span>  const keys = Object.keys(obj).sort();</span>
+<span class="line"><span class="ln">  37</span>  const parts = keys.map(</span>
+<span class="line"><span class="ln">  38</span>    (k) =&gt; `${JSON.stringify(k)}:${stableStringify(obj[k])}`,</span>
+<span class="line"><span class="ln">  39</span>  );</span>
+<span class="line"><span class="ln">  40</span>  return `{${parts.join(",")}}`;</span>
+<span class="line"><span class="ln">  41</span>}</span>
+<span class="line"><span class="ln">  42</span></span>
+<span class="line"><span class="ln">  43</span>/**</span>
+<span class="line"><span class="ln">  44</span> * Canonical, signature-independent JSON string of a certificate. Given a full</span>
+<span class="line"><span class="ln">  45</span> * certificate or a payload, the `signature` field is always excluded, so the</span>
+<span class="line"><span class="ln">  46</span> * signer and the verifier hash exactly the same bytes.</span>
+<span class="line"><span class="ln">  47</span> */</span>
+<span class="line"><span class="ln">  48</span>export function canonicalPayload(</span>
+<span class="line"><span class="ln">  49</span>  cert: CertificatePayload | DeletionCertificate,</span>
+<span class="line"><span class="ln">  50</span>): string {</span>
+<span class="line"><span class="ln">  51</span>  const { signature: _signature, ...payload } = cert as DeletionCertificate;</span>
+<span class="line"><span class="ln">  52</span>  return stableStringify(payload);</span>
+<span class="line"><span class="ln">  53</span>}</span>
+<span class="line"><span class="ln">  54</span></span>
+<span class="line"><span class="ln">  55</span>/**</span>
+<span class="line"><span class="ln">  56</span> * Sign a certificate payload with the kernel's ed25519 key; returns the base64</span>
+<span class="line"><span class="ln">  57</span> * signature over the canonical payload bytes (UTF-8).</span>
+<span class="line"><span class="ln">  58</span> */</span>
+<span class="line"><span class="ln">  59</span>export function signCertificate(</span>
+<span class="line"><span class="ln">  60</span>  payload: CertificatePayload,</span>
+<span class="line"><span class="ln">  61</span>  key: SigningKey,</span>
+<span class="line"><span class="ln">  62</span>): string {</span>
+<span class="line"><span class="ln">  63</span>  const bytes = Buffer.from(canonicalPayload(payload), "utf8");</span>
+<span class="line"><span class="ln">  64</span>  return key.sign(bytes).toString("base64");</span>
+<span class="line"><span class="ln">  65</span>}</span>
+<span class="line"><span class="ln">  66</span></span>
+<span class="line"><span class="ln">  67</span>/**</span>
+<span class="line"><span class="ln">  68</span> * Verify a certificate against an out-of-band trusted public key. The inline</span>
+<span class="line"><span class="ln">  69</span> * key is signed descriptive metadata and must identify that same trusted key;</span>
+<span class="line"><span class="ln">  70</span> * it is never itself a trust anchor. Rebuilds the canonical payload (dropping</span>
+<span class="line"><span class="ln">  71</span> * `signature`) and checks the ed25519 signature.</span>
+<span class="line"><span class="ln">  72</span> * Returns false — never throws — for a key mismatch, tampered field, bad</span>
+<span class="line"><span class="ln">  73</span> * signature, malformed key, or non-ed25519 algorithm.</span>
+<span class="line"><span class="ln">  74</span> */</span>
+<span class="line"><span class="ln">  75</span>export function verifyCertificate(</span>
+<span class="line"><span class="ln">  76</span>  cert: DeletionCertificate,</span>
+<span class="line"><span class="ln">  77</span>  trustedPublicKeyBase64: string,</span>
+<span class="line"><span class="ln">  78</span>): boolean {</span>
+<span class="line"><span class="ln">  79</span>  try {</span>
+<span class="line"><span class="ln">  80</span>    if (cert.algorithm !== "ed25519") return false;</span>
+<span class="line"><span class="ln">  81</span>    const inlineKeyDer = Buffer.from(cert.publicKey, "base64");</span>
+<span class="line"><span class="ln">  82</span>    const trustedKeyDer = Buffer.from(trustedPublicKeyBase64, "base64");</span>
+<span class="line"><span class="ln">  83</span>    if (</span>
+<span class="line"><span class="ln">  84</span>      inlineKeyDer.length === 0 ||</span>
+<span class="line"><span class="ln">  85</span>      inlineKeyDer.length !== trustedKeyDer.length ||</span>
+<span class="line"><span class="ln">  86</span>      !timingSafeEqual(inlineKeyDer, trustedKeyDer)</span>
+<span class="line"><span class="ln">  87</span>    ) {</span>
+<span class="line"><span class="ln">  88</span>      return false;</span>
+<span class="line"><span class="ln">  89</span>    }</span>
+<span class="line"><span class="ln">  90</span>    const publicKey = createPublicKey({</span>
+<span class="line"><span class="ln">  91</span>      key: trustedKeyDer,</span>
+<span class="line"><span class="ln">  92</span>      format: "der",</span>
+<span class="line"><span class="ln">  93</span>      type: "spki",</span>
+<span class="line"><span class="ln">  94</span>    });</span>
+<span class="line"><span class="ln">  95</span>    if (publicKey.asymmetricKeyType !== "ed25519") return false;</span>
+<span class="line"><span class="ln">  96</span>    const bytes = Buffer.from(canonicalPayload(cert), "utf8");</span>
+<span class="line"><span class="ln">  97</span>    const signature = Buffer.from(cert.signature, "base64");</span>
+<span class="line"><span class="ln">  98</span>    // ed25519: algorithm is null (the scheme fixes the digest).</span>
+<span class="line"><span class="ln">  99</span>    return cryptoVerify(null, bytes, publicKey, signature);</span>
+<span class="line"><span class="ln"> 100</span>  } catch {</span>
+<span class="line"><span class="ln"> 101</span>    return false;</span>
+<span class="line"><span class="ln"> 102</span>  }</span>
+<span class="line"><span class="ln"> 103</span>}</span></code></pre></div></section>
+
+</main>
+</div>
+<script>
+const links=[...document.querySelectorAll('.nav-list a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const spy=()=>{let active=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<180)active=i});links.forEach((a,i)=>a.classList.toggle('active',i===active));};
+addEventListener('scroll',spy,{passive:true});spy();
+</script>
+</body>
+</html>

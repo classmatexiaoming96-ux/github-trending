@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Halofy · AI Agent 访问治理与记忆内核 · 源码观测台</title>
+<meta name="description" content="halofyai/halofy 源码级解析：服务端身份、统一 ACL、写入治理、ScopedView 检索驱动、ContextAllocator、FaultHandler、append-only 审计链与签名删除证书。" />
+<meta property="og:title" content="Halofy · AI Agent 访问治理与记忆内核 · 源码观测台" />
+<meta property="og:description" content="halofyai/halofy 源码级解析：服务端身份、统一 ACL、写入治理、ScopedView 检索驱动、ContextAllocator、FaultHandler、append-only 审计链与签名删除证书。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#74d4b6; --star-soft:#9ee8d4; --star-deep:#3f9f87; }
+.flow{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;margin:24px 0;display:grid;gap:12px}
+.flow-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flow-node{border:1px solid var(--line-2);background:rgba(255,255,255,.035);border-radius:10px;padding:14px;font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.callouts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+.callout{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px}
+.callout h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.callout p{color:var(--text-2);line-height:1.62}
+.ref-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:20px 0}
+.ref-grid p,.ref-list p{border:1px solid var(--line-2);border-radius:10px;background:rgba(255,255,255,.026);padding:13px 14px;color:var(--text-2);line-height:1.58}
+.deep-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px;text-decoration:none;color:var(--text)}
+.deep-link h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.deep-link p{color:var(--text-2);font-size:14px;line-height:1.55}
+.code-wrap{margin:20px 0 28px}
+.code-head{display:flex;justify-content:space-between;gap:14px;color:var(--text-faint);font-family:var(--mono);font-size:11px;padding:9px 12px;border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:rgba(255,255,255,.035)}
+.code-wrap pre{margin:0;overflow:auto;border:1px solid var(--line);border-radius:0 0 10px 10px;background:#050609;padding:14px 0}
+.code-wrap code{font-family:var(--mono);font-size:12px;line-height:1.55;color:#d8deea}
+.code-wrap .line{display:block;white-space:pre;padding:0 16px}
+.code-wrap .ln{display:inline-block;width:48px;margin-right:14px;color:var(--text-faint);user-select:none}
+@media(max-width:900px){.flow-row,.callouts,.ref-grid,.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><strong>Halofy</strong><a href="../index.html">Index</a></div>
+<div class="shell">
+<aside class="nav">
+  <div class="nav-brand"><div class="glyph"><b>Halofy</b> Observatory</div><div class="sub">source-level · 2026-08-27</div></div>
+  <ol class="nav-list">
+    <li><a href="#why"><span class="idx">01</span>它把 agent 记忆做成治理内核</a></li>
+<li><a href="#identity"><span class="idx">02</span>身份与权限不是 HTTP 参数</a></li>
+<li><a href="#write"><span class="idx">03</span>写入路径先治理，再落库</a></li>
+<li><a href="#retrieval"><span class="idx">04</span>检索驱动只能站在 ScopedView 后面</a></li>
+<li><a href="#allocator"><span class="idx">05</span>ContextAllocator 返回 blocks，不拼 prompt</a></li>
+<li><a href="#fault"><span class="idx">06</span>FaultHandler 的价值是可降级而不是更聪明</a></li>
+<li><a href="#audit"><span class="idx">07</span>审计链是 append-only 的系统记录</a></li>
+<li><a href="#erasure"><span class="idx">08</span>合规删除是唯一硬删除例外</a></li>
+<li><a href="#tests"><span class="idx">09</span>测试覆盖的是治理不变量</a></li>
+<li><a href="#risk"><span class="idx">10</span>适合学习的地方与合并前风险</a></li>
+<li><a href="#deep"><span class="idx">11</span>继续拆源码</a></li>
+  </ol>
+  <div class="nav-foot"><a href="../index.html">Index</a><br /><a href="https://github.com/halofyai/halofy" target="_blank" rel="noopener">halofyai/halofy</a></div>
+</aside>
+<main class="main">
+<section class="hero">
+  <div class="hero-grid">
+    <div><div class="hero-eyebrow">AI agent governance · MCP/HTTP memory kernel</div><h1 class="hero-title">AI agent 的 <em>memory kernel</em> 需要身份、证据与可删除性</h1><p class="hero-desc">halofyai/halofy 源码级解析：服务端身份、统一 ACL、写入治理、ScopedView 检索驱动、ContextAllocator、FaultHandler、append-only 审计链与签名删除证书。</p></div>
+    <div class="hero-card"><h3>观察结论</h3><p>它不是又一个 prompt memory 插件，而是把身份、ACL、写入验证、检索驱动、审计链和合规删除放进同一个内核边界。</p></div>
+  </div>
+  <div class="hero-stats"><div class="stat"><div class="stat-num">993</div><div class="stat-lbl">stars</div></div><div class="stat"><div class="stat-num">170k</div><div class="stat-lbl">kernel LOC</div></div><div class="stat"><div class="stat-num">191</div><div class="stat-lbl">src files</div></div><div class="stat"><div class="stat-num">2,678</div><div class="stat-lbl">tests claimed</div></div></div>
+</section>
+<section class="sec" id="why"><div class="sec-no"><b>01</b> / why it matters</div><h2 class="sec-title">它把 agent 记忆做成治理内核</h2><h3>源码判断</h3>
+  <div class="callouts"><div class="callout"><h3>身份服务端化</h3><p>namespace、actor、role 从 key 解析，不靠调用方自报。</p></div><div class="callout"><h3>检索只读化</h3><p>driver 通过 ScopedView 读取候选，不能写入或绕过 ACL。</p></div><div class="callout"><h3>删除可证明</h3><p>合规删除硬删数据，同时留下 tombstone、证书和审计链。</p></div></div><p><code>src/auth/index.ts:39</code> API key 表把 key_hash、role、namespace、expires_at 放在同一权威表里，说明身份不是客户端传参，而是服务端从凭证解析出的上下文。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:73</code> hashKey 只保存 SHA-256 摘要，明文 key 只在签发响应里出现一次，这让泄漏数据库时无法直接重放 agent 凭证。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:99</code> isOversightRole 把 owner、admin、auditor 抽成审计/治理角色集合，后续权限检查可以复用同一组语义。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:146</code> rowAgentCanWrite 把行级写权限压成纯函数，写入面能用同一判断处理 owner/admin/member/agent 的差异。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:224</code> auditDenied 在拒绝路径上也追加审计事件，系统不是只记录成功调用，而是把越权尝试纳入可追溯轨迹。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:286</code> issueKey 生成随机 key 后只插入 hash 与元数据，签发环节完成后系统内没有二次读取明文 key 的接口。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p></section>
+<section class="sec" id="identity"><div class="sec-no"><b>02</b> / identity</div><h2 class="sec-title">身份与权限不是 HTTP 参数</h2><h3>源码判断</h3><p><code>src/auth/index.ts:331</code> resolveKey 从 hash 查 principal，并在过期、禁用、不可用 principal 时写 denied audit，身份层承担了第一道治理责任。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:16</code> syscall 顶部注释列出 auditor 可读不可写的角色语义，说明 HTTP/MCP 入口共享的是同一套 operation gate。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:124</code> SyscallDeps 把 audit、rateLimiter、budget、credential、policy、runtimes、queue 都注入进来，内核调用不是裸函数直达存储。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:250</code> L4DispatchOptions 特别声明 source token 不能被日志、审计、持久化或回显，这把短期 OAuth 能力和长记忆数据切开。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:334</code> planViaDriver 总是用同一个 ScopedView 构造检索计划，driver 没机会自己绕过 ACL 去碰底层 index。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:380</code> MemReadResult 用 denied=false 避免把跨 namespace 的存在性泄露给调用者，这是一处明确的 oracle 防护。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/auth/index.ts:331-380</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 331</span>  async resolve(plaintext: string): Promise&lt;Identity | null&gt; {</span>
+<span class="line"><span class="ln"> 332</span>    const hash = hashKey(plaintext);</span>
+<span class="line"><span class="ln"> 333</span>    const res = await this.db.query(</span>
+<span class="line"><span class="ln"> 334</span>      `SELECT ${KEY_COLUMNS}, caller_class FROM api_keys WHERE key_hash = $1`,</span>
+<span class="line"><span class="ln"> 335</span>      [hash],</span>
+<span class="line"><span class="ln"> 336</span>    );</span>
+<span class="line"><span class="ln"> 337</span>    const row = res.rows[0] as ApiKeyRow | undefined;</span>
+<span class="line"><span class="ln"> 338</span>    // Verification-only principals (principal_purpose = 'channel_verification')</span>
+<span class="line"><span class="ln"> 339</span>    // exist solely for in-process deterministic channel probes and must never</span>
+<span class="line"><span class="ln"> 340</span>    // authenticate over the public API.</span>
+<span class="line"><span class="ln"> 341</span>    if (!row || row.status !== "active" ||</span>
+<span class="line"><span class="ln"> 342</span>        (row.principal_purpose !== undefined &amp;&amp; row.principal_purpose !== "general")) {</span>
+<span class="line"><span class="ln"> 343</span>      await this.auditDenied(</span>
+<span class="line"><span class="ln"> 344</span>        "unknown",</span>
+<span class="line"><span class="ln"> 345</span>        row?.namespace ?? "unknown",</span>
+<span class="line"><span class="ln"> 346</span>        row</span>
+<span class="line"><span class="ln"> 347</span>          ? `resolve denied: key ${row.id} is unavailable for public authentication`</span>
+<span class="line"><span class="ln"> 348</span>          : "resolve denied: unknown key",</span>
+<span class="line"><span class="ln"> 349</span>      );</span>
+<span class="line"><span class="ln"> 350</span>      return null;</span>
+<span class="line"><span class="ln"> 351</span>    }</span>
+<span class="line"><span class="ln"> 352</span>    // D51: an expired key is indistinguishable from a revoked one at the</span>
+<span class="line"><span class="ln"> 353</span>    // transport (401). It is NOT flipped to status 'revoked' here — resolve is</span>
+<span class="line"><span class="ln"> 354</span>    // on the hot path for every request, and a write on each rejected call is</span>
+<span class="line"><span class="ln"> 355</span>    // both a needless round trip and a lie about who revoked it. The audit row</span>
+<span class="line"><span class="ln"> 356</span>    // names expiry explicitly so the two causes stay separable in the trail.</span>
+<span class="line"><span class="ln"> 357</span>    if (isExpired(row, Date.now())) {</span>
+<span class="line"><span class="ln"> 358</span>      await this.auditDenied(</span>
+<span class="line"><span class="ln"> 359</span>        row.actor,</span>
+<span class="line"><span class="ln"> 360</span>        row.namespace,</span>
+<span class="line"><span class="ln"> 361</span>        `resolve denied: key ${row.id} expired at ${String(row.expires_at)}`,</span>
+<span class="line"><span class="ln"> 362</span>      );</span>
+<span class="line"><span class="ln"> 363</span>      return null;</span>
+<span class="line"><span class="ln"> 364</span>    }</span>
+<span class="line"><span class="ln"> 365</span>    await this.db.query(`UPDATE api_keys SET last_used = $1 WHERE id = $2`, [</span>
+<span class="line"><span class="ln"> 366</span>      new Date().toISOString(),</span>
+<span class="line"><span class="ln"> 367</span>      row.id,</span>
+<span class="line"><span class="ln"> 368</span>    ]);</span>
+<span class="line"><span class="ln"> 369</span>    const entitlements = rowToRecord(row);</span>
+<span class="line"><span class="ln"> 370</span>    const sourcePrincipals = entitlements.sourcePrincipals ?? [];</span>
+<span class="line"><span class="ln"> 371</span>    const sourceGroups = entitlements.sourceGroups ?? [];</span>
+<span class="line"><span class="ln"> 372</span>    const agentAccessLevel = rowAgentLevel(row.role, row.agent_access_level);</span>
+<span class="line"><span class="ln"> 373</span>    return {</span>
+<span class="line"><span class="ln"> 374</span>      keyId: row.id,</span>
+<span class="line"><span class="ln"> 375</span>      namespace: row.namespace,</span>
+<span class="line"><span class="ln"> 376</span>      actor: row.actor,</span>
+<span class="line"><span class="ln"> 377</span>      role: row.role as Role,</span>
+<span class="line"><span class="ln"> 378</span>      ...(agentAccessLevel ? { agentAccessLevel } : {}),</span>
+<span class="line"><span class="ln"> 379</span>      ...(row.role === "agent"</span>
+<span class="line"><span class="ln"> 380</span>        ? { agentCanWrite: rowAgentCanWrite(row.role, row.agent_can_write) === true }</span></code></pre></div></section>
+<section class="sec" id="write"><div class="sec-no"><b>03</b> / write path</div><h2 class="sec-title">写入路径先治理，再落库</h2><h3>源码判断</h3><p><code>src/write/index.ts:1</code> 写入模块的文件头把 extraction、verification、entity resolution、dedupe、insert 排成管线，定位很像数据库事务前的治理编排。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:61</code> MemoryIndexLike 暴露 insert、vectorSearch、bumpAccess、closeValidity，说明写入路径可关闭旧事实而不是覆盖原行。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:133</code> SUPERSEDE_MIN_COSINE 给语义冲突设置阈值，避免只靠 exact string dedupe 判断一条事实是否应该 supersede。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:177</code> governedClassification 把 verbatim、fact、profile 等 hint 映射到允许的分类，写入前先对目的地做语义约束。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:321</code> write() 首先分类、再提取、再分批验证，LLM 输出只是候选事实，不能直接落库成权威记忆。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:354</code> 每个候选事实独立经过验证、实体解析、目的地检查和 embedding，单条失败不会把整个写入批次粗暴吞掉。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/write/index.ts:421</code> processCandidate 会拒绝低信息事实、剥离实体注解、检查 destination，再进入向量和去重阶段，落库前有多重过滤。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:1</code> ScopedView 的文件头明确它是 driver 世界的唯一构造器，检索插件不能导入存储层另起通道。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/write/index.ts:321-418</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 321</span>  async write(</span>
+<span class="line"><span class="ln"> 322</span>    req: WriteRequest,</span>
+<span class="line"><span class="ln"> 323</span>    policy: WritePolicy,</span>
+<span class="line"><span class="ln"> 324</span>    /** Agent identity for audit attribution (D4); defaults to the actor. */</span>
+<span class="line"><span class="ln"> 325</span>    agentId: string = req.actor,</span>
+<span class="line"><span class="ln"> 326</span>    hooks?: WritePathHooks,</span>
+<span class="line"><span class="ln"> 327</span>  ): Promise&lt;WriteResult&gt; {</span>
+<span class="line"><span class="ln"> 328</span>    const now = new Date().toISOString();</span>
+<span class="line"><span class="ln"> 329</span>    const inputClassification = governedClassification(req.content, req, policy);</span>
+<span class="line"><span class="ln"> 330</span>    if (!req.hints?.verbatim) {</span>
+<span class="line"><span class="ln"> 331</span>      assertDestinationAllowed(inputClassification, "llm-extraction", {</span>
+<span class="line"><span class="ln"> 332</span>        region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 333</span>      });</span>
+<span class="line"><span class="ln"> 334</span>    }</span>
+<span class="line"><span class="ln"> 335</span>    const result: WriteResult = {</span>
+<span class="line"><span class="ln"> 336</span>      stored: [],</span>
+<span class="line"><span class="ln"> 337</span>      rejected: [],</span>
+<span class="line"><span class="ln"> 338</span>      superseded: [],</span>
+<span class="line"><span class="ln"> 339</span>      deduplicated: 0,</span>
+<span class="line"><span class="ln"> 340</span>    };</span>
+<span class="line"><span class="ln"> 341</span></span>
+<span class="line"><span class="ln"> 342</span>    // a. Extraction.</span>
+<span class="line"><span class="ln"> 343</span>    await hooks?.onStage?.("extraction");</span>
+<span class="line"><span class="ln"> 344</span>    const candidates = await this.extract(req);</span>
+<span class="line"><span class="ln"> 345</span></span>
+<span class="line"><span class="ln"> 346</span>    // b (hoisted). One verifier call covers every extracted candidate —</span>
+<span class="line"><span class="ln"> 347</span>    // per-fact calls re-sent the whole transcript per candidate, which made</span>
+<span class="line"><span class="ln"> 348</span>    // verification the write path's dominant model spend on multi-fact</span>
+<span class="line"><span class="ln"> 349</span>    // documents. Runs BEFORE any candidate commits, so an LLM outage here</span>
+<span class="line"><span class="ln"> 350</span>    // propagates with zero progress and the caller's verbatim fallback stays</span>
+<span class="line"><span class="ln"> 351</span>    // safe to re-run (nothing committed to duplicate).</span>
+<span class="line"><span class="ln"> 352</span>    const verdicts = await this.verifyCandidates(req, policy, candidates, now);</span>
+<span class="line"><span class="ln"> 353</span></span>
+<span class="line"><span class="ln"> 354</span>    for (const [index, cand] of candidates.entries()) {</span>
+<span class="line"><span class="ln"> 355</span>      // M6 (D14): the caller's hard cap on STORED facts (the L4 write-back</span>
+<span class="line"><span class="ln"> 356</span>      // passes its remaining per-fault cache budget). Checked before each</span>
+<span class="line"><span class="ln"> 357</span>      // candidate — extraction fan-out can never land more rows than the cap,</span>
+<span class="line"><span class="ln"> 358</span>      // and the overflow is reported, not silently dropped.</span>
+<span class="line"><span class="ln"> 359</span>      if (req.maxFacts !== undefined &amp;&amp; result.stored.length &gt;= req.maxFacts) {</span>
+<span class="line"><span class="ln"> 360</span>        result.rejected.push({ candidate: cand.content, reason: "max-facts-cap" });</span>
+<span class="line"><span class="ln"> 361</span>        continue;</span>
+<span class="line"><span class="ln"> 362</span>      }</span>
+<span class="line"><span class="ln"> 363</span>      try {</span>
+<span class="line"><span class="ln"> 364</span>        // Entity-registry drift between prepare() and the commit transaction</span>
+<span class="line"><span class="ln"> 365</span>        // retries the whole candidate: the transaction rolled back, so a</span>
+<span class="line"><span class="ln"> 366</span>        // fresh preparation inside processCandidate re-reads current state</span>
+<span class="line"><span class="ln"> 367</span>        // and (normally) resolves the colliding mention as an exact match.</span>
+<span class="line"><span class="ln"> 368</span>        // Any other failure - and a conflict that persists past the bound -</span>
+<span class="line"><span class="ln"> 369</span>        // propagates to the handler below unchanged.</span>
+<span class="line"><span class="ln"> 370</span>        for (let entityAttempt = 1; ; entityAttempt++) {</span>
+<span class="line"><span class="ln"> 371</span>          try {</span>
+<span class="line"><span class="ln"> 372</span>            await this.processCandidate(req, policy, agentId, now, cand, verdicts[index] ?? false, result, hooks);</span>
+<span class="line"><span class="ln"> 373</span>            break;</span>
+<span class="line"><span class="ln"> 374</span>          } catch (err) {</span>
+<span class="line"><span class="ln"> 375</span>            if (</span>
+<span class="line"><span class="ln"> 376</span>              err instanceof EntityResolutionConflictError &amp;&amp;</span>
+<span class="line"><span class="ln"> 377</span>              entityAttempt &lt; MAX_ENTITY_RESOLUTION_ATTEMPTS</span>
+<span class="line"><span class="ln"> 378</span>            ) {</span>
+<span class="line"><span class="ln"> 379</span>              continue;</span>
+<span class="line"><span class="ln"> 380</span>            }</span>
+<span class="line"><span class="ln"> 381</span>            throw err;</span>
+<span class="line"><span class="ln"> 382</span>          }</span>
+<span class="line"><span class="ln"> 383</span>        }</span>
+<span class="line"><span class="ln"> 384</span>      } catch (err) {</span>
+<span class="line"><span class="ln"> 385</span>        // An LLM circuit that opens MID-write — after earlier candidates</span>
+<span class="line"><span class="ln"> 386</span>        // were already committed — must never surface as a whole-write</span>
+<span class="line"><span class="ln"> 387</span>        // failure: the caller's verbatim fallback would re-run the ENTIRE</span>
+<span class="line"><span class="ln"> 388</span>        // write, duplicating the committed facts (plus their supersede/</span>
+<span class="line"><span class="ln"> 389</span>        // audit/cost rows) and dropping their ids from the returned result.</span>
+<span class="line"><span class="ln"> 390</span>        // Record the outage per remaining candidate and keep the partial</span>
+<span class="line"><span class="ln"> 391</span>        // WriteResult accurate instead. With ZERO progress the error still</span>
+<span class="line"><span class="ln"> 392</span>        // propagates: the verbatim fallback is safe then (nothing committed</span>
+<span class="line"><span class="ln"> 393</span>        // to duplicate).</span>
+<span class="line"><span class="ln"> 394</span>        const progress =</span>
+<span class="line"><span class="ln"> 395</span>          result.stored.length +</span>
+<span class="line"><span class="ln"> 396</span>            result.superseded.length +</span>
+<span class="line"><span class="ln"> 397</span>            result.rejected.length +</span>
+<span class="line"><span class="ln"> 398</span>            (result.disputed?.length ?? 0) +</span>
+<span class="line"><span class="ln"> 399</span>            result.deduplicated &gt;</span>
+<span class="line"><span class="ln"> 400</span>          0;</span>
+<span class="line"><span class="ln"> 401</span>        if (err instanceof LlmUnavailableError &amp;&amp; progress) {</span>
+<span class="line"><span class="ln"> 402</span>          result.rejected.push({ candidate: cand.content, reason: "llm-unavailable" });</span>
+<span class="line"><span class="ln"> 403</span>          await this.audit(</span>
+<span class="line"><span class="ln"> 404</span>            req,</span>
+<span class="line"><span class="ln"> 405</span>            agentId,</span>
+<span class="line"><span class="ln"> 406</span>            now,</span>
+<span class="line"><span class="ln"> 407</span>            "reject",</span>
+<span class="line"><span class="ln"> 408</span>            null,</span>
+<span class="line"><span class="ln"> 409</span>            "error",</span>
+<span class="line"><span class="ln"> 410</span>            "llm-unavailable: circuit opened mid-write; earlier candidates already committed",</span>
+<span class="line"><span class="ln"> 411</span>          );</span>
+<span class="line"><span class="ln"> 412</span>          continue;</span>
+<span class="line"><span class="ln"> 413</span>        }</span>
+<span class="line"><span class="ln"> 414</span>        throw err;</span>
+<span class="line"><span class="ln"> 415</span>      }</span>
+<span class="line"><span class="ln"> 416</span>    }</span>
+<span class="line"><span class="ln"> 417</span></span>
+<span class="line"><span class="ln"> 418</span>    return result;</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/write/index.ts:421-520</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 421</span>  /** Steps b–f for one extracted candidate (mutates `result` in place). */</span>
+<span class="line"><span class="ln"> 422</span>  private async processCandidate(</span>
+<span class="line"><span class="ln"> 423</span>    req: WriteRequest,</span>
+<span class="line"><span class="ln"> 424</span>    policy: WritePolicy,</span>
+<span class="line"><span class="ln"> 425</span>    agentId: string,</span>
+<span class="line"><span class="ln"> 426</span>    now: string,</span>
+<span class="line"><span class="ln"> 427</span>    cand: Candidate,</span>
+<span class="line"><span class="ln"> 428</span>    /** This candidate's verdict from the hoisted batch verification. */</span>
+<span class="line"><span class="ln"> 429</span>    verdictOk: boolean,</span>
+<span class="line"><span class="ln"> 430</span>    result: WriteResult,</span>
+<span class="line"><span class="ln"> 431</span>    hooks?: WritePathHooks,</span>
+<span class="line"><span class="ln"> 432</span>  ): Promise&lt;void&gt; {</span>
+<span class="line"><span class="ln"> 433</span>    if (req.provenance !== undefined &amp;&amp; !req.hints?.verbatim &amp;&amp; isLowInformationFact(cand.content)) {</span>
+<span class="line"><span class="ln"> 434</span>      result.rejected.push({ candidate: cand.content, reason: "low-information-fact" });</span>
+<span class="line"><span class="ln"> 435</span>      await this.audit(req, agentId, now, "reject", null, "denied", "low-information-fact");</span>
+<span class="line"><span class="ln"> 436</span>      return;</span>
+<span class="line"><span class="ln"> 437</span>    }</span>
+<span class="line"><span class="ln"> 438</span></span>
+<span class="line"><span class="ln"> 439</span>    // b. Verifier verdict (computed once for the whole write in</span>
+<span class="line"><span class="ln"> 440</span>    // verifyCandidates) — SKIPPED for verbatim requests: verbatim is the</span>
+<span class="line"><span class="ln"> 441</span>    // no-LLM lane (budget brownout / LLM-outage fallback), so it must not</span>
+<span class="line"><span class="ln"> 442</span>    // call the LLM again. The candidate is the caller's own content stored</span>
+<span class="line"><span class="ln"> 443</span>    // as-is; there is nothing extracted to verify against the transcript.</span>
+<span class="line"><span class="ln"> 444</span>    if (policy.verifierEnabled &amp;&amp; !req.hints?.verbatim &amp;&amp; !verdictOk) {</span>
+<span class="line"><span class="ln"> 445</span>      result.rejected.push({</span>
+<span class="line"><span class="ln"> 446</span>        candidate: cand.content,</span>
+<span class="line"><span class="ln"> 447</span>        reason: "failed-verification",</span>
+<span class="line"><span class="ln"> 448</span>      });</span>
+<span class="line"><span class="ln"> 449</span>      await this.audit(req, agentId, now, "reject", null, "denied", "failed-verification");</span>
+<span class="line"><span class="ln"> 450</span>      return;</span>
+<span class="line"><span class="ln"> 451</span>    }</span>
+<span class="line"><span class="ln"> 452</span></span>
+<span class="line"><span class="ln"> 453</span>    // c. Entity resolution — canonical names appended as an annotation;</span>
+<span class="line"><span class="ln"> 454</span>    // the fact text itself stays verbatim.</span>
+<span class="line"><span class="ln"> 455</span>    //</span>
+<span class="line"><span class="ln"> 456</span>    // `[entities: …]` is a RESERVED write-path marker: the read side</span>
+<span class="line"><span class="ln"> 457</span>    // (DbFragmentationReader) parses canonical entities out of a trailing</span>
+<span class="line"><span class="ln"> 458</span>    // annotation. Source-controlled content (a raw doc or verbatim import) that</span>
+<span class="line"><span class="ln"> 459</span>    // legitimately ends in that bracket would otherwise inject FORGED canonical</span>
+<span class="line"><span class="ln"> 460</span>    // entities the write path never resolved. Strip any trailing occurrence off</span>
+<span class="line"><span class="ln"> 461</span>    // the base text first, so the only `[entities: …]` the read side can ever</span>
+<span class="line"><span class="ln"> 462</span>    // see is the one the write path itself appends below after real resolution.</span>
+<span class="line"><span class="ln"> 463</span>    const base = stripEntitiesAnnotation(cand.content);</span>
+<span class="line"><span class="ln"> 464</span>    // A governed localOnly ingestion write (DLP brownout: the document's</span>
+<span class="line"><span class="ln"> 465</span>    // classification denied llm-extraction / embedding-provider) must NOT</span>
+<span class="line"><span class="ln"> 466</span>    // resolve mentions through the entity registry — EntityRegistry.prepare()</span>
+<span class="line"><span class="ln"> 467</span>    // embeds with the external embedder and can call the external LLM</span>
+<span class="line"><span class="ln"> 468</span>    // tiebreak, exactly the egress localOnly exists to prevent. But landing</span>
+<span class="line"><span class="ln"> 469</span>    // with NO entity metadata makes the fact invisible to entity-grouped</span>
+<span class="line"><span class="ln"> 470</span>    // contradiction detection (organization conflict scans report</span>
+<span class="line"><span class="ln"> 471</span>    // entity_metadata_unavailable and skip it), so annotate the deterministic</span>
+<span class="line"><span class="ln"> 472</span>    // proper-noun mentions directly: zero egress, no registry mutation, same</span>
+<span class="line"><span class="ln"> 473</span>    // marker shape the read side parses. Non-ingestion localOnly writes stay</span>
+<span class="line"><span class="ln"> 474</span>    // exactly as-is, mirroring the extract() lane's provenance gate.</span>
+<span class="line"><span class="ln"> 475</span>    const deterministicMentions =</span>
+<span class="line"><span class="ln"> 476</span>      (req.hints?.localOnly || req.hints?.deterministicEntities) &amp;&amp;</span>
+<span class="line"><span class="ln"> 477</span>        req.provenance !== undefined</span>
+<span class="line"><span class="ln"> 478</span>        ? capitalizedWords(base)</span>
+<span class="line"><span class="ln"> 479</span>        : [];</span>
+<span class="line"><span class="ln"> 480</span>    // Entity resolution itself can call the embedding provider. Report the</span>
+<span class="line"><span class="ln"> 481</span>    // boundary before that work begins, not only before the final fact vector,</span>
+<span class="line"><span class="ln"> 482</span>    // so a provider failure is attributed to the real stage.</span>
+<span class="line"><span class="ln"> 483</span>    await hooks?.onStage?.("embedding");</span>
+<span class="line"><span class="ln"> 484</span>    const preparedEntities: PreparedEntityResolution[] = [];</span>
+<span class="line"><span class="ln"> 485</span>    if (this.deps.transact &amp;&amp; deterministicMentions.length === 0) {</span>
+<span class="line"><span class="ln"> 486</span>      for (const mention of cand.entities) {</span>
+<span class="line"><span class="ln"> 487</span>        preparedEntities.push(await this.entities.prepare(req.namespace, mention));</span>
+<span class="line"><span class="ln"> 488</span>      }</span>
+<span class="line"><span class="ln"> 489</span>    }</span>
+<span class="line"><span class="ln"> 490</span>    // Production writes resolve entities only after entering deps.transact so</span>
+<span class="line"><span class="ln"> 491</span>    // entity rows, alias changes, erasure fences, the memory row, and its D4</span>
+<span class="line"><span class="ln"> 492</span>    // audit evidence share one commit boundary. The non-transactional lane is</span>
+<span class="line"><span class="ln"> 493</span>    // retained for small structural unit-test implementations.</span>
+<span class="line"><span class="ln"> 494</span>    let content = deterministicMentions.length &gt; 0</span>
+<span class="line"><span class="ln"> 495</span>      ? `${base} [entities: ${deterministicMentions.join(", ")}]`</span>
+<span class="line"><span class="ln"> 496</span>      : this.deps.transact</span>
+<span class="line"><span class="ln"> 497</span>      ? base</span>
+<span class="line"><span class="ln"> 498</span>      : await this.annotateEntities(base, req.namespace, cand.entities, this.entities);</span>
+<span class="line"><span class="ln"> 499</span></span>
+<span class="line"><span class="ln"> 500</span>    // Embed the fact TEXT (un-annotated base), not the `[entities: …]` marker:</span>
+<span class="line"><span class="ln"> 501</span>    // the annotation is derived read-side metadata, so dedupe / supersedence /</span>
+<span class="line"><span class="ln"> 502</span>    // search similarity must depend only on the fact itself. This also keeps</span>
+<span class="line"><span class="ln"> 503</span>    // the verbatim lane's newly-added entity annotation from perturbing</span>
+<span class="line"><span class="ln"> 504</span>    // supersede matching between two near-identical facts.</span>
+<span class="line"><span class="ln"> 505</span>    const classification = governedClassification(content, req, policy);</span>
+<span class="line"><span class="ln"> 506</span>    if (!req.hints?.localOnly) {</span>
+<span class="line"><span class="ln"> 507</span>      assertDestinationAllowed(classification, "embedding-provider", {</span>
+<span class="line"><span class="ln"> 508</span>        region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 509</span>      });</span>
+<span class="line"><span class="ln"> 510</span>    }</span>
+<span class="line"><span class="ln"> 511</span>    assertDestinationAllowed(classification, "canonical-l2", {</span>
+<span class="line"><span class="ln"> 512</span>      region: policy.dataRegion,</span>
+<span class="line"><span class="ln"> 513</span>    });</span>
+<span class="line"><span class="ln"> 514</span>    await hooks?.onStage?.("embedding");</span>
+<span class="line"><span class="ln"> 515</span>    const [embedding] = await (</span>
+<span class="line"><span class="ln"> 516</span>      req.hints?.localOnly ? this.localEmbedder : this.deps.embedder</span>
+<span class="line"><span class="ln"> 517</span>    ).embed([base]);</span>
+<span class="line"><span class="ln"> 518</span>    if (!embedding) return; // defensive; embedders return 1:1</span>
+<span class="line"><span class="ln"> 519</span>    const sourceAccess = req.provenance?.sourceAccess ?? {</span>
+<span class="line"><span class="ln"> 520</span>      principals: [],</span></code></pre></div></section>
+<section class="sec" id="retrieval"><div class="sec-no"><b>04</b> / retrieval</div><h2 class="sec-title">检索驱动只能站在 ScopedView 后面</h2><h3>源码判断</h3><p><code>src/driver/view.ts:140</code> nameMatchers 用 whole-word 正则避免 Ann 命中 planning 这类误召回，图检索路径对实体边界有显式防护。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:181</code> buildScopedView 的 candidates 调用带 validOnly、access、sourceProjection，候选集从创建时就被 ACL 与 source scope 收窄。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:220</code> vectorSearch 同样传入 validOnly、access、sourceIds，向量检索没有被例外化成更宽的读取面。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:242</code> concepts 在 sourceProjection 存在时 fail closed，这让冷层概念检索不会把指定来源之外的信息混入计划。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:7</code> ContextAllocator 把 policy-directive 排在 lane 0，并从预留 token slice 装入，治理指令不会被普通 recall 挤出上下文。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/driver/view.ts:181-258</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 181</span>export function buildScopedView&lt;TDb&gt;(</span>
+<span class="line"><span class="ln"> 182</span>  deps: ScopedViewDeps&lt;TDb&gt;,</span>
+<span class="line"><span class="ln"> 183</span>  namespace: Namespace,</span>
+<span class="line"><span class="ln"> 184</span>  access?: AccessSubject,</span>
+<span class="line"><span class="ln"> 185</span>  sourceProjection?: RetrievalSourceProjection,</span>
+<span class="line"><span class="ln"> 186</span>): ScopedView {</span>
+<span class="line"><span class="ln"> 187</span>  return {</span>
+<span class="line"><span class="ln"> 188</span>    namespace,</span>
+<span class="line"><span class="ln"> 189</span></span>
+<span class="line"><span class="ln"> 190</span>    async candidates(limit = DEFAULT_CANDIDATE_LIMIT) {</span>
+<span class="line"><span class="ln"> 191</span>      const rows = await deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 192</span>        validOnly: true,</span>
+<span class="line"><span class="ln"> 193</span>        limit,</span>
+<span class="line"><span class="ln"> 194</span>        access,</span>
+<span class="line"><span class="ln"> 195</span>        sourceIds: sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 196</span>      });</span>
+<span class="line"><span class="ln"> 197</span>      return rows.map((r) =&gt; ({</span>
+<span class="line"><span class="ln"> 198</span>        ref: r.id,</span>
+<span class="line"><span class="ln"> 199</span>        content: retrievalContent(r, sourceProjection),</span>
+<span class="line"><span class="ln"> 200</span>      }));</span>
+<span class="line"><span class="ln"> 201</span>    },</span>
+<span class="line"><span class="ln"> 202</span></span>
+<span class="line"><span class="ln"> 203</span>    ...(deps.index.listLexicalCandidates</span>
+<span class="line"><span class="ln"> 204</span>      ? {</span>
+<span class="line"><span class="ln"> 205</span>          async lexicalCandidates(query: string, limit: number) {</span>
+<span class="line"><span class="ln"> 206</span>            const rows = await deps.index.listLexicalCandidates!(namespace, query, {</span>
+<span class="line"><span class="ln"> 207</span>              validOnly: true,</span>
+<span class="line"><span class="ln"> 208</span>              limit,</span>
+<span class="line"><span class="ln"> 209</span>              access,</span>
+<span class="line"><span class="ln"> 210</span>              sourceIds: sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 211</span>            });</span>
+<span class="line"><span class="ln"> 212</span>            return rows.map((r) =&gt; ({</span>
+<span class="line"><span class="ln"> 213</span>              ref: r.id,</span>
+<span class="line"><span class="ln"> 214</span>              content: retrievalContent(r, sourceProjection),</span>
+<span class="line"><span class="ln"> 215</span>            }));</span>
+<span class="line"><span class="ln"> 216</span>          },</span>
+<span class="line"><span class="ln"> 217</span>        }</span>
+<span class="line"><span class="ln"> 218</span>      : {}),</span>
+<span class="line"><span class="ln"> 219</span></span>
+<span class="line"><span class="ln"> 220</span>    async vectorSearch(embedding, k) {</span>
+<span class="line"><span class="ln"> 221</span>      const hits = await deps.index.vectorSearch(</span>
+<span class="line"><span class="ln"> 222</span>        namespace,</span>
+<span class="line"><span class="ln"> 223</span>        embedding,</span>
+<span class="line"><span class="ln"> 224</span>        k,</span>
+<span class="line"><span class="ln"> 225</span>        true,</span>
+<span class="line"><span class="ln"> 226</span>        false,</span>
+<span class="line"><span class="ln"> 227</span>        false,</span>
+<span class="line"><span class="ln"> 228</span>        access,</span>
+<span class="line"><span class="ln"> 229</span>        sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 230</span>      );</span>
+<span class="line"><span class="ln"> 231</span>      return hits.map((h) =&gt; ({</span>
+<span class="line"><span class="ln"> 232</span>        ref: h.obj.id,</span>
+<span class="line"><span class="ln"> 233</span>        content: retrievalContent(h.obj, sourceProjection),</span>
+<span class="line"><span class="ln"> 234</span>        score: h.similarity,</span>
+<span class="line"><span class="ln"> 235</span>      }));</span>
+<span class="line"><span class="ln"> 236</span>    },</span>
+<span class="line"><span class="ln"> 237</span></span>
+<span class="line"><span class="ln"> 238</span>    async embed(texts) {</span>
+<span class="line"><span class="ln"> 239</span>      return deps.embedder.embed(texts);</span>
+<span class="line"><span class="ln"> 240</span>    },</span>
+<span class="line"><span class="ln"> 241</span></span>
+<span class="line"><span class="ln"> 242</span>    async concepts(query, k) {</span>
+<span class="line"><span class="ln"> 243</span>      // L3 concepts do not retain per-source provenance. A source-scoped view</span>
+<span class="line"><span class="ln"> 244</span>      // therefore fails closed instead of allowing a future driver to widen</span>
+<span class="line"><span class="ln"> 245</span>      // the result set through the cold tier.</span>
+<span class="line"><span class="ln"> 246</span>      if (sourceProjection?.sourceIds !== undefined) return [];</span>
+<span class="line"><span class="ln"> 247</span>      return deps.cold.searchConcepts(deps.db, deps.embedder, namespace, query, k);</span>
+<span class="line"><span class="ln"> 248</span>    },</span>
+<span class="line"><span class="ln"> 249</span></span>
+<span class="line"><span class="ln"> 250</span>    async entityFacts(mention, hops) {</span>
+<span class="line"><span class="ln"> 251</span>      const needle = mention.trim().toLowerCase();</span>
+<span class="line"><span class="ln"> 252</span>      if (needle.length === 0) return [];</span>
+<span class="line"><span class="ln"> 253</span></span>
+<span class="line"><span class="ln"> 254</span>      const entities = await deps.entities.listEntities(namespace);</span>
+<span class="line"><span class="ln"> 255</span>      const seeds = entities.filter((e) =&gt;</span>
+<span class="line"><span class="ln"> 256</span>        lowerNames(e).some((n) =&gt; n === needle),</span>
+<span class="line"><span class="ln"> 257</span>      );</span>
+<span class="line"><span class="ln"> 258</span>      if (seeds.length === 0) return [];</span></code></pre></div><div class="flow"><div class="flow-row"><div class="flow-node">Identity</div><div class="flow-node">Policy Gate</div><div class="flow-node">ScopedView</div><div class="flow-node">Driver Plan</div></div><div class="flow-row"><div class="flow-node">validOnly/access</div><div class="flow-node">sourceProjection</div><div class="flow-node">refs only</div><div class="flow-node">audit detail</div></div></div></section>
+<section class="sec" id="allocator"><div class="sec-no"><b>05</b> / allocator</div><h2 class="sec-title">ContextAllocator 返回 blocks，不拼 prompt</h2><h3>源码判断</h3><p><code>src/allocator/index.ts:125</code> tryAdd 用 ref 去重并按 tokenBudget 跳过超额 block，工作集是可解释的 blocks 而不是拼接 prompt。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:181</code> legacy pinned concepts 仍是只读兼容路径，策略顺序保留但不会把旧 pin 自动升级成新 governed pin。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:232</code> predicted-relevant lane 只有 taskHint 存在时才启动，系统不会无条件把相似记忆塞进每一次调用。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:285</code> assemble audit detail 写入 blocks、tokens、budget、rejectedPins 和 policy digest，召回上下文也有审计证据。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:49</code> L2_SCORE_FLOOR 和 L3_SCORE_FLOOR 把故障补召回变成阈值判定，而不是只要有候选就硬塞回上下文。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/allocator/index.ts:110-177</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 110</span>  async assemble(args: AssembleArgs): Promise&lt;WorkingSet&gt; {</span>
+<span class="line"><span class="ln"> 111</span>    const t0 = performance.now();</span>
+<span class="line"><span class="ln"> 112</span>    const { namespace, policy, taskHint } = args;</span>
+<span class="line"><span class="ln"> 113</span>    // Defensive: some callers (syscall layer) route audit attribution</span>
+<span class="line"><span class="ln"> 114</span>    // themselves and may omit actor/agentId at runtime.</span>
+<span class="line"><span class="ln"> 115</span>    const actor = args.actor ?? "unknown";</span>
+<span class="line"><span class="ln"> 116</span>    const agentId = args.agentId ?? "unknown";</span>
+<span class="line"><span class="ln"> 117</span>    const budget = policy.tokenBudget;</span>
+<span class="line"><span class="ln"> 118</span></span>
+<span class="line"><span class="ln"> 119</span>    let totalTokens = 0;</span>
+<span class="line"><span class="ln"> 120</span>    let rejectedPins = 0;</span>
+<span class="line"><span class="ln"> 121</span>    let brownoutDetail = "";</span>
+<span class="line"><span class="ln"> 122</span>    const selected: ContextBlock[] = [];</span>
+<span class="line"><span class="ln"> 123</span>    const usedRefs = new Set&lt;string&gt;();</span>
+<span class="line"><span class="ln"> 124</span></span>
+<span class="line"><span class="ln"> 125</span>    const tryAdd = (block: ContextBlock): void =&gt; {</span>
+<span class="line"><span class="ln"> 126</span>      if (usedRefs.has(block.ref)) return;</span>
+<span class="line"><span class="ln"> 127</span>      if (totalTokens + block.tokenEstimate &gt; budget) return; // never split</span>
+<span class="line"><span class="ln"> 128</span>      selected.push(block);</span>
+<span class="line"><span class="ln"> 129</span>      usedRefs.add(block.ref);</span>
+<span class="line"><span class="ln"> 130</span>      totalTokens += block.tokenEstimate;</span>
+<span class="line"><span class="ln"> 131</span>    };</span>
+<span class="line"><span class="ln"> 132</span></span>
+<span class="line"><span class="ln"> 133</span>    // -- lane 0: governed policy directives ---------------------------------</span>
+<span class="line"><span class="ln"> 134</span>    // Guardrails are packed first out of a reserved slice of the budget, so</span>
+<span class="line"><span class="ln"> 135</span>    // no amount of recall can push a policy out of the working set. The</span>
+<span class="line"><span class="ln"> 136</span>    // reserve is a CEILING, not an allotment: unused policy tokens stay</span>
+<span class="line"><span class="ln"> 137</span>    // available to the ordinary lanes below.</span>
+<span class="line"><span class="ln"> 138</span>    let policySet: PolicyDirectiveSet | null = null;</span>
+<span class="line"><span class="ln"> 139</span>    if (this.deps.policyDirectives) {</span>
+<span class="line"><span class="ln"> 140</span>      try {</span>
+<span class="line"><span class="ln"> 141</span>        const loaded = await this.deps.policyDirectives.load(</span>
+<span class="line"><span class="ln"> 142</span>          namespace,</span>
+<span class="line"><span class="ln"> 143</span>          policyTokenReserve(budget),</span>
+<span class="line"><span class="ln"> 144</span>        );</span>
+<span class="line"><span class="ln"> 145</span>        if (loaded.documents.length &gt; 0) {</span>
+<span class="line"><span class="ln"> 146</span>          policySet = loaded;</span>
+<span class="line"><span class="ln"> 147</span>          for (const block of loaded.blocks) tryAdd(block);</span>
+<span class="line"><span class="ln"> 148</span>        }</span>
+<span class="line"><span class="ln"> 149</span>      } catch {</span>
+<span class="line"><span class="ln"> 150</span>        // Brownout (kernel rule 5): an unreadable guardrail lane degrades the</span>
+<span class="line"><span class="ln"> 151</span>        // working set, it never fails the agent's call. The audit detail below</span>
+<span class="line"><span class="ln"> 152</span>        // records that policy was unavailable for this assembly.</span>
+<span class="line"><span class="ln"> 153</span>        brownoutDetail += " brownout=policy_unavailable";</span>
+<span class="line"><span class="ln"> 154</span>      }</span>
+<span class="line"><span class="ln"> 155</span>    }</span>
+<span class="line"><span class="ln"> 156</span></span>
+<span class="line"><span class="ln"> 157</span>    // -- lane 1a: governed stable pins (durable creation order) --------------</span>
+<span class="line"><span class="ln"> 158</span>    if (this.deps.pins) {</span>
+<span class="line"><span class="ln"> 159</span>      try {</span>
+<span class="line"><span class="ln"> 160</span>        const governed = await this.deps.pins.resolve(namespace, args.access);</span>
+<span class="line"><span class="ln"> 161</span>        rejectedPins += governed.rejected;</span>
+<span class="line"><span class="ln"> 162</span>        for (let i = 0; i &lt; governed.pins.length; i++) {</span>
+<span class="line"><span class="ln"> 163</span>          const pin = governed.pins[i];</span>
+<span class="line"><span class="ln"> 164</span>          tryAdd({</span>
+<span class="line"><span class="ln"> 165</span>            kind: pin.kind === "memory" ? "pinned-memory" : "pinned-concept",</span>
+<span class="line"><span class="ln"> 166</span>            ref: pin.ref,</span>
+<span class="line"><span class="ln"> 167</span>            content: pin.content,</span>
+<span class="line"><span class="ln"> 168</span>            tokenEstimate: estimateTokens(pin.content),</span>
+<span class="line"><span class="ln"> 169</span>            orderKey: `0-pin-0-governed-${String(i).padStart(6, "0")}-${pin.pinId}`,</span>
+<span class="line"><span class="ln"> 170</span>          });</span>
+<span class="line"><span class="ln"> 171</span>        }</span>
+<span class="line"><span class="ln"> 172</span>      } catch {</span>
+<span class="line"><span class="ln"> 173</span>        // Brownout: pin metadata or its backing store may be unavailable. The</span>
+<span class="line"><span class="ln"> 174</span>        // compatibility and ordinary lanes still provide a working set.</span>
+<span class="line"><span class="ln"> 175</span>        rejectedPins++;</span>
+<span class="line"><span class="ln"> 176</span>      }</span>
+<span class="line"><span class="ln"> 177</span>    }</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/allocator/index.ts:285-356</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 285</span>    const assembledAt = new Date().toISOString();</span>
+<span class="line"><span class="ln"> 286</span>    const event = {</span>
+<span class="line"><span class="ln"> 287</span>      ts: assembledAt,</span>
+<span class="line"><span class="ln"> 288</span>      actor,</span>
+<span class="line"><span class="ln"> 289</span>      agentId,</span>
+<span class="line"><span class="ln"> 290</span>      op: "assemble",</span>
+<span class="line"><span class="ln"> 291</span>      memoryId: null,</span>
+<span class="line"><span class="ln"> 292</span>      namespace,</span>
+<span class="line"><span class="ln"> 293</span>      purpose: taskHint ?? null,</span>
+<span class="line"><span class="ln"> 294</span>      result: "ok",</span>
+<span class="line"><span class="ln"> 295</span>      detail: `blocks=${selected.length} tokens=${totalTokens} budget=${budget} rejectedPins=${rejectedPins}${policyDetail}${brownoutDetail}`,</span>
+<span class="line"><span class="ln"> 296</span>    } as const;</span>
+<span class="line"><span class="ln"> 297</span>    // D36: with the kernel's transact/usage wiring the audit row and its</span>
+<span class="line"><span class="ln"> 298</span>    // companion usage row commit in one transaction; module-level tests keep</span>
+<span class="line"><span class="ln"> 299</span>    // the standalone append.</span>
+<span class="line"><span class="ln"> 300</span>    const writeAudit = async (audit: AuditPort, tx?: unknown): Promise&lt;void&gt; =&gt; {</span>
+<span class="line"><span class="ln"> 301</span>      const auditSeq = await audit.append(event);</span>
+<span class="line"><span class="ln"> 302</span>      if (this.deps.usage &amp;&amp; tx !== undefined &amp;&amp; typeof auditSeq === "number" &amp;&amp; args.usage) {</span>
+<span class="line"><span class="ln"> 303</span>        await this.deps.usage(tx, {</span>
+<span class="line"><span class="ln"> 304</span>          auditSeq,</span>
+<span class="line"><span class="ln"> 305</span>          traceId: args.usage.traceId,</span>
+<span class="line"><span class="ln"> 306</span>          ts: assembledAt,</span>
+<span class="line"><span class="ln"> 307</span>          namespace,</span>
+<span class="line"><span class="ln"> 308</span>          actor,</span>
+<span class="line"><span class="ln"> 309</span>          principal: args.usage.principal,</span>
+<span class="line"><span class="ln"> 310</span>          callerClass: args.usage.callerClass,</span>
+<span class="line"><span class="ln"> 311</span>          op: "assemble",</span>
+<span class="line"><span class="ln"> 312</span>          tool: args.usage.tool,</span>
+<span class="line"><span class="ln"> 313</span>          result: "ok",</span>
+<span class="line"><span class="ln"> 314</span>          latencyMs: performance.now() - t0,</span>
+<span class="line"><span class="ln"> 315</span>          tokens: totalTokens,</span>
+<span class="line"><span class="ln"> 316</span>          returned: selected.length,</span>
+<span class="line"><span class="ln"> 317</span>          driver: null,</span>
+<span class="line"><span class="ln"> 318</span>          sourceTier: null,</span>
+<span class="line"><span class="ln"> 319</span>          sourceIds: null,</span>
+<span class="line"><span class="ln"> 320</span>          topScore: null,</span>
+<span class="line"><span class="ln"> 321</span>        });</span>
+<span class="line"><span class="ln"> 322</span>      }</span>
+<span class="line"><span class="ln"> 323</span>    };</span>
+<span class="line"><span class="ln"> 324</span>    if (this.deps.transact) {</span>
+<span class="line"><span class="ln"> 325</span>      await this.deps.transact(writeAudit);</span>
+<span class="line"><span class="ln"> 326</span>    } else {</span>
+<span class="line"><span class="ln"> 327</span>      await writeAudit(this.deps.audit);</span>
+<span class="line"><span class="ln"> 328</span>    }</span>
+<span class="line"><span class="ln"> 329</span></span>
+<span class="line"><span class="ln"> 330</span>    if (deliveredPolicy &amp;&amp; this.deps.policyDirectives?.onDelivered) {</span>
+<span class="line"><span class="ln"> 331</span>      try {</span>
+<span class="line"><span class="ln"> 332</span>        await this.deps.policyDirectives.onDelivered(deliveredPolicy, args);</span>
+<span class="line"><span class="ln"> 333</span>      } catch {</span>
+<span class="line"><span class="ln"> 334</span>        // The ledger is evidence, not a gate: a failed compliance write never</span>
+<span class="line"><span class="ln"> 335</span>        // costs the agent its working set.</span>
+<span class="line"><span class="ln"> 336</span>      }</span>
+<span class="line"><span class="ln"> 337</span>    }</span>
+<span class="line"><span class="ln"> 338</span></span>
+<span class="line"><span class="ln"> 339</span>    return {</span>
+<span class="line"><span class="ln"> 340</span>      namespace,</span>
+<span class="line"><span class="ln"> 341</span>      blocks: selected,</span>
+<span class="line"><span class="ln"> 342</span>      totalTokens,</span>
+<span class="line"><span class="ln"> 343</span>      budget,</span>
+<span class="line"><span class="ln"> 344</span>      assembledAt,</span>
+<span class="line"><span class="ln"> 345</span>      ...(deliveredPolicy</span>
+<span class="line"><span class="ln"> 346</span>        ? {</span>
+<span class="line"><span class="ln"> 347</span>            policy: {</span>
+<span class="line"><span class="ln"> 348</span>              digest: deliveredPolicy.digest,</span>
+<span class="line"><span class="ln"> 349</span>              documents: deliveredPolicy.documents,</span>
+<span class="line"><span class="ln"> 350</span>              tokens: deliveredPolicy.totalTokens,</span>
+<span class="line"><span class="ln"> 351</span>              required: deliveredPolicy.required,</span>
+<span class="line"><span class="ln"> 352</span>              truncated: deliveredPolicy.truncated,</span>
+<span class="line"><span class="ln"> 353</span>            },</span>
+<span class="line"><span class="ln"> 354</span>          }</span>
+<span class="line"><span class="ln"> 355</span>        : {}),</span>
+<span class="line"><span class="ln"> 356</span>    };</span></code></pre></div></section>
+<section class="sec" id="fault"><div class="sec-no"><b>06</b> / fault</div><h2 class="sec-title">FaultHandler 的价值是可降级而不是更聪明</h2><h3>源码判断</h3><p><code>src/fault/index.ts:182</code> FaultHandler 优先走 driver-planned L2，但随后仍计算绝对分数，driver 的归一化分数不能单独决定是否命中。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:217</code> embedding 出错时 brownout 到 BM25，系统记录 degradedReason，但不把一次向量服务失败变成 agent 调用失败。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:265</code> L2 不够强时才进入 L3 cold concept search，冷层被设计成有门槛的补救路径而不是默认主路。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:317</code> 故障路径会 bumpAccess 或 bumpFault 并同事务 append audit，召回压力会回流成可观测信号。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/fault/index.ts:160-249</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 160</span>  async fault(args: FaultArgs): Promise&lt;FaultResult&gt; {</span>
+<span class="line"><span class="ln"> 161</span>    const t0 = performance.now();</span>
+<span class="line"><span class="ln"> 162</span>    const { namespace, query } = args;</span>
+<span class="line"><span class="ln"> 163</span>    // Defensive: some callers (syscall layer) route audit attribution</span>
+<span class="line"><span class="ln"> 164</span>    // themselves and may omit actor/agentId at runtime.</span>
+<span class="line"><span class="ln"> 165</span>    const actor = args.actor ?? "unknown";</span>
+<span class="line"><span class="ln"> 166</span>    const agentId = args.agentId ?? "unknown";</span>
+<span class="line"><span class="ln"> 167</span>    const k = args.k ?? DEFAULT_K;</span>
+<span class="line"><span class="ln"> 168</span>    const tokenBudget = args.tokenBudget ?? DEFAULT_TOKEN_BUDGET;</span>
+<span class="line"><span class="ln"> 169</span></span>
+<span class="line"><span class="ln"> 170</span>    // -- tier L2 --------------------------------------------------------------</span>
+<span class="line"><span class="ln"> 171</span>    // M2: when the kernel wired a driver-routed planner, the L2 candidates</span>
+<span class="line"><span class="ln"> 172</span>    // come from the policy-selected retriever cartridge; otherwise the</span>
+<span class="line"><span class="ln"> 173</span>    // legacy hybrid search runs. Either way the ACCEPTANCE decision uses the</span>
+<span class="line"><span class="ln"> 174</span>    // absolute hybrid score against L2_SCORE_FLOOR (see FaultHandlerDeps).</span>
+<span class="line"><span class="ln"> 175</span>    let l2Refs: ScoredRef[];</span>
+<span class="line"><span class="ln"> 176</span>    let acceptL2: boolean;</span>
+<span class="line"><span class="ln"> 177</span>    let bumpTargetId: string | null;</span>
+<span class="line"><span class="ln"> 178</span>    let driverDetail = "";</span>
+<span class="line"><span class="ln"> 179</span>    let driverName: string | null = null;</span>
+<span class="line"><span class="ln"> 180</span>    let degradedReason: FaultResult["degradedReason"];</span>
+<span class="line"><span class="ln"> 181</span></span>
+<span class="line"><span class="ln"> 182</span>    try {</span>
+<span class="line"><span class="ln"> 183</span>      if (this.deps.l2Planner) {</span>
+<span class="line"><span class="ln"> 184</span>        const outcome = await this.deps.l2Planner(query, k, tokenBudget, args.access);</span>
+<span class="line"><span class="ln"> 185</span>        driverDetail =</span>
+<span class="line"><span class="ln"> 186</span>          ` driver=${outcome.driver}` +</span>
+<span class="line"><span class="ln"> 187</span>          (outcome.fallback ? ` driver_fallback=${outcome.fallback}` : "");</span>
+<span class="line"><span class="ln"> 188</span>        driverName = outcome.driver;</span>
+<span class="line"><span class="ln"> 189</span>        l2Refs = outcome.refs;</span>
+<span class="line"><span class="ln"> 190</span>        const abs = await this.absoluteScores(namespace, query, outcome.refs, args.access);</span>
+<span class="line"><span class="ln"> 191</span>        acceptL2 = abs.some((s) =&gt; s &gt;= L2_SCORE_FLOOR);</span>
+<span class="line"><span class="ln"> 192</span>        bumpTargetId = outcome.refs[0]?.ref ?? null;</span>
+<span class="line"><span class="ln"> 193</span>      } else {</span>
+<span class="line"><span class="ln"> 194</span>        const l2Hits: HybridHit[] = await hybridSearchL2({</span>
+<span class="line"><span class="ln"> 195</span>          index: this.deps.index,</span>
+<span class="line"><span class="ln"> 196</span>          embedder: this.deps.embedder,</span>
+<span class="line"><span class="ln"> 197</span>          namespace,</span>
+<span class="line"><span class="ln"> 198</span>          query,</span>
+<span class="line"><span class="ln"> 199</span>          k: Math.max(k * 3, 12),</span>
+<span class="line"><span class="ln"> 200</span>          access: args.access,</span>
+<span class="line"><span class="ln"> 201</span>        });</span>
+<span class="line"><span class="ln"> 202</span>        const bestL2 = l2Hits.length &gt; 0 ? l2Hits[0] : null;</span>
+<span class="line"><span class="ln"> 203</span>        acceptL2 = bestL2 !== null &amp;&amp; bestL2.score &gt;= L2_SCORE_FLOOR;</span>
+<span class="line"><span class="ln"> 204</span>        bumpTargetId = bestL2?.row.id ?? null;</span>
+<span class="line"><span class="ln"> 205</span>        l2Refs = l2Hits</span>
+<span class="line"><span class="ln"> 206</span>          .filter((h) =&gt; h.score &gt; 0)</span>
+<span class="line"><span class="ln"> 207</span>          .slice(0, k)</span>
+<span class="line"><span class="ln"> 208</span>          .map((h) =&gt; ({</span>
+<span class="line"><span class="ln"> 209</span>            id: h.row.id,</span>
+<span class="line"><span class="ln"> 210</span>            tier: "L2" as const,</span>
+<span class="line"><span class="ln"> 211</span>            ref: h.row.id,</span>
+<span class="line"><span class="ln"> 212</span>            score: h.score,</span>
+<span class="line"><span class="ln"> 213</span>            content: h.row.content,</span>
+<span class="line"><span class="ln"> 214</span>            tokenEstimate: estimateTokens(h.row.content),</span>
+<span class="line"><span class="ln"> 215</span>          }));</span>
+<span class="line"><span class="ln"> 216</span>      }</span>
+<span class="line"><span class="ln"> 217</span>    } catch {</span>
+<span class="line"><span class="ln"> 218</span>      // Immediate brownout, including failures before the circuit breaker has</span>
+<span class="line"><span class="ln"> 219</span>      // opened: retain the governed lexical lane and expose the degradation.</span>
+<span class="line"><span class="ln"> 220</span>      const rows = await this.deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 221</span>        validOnly: true,</span>
+<span class="line"><span class="ln"> 222</span>        limit: 200,</span>
+<span class="line"><span class="ln"> 223</span>        access: args.access,</span>
+<span class="line"><span class="ln"> 224</span>      });</span>
+<span class="line"><span class="ln"> 225</span>      const scores = bm25Scores(</span>
+<span class="line"><span class="ln"> 226</span>        query,</span>
+<span class="line"><span class="ln"> 227</span>        rows.map((row) =&gt; ({ ref: row.id, content: row.content })),</span>
+<span class="line"><span class="ln"> 228</span>      );</span>
+<span class="line"><span class="ln"> 229</span>      l2Refs = rows</span>
+<span class="line"><span class="ln"> 230</span>        .map((row) =&gt; ({</span>
+<span class="line"><span class="ln"> 231</span>          id: row.id,</span>
+<span class="line"><span class="ln"> 232</span>          tier: "L2" as const,</span>
+<span class="line"><span class="ln"> 233</span>          ref: row.id,</span>
+<span class="line"><span class="ln"> 234</span>          // In a lexical-only brownout the BM25 lane owns the full confidence</span>
+<span class="line"><span class="ln"> 235</span>          // scale; retaining the hybrid 0.4 weight would make its maximum too</span>
+<span class="line"><span class="ln"> 236</span>          // small to clear the calibrated acceptance floor reliably.</span>
+<span class="line"><span class="ln"> 237</span>          score: saturate(scores.get(row.id) ?? 0),</span>
+<span class="line"><span class="ln"> 238</span>          content: row.content,</span>
+<span class="line"><span class="ln"> 239</span>          tokenEstimate: estimateTokens(row.content),</span>
+<span class="line"><span class="ln"> 240</span>        }))</span>
+<span class="line"><span class="ln"> 241</span>        .filter((ref) =&gt; ref.score &gt; 0)</span>
+<span class="line"><span class="ln"> 242</span>        .sort((a, b) =&gt; b.score - a.score || a.ref.localeCompare(b.ref))</span>
+<span class="line"><span class="ln"> 243</span>        .slice(0, k);</span>
+<span class="line"><span class="ln"> 244</span>      acceptL2 = (l2Refs[0]?.score ?? 0) &gt;= L2_SCORE_FLOOR;</span>
+<span class="line"><span class="ln"> 245</span>      bumpTargetId = l2Refs[0]?.ref ?? null;</span>
+<span class="line"><span class="ln"> 246</span>      driverDetail = " driver=bm25-degraded brownout=embedding_unavailable";</span>
+<span class="line"><span class="ln"> 247</span>      driverName = "bm25-degraded";</span>
+<span class="line"><span class="ln"> 248</span>      degradedReason = "embedding_unavailable";</span>
+<span class="line"><span class="ln"> 249</span>    }</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/fault/index.ts:303-358</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 303</span>    const event = {</span>
+<span class="line"><span class="ln"> 304</span>      ts: new Date().toISOString(),</span>
+<span class="line"><span class="ln"> 305</span>      actor,</span>
+<span class="line"><span class="ln"> 306</span>      agentId,</span>
+<span class="line"><span class="ln"> 307</span>      op: "fault",</span>
+<span class="line"><span class="ln"> 308</span>      memoryId: injected.length &gt; 0 ? injected[0].id : null,</span>
+<span class="line"><span class="ln"> 309</span>      namespace,</span>
+<span class="line"><span class="ln"> 310</span>      purpose: args.auditPurpose ?? query,</span>
+<span class="line"><span class="ln"> 311</span>      result,</span>
+<span class="line"><span class="ln"> 312</span>      detail:</span>
+<span class="line"><span class="ln"> 313</span>        `source=${source ?? "none"} injected=${injected.length} tokens=${injectedTokens} latencyMs=${latencyMs}${driverDetail}` +</span>
+<span class="line"><span class="ln"> 314</span>        (degradedReason ? ` brownout=${degradedReason}` : ""),</span>
+<span class="line"><span class="ln"> 315</span>    } as const;</span>
+<span class="line"><span class="ln"> 316</span></span>
+<span class="line"><span class="ln"> 317</span>    const mutateAndAudit = async (index: L2IndexPort, audit: AuditPort, tx?: TDb): Promise&lt;void&gt; =&gt; {</span>
+<span class="line"><span class="ln"> 318</span>      if (accessIds.length &gt; 0) await index.bumpAccess(accessIds);</span>
+<span class="line"><span class="ln"> 319</span>      if (faultId !== null) await index.bumpFault(faultId);</span>
+<span class="line"><span class="ln"> 320</span>      const auditSeq = await audit.append(event);</span>
+<span class="line"><span class="ln"> 321</span>      // D36: the companion usage row rides the audit transaction (the hook</span>
+<span class="line"><span class="ln"> 322</span>      // wraps its writes in a SAVEPOINT brownout). The audit detail string</span>
+<span class="line"><span class="ln"> 323</span>      // above stays byte-identical.</span>
+<span class="line"><span class="ln"> 324</span>      if (this.deps.usage &amp;&amp; tx !== undefined &amp;&amp; typeof auditSeq === "number" &amp;&amp; args.usage) {</span>
+<span class="line"><span class="ln"> 325</span>        await this.deps.usage(tx, {</span>
+<span class="line"><span class="ln"> 326</span>          auditSeq,</span>
+<span class="line"><span class="ln"> 327</span>          traceId: args.usage.traceId,</span>
+<span class="line"><span class="ln"> 328</span>          ts: event.ts,</span>
+<span class="line"><span class="ln"> 329</span>          namespace,</span>
+<span class="line"><span class="ln"> 330</span>          actor,</span>
+<span class="line"><span class="ln"> 331</span>          principal: args.usage.principal,</span>
+<span class="line"><span class="ln"> 332</span>          callerClass: args.usage.callerClass,</span>
+<span class="line"><span class="ln"> 333</span>          op: "fault",</span>
+<span class="line"><span class="ln"> 334</span>          tool: args.usage.tool,</span>
+<span class="line"><span class="ln"> 335</span>          result,</span>
+<span class="line"><span class="ln"> 336</span>          latencyMs,</span>
+<span class="line"><span class="ln"> 337</span>          tokens: injectedTokens,</span>
+<span class="line"><span class="ln"> 338</span>          returned: injected.length,</span>
+<span class="line"><span class="ln"> 339</span>          driver: driverName,</span>
+<span class="line"><span class="ln"> 340</span>          sourceTier: source === "L2" ? "warm" : source === "L3" ? "cold" : null,</span>
+<span class="line"><span class="ln"> 341</span>          sourceIds: null,</span>
+<span class="line"><span class="ln"> 342</span>          topScore: injected[0]?.score ?? null,</span>
+<span class="line"><span class="ln"> 343</span>        });</span>
+<span class="line"><span class="ln"> 344</span>      }</span>
+<span class="line"><span class="ln"> 345</span>    };</span>
+<span class="line"><span class="ln"> 346</span>    if (this.deps.transact) {</span>
+<span class="line"><span class="ln"> 347</span>      await this.deps.transact(mutateAndAudit);</span>
+<span class="line"><span class="ln"> 348</span>    } else {</span>
+<span class="line"><span class="ln"> 349</span>      await mutateAndAudit(this.deps.index, this.deps.audit);</span>
+<span class="line"><span class="ln"> 350</span>    }</span>
+<span class="line"><span class="ln"> 351</span></span>
+<span class="line"><span class="ln"> 352</span>    return {</span>
+<span class="line"><span class="ln"> 353</span>      hit: result === "ok",</span>
+<span class="line"><span class="ln"> 354</span>      source,</span>
+<span class="line"><span class="ln"> 355</span>      injected,</span>
+<span class="line"><span class="ln"> 356</span>      latencyMs,</span>
+<span class="line"><span class="ln"> 357</span>      ...(degradedReason ? { degradedReason } : {}),</span>
+<span class="line"><span class="ln"> 358</span>    };</span></code></pre></div></section>
+<section class="sec" id="audit"><div class="sec-no"><b>07</b> / audit</div><h2 class="sec-title">审计链是 append-only 的系统记录</h2><h3>源码判断</h3><p><code>src/audit/index.ts:4</code> AuditLog 的模块注释直接声明每个 syscall 都写行，包括 denied/miss/error，这决定了治理视角下的证据完整性。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:92</code> auditDigest 把 prevHash、ts、actor、op、namespace、result、detail 纳入 canonical JSON，再用 SHA-256 串链。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:109</code> appendAuditEventTx 先 FOR UPDATE 锁 head_hash，再插入事件与新 hash，链头推进和事件提交在一个事务里完成。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:180</code> verifyChain 重算每条 hashed audit row 并检查 audit_chain_state，能发现篡改、删除和链头不一致。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/audit/index.ts:225</code> search 的注释强调 namespace IN 精确枚举，不用 LIKE 通配，审计导出和控制台筛选都沿用同一 ACL 边界。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/audit/index.ts:92-144</span><span>source</span></div><pre><code><span class="line"><span class="ln">  92</span>/** Low-level append primitive used by transactional and recovery paths. */</span>
+<span class="line"><span class="ln">  93</span>function auditDigest(event: AuditEvent, prevHash: string | null): string {</span>
+<span class="line"><span class="ln">  94</span>  const canonical = JSON.stringify({</span>
+<span class="line"><span class="ln">  95</span>    prevHash,</span>
+<span class="line"><span class="ln">  96</span>    ts: event.ts,</span>
+<span class="line"><span class="ln">  97</span>    actor: event.actor,</span>
+<span class="line"><span class="ln">  98</span>    agentId: event.agentId,</span>
+<span class="line"><span class="ln">  99</span>    op: event.op,</span>
+<span class="line"><span class="ln"> 100</span>    memoryId: event.memoryId,</span>
+<span class="line"><span class="ln"> 101</span>    namespace: event.namespace,</span>
+<span class="line"><span class="ln"> 102</span>    purpose: event.purpose,</span>
+<span class="line"><span class="ln"> 103</span>    result: event.result,</span>
+<span class="line"><span class="ln"> 104</span>    detail: event.detail ?? null,</span>
+<span class="line"><span class="ln"> 105</span>  });</span>
+<span class="line"><span class="ln"> 106</span>  return createHash("sha256").update(canonical).digest("hex");</span>
+<span class="line"><span class="ln"> 107</span>}</span>
+<span class="line"><span class="ln"> 108</span></span>
+<span class="line"><span class="ln"> 109</span>async function appendAuditEventTx(db: Db, event: AuditEvent): Promise&lt;number&gt; {</span>
+<span class="line"><span class="ln"> 110</span>  const head = await db.query(</span>
+<span class="line"><span class="ln"> 111</span>    `SELECT head_hash FROM audit_chain_state WHERE singleton = TRUE FOR UPDATE`,</span>
+<span class="line"><span class="ln"> 112</span>  );</span>
+<span class="line"><span class="ln"> 113</span>  const prevHash = head.rows[0]?.head_hash == null ? null : String(head.rows[0].head_hash);</span>
+<span class="line"><span class="ln"> 114</span>  const eventHash = auditDigest(event, prevHash);</span>
+<span class="line"><span class="ln"> 115</span>  const inserted = await db.query(</span>
+<span class="line"><span class="ln"> 116</span>    `INSERT INTO audit_log</span>
+<span class="line"><span class="ln"> 117</span>       (ts, actor, agent_id, op, memory_id, namespace, purpose, result, detail, prev_hash, event_hash)</span>
+<span class="line"><span class="ln"> 118</span>     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)</span>
+<span class="line"><span class="ln"> 119</span>     RETURNING seq`,</span>
+<span class="line"><span class="ln"> 120</span>    [</span>
+<span class="line"><span class="ln"> 121</span>      event.ts,</span>
+<span class="line"><span class="ln"> 122</span>      event.actor,</span>
+<span class="line"><span class="ln"> 123</span>      event.agentId,</span>
+<span class="line"><span class="ln"> 124</span>      event.op,</span>
+<span class="line"><span class="ln"> 125</span>      event.memoryId,</span>
+<span class="line"><span class="ln"> 126</span>      event.namespace,</span>
+<span class="line"><span class="ln"> 127</span>      event.purpose,</span>
+<span class="line"><span class="ln"> 128</span>      event.result,</span>
+<span class="line"><span class="ln"> 129</span>      event.detail ?? null,</span>
+<span class="line"><span class="ln"> 130</span>      prevHash,</span>
+<span class="line"><span class="ln"> 131</span>      eventHash,</span>
+<span class="line"><span class="ln"> 132</span>    ],</span>
+<span class="line"><span class="ln"> 133</span>  );</span>
+<span class="line"><span class="ln"> 134</span>  await db.query(</span>
+<span class="line"><span class="ln"> 135</span>    `UPDATE audit_chain_state SET head_hash = $1, updated_at = $2 WHERE singleton = TRUE`,</span>
+<span class="line"><span class="ln"> 136</span>    [eventHash, event.ts],</span>
+<span class="line"><span class="ln"> 137</span>  );</span>
+<span class="line"><span class="ln"> 138</span>  // seq is BIGINT: pg binds it as text, PGlite as number — coerce either way.</span>
+<span class="line"><span class="ln"> 139</span>  return Number((inserted.rows[0] as { seq: unknown }).seq);</span>
+<span class="line"><span class="ln"> 140</span>}</span>
+<span class="line"><span class="ln"> 141</span></span>
+<span class="line"><span class="ln"> 142</span>/** Standalone append: the chain-head lock and event commit atomically. */</span>
+<span class="line"><span class="ln"> 143</span>export async function appendAuditEvent(db: Db, event: AuditEvent): Promise&lt;void&gt; {</span>
+<span class="line"><span class="ln"> 144</span>  await db.transaction((tx) =&gt; appendAuditEventTx(tx, event));</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/audit/index.ts:180-209</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 180</span>  async verifyChain(): Promise&lt;{ ok: boolean; checked: number; brokenSeq?: number }&gt; {</span>
+<span class="line"><span class="ln"> 181</span>    const res = await this.db.query(</span>
+<span class="line"><span class="ln"> 182</span>      `SELECT seq, ts, actor, agent_id, op, memory_id, namespace, purpose, result,</span>
+<span class="line"><span class="ln"> 183</span>              detail, prev_hash, event_hash</span>
+<span class="line"><span class="ln"> 184</span>         FROM audit_log WHERE event_hash IS NOT NULL ORDER BY seq`,</span>
+<span class="line"><span class="ln"> 185</span>    );</span>
+<span class="line"><span class="ln"> 186</span>    let expectedPrev: string | null = null;</span>
+<span class="line"><span class="ln"> 187</span>    let checked = 0;</span>
+<span class="line"><span class="ln"> 188</span>    for (const raw of res.rows) {</span>
+<span class="line"><span class="ln"> 189</span>      const row = raw as Record&lt;string, unknown&gt;;</span>
+<span class="line"><span class="ln"> 190</span>      checked += 1;</span>
+<span class="line"><span class="ln"> 191</span>      const event = rowToAuditEvent(row);</span>
+<span class="line"><span class="ln"> 192</span>      const storedPrev = row.prev_hash == null ? null : String(row.prev_hash);</span>
+<span class="line"><span class="ln"> 193</span>      const storedHash = String(row.event_hash);</span>
+<span class="line"><span class="ln"> 194</span>      const expectedHash = auditDigest(event, expectedPrev);</span>
+<span class="line"><span class="ln"> 195</span>      if (storedPrev !== expectedPrev || storedHash !== expectedHash) {</span>
+<span class="line"><span class="ln"> 196</span>        return { ok: false, checked, brokenSeq: Number(row.seq) };</span>
+<span class="line"><span class="ln"> 197</span>      }</span>
+<span class="line"><span class="ln"> 198</span>      expectedPrev = storedHash;</span>
+<span class="line"><span class="ln"> 199</span>    }</span>
+<span class="line"><span class="ln"> 200</span>    const state = await this.db.query(</span>
+<span class="line"><span class="ln"> 201</span>      `SELECT head_hash FROM audit_chain_state WHERE singleton = TRUE`,</span>
+<span class="line"><span class="ln"> 202</span>    );</span>
+<span class="line"><span class="ln"> 203</span>    const storedHead = state.rows[0]?.head_hash == null</span>
+<span class="line"><span class="ln"> 204</span>      ? null</span>
+<span class="line"><span class="ln"> 205</span>      : String(state.rows[0].head_hash);</span>
+<span class="line"><span class="ln"> 206</span>    if (storedHead !== expectedPrev) {</span>
+<span class="line"><span class="ln"> 207</span>      return { ok: false, checked };</span>
+<span class="line"><span class="ln"> 208</span>    }</span>
+<span class="line"><span class="ln"> 209</span>    return { ok: true, checked };</span></code></pre></div></section>
+<section class="sec" id="erasure"><div class="sec-no"><b>08</b> / erasure</div><h2 class="sec-title">合规删除是唯一硬删除例外</h2><h3>源码判断</h3><p><code>src/erasure/index.ts:4</code> forget 是 D7 不删除规则的唯一受治理例外：它硬删 memory_objects，但保留 append-only audit，并返回证书。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:117</code> isInSubtree 复用 namespaceAncestors 判断 downward containment，擦除只能在 caller 自己的 subtree 内发生。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:201</code> resolveTargets 对 memory、namespace、actor、entity 都先解析具体行，再按 caller subtree 过滤，避免跨租户删除。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:306</code> resolveEntityRegistry 只读取 caller subtree 内的 canonical name 和 aliases，避免 sibling alias graph 扩大删除范围。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/index.ts:374</code> resolveUsageTargets 会清 usage_events 和 query_traces 的派生记录，并用精确 IN 绑定而非全表事务扫描。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/certificate.ts:24</code> stableStringify 对对象 key 递归排序，删除证书签名的 payload 因此能在 signer/verifier 两端得到同样字节。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/erasure/certificate.ts:75</code> verifyCertificate 要求 out-of-band trusted public key 与证书内 publicKey 一致，inline key 不是自签信任锚。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/erasure/index.ts:1-28</span><span>source</span></div><pre><code><span class="line"><span class="ln">   1</span>/**</span>
+<span class="line"><span class="ln">   2</span> * Module B (M4 / D3) — mem.forget erasure engine.</span>
+<span class="line"><span class="ln">   3</span> *</span>
+<span class="line"><span class="ln">   4</span> * `forget(deps, target, identity)` is the ONE governed exception to D7's "never</span>
+<span class="line"><span class="ln">   5</span> * delete": a compliance erasure. It resolves the target to a concrete id set</span>
+<span class="line"><span class="ln">   6</span> * INSIDE the caller's subtree, then in ONE database transaction:</span>
+<span class="line"><span class="ln">   7</span> *   1. nulls any dangling `supersedes` links from surviving rows into the</span>
+<span class="line"><span class="ln">   8</span> *      to-be-deleted set (the FK `memory_objects.supersedes -&gt; memory_objects.id`</span>
+<span class="line"><span class="ln">   9</span> *      would otherwise reject the DELETE);</span>
+<span class="line"><span class="ln">  10</span> *   2. HARD-DELETEs the matching rows (their inline embeddings go with them);</span>
+<span class="line"><span class="ln">  11</span> *   3. inserts one tombstone per erased id;</span>
+<span class="line"><span class="ln">  12</span> *   4. builds + ed25519-signs a DeletionCertificate (public key inline) and</span>
+<span class="line"><span class="ln">  13</span> *      inserts it.</span>
+<span class="line"><span class="ln">  14</span> * E6: derived usage rows (usage_events, query_traces for actor/namespace</span>
+<span class="line"><span class="ln">  15</span> * targets) are scrubbed in the same transaction — no tombstones (they are not</span>
+<span class="line"><span class="ln">  16</span> * memory objects), but the certificate enumerates their ids.</span>
+<span class="line"><span class="ln">  17</span> * It NEVER touches `audit_log` — the audit trail is append-only (D4); the</span>
+<span class="line"><span class="ln">  18</span> * syscall layer appends the `forget` audit row.</span>
+<span class="line"><span class="ln">  19</span> *</span>
+<span class="line"><span class="ln">  20</span> * Subtree scoping (isolation = the existing ancestor-prefix ACL, downward):</span>
+<span class="line"><span class="ln">  21</span> *   - the caller may only erase within its OWN subtree — a target whose</span>
+<span class="line"><span class="ln">  22</span> *     namespace is an ANCESTOR or a SIBLING of the caller's namespace resolves</span>
+<span class="line"><span class="ln">  23</span> *     to zero rows;</span>
+<span class="line"><span class="ln">  24</span> *   - resolution runs DOWNWARD: a namespace target matches that namespace and</span>
+<span class="line"><span class="ln">  25</span> *     its descendants (again constrained to the caller's subtree).</span>
+<span class="line"><span class="ln">  26</span> *</span>
+<span class="line"><span class="ln">  27</span> * `deps` is a STRUCTURAL slice `{ db, audit }` — no kernel import.</span>
+<span class="line"><span class="ln">  28</span> */</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/erasure/certificate.ts:24-75</span><span>source</span></div><pre><code><span class="line"><span class="ln">  24</span> * Deterministic JSON of an arbitrary JSON value with object keys sorted at</span>
+<span class="line"><span class="ln">  25</span> * every depth. Arrays keep their order (erasedIds ordering is meaningful and</span>
+<span class="line"><span class="ln">  26</span> * fixed by the resolver); objects (including the nested ForgetTarget) sort.</span>
+<span class="line"><span class="ln">  27</span> */</span>
+<span class="line"><span class="ln">  28</span>function stableStringify(value: unknown): string {</span>
+<span class="line"><span class="ln">  29</span>  if (value === null || typeof value !== "object") {</span>
+<span class="line"><span class="ln">  30</span>    return JSON.stringify(value);</span>
+<span class="line"><span class="ln">  31</span>  }</span>
+<span class="line"><span class="ln">  32</span>  if (Array.isArray(value)) {</span>
+<span class="line"><span class="ln">  33</span>    return `[${value.map((v) =&gt; stableStringify(v)).join(",")}]`;</span>
+<span class="line"><span class="ln">  34</span>  }</span>
+<span class="line"><span class="ln">  35</span>  const obj = value as Record&lt;string, unknown&gt;;</span>
+<span class="line"><span class="ln">  36</span>  const keys = Object.keys(obj).sort();</span>
+<span class="line"><span class="ln">  37</span>  const parts = keys.map(</span>
+<span class="line"><span class="ln">  38</span>    (k) =&gt; `${JSON.stringify(k)}:${stableStringify(obj[k])}`,</span>
+<span class="line"><span class="ln">  39</span>  );</span>
+<span class="line"><span class="ln">  40</span>  return `{${parts.join(",")}}`;</span>
+<span class="line"><span class="ln">  41</span>}</span>
+<span class="line"><span class="ln">  42</span></span>
+<span class="line"><span class="ln">  43</span>/**</span>
+<span class="line"><span class="ln">  44</span> * Canonical, signature-independent JSON string of a certificate. Given a full</span>
+<span class="line"><span class="ln">  45</span> * certificate or a payload, the `signature` field is always excluded, so the</span>
+<span class="line"><span class="ln">  46</span> * signer and the verifier hash exactly the same bytes.</span>
+<span class="line"><span class="ln">  47</span> */</span>
+<span class="line"><span class="ln">  48</span>export function canonicalPayload(</span>
+<span class="line"><span class="ln">  49</span>  cert: CertificatePayload | DeletionCertificate,</span>
+<span class="line"><span class="ln">  50</span>): string {</span>
+<span class="line"><span class="ln">  51</span>  const { signature: _signature, ...payload } = cert as DeletionCertificate;</span>
+<span class="line"><span class="ln">  52</span>  return stableStringify(payload);</span>
+<span class="line"><span class="ln">  53</span>}</span>
+<span class="line"><span class="ln">  54</span></span>
+<span class="line"><span class="ln">  55</span>/**</span>
+<span class="line"><span class="ln">  56</span> * Sign a certificate payload with the kernel's ed25519 key; returns the base64</span>
+<span class="line"><span class="ln">  57</span> * signature over the canonical payload bytes (UTF-8).</span>
+<span class="line"><span class="ln">  58</span> */</span>
+<span class="line"><span class="ln">  59</span>export function signCertificate(</span>
+<span class="line"><span class="ln">  60</span>  payload: CertificatePayload,</span>
+<span class="line"><span class="ln">  61</span>  key: SigningKey,</span>
+<span class="line"><span class="ln">  62</span>): string {</span>
+<span class="line"><span class="ln">  63</span>  const bytes = Buffer.from(canonicalPayload(payload), "utf8");</span>
+<span class="line"><span class="ln">  64</span>  return key.sign(bytes).toString("base64");</span>
+<span class="line"><span class="ln">  65</span>}</span>
+<span class="line"><span class="ln">  66</span></span>
+<span class="line"><span class="ln">  67</span>/**</span>
+<span class="line"><span class="ln">  68</span> * Verify a certificate against an out-of-band trusted public key. The inline</span>
+<span class="line"><span class="ln">  69</span> * key is signed descriptive metadata and must identify that same trusted key;</span>
+<span class="line"><span class="ln">  70</span> * it is never itself a trust anchor. Rebuilds the canonical payload (dropping</span>
+<span class="line"><span class="ln">  71</span> * `signature`) and checks the ed25519 signature.</span>
+<span class="line"><span class="ln">  72</span> * Returns false — never throws — for a key mismatch, tampered field, bad</span>
+<span class="line"><span class="ln">  73</span> * signature, malformed key, or non-ed25519 algorithm.</span>
+<span class="line"><span class="ln">  74</span> */</span>
+<span class="line"><span class="ln">  75</span>export function verifyCertificate(</span></code></pre></div></section>
+<section class="sec" id="tests"><div class="sec-no"><b>09</b> / tests</div><h2 class="sec-title">测试覆盖的是治理不变量</h2><h3>源码判断</h3><p><code>test/allocator-fault.test.ts:227</code> 测试直接覆盖 assemble 的 priority order、token budget、去重和 audit detail，证明上下文装配不是 README 声明。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/allocator-fault.test.ts:459</code> embedding 失败的测试期待 brownout=embedding_unavailable，并确认 BM25 仍可命中，这是故障模型的可执行证据。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/m7-audit-chain.test.ts:35</code> 审计链测试检查第二行 prev_hash 指向第一行 event_hash，正常追加路径确实形成 hash-linked ledger。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/m7-audit-chain.test.ts:48</code> 篡改 detail 后 verifyChain 返回 brokenSeq，说明链不仅存在，而且能捕捉历史事件字段变更。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:165</code> actor erasure 测试要求删除 Alice 三条事实并保留 Bob 的事实，擦除范围按 provenance 和 scope 精确收束。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:467</code> audit survives erasure 测试确认 erased memory 的 write/read 审计仍在，并只追加一个 forget 行。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/erasure.test.ts:624</code> sibling alias graph regression 防止外部租户的 Nimbus-Falcon alias 污染当前租户的 entity erasure。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>test/allocator-fault.test.ts:227-273</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 227</span>describe("ContextAllocator.assemble", () =&gt; {</span>
+<span class="line"><span class="ln"> 228</span>  it("assembles pinned, scope and predicted blocks in priority order under budget", async () =&gt; {</span>
+<span class="line"><span class="ln"> 229</span>    const { allocator, audit, cold } = makeAllocator(SCOPE_ROWS);</span>
+<span class="line"><span class="ln"> 230</span>    const ws = await allocator.assemble({</span>
+<span class="line"><span class="ln"> 231</span>      namespace: NS,</span>
+<span class="line"><span class="ln"> 232</span>      actor: "user:kay",</span>
+<span class="line"><span class="ln"> 233</span>      agentId: "agent-7",</span>
+<span class="line"><span class="ln"> 234</span>      policy: policy({</span>
+<span class="line"><span class="ln"> 235</span>        pinnedConcepts: [REFUND_CONCEPT.path],</span>
+<span class="line"><span class="ln"> 236</span>        tokenBudget: 100,</span>
+<span class="line"><span class="ln"> 237</span>      }),</span>
+<span class="line"><span class="ln"> 238</span>      taskHint: "database migration checklist",</span>
+<span class="line"><span class="ln"> 239</span>    });</span>
+<span class="line"><span class="ln"> 240</span></span>
+<span class="line"><span class="ln"> 241</span>    const kinds = ws.blocks.map((b) =&gt; b.kind);</span>
+<span class="line"><span class="ln"> 242</span>    expect(kinds[0]).toBe("pinned-concept");</span>
+<span class="line"><span class="ln"> 243</span>    expect(cold.readNamespaces).toContain(NS);</span>
+<span class="line"><span class="ln"> 244</span>    expect(ws.blocks[0].ref).toBe(REFUND_CONCEPT.path);</span>
+<span class="line"><span class="ln"> 245</span></span>
+<span class="line"><span class="ln"> 246</span>    const scopeRefs = ws.blocks</span>
+<span class="line"><span class="ln"> 247</span>      .filter((b) =&gt; b.kind === "scope-memory")</span>
+<span class="line"><span class="ln"> 248</span>      .map((b) =&gt; b.ref);</span>
+<span class="line"><span class="ln"> 249</span>    expect(scopeRefs).toEqual(["m1", "m2"]); // m3 never accessed</span>
+<span class="line"><span class="ln"> 250</span></span>
+<span class="line"><span class="ln"> 251</span>    const relRefs = ws.blocks</span>
+<span class="line"><span class="ln"> 252</span>      .filter((b) =&gt; b.kind === "predicted-relevant")</span>
+<span class="line"><span class="ln"> 253</span>      .map((b) =&gt; b.ref);</span>
+<span class="line"><span class="ln"> 254</span>    expect(relRefs).toContain("m3");</span>
+<span class="line"><span class="ln"> 255</span></span>
+<span class="line"><span class="ln"> 256</span>    // no duplicate refs across lanes (dedupe)</span>
+<span class="line"><span class="ln"> 257</span>    const refs = ws.blocks.map((b) =&gt; b.ref);</span>
+<span class="line"><span class="ln"> 258</span>    expect(new Set(refs).size).toBe(refs.length);</span>
+<span class="line"><span class="ln"> 259</span></span>
+<span class="line"><span class="ln"> 260</span>    // budget respected, totals consistent</span>
+<span class="line"><span class="ln"> 261</span>    expect(ws.totalTokens).toBeLessThanOrEqual(ws.budget);</span>
+<span class="line"><span class="ln"> 262</span>    expect(ws.totalTokens).toBe(</span>
+<span class="line"><span class="ln"> 263</span>      ws.blocks.reduce((s, b) =&gt; s + b.tokenEstimate, 0),</span>
+<span class="line"><span class="ln"> 264</span>    );</span>
+<span class="line"><span class="ln"> 265</span></span>
+<span class="line"><span class="ln"> 266</span>    // audit row</span>
+<span class="line"><span class="ln"> 267</span>    const ev = audit.events.at(-1)!;</span>
+<span class="line"><span class="ln"> 268</span>    expect(ev.op).toBe("assemble");</span>
+<span class="line"><span class="ln"> 269</span>    expect(ev.result).toBe("ok");</span>
+<span class="line"><span class="ln"> 270</span>    expect(ev.namespace).toBe(NS);</span>
+<span class="line"><span class="ln"> 271</span>    expect(ev.detail).toContain(`blocks=${ws.blocks.length}`);</span>
+<span class="line"><span class="ln"> 272</span>    expect(ev.detail).toContain(`tokens=${ws.totalTokens}`);</span>
+<span class="line"><span class="ln"> 273</span>  });</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>test/erasure.test.ts:467-522</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 467</span>  it("pre-existing audit rows for erased memory stay; a forget row is appended", async () =&gt; {</span>
+<span class="line"><span class="ln"> 468</span>    const ns = "acme/audited";</span>
+<span class="line"><span class="ln"> 469</span>    const owner = ownerOf(ns);</span>
+<span class="line"><span class="ln"> 470</span>    const f = await plant({</span>
+<span class="line"><span class="ln"> 471</span>      id: "01AU1",</span>
+<span class="line"><span class="ln"> 472</span>      namespace: ns,</span>
+<span class="line"><span class="ln"> 473</span>      content: "A fact that was read before it was erased.",</span>
+<span class="line"><span class="ln"> 474</span>      provenance: [{ source: "conversation", actor: "grace", ts: NOW }],</span>
+<span class="line"><span class="ln"> 475</span>    });</span>
+<span class="line"><span class="ln"> 476</span></span>
+<span class="line"><span class="ln"> 477</span>    // Simulate the original write + a later read being audited (D4).</span>
+<span class="line"><span class="ln"> 478</span>    await audit.append({</span>
+<span class="line"><span class="ln"> 479</span>      ts: NOW,</span>
+<span class="line"><span class="ln"> 480</span>      actor: "grace",</span>
+<span class="line"><span class="ln"> 481</span>      agentId: "agent-1",</span>
+<span class="line"><span class="ln"> 482</span>      op: "write",</span>
+<span class="line"><span class="ln"> 483</span>      memoryId: f.id,</span>
+<span class="line"><span class="ln"> 484</span>      namespace: ns,</span>
+<span class="line"><span class="ln"> 485</span>      purpose: null,</span>
+<span class="line"><span class="ln"> 486</span>      result: "ok",</span>
+<span class="line"><span class="ln"> 487</span>    });</span>
+<span class="line"><span class="ln"> 488</span>    await audit.append({</span>
+<span class="line"><span class="ln"> 489</span>      ts: NOW,</span>
+<span class="line"><span class="ln"> 490</span>      actor: "reader",</span>
+<span class="line"><span class="ln"> 491</span>      agentId: "agent-2",</span>
+<span class="line"><span class="ln"> 492</span>      op: "read",</span>
+<span class="line"><span class="ln"> 493</span>      memoryId: f.id,</span>
+<span class="line"><span class="ln"> 494</span>      namespace: ns,</span>
+<span class="line"><span class="ln"> 495</span>      purpose: "support",</span>
+<span class="line"><span class="ln"> 496</span>      result: "ok",</span>
+<span class="line"><span class="ln"> 497</span>    });</span>
+<span class="line"><span class="ln"> 498</span></span>
+<span class="line"><span class="ln"> 499</span>    const before = await audit.count(ns);</span>
+<span class="line"><span class="ln"> 500</span></span>
+<span class="line"><span class="ln"> 501</span>    const result = await forget(</span>
+<span class="line"><span class="ln"> 502</span>      { db, audit, signingKey },</span>
+<span class="line"><span class="ln"> 503</span>      { kind: "actor", value: "grace" },</span>
+<span class="line"><span class="ln"> 504</span>      owner,</span>
+<span class="line"><span class="ln"> 505</span>    );</span>
+<span class="line"><span class="ln"> 506</span>    expect(result.erasedCount).toBe(1);</span>
+<span class="line"><span class="ln"> 507</span></span>
+<span class="line"><span class="ln"> 508</span>    // The row is gone from memory_objects...</span>
+<span class="line"><span class="ln"> 509</span>    expect((await index.getById(f.id, ns)).obj).toBeNull();</span>
+<span class="line"><span class="ln"> 510</span></span>
+<span class="line"><span class="ln"> 511</span>    // ...but its audit history survives, and a `forget` row was appended.</span>
+<span class="line"><span class="ln"> 512</span>    const events = await audit.list(ns, { limit: 100 });</span>
+<span class="line"><span class="ln"> 513</span>    const opsForMemory = events</span>
+<span class="line"><span class="ln"> 514</span>      .filter((e) =&gt; e.memoryId === f.id)</span>
+<span class="line"><span class="ln"> 515</span>      .map((e) =&gt; e.op);</span>
+<span class="line"><span class="ln"> 516</span>    expect(opsForMemory).toContain("write");</span>
+<span class="line"><span class="ln"> 517</span>    expect(opsForMemory).toContain("read");</span>
+<span class="line"><span class="ln"> 518</span></span>
+<span class="line"><span class="ln"> 519</span>    const after = await audit.count(ns);</span>
+<span class="line"><span class="ln"> 520</span>    expect(after).toBe(before + 1); // exactly one new row: the forget</span>
+<span class="line"><span class="ln"> 521</span>    expect(events.some((e) =&gt; e.op === "forget" &amp;&amp; e.result === "ok")).toBe(true);</span>
+<span class="line"><span class="ln"> 522</span>  });</span></code></pre></div></section>
+<section class="sec" id="risk"><div class="sec-no"><b>10</b> / operator view</div><h2 class="sec-title">适合学习的地方与合并前风险</h2><h3>源码判断</h3><h3>适合借鉴</h3><p><code>src/syscalls/index.ts:124</code> 把横切能力注入 syscall runtime，适合所有想把 agent 从 demo 推到组织系统的项目；<code>src/driver/view.ts:181</code> 则展示了“插件可扩展但边界不可扩展”的工程写法。<code>src/audit/index.ts:109</code> 与 <code>src/erasure/certificate.ts:75</code> 共同说明，证据链和证书验证最好从第一天进入数据模型。</p><h3>需要继续确认</h3><p><code>src/write/index.ts:354</code> 的候选级处理非常细，但真实部署仍要压测 LLM outage、embedding brownout 和 Postgres 事务边界；<code>src/fault/index.ts:317</code> 会记录 fault pressure，因此运营侧也需要避免把噪声 query 变成错误优化信号。</p></section>
+<section class="sec" id="deep"><div class="sec-no"><b>∞</b> / deeper pages</div><h2 class="sec-title">继续拆源码</h2><div class="deep-grid"><a class="deep-link" href="halofy/halofy-identity-policy.html"><h3>身份与权限</h3><p>API key、role、operation gate、非 oracle read 的边界细读。</p></a><a class="deep-link" href="halofy/halofy-write-audit-erasure.html"><h3>写入、审计与删除</h3><p>从候选事实到 audit hash chain，再到 signed deletion certificate。</p></a><a class="deep-link" href="halofy/halofy-retrieval-fault.html"><h3>检索、装配与 brownout</h3><p>ScopedView、ContextAllocator、FaultHandler 与 driver 分数校准。</p></a></div></section>
+</main>
+</div>
+<script>
+const links=[...document.querySelectorAll('.nav-list a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const spy=()=>{let active=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<180)active=i});links.forEach((a,i)=>a.classList.toggle('active',i===active));};
+addEventListener('scroll',spy,{passive:true});spy();
+</script>
+</body>
+</html>

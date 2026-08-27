@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Halofy · 身份与权限边界</title>
+<meta name="description" content="Halofy 身份/权限源码拆解：API key hash、server-owned identity、row-level write checks、OAuth tool gate 与非 oracle read。" />
+<meta property="og:title" content="Halofy · 身份与权限边界" />
+<meta property="og:description" content="Halofy 身份/权限源码拆解：API key hash、server-owned identity、row-level write checks、OAuth tool gate 与非 oracle read。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#74d4b6; --star-soft:#9ee8d4; --star-deep:#3f9f87; }
+.flow{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;margin:24px 0;display:grid;gap:12px}
+.flow-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flow-node{border:1px solid var(--line-2);background:rgba(255,255,255,.035);border-radius:10px;padding:14px;font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.callouts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+.callout{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px}
+.callout h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.callout p{color:var(--text-2);line-height:1.62}
+.ref-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:20px 0}
+.ref-grid p,.ref-list p{border:1px solid var(--line-2);border-radius:10px;background:rgba(255,255,255,.026);padding:13px 14px;color:var(--text-2);line-height:1.58}
+.deep-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px;text-decoration:none;color:var(--text)}
+.deep-link h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.deep-link p{color:var(--text-2);font-size:14px;line-height:1.55}
+.code-wrap{margin:20px 0 28px}
+.code-head{display:flex;justify-content:space-between;gap:14px;color:var(--text-faint);font-family:var(--mono);font-size:11px;padding:9px 12px;border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:rgba(255,255,255,.035)}
+.code-wrap pre{margin:0;overflow:auto;border:1px solid var(--line);border-radius:0 0 10px 10px;background:#050609;padding:14px 0}
+.code-wrap code{font-family:var(--mono);font-size:12px;line-height:1.55;color:#d8deea}
+.code-wrap .line{display:block;white-space:pre;padding:0 16px}
+.code-wrap .ln{display:inline-block;width:48px;margin-right:14px;color:var(--text-faint);user-select:none}
+@media(max-width:900px){.flow-row,.callouts,.ref-grid,.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><strong>Halofy</strong><a href="../index.html">Index</a></div>
+<div class="shell">
+<aside class="nav">
+  <div class="nav-brand"><div class="glyph"><b>Halofy</b> Observatory</div><div class="sub">source-level · 2026-08-27</div></div>
+  <ol class="nav-list">
+    <li><a href="#keys"><span class="idx">01</span>Key 发行</a></li>
+<li><a href="#gate"><span class="idx">02</span>操作门禁</a></li>
+<li><a href="#oracle"><span class="idx">03</span>非 oracle read</a></li>
+  </ol>
+  <div class="nav-foot"><a href="../index.html">Index</a><br /><a href="https://github.com/halofyai/halofy" target="_blank" rel="noopener">halofyai/halofy</a></div>
+</aside>
+<main class="main">
+<section class="hero">
+  <div class="hero-grid">
+    <div><div class="hero-eyebrow">AI agent governance · MCP/HTTP memory kernel</div><h1 class="hero-title">身份不是请求体字段，而是 <em>server-owned principal</em></h1><p class="hero-desc">Halofy 身份/权限源码拆解：API key hash、server-owned identity、row-level write checks、OAuth tool gate 与非 oracle read。</p></div>
+    <div class="hero-card"><h3>观察结论</h3><p>它不是又一个 prompt memory 插件，而是把身份、ACL、写入验证、检索驱动、审计链和合规删除放进同一个内核边界。</p></div>
+  </div>
+  <div class="hero-stats"><div class="stat"><div class="stat-num">4</div><div class="stat-lbl">roles</div></div><div class="stat"><div class="stat-num">1</div><div class="stat-lbl">key hash</div></div><div class="stat"><div class="stat-num">2</div><div class="stat-lbl">gates</div></div><div class="stat"><div class="stat-num">0</div><div class="stat-lbl">client ns trust</div></div></div>
+</section>
+<section class="sec" id="keys"><div class="sec-no"><b>01</b> / credential</div><h2 class="sec-title">Key 发行只暴露一次明文</h2><h3>源码判断</h3><p><code>src/auth/index.ts:39</code> key 表的 schema 直接承载 role 与 namespace，权限判定不用信任请求体里的租户字段。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:73</code> key hashing 是第一处凭证最小化，数据库只保存可匹配摘要而不是 bearer secret。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:99</code> oversight role 抽象让 audit/admin 入口可共享语义，而不是散落字符串判断。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:146</code> rowAgentCanWrite 体现行级写入边界，agent 不能靠传入 actor 改变自己的写面。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:224</code> 拒绝也 append audit，把失败授权纳入治理证据。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:272</code> bootstrap 与 owner 授权分支先判权再签 key，初始配置和常规签发被清楚分开。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:286</code> issueKey 明文只出现在返回值，插入表的是 keyHash。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/auth/index.ts:331</code> resolveKey 将禁用、过期、无 principal 的情形转成 denied 审计。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/auth/index.ts:39-85</span><span>source</span></div><pre><code><span class="line"><span class="ln">  39</span>export const API_KEYS_DDL = `CREATE TABLE IF NOT EXISTS api_keys (</span>
+<span class="line"><span class="ln">  40</span>  id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE,</span>
+<span class="line"><span class="ln">  41</span>  namespace TEXT NOT NULL, actor TEXT NOT NULL,</span>
+<span class="line"><span class="ln">  42</span>  role TEXT NOT NULL CHECK (role IN ('owner','admin','auditor','member','agent')),</span>
+<span class="line"><span class="ln">  43</span>  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),</span>
+<span class="line"><span class="ln">  44</span>  principal_purpose TEXT NOT NULL DEFAULT 'general' CHECK (principal_purpose IN ('general','channel_verification','channel_assistant')),</span>
+<span class="line"><span class="ln">  45</span>  created_at TIMESTAMPTZ NOT NULL, last_used TIMESTAMPTZ,</span>
+<span class="line"><span class="ln">  46</span>  source_principals JSONB NOT NULL DEFAULT '[]',</span>
+<span class="line"><span class="ln">  47</span>  source_groups JSONB NOT NULL DEFAULT '[]',</span>
+<span class="line"><span class="ln">  48</span>  -- D50: NULL on a human key type; 'manager'|'member' on an agent credential.</span>
+<span class="line"><span class="ln">  49</span>  agent_access_level TEXT</span>
+<span class="line"><span class="ln">  50</span>    CHECK (agent_access_level IS NULL OR agent_access_level IN ('manager','member')),</span>
+<span class="line"><span class="ln">  51</span>  -- D51: NULL expiry is standing access; a past expiry stops resolving.</span>
+<span class="line"><span class="ln">  52</span>  expires_at TIMESTAMPTZ,</span>
+<span class="line"><span class="ln">  53</span>  description TEXT,</span>
+<span class="line"><span class="ln">  54</span>  -- D54: NULL means "may write" (every pre-D54 agent could); only FALSE restricts.</span>
+<span class="line"><span class="ln">  55</span>  agent_can_write BOOLEAN,</span>
+<span class="line"><span class="ln">  56</span>  created_by TEXT,</span>
+<span class="line"><span class="ln">  57</span>  custodian_user_id TEXT,</span>
+<span class="line"><span class="ln">  58</span>  bearer_ciphertext TEXT,</span>
+<span class="line"><span class="ln">  59</span>  bearer_iv TEXT,</span>
+<span class="line"><span class="ln">  60</span>  bearer_tag TEXT,</span>
+<span class="line"><span class="ln">  61</span>  CHECK (</span>
+<span class="line"><span class="ln">  62</span>    (bearer_ciphertext IS NULL AND bearer_iv IS NULL AND bearer_tag IS NULL)</span>
+<span class="line"><span class="ln">  63</span>    OR</span>
+<span class="line"><span class="ln">  64</span>    (bearer_ciphertext IS NOT NULL AND bearer_iv IS NOT NULL AND bearer_tag IS NOT NULL)</span>
+<span class="line"><span class="ln">  65</span>  )</span>
+<span class="line"><span class="ln">  66</span>)`;</span>
+<span class="line"><span class="ln">  67</span></span>
+<span class="line"><span class="ln">  68</span>/** Idempotent safety net; module C's numbered migration is authoritative. */</span>
+<span class="line"><span class="ln">  69</span>export async function ensureApiKeysTable(db: Db): Promise&lt;void&gt; {</span>
+<span class="line"><span class="ln">  70</span>  await db.query(API_KEYS_DDL);</span>
+<span class="line"><span class="ln">  71</span>}</span>
+<span class="line"><span class="ln">  72</span></span>
+<span class="line"><span class="ln">  73</span>export function hashKey(plaintext: string): string {</span>
+<span class="line"><span class="ln">  74</span>  return createHash("sha256").update(plaintext, "utf8").digest("hex");</span>
+<span class="line"><span class="ln">  75</span>}</span>
+<span class="line"><span class="ln">  76</span></span>
+<span class="line"><span class="ln">  77</span>/** True when `ns` equals `ancestor` or is a slash-delimited descendant of it. */</span>
+<span class="line"><span class="ln">  78</span>export function isSelfOrDescendant(ns: string, ancestor: string): boolean {</span>
+<span class="line"><span class="ln">  79</span>  return ns === ancestor || ns.startsWith(ancestor + "/");</span>
+<span class="line"><span class="ln">  80</span>}</span>
+<span class="line"><span class="ln">  81</span></span>
+<span class="line"><span class="ln">  82</span>/** Global authority requires both the owner role and the root namespace. */</span>
+<span class="line"><span class="ln">  83</span>export function isRootOwner(identity: Identity): boolean {</span>
+<span class="line"><span class="ln">  84</span>  return identity.role === "owner" &amp;&amp; identity.namespace === "";</span>
+<span class="line"><span class="ln">  85</span>}</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/auth/index.ts:272-308</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 272</span>    const countRes = await this.db.query(`SELECT COUNT(*) AS n FROM api_keys`);</span>
+<span class="line"><span class="ln"> 273</span>    const empty = Number(countRes.rows[0].n) === 0;</span>
+<span class="line"><span class="ln"> 274</span>    const callerMayIssue =</span>
+<span class="line"><span class="ln"> 275</span>      caller?.role === "owner" &amp;&amp;</span>
+<span class="line"><span class="ln"> 276</span>      (isRootOwner(caller) || isSelfOrDescendant(namespace, caller.namespace));</span>
+<span class="line"><span class="ln"> 277</span>    if (!empty &amp;&amp; !callerMayIssue) {</span>
+<span class="line"><span class="ln"> 278</span>      await this.auditDenied(</span>
+<span class="line"><span class="ln"> 279</span>        caller?.actor ?? actor,</span>
+<span class="line"><span class="ln"> 280</span>        caller?.namespace ?? namespace,</span>
+<span class="line"><span class="ln"> 281</span>        `issueKey denied: requires owner identity (caller role: ${caller?.role ?? "none"})`,</span>
+<span class="line"><span class="ln"> 282</span>      );</span>
+<span class="line"><span class="ln"> 283</span>      throw new AuthzError("issueKey requires an owner identity");</span>
+<span class="line"><span class="ln"> 284</span>    }</span>
+<span class="line"><span class="ln"> 285</span></span>
+<span class="line"><span class="ln"> 286</span>    const plaintext = "hm_" + randomBytes(20).toString("hex");</span>
+<span class="line"><span class="ln"> 287</span>    const id = ulid();</span>
+<span class="line"><span class="ln"> 288</span>    const createdAt = new Date().toISOString();</span>
+<span class="line"><span class="ln"> 289</span>    // D50: a level is meaningful only for a machine principal. Non-agent rows</span>
+<span class="line"><span class="ln"> 290</span>    // store NULL so "not a machine principal" and "least-privileged agent" stay</span>
+<span class="line"><span class="ln"> 291</span>    // distinguishable in the table.</span>
+<span class="line"><span class="ln"> 292</span>    const agentAccessLevel: AgentAccessLevel | null =</span>
+<span class="line"><span class="ln"> 293</span>      role === "agent" ? (entitlements.agentAccessLevel ?? "member") : null;</span>
+<span class="line"><span class="ln"> 294</span>    // Migration 76: the issuer is the CALLER, never the actor the credential</span>
+<span class="line"><span class="ln"> 295</span>    // acts as (D9) — and it is null on the first-boot bootstrap path, which by</span>
+<span class="line"><span class="ln"> 296</span>    // definition has no caller.</span>
+<span class="line"><span class="ln"> 297</span>    const createdBy = caller?.actor ?? null;</span>
+<span class="line"><span class="ln"> 298</span>    await this.db.query(</span>
+<span class="line"><span class="ln"> 299</span>      `INSERT INTO api_keys</span>
+<span class="line"><span class="ln"> 300</span>         (id, key_hash, namespace, actor, role, status, principal_purpose,</span>
+<span class="line"><span class="ln"> 301</span>          created_at, last_used, source_principals, source_groups, agent_access_level,</span>
+<span class="line"><span class="ln"> 302</span>          created_by)</span>
+<span class="line"><span class="ln"> 303</span>       VALUES ($1, $2, $3, $4, $5, 'active', 'general', $6, NULL, $7::jsonb, $8::jsonb, $9, $10)`,</span>
+<span class="line"><span class="ln"> 304</span>      [id, hashKey(plaintext), namespace, actor, role, createdAt,</span>
+<span class="line"><span class="ln"> 305</span>        JSON.stringify(entitlements.sourcePrincipals ?? []),</span>
+<span class="line"><span class="ln"> 306</span>        JSON.stringify(entitlements.sourceGroups ?? []),</span>
+<span class="line"><span class="ln"> 307</span>        agentAccessLevel, createdBy],</span>
+<span class="line"><span class="ln"> 308</span>    );</span></code></pre></div></section>
+<section class="sec" id="gate"><div class="sec-no"><b>02</b> / operation</div><h2 class="sec-title">工具授权和 operation 授权叠加</h2><h3>源码判断</h3><p><code>src/syscalls/index.ts:16</code> 角色矩阵写在 syscall 注释中，auditor 可以读/查/组装/故障召回但不能写。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:124</code> 依赖注入把 credential、policy、budget、audit、queue 合并到同一 runtime，权限不是每个 handler 自己发明。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:250</code> source token 不进日志与审计，短期连接授权和长期记忆数据隔离。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/syscalls/index.ts:380</code> read denied 被映射为非 oracle 响应，调用者看不到隐藏对象是否存在。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/syscalls.test.ts:386</code> syscalls 测试枚举 write/search/read/fault/assemble/stats 的审计覆盖。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/oauth-connect.test.ts:479</code> OAuth 连接测试确认 mem_assemble 是 assistant-only，入口处就收束调用者类型。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/r5-integration.test.ts:74</code> R5 集成测试关注 mem.read 不能成为跨 namespace 存在性 oracle。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/access-projection/index.ts:131</code> projection 把 contextAssemble 映射为 context:assemble，前端/控制台显示和内核能力统一命名。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/http/adapter.ts:251</code> assembleSchema 在 HTTP 适配层解析请求，但身份仍来自已解析 principal。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/http/server.ts:1414</code> server 的路由表把 assemble 映射到 memAssemble，HTTP 只是传输外壳。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/syscalls/index.ts:1-28</span><span>source</span></div><pre><code><span class="line"><span class="ln">   1</span>/**</span>
+<span class="line"><span class="ln">   2</span> * HaloMem syscall layer (M1 — D9 identity model).</span>
+<span class="line"><span class="ln">   3</span> *</span>
+<span class="line"><span class="ln">   4</span> * BREAKING (CONTRACTS-M1.md): syscalls no longer accept `namespace`/`actor`</span>
+<span class="line"><span class="ln">   5</span> * from the caller. Every syscall takes a resolved `Identity` — namespace and</span>
+<span class="line"><span class="ln">   6</span> * actor come ONLY from the credential the kernel resolved. No request path</span>
+<span class="line"><span class="ln">   7</span> * reaches MemoryIndex without one.</span>
+<span class="line"><span class="ln">   8</span> *</span>
+<span class="line"><span class="ln">   9</span> * Per-syscall pipeline:</span>
+<span class="line"><span class="ln">  10</span> *   metrics.time(op) → role check → policy fetch (PolicyStore, async) →</span>
+<span class="line"><span class="ln">  11</span> *   rate limit (TokenBucket per keyId, denial → 429-style RateLimitError +</span>
+<span class="line"><span class="ln">  12</span> *   audit row) → op body → audit.</span>
+<span class="line"><span class="ln">  13</span> *</span>
+<span class="line"><span class="ln">  14</span> * Role rules (CONTRACTS-M1.md):</span>
+<span class="line"><span class="ln">  15</span> *   agent/member → syscalls only (admin ops enforced in transport/admin layer)</span>
+<span class="line"><span class="ln">  16</span> *   auditor      → read/search/stats/assemble/fault allowed, memWrite DENIED</span>
+<span class="line"><span class="ln">  17</span> *   admin/owner  → everything</span>
+<span class="line"><span class="ln">  18</span> *</span>
+<span class="line"><span class="ln">  19</span> * Budget brownout (D module): when the namespace subtree is over its monthly</span>
+<span class="line"><span class="ln">  20</span> * USD cap, mem_write degrades to verbatim (no LLM) and the degradation is</span>
+<span class="line"><span class="ln">  21</span> * logged + audited — the agent is never hard-failed. An LLM circuit-open</span>
+<span class="line"><span class="ln">  22</span> * (LlmUnavailableError) likewise falls back to verbatim storage; an embedder</span>
+<span class="line"><span class="ln">  23</span> * circuit-open during search falls back to the BM25-only lane.</span>
+<span class="line"><span class="ln">  24</span> *</span>
+<span class="line"><span class="ln">  25</span> * D4: EVERY syscall produces at least one audit row per logical outcome,</span>
+<span class="line"><span class="ln">  26</span> * including denied / miss / error (write/fault/assemble audit inside their</span>
+<span class="line"><span class="ln">  27</span> * modules; denial and error paths audit here).</span>
+<span class="line"><span class="ln">  28</span> */</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/syscalls/index.ts:124-184</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 124</span>export interface SyscallDeps {</span>
+<span class="line"><span class="ln"> 125</span>  config: KernelConfig;</span>
+<span class="line"><span class="ln"> 126</span>  db: Db;</span>
+<span class="line"><span class="ln"> 127</span>  index: MemoryIndex;</span>
+<span class="line"><span class="ln"> 128</span>  audit: AuditLog;</span>
+<span class="line"><span class="ln"> 129</span>  cold: ColdStore;</span>
+<span class="line"><span class="ln"> 130</span>  metrics: MetricsRegistry;</span>
+<span class="line"><span class="ln"> 131</span>  rateLimiter: {</span>
+<span class="line"><span class="ln"> 132</span>    allow(key: string, limit: number): boolean | Promise&lt;boolean&gt;;</span>
+<span class="line"><span class="ln"> 133</span>    /**</span>
+<span class="line"><span class="ln"> 134</span>     * Durable stores expose the full outcome so a denial can carry its</span>
+<span class="line"><span class="ln"> 135</span>     * retry-after seconds out to the transport (429 + `retry-after` header).</span>
+<span class="line"><span class="ln"> 136</span>     * Optional: in-process buckets and test fakes implement `allow` only and</span>
+<span class="line"><span class="ln"> 137</span>     * fall back to a denial without timing.</span>
+<span class="line"><span class="ln"> 138</span>     */</span>
+<span class="line"><span class="ln"> 139</span>    consume?(</span>
+<span class="line"><span class="ln"> 140</span>      bucketKey: string,</span>
+<span class="line"><span class="ln"> 141</span>      limit: number,</span>
+<span class="line"><span class="ln"> 142</span>      windowMs: number,</span>
+<span class="line"><span class="ln"> 143</span>    ): Promise&lt;{ allowed: boolean; retryAfterSec: number }&gt;;</span>
+<span class="line"><span class="ln"> 144</span>  };</span>
+<span class="line"><span class="ln"> 145</span>  budget: BudgetGuard;</span>
+<span class="line"><span class="ln"> 146</span>  logger: Logger;</span>
+<span class="line"><span class="ln"> 147</span>  /** Optional commercial quota clamp. Standalone builds leave this absent. */</span>
+<span class="line"><span class="ln"> 148</span>  quotaRateLimit?(current: number, actor?: string): number;</span>
+<span class="line"><span class="ln"> 149</span>  /**</span>
+<span class="line"><span class="ln"> 150</span>   * Durable credential-state check. Identity objects may outlive the request</span>
+<span class="line"><span class="ln"> 151</span>   * that resolved them (notably stdio MCP), so no syscall may trust the</span>
+<span class="line"><span class="ln"> 152</span>   * snapshot without re-checking the backing key row.</span>
+<span class="line"><span class="ln"> 153</span>   */</span>
+<span class="line"><span class="ln"> 154</span>  isCredentialActive(identity: Identity): Promise&lt;boolean&gt;;</span>
+<span class="line"><span class="ln"> 155</span>  /** Effective (merged, cached) policy for a namespace — PolicyStore.get. */</span>
+<span class="line"><span class="ln"> 156</span>  getPolicy(namespace: Namespace): Promise&lt;PolicyConfigX&gt;;</span>
+<span class="line"><span class="ln"> 157</span>  /**</span>
+<span class="line"><span class="ln"> 158</span>   * M4: resolve the owning Tenant of a namespace (its root), or null when the</span>
+<span class="line"><span class="ln"> 159</span>   * root is unregistered. The gate uses this to deny suspended tenants and to</span>
+<span class="line"><span class="ln"> 160</span>   * lower the effective rate-limit/budget caps; a null tenant leaves M1/M2/M3</span>
+<span class="line"><span class="ln"> 161</span>   * behavior unchanged.</span>
+<span class="line"><span class="ln"> 162</span>   */</span>
+<span class="line"><span class="ln"> 163</span>  resolveTenant(namespace: Namespace): Promise&lt;Tenant | null&gt;;</span>
+<span class="line"><span class="ln"> 164</span>  /**</span>
+<span class="line"><span class="ln"> 165</span>   * M4: the process-wide ed25519 signing key (loaded once at boot). Handed to</span>
+<span class="line"><span class="ln"> 166</span>   * the erasure engine so every DeletionCertificate shares one public key.</span>
+<span class="line"><span class="ln"> 167</span>   */</span>
+<span class="line"><span class="ln"> 168</span>  signingKey: SigningKey;</span>
+<span class="line"><span class="ln"> 169</span>  /** Namespace-scoped resilient runtime (cost attribution + per-ns breakers). */</span>
+<span class="line"><span class="ln"> 170</span>  runtimeFor(namespace: Namespace): NamespaceRuntime;</span>
+<span class="line"><span class="ln"> 171</span>  /** Async write lane (WriteQueue) — returns a ticket immediately. */</span>
+<span class="line"><span class="ln"> 172</span>  enqueueWrite(</span>
+<span class="line"><span class="ln"> 173</span>    req: WriteRequest,</span>
+<span class="line"><span class="ln"> 174</span>    identity: Identity,</span>
+<span class="line"><span class="ln"> 175</span>    agentId: string,</span>
+<span class="line"><span class="ln"> 176</span>  ): Promise&lt;{ ticket: string }&gt;;</span>
+<span class="line"><span class="ln"> 177</span>  /** M2: mounted retriever drivers (unknown names → baseline + warn). */</span>
+<span class="line"><span class="ln"> 178</span>  registry: DriverRegistrySlice;</span>
+<span class="line"><span class="ln"> 179</span>  /** M2: ACL-scoped read fence for a namespace (module A's buildScopedView). */</span>
+<span class="line"><span class="ln"> 180</span>  buildView(</span>
+<span class="line"><span class="ln"> 181</span>    namespace: Namespace,</span>
+<span class="line"><span class="ln"> 182</span>    access?: AccessSubject,</span>
+<span class="line"><span class="ln"> 183</span>    sourceProjection?: RetrievalSourceProjection,</span>
+<span class="line"><span class="ln"> 184</span>  ): ScopedView;</span></code></pre></div></section>
+<section class="sec" id="oracle"><div class="sec-no"><b>03</b> / oracle defense</div><h2 class="sec-title">隐藏对象不能变成存在性信号</h2><h3>源码判断</h3><p><code>src/kernel.ts:8445</code> kernel 在 memAssemble 前 requireOAuthTool，工具级授权挡在操作执行之前。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/kernel.ts:8475</code> 同一段附近继续 requireAgentOperation，工具授权和 operation 授权叠加，而不是二选一。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/m1-exit.test.ts:485</code> M1 exit 测试包含 mem_assemble 能力，说明早期验收就把上下文组装作为受控 syscall。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/syscalls/index.ts:380-394</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 380</span>export interface MemReadArgs {</span>
+<span class="line"><span class="ln"> 381</span>  id: string;</span>
+<span class="line"><span class="ln"> 382</span>}</span>
+<span class="line"><span class="ln"> 383</span></span>
+<span class="line"><span class="ln"> 384</span>export interface MemReadResult {</span>
+<span class="line"><span class="ln"> 385</span>  found: boolean;</span>
+<span class="line"><span class="ln"> 386</span>  /**</span>
+<span class="line"><span class="ln"> 387</span>   * Always false in caller-facing results: an exists-but-forbidden row is</span>
+<span class="line"><span class="ln"> 388</span>   * indistinguishable from a miss so callers cannot probe for the existence</span>
+<span class="line"><span class="ln"> 389</span>   * of rows in namespaces they are denied. The audit trail still records</span>
+<span class="line"><span class="ln"> 390</span>   * 'denied' distinctly from 'miss' (D4).</span>
+<span class="line"><span class="ln"> 391</span>   */</span>
+<span class="line"><span class="ln"> 392</span>  denied: boolean;</span>
+<span class="line"><span class="ln"> 393</span>  memory: MemoryObject | null;</span>
+<span class="line"><span class="ln"> 394</span>}</span></code></pre></div></section>
+
+</main>
+</div>
+<script>
+const links=[...document.querySelectorAll('.nav-list a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const spy=()=>{let active=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<180)active=i});links.forEach((a,i)=>a.classList.toggle('active',i===active));};
+addEventListener('scroll',spy,{passive:true});spy();
+</script>
+</body>
+</html>

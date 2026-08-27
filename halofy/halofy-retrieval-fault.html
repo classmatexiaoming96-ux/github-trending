@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Halofy · 检索驱动、上下文装配与 Fault Brownout</title>
+<meta name="description" content="Halofy 检索源码拆解：ScopedView 只读视图、ContextAllocator lane packing、FaultHandler L2/L3 阈值、BM25 brownout 与 driver score calibration。" />
+<meta property="og:title" content="Halofy · 检索驱动、上下文装配与 Fault Brownout" />
+<meta property="og:description" content="Halofy 检索源码拆解：ScopedView 只读视图、ContextAllocator lane packing、FaultHandler L2/L3 阈值、BM25 brownout 与 driver score calibration。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+:root { --star:#74d4b6; --star-soft:#9ee8d4; --star-deep:#3f9f87; }
+.flow{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;margin:24px 0;display:grid;gap:12px}
+.flow-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flow-node{border:1px solid var(--line-2);background:rgba(255,255,255,.035);border-radius:10px;padding:14px;font-family:var(--mono);font-size:12px;color:var(--text-2)}
+.callouts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:24px 0}
+.callout{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px}
+.callout h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.callout p{color:var(--text-2);line-height:1.62}
+.ref-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:20px 0}
+.ref-grid p,.ref-list p{border:1px solid var(--line-2);border-radius:10px;background:rgba(255,255,255,.026);padding:13px 14px;color:var(--text-2);line-height:1.58}
+.deep-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:18px;text-decoration:none;color:var(--text)}
+.deep-link h3{font-size:18px;margin-bottom:8px;color:var(--star)}
+.deep-link p{color:var(--text-2);font-size:14px;line-height:1.55}
+.code-wrap{margin:20px 0 28px}
+.code-head{display:flex;justify-content:space-between;gap:14px;color:var(--text-faint);font-family:var(--mono);font-size:11px;padding:9px 12px;border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:rgba(255,255,255,.035)}
+.code-wrap pre{margin:0;overflow:auto;border:1px solid var(--line);border-radius:0 0 10px 10px;background:#050609;padding:14px 0}
+.code-wrap code{font-family:var(--mono);font-size:12px;line-height:1.55;color:#d8deea}
+.code-wrap .line{display:block;white-space:pre;padding:0 16px}
+.code-wrap .ln{display:inline-block;width:48px;margin-right:14px;color:var(--text-faint);user-select:none}
+@media(max-width:900px){.flow-row,.callouts,.ref-grid,.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><strong>Halofy</strong><a href="../index.html">Index</a></div>
+<div class="shell">
+<aside class="nav">
+  <div class="nav-brand"><div class="glyph"><b>Halofy</b> Observatory</div><div class="sub">source-level · 2026-08-27</div></div>
+  <ol class="nav-list">
+    <li><a href="#view"><span class="idx">01</span>ScopedView</a></li>
+<li><a href="#assemble"><span class="idx">02</span>ContextAllocator</a></li>
+<li><a href="#fault"><span class="idx">03</span>FaultHandler</a></li>
+  </ol>
+  <div class="nav-foot"><a href="../index.html">Index</a><br /><a href="https://github.com/halofyai/halofy" target="_blank" rel="noopener">halofyai/halofy</a></div>
+</aside>
+<main class="main">
+<section class="hero">
+  <div class="hero-grid">
+    <div><div class="hero-eyebrow">AI agent governance · MCP/HTTP memory kernel</div><h1 class="hero-title">检索插件可替换，但读取边界必须由 <em>ScopedView</em> 固定</h1><p class="hero-desc">Halofy 检索源码拆解：ScopedView 只读视图、ContextAllocator lane packing、FaultHandler L2/L3 阈值、BM25 brownout 与 driver score calibration。</p></div>
+    <div class="hero-card"><h3>观察结论</h3><p>它不是又一个 prompt memory 插件，而是把身份、ACL、写入验证、检索驱动、审计链和合规删除放进同一个内核边界。</p></div>
+  </div>
+  <div class="hero-stats"><div class="stat"><div class="stat-num">4</div><div class="stat-lbl">allocator lanes</div></div><div class="stat"><div class="stat-num">0.35</div><div class="stat-lbl">L2 floor</div></div><div class="stat"><div class="stat-num">0.15</div><div class="stat-lbl">L3 floor</div></div><div class="stat"><div class="stat-num">BM25</div><div class="stat-lbl">brownout</div></div></div>
+</section>
+<section class="sec" id="view"><div class="sec-no"><b>01</b> / driver</div><h2 class="sec-title">Driver 只拿 refs，不拿数据库</h2><h3>源码判断</h3><p><code>src/driver/view.ts:1</code> ScopedView 文件头声明它是 driver 读取的唯一世界。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:140</code> whole-word matcher 降低实体名误召回。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:181</code> candidates 带 validOnly/access/sourceProjection。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:220</code> vectorSearch 继续沿用 access 和 sourceIds。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:242</code> sourceProjection 下 concepts fail closed。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/driver/view.ts:260</code> entityFacts 从 scoped fact pool 开始构造实体跳数。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/driver/view.ts:181-258</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 181</span>export function buildScopedView&lt;TDb&gt;(</span>
+<span class="line"><span class="ln"> 182</span>  deps: ScopedViewDeps&lt;TDb&gt;,</span>
+<span class="line"><span class="ln"> 183</span>  namespace: Namespace,</span>
+<span class="line"><span class="ln"> 184</span>  access?: AccessSubject,</span>
+<span class="line"><span class="ln"> 185</span>  sourceProjection?: RetrievalSourceProjection,</span>
+<span class="line"><span class="ln"> 186</span>): ScopedView {</span>
+<span class="line"><span class="ln"> 187</span>  return {</span>
+<span class="line"><span class="ln"> 188</span>    namespace,</span>
+<span class="line"><span class="ln"> 189</span></span>
+<span class="line"><span class="ln"> 190</span>    async candidates(limit = DEFAULT_CANDIDATE_LIMIT) {</span>
+<span class="line"><span class="ln"> 191</span>      const rows = await deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 192</span>        validOnly: true,</span>
+<span class="line"><span class="ln"> 193</span>        limit,</span>
+<span class="line"><span class="ln"> 194</span>        access,</span>
+<span class="line"><span class="ln"> 195</span>        sourceIds: sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 196</span>      });</span>
+<span class="line"><span class="ln"> 197</span>      return rows.map((r) =&gt; ({</span>
+<span class="line"><span class="ln"> 198</span>        ref: r.id,</span>
+<span class="line"><span class="ln"> 199</span>        content: retrievalContent(r, sourceProjection),</span>
+<span class="line"><span class="ln"> 200</span>      }));</span>
+<span class="line"><span class="ln"> 201</span>    },</span>
+<span class="line"><span class="ln"> 202</span></span>
+<span class="line"><span class="ln"> 203</span>    ...(deps.index.listLexicalCandidates</span>
+<span class="line"><span class="ln"> 204</span>      ? {</span>
+<span class="line"><span class="ln"> 205</span>          async lexicalCandidates(query: string, limit: number) {</span>
+<span class="line"><span class="ln"> 206</span>            const rows = await deps.index.listLexicalCandidates!(namespace, query, {</span>
+<span class="line"><span class="ln"> 207</span>              validOnly: true,</span>
+<span class="line"><span class="ln"> 208</span>              limit,</span>
+<span class="line"><span class="ln"> 209</span>              access,</span>
+<span class="line"><span class="ln"> 210</span>              sourceIds: sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 211</span>            });</span>
+<span class="line"><span class="ln"> 212</span>            return rows.map((r) =&gt; ({</span>
+<span class="line"><span class="ln"> 213</span>              ref: r.id,</span>
+<span class="line"><span class="ln"> 214</span>              content: retrievalContent(r, sourceProjection),</span>
+<span class="line"><span class="ln"> 215</span>            }));</span>
+<span class="line"><span class="ln"> 216</span>          },</span>
+<span class="line"><span class="ln"> 217</span>        }</span>
+<span class="line"><span class="ln"> 218</span>      : {}),</span>
+<span class="line"><span class="ln"> 219</span></span>
+<span class="line"><span class="ln"> 220</span>    async vectorSearch(embedding, k) {</span>
+<span class="line"><span class="ln"> 221</span>      const hits = await deps.index.vectorSearch(</span>
+<span class="line"><span class="ln"> 222</span>        namespace,</span>
+<span class="line"><span class="ln"> 223</span>        embedding,</span>
+<span class="line"><span class="ln"> 224</span>        k,</span>
+<span class="line"><span class="ln"> 225</span>        true,</span>
+<span class="line"><span class="ln"> 226</span>        false,</span>
+<span class="line"><span class="ln"> 227</span>        false,</span>
+<span class="line"><span class="ln"> 228</span>        access,</span>
+<span class="line"><span class="ln"> 229</span>        sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 230</span>      );</span>
+<span class="line"><span class="ln"> 231</span>      return hits.map((h) =&gt; ({</span>
+<span class="line"><span class="ln"> 232</span>        ref: h.obj.id,</span>
+<span class="line"><span class="ln"> 233</span>        content: retrievalContent(h.obj, sourceProjection),</span>
+<span class="line"><span class="ln"> 234</span>        score: h.similarity,</span>
+<span class="line"><span class="ln"> 235</span>      }));</span>
+<span class="line"><span class="ln"> 236</span>    },</span>
+<span class="line"><span class="ln"> 237</span></span>
+<span class="line"><span class="ln"> 238</span>    async embed(texts) {</span>
+<span class="line"><span class="ln"> 239</span>      return deps.embedder.embed(texts);</span>
+<span class="line"><span class="ln"> 240</span>    },</span>
+<span class="line"><span class="ln"> 241</span></span>
+<span class="line"><span class="ln"> 242</span>    async concepts(query, k) {</span>
+<span class="line"><span class="ln"> 243</span>      // L3 concepts do not retain per-source provenance. A source-scoped view</span>
+<span class="line"><span class="ln"> 244</span>      // therefore fails closed instead of allowing a future driver to widen</span>
+<span class="line"><span class="ln"> 245</span>      // the result set through the cold tier.</span>
+<span class="line"><span class="ln"> 246</span>      if (sourceProjection?.sourceIds !== undefined) return [];</span>
+<span class="line"><span class="ln"> 247</span>      return deps.cold.searchConcepts(deps.db, deps.embedder, namespace, query, k);</span>
+<span class="line"><span class="ln"> 248</span>    },</span>
+<span class="line"><span class="ln"> 249</span></span>
+<span class="line"><span class="ln"> 250</span>    async entityFacts(mention, hops) {</span>
+<span class="line"><span class="ln"> 251</span>      const needle = mention.trim().toLowerCase();</span>
+<span class="line"><span class="ln"> 252</span>      if (needle.length === 0) return [];</span>
+<span class="line"><span class="ln"> 253</span></span>
+<span class="line"><span class="ln"> 254</span>      const entities = await deps.entities.listEntities(namespace);</span>
+<span class="line"><span class="ln"> 255</span>      const seeds = entities.filter((e) =&gt;</span>
+<span class="line"><span class="ln"> 256</span>        lowerNames(e).some((n) =&gt; n === needle),</span>
+<span class="line"><span class="ln"> 257</span>      );</span>
+<span class="line"><span class="ln"> 258</span>      if (seeds.length === 0) return [];</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/driver/view.ts:260-305</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 260</span>      // ACL-scoped fact pool (delegated to the index — see module header).</span>
+<span class="line"><span class="ln"> 261</span>      const pool = await deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 262</span>        validOnly: true,</span>
+<span class="line"><span class="ln"> 263</span>        limit: DEFAULT_CANDIDATE_LIMIT,</span>
+<span class="line"><span class="ln"> 264</span>        access,</span>
+<span class="line"><span class="ln"> 265</span>        sourceIds: sourceProjection?.sourceIds,</span>
+<span class="line"><span class="ln"> 266</span>      });</span>
+<span class="line"><span class="ln"> 267</span>      const docs = pool.map((row) =&gt; {</span>
+<span class="line"><span class="ln"> 268</span>        const content = retrievalContent(row, sourceProjection);</span>
+<span class="line"><span class="ln"> 269</span>        return { ref: row.id, content, lower: content.toLowerCase() };</span>
+<span class="line"><span class="ln"> 270</span>      });</span>
+<span class="line"><span class="ln"> 271</span></span>
+<span class="line"><span class="ln"> 272</span>      const out: { ref: string; content: string; entity: string }[] = [];</span>
+<span class="line"><span class="ln"> 273</span>      const seen = new Set&lt;string&gt;();</span>
+<span class="line"><span class="ln"> 274</span></span>
+<span class="line"><span class="ln"> 275</span>      // Hop 1: facts mentioning a seed entity (whole-word, ci).</span>
+<span class="line"><span class="ln"> 276</span>      const hop1Lower: string[] = [];</span>
+<span class="line"><span class="ln"> 277</span>      for (const seed of seeds) {</span>
+<span class="line"><span class="ln"> 278</span>        const matchers = nameMatchers(lowerNames(seed));</span>
+<span class="line"><span class="ln"> 279</span>        for (const d of docs) {</span>
+<span class="line"><span class="ln"> 280</span>          if (!mentions(d.lower, matchers)) continue;</span>
+<span class="line"><span class="ln"> 281</span>          if (!seen.has(d.ref)) {</span>
+<span class="line"><span class="ln"> 282</span>            seen.add(d.ref);</span>
+<span class="line"><span class="ln"> 283</span>            out.push({ ref: d.ref, content: d.content, entity: seed.canonicalName });</span>
+<span class="line"><span class="ln"> 284</span>            hop1Lower.push(d.lower);</span>
+<span class="line"><span class="ln"> 285</span>          }</span>
+<span class="line"><span class="ln"> 286</span>        }</span>
+<span class="line"><span class="ln"> 287</span>      }</span>
+<span class="line"><span class="ln"> 288</span></span>
+<span class="line"><span class="ln"> 289</span>      if (hops === 2 &amp;&amp; hop1Lower.length &gt; 0) {</span>
+<span class="line"><span class="ln"> 290</span>        // Hop 2: entities co-mentioned in hop-1 facts → their facts.</span>
+<span class="line"><span class="ln"> 291</span>        const seedNames = new Set(seeds.map((s) =&gt; s.canonicalName));</span>
+<span class="line"><span class="ln"> 292</span>        for (const other of entities) {</span>
+<span class="line"><span class="ln"> 293</span>          if (seedNames.has(other.canonicalName)) continue;</span>
+<span class="line"><span class="ln"> 294</span>          const matchers = nameMatchers(lowerNames(other));</span>
+<span class="line"><span class="ln"> 295</span>          if (!hop1Lower.some((c) =&gt; mentions(c, matchers))) continue;</span>
+<span class="line"><span class="ln"> 296</span>          for (const d of docs) {</span>
+<span class="line"><span class="ln"> 297</span>            if (seen.has(d.ref) || !mentions(d.lower, matchers)) continue;</span>
+<span class="line"><span class="ln"> 298</span>            seen.add(d.ref);</span>
+<span class="line"><span class="ln"> 299</span>            out.push({ ref: d.ref, content: d.content, entity: other.canonicalName });</span>
+<span class="line"><span class="ln"> 300</span>          }</span>
+<span class="line"><span class="ln"> 301</span>        }</span>
+<span class="line"><span class="ln"> 302</span>      }</span>
+<span class="line"><span class="ln"> 303</span></span>
+<span class="line"><span class="ln"> 304</span>      return out;</span>
+<span class="line"><span class="ln"> 305</span>    },</span></code></pre></div></section>
+<section class="sec" id="assemble"><div class="sec-no"><b>02</b> / allocator</div><h2 class="sec-title">工作集按治理优先级贪心打包</h2><h3>源码判断</h3><p><code>src/allocator/index.ts:7</code> policy-directive 作为 lane 0 获得预留 token slice。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:125</code> tryAdd 用预算和 ref 去重控制工作集。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:157</code> governed stable pins 在 legacy path pins 前处理。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:207</code> scope-memory lane 只使用有效且曾访问的候选。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:232</code> predicted-relevant 只在 taskHint 非空时启动。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/allocator/index.ts:285</code> assemble audit detail 记录 blocks、tokens 与 policy digest。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/allocator/index.ts:110-177</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 110</span>  async assemble(args: AssembleArgs): Promise&lt;WorkingSet&gt; {</span>
+<span class="line"><span class="ln"> 111</span>    const t0 = performance.now();</span>
+<span class="line"><span class="ln"> 112</span>    const { namespace, policy, taskHint } = args;</span>
+<span class="line"><span class="ln"> 113</span>    // Defensive: some callers (syscall layer) route audit attribution</span>
+<span class="line"><span class="ln"> 114</span>    // themselves and may omit actor/agentId at runtime.</span>
+<span class="line"><span class="ln"> 115</span>    const actor = args.actor ?? "unknown";</span>
+<span class="line"><span class="ln"> 116</span>    const agentId = args.agentId ?? "unknown";</span>
+<span class="line"><span class="ln"> 117</span>    const budget = policy.tokenBudget;</span>
+<span class="line"><span class="ln"> 118</span></span>
+<span class="line"><span class="ln"> 119</span>    let totalTokens = 0;</span>
+<span class="line"><span class="ln"> 120</span>    let rejectedPins = 0;</span>
+<span class="line"><span class="ln"> 121</span>    let brownoutDetail = "";</span>
+<span class="line"><span class="ln"> 122</span>    const selected: ContextBlock[] = [];</span>
+<span class="line"><span class="ln"> 123</span>    const usedRefs = new Set&lt;string&gt;();</span>
+<span class="line"><span class="ln"> 124</span></span>
+<span class="line"><span class="ln"> 125</span>    const tryAdd = (block: ContextBlock): void =&gt; {</span>
+<span class="line"><span class="ln"> 126</span>      if (usedRefs.has(block.ref)) return;</span>
+<span class="line"><span class="ln"> 127</span>      if (totalTokens + block.tokenEstimate &gt; budget) return; // never split</span>
+<span class="line"><span class="ln"> 128</span>      selected.push(block);</span>
+<span class="line"><span class="ln"> 129</span>      usedRefs.add(block.ref);</span>
+<span class="line"><span class="ln"> 130</span>      totalTokens += block.tokenEstimate;</span>
+<span class="line"><span class="ln"> 131</span>    };</span>
+<span class="line"><span class="ln"> 132</span></span>
+<span class="line"><span class="ln"> 133</span>    // -- lane 0: governed policy directives ---------------------------------</span>
+<span class="line"><span class="ln"> 134</span>    // Guardrails are packed first out of a reserved slice of the budget, so</span>
+<span class="line"><span class="ln"> 135</span>    // no amount of recall can push a policy out of the working set. The</span>
+<span class="line"><span class="ln"> 136</span>    // reserve is a CEILING, not an allotment: unused policy tokens stay</span>
+<span class="line"><span class="ln"> 137</span>    // available to the ordinary lanes below.</span>
+<span class="line"><span class="ln"> 138</span>    let policySet: PolicyDirectiveSet | null = null;</span>
+<span class="line"><span class="ln"> 139</span>    if (this.deps.policyDirectives) {</span>
+<span class="line"><span class="ln"> 140</span>      try {</span>
+<span class="line"><span class="ln"> 141</span>        const loaded = await this.deps.policyDirectives.load(</span>
+<span class="line"><span class="ln"> 142</span>          namespace,</span>
+<span class="line"><span class="ln"> 143</span>          policyTokenReserve(budget),</span>
+<span class="line"><span class="ln"> 144</span>        );</span>
+<span class="line"><span class="ln"> 145</span>        if (loaded.documents.length &gt; 0) {</span>
+<span class="line"><span class="ln"> 146</span>          policySet = loaded;</span>
+<span class="line"><span class="ln"> 147</span>          for (const block of loaded.blocks) tryAdd(block);</span>
+<span class="line"><span class="ln"> 148</span>        }</span>
+<span class="line"><span class="ln"> 149</span>      } catch {</span>
+<span class="line"><span class="ln"> 150</span>        // Brownout (kernel rule 5): an unreadable guardrail lane degrades the</span>
+<span class="line"><span class="ln"> 151</span>        // working set, it never fails the agent's call. The audit detail below</span>
+<span class="line"><span class="ln"> 152</span>        // records that policy was unavailable for this assembly.</span>
+<span class="line"><span class="ln"> 153</span>        brownoutDetail += " brownout=policy_unavailable";</span>
+<span class="line"><span class="ln"> 154</span>      }</span>
+<span class="line"><span class="ln"> 155</span>    }</span>
+<span class="line"><span class="ln"> 156</span></span>
+<span class="line"><span class="ln"> 157</span>    // -- lane 1a: governed stable pins (durable creation order) --------------</span>
+<span class="line"><span class="ln"> 158</span>    if (this.deps.pins) {</span>
+<span class="line"><span class="ln"> 159</span>      try {</span>
+<span class="line"><span class="ln"> 160</span>        const governed = await this.deps.pins.resolve(namespace, args.access);</span>
+<span class="line"><span class="ln"> 161</span>        rejectedPins += governed.rejected;</span>
+<span class="line"><span class="ln"> 162</span>        for (let i = 0; i &lt; governed.pins.length; i++) {</span>
+<span class="line"><span class="ln"> 163</span>          const pin = governed.pins[i];</span>
+<span class="line"><span class="ln"> 164</span>          tryAdd({</span>
+<span class="line"><span class="ln"> 165</span>            kind: pin.kind === "memory" ? "pinned-memory" : "pinned-concept",</span>
+<span class="line"><span class="ln"> 166</span>            ref: pin.ref,</span>
+<span class="line"><span class="ln"> 167</span>            content: pin.content,</span>
+<span class="line"><span class="ln"> 168</span>            tokenEstimate: estimateTokens(pin.content),</span>
+<span class="line"><span class="ln"> 169</span>            orderKey: `0-pin-0-governed-${String(i).padStart(6, "0")}-${pin.pinId}`,</span>
+<span class="line"><span class="ln"> 170</span>          });</span>
+<span class="line"><span class="ln"> 171</span>        }</span>
+<span class="line"><span class="ln"> 172</span>      } catch {</span>
+<span class="line"><span class="ln"> 173</span>        // Brownout: pin metadata or its backing store may be unavailable. The</span>
+<span class="line"><span class="ln"> 174</span>        // compatibility and ordinary lanes still provide a working set.</span>
+<span class="line"><span class="ln"> 175</span>        rejectedPins++;</span>
+<span class="line"><span class="ln"> 176</span>      }</span>
+<span class="line"><span class="ln"> 177</span>    }</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/allocator/index.ts:207-267</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 207</span>    // -- lane 2: most-recently-accessed valid scope memories -----------------</span>
+<span class="line"><span class="ln"> 208</span>    const rows = await this.deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 209</span>      validOnly: true,</span>
+<span class="line"><span class="ln"> 210</span>      limit: CANDIDATE_LIMIT,</span>
+<span class="line"><span class="ln"> 211</span>      access: args.access,</span>
+<span class="line"><span class="ln"> 212</span>    });</span>
+<span class="line"><span class="ln"> 213</span>    const now = Date.now();</span>
+<span class="line"><span class="ln"> 214</span>    const accessed = rows</span>
+<span class="line"><span class="ln"> 215</span>      .filter((r) =&gt; r.tValidTo === null || Date.parse(r.tValidTo) &gt; now)</span>
+<span class="line"><span class="ln"> 216</span>      .filter(</span>
+<span class="line"><span class="ln"> 217</span>        (r) =&gt;</span>
+<span class="line"><span class="ln"> 218</span>          r.telemetry.lastAccessed !== null || r.telemetry.accessCount &gt; 0,</span>
+<span class="line"><span class="ln"> 219</span>      )</span>
+<span class="line"><span class="ln"> 220</span>      .sort(byRecencyDesc)</span>
+<span class="line"><span class="ln"> 221</span>      .slice(0, SCOPE_LANE_LIMIT);</span>
+<span class="line"><span class="ln"> 222</span>    for (const row of accessed) {</span>
+<span class="line"><span class="ln"> 223</span>      tryAdd({</span>
+<span class="line"><span class="ln"> 224</span>        kind: "scope-memory",</span>
+<span class="line"><span class="ln"> 225</span>        ref: row.id,</span>
+<span class="line"><span class="ln"> 226</span>        content: row.content,</span>
+<span class="line"><span class="ln"> 227</span>        tokenEstimate: estimateTokens(row.content),</span>
+<span class="line"><span class="ln"> 228</span>        orderKey: `1-scope-${row.id}`,</span>
+<span class="line"><span class="ln"> 229</span>      });</span>
+<span class="line"><span class="ln"> 230</span>    }</span>
+<span class="line"><span class="ln"> 231</span></span>
+<span class="line"><span class="ln"> 232</span>    // -- lane 3: predicted-relevant (only with a task hint) ------------------</span>
+<span class="line"><span class="ln"> 233</span>    if (taskHint &amp;&amp; taskHint.trim().length &gt; 0) {</span>
+<span class="line"><span class="ln"> 234</span>      let hits: HybridHit[];</span>
+<span class="line"><span class="ln"> 235</span>      try {</span>
+<span class="line"><span class="ln"> 236</span>        hits = await hybridSearchL2({</span>
+<span class="line"><span class="ln"> 237</span>          index: this.deps.index,</span>
+<span class="line"><span class="ln"> 238</span>          embedder: this.deps.embedder,</span>
+<span class="line"><span class="ln"> 239</span>          namespace,</span>
+<span class="line"><span class="ln"> 240</span>          query: taskHint,</span>
+<span class="line"><span class="ln"> 241</span>          k: PREDICTED_K,</span>
+<span class="line"><span class="ln"> 242</span>          candidateLimit: CANDIDATE_LIMIT,</span>
+<span class="line"><span class="ln"> 243</span>          access: args.access,</span>
+<span class="line"><span class="ln"> 244</span>        });</span>
+<span class="line"><span class="ln"> 245</span>      } catch {</span>
+<span class="line"><span class="ln"> 246</span>        const scores = bm25Scores(</span>
+<span class="line"><span class="ln"> 247</span>          taskHint,</span>
+<span class="line"><span class="ln"> 248</span>          rows.map((row) =&gt; ({ ref: row.id, content: row.content })),</span>
+<span class="line"><span class="ln"> 249</span>        );</span>
+<span class="line"><span class="ln"> 250</span>        hits = rows</span>
+<span class="line"><span class="ln"> 251</span>          .map((row) =&gt; ({ row, score: saturate(scores.get(row.id) ?? 0) }))</span>
+<span class="line"><span class="ln"> 252</span>          .filter((hit) =&gt; hit.score &gt; 0)</span>
+<span class="line"><span class="ln"> 253</span>          .sort((a, b) =&gt; b.score - a.score || a.row.id.localeCompare(b.row.id))</span>
+<span class="line"><span class="ln"> 254</span>          .slice(0, PREDICTED_K);</span>
+<span class="line"><span class="ln"> 255</span>        brownoutDetail += " brownout=embedding_unavailable";</span>
+<span class="line"><span class="ln"> 256</span>      }</span>
+<span class="line"><span class="ln"> 257</span>      for (const hit of hits) {</span>
+<span class="line"><span class="ln"> 258</span>        if (hit.score &lt;= 0) continue;</span>
+<span class="line"><span class="ln"> 259</span>        tryAdd({</span>
+<span class="line"><span class="ln"> 260</span>          kind: "predicted-relevant",</span>
+<span class="line"><span class="ln"> 261</span>          ref: hit.row.id,</span>
+<span class="line"><span class="ln"> 262</span>          content: hit.row.content,</span>
+<span class="line"><span class="ln"> 263</span>          tokenEstimate: estimateTokens(hit.row.content),</span>
+<span class="line"><span class="ln"> 264</span>          orderKey: `2-rel-${hit.row.id}`,</span>
+<span class="line"><span class="ln"> 265</span>        });</span>
+<span class="line"><span class="ln"> 266</span>      }</span>
+<span class="line"><span class="ln"> 267</span>    }</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/allocator/index.ts:285-356</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 285</span>    const assembledAt = new Date().toISOString();</span>
+<span class="line"><span class="ln"> 286</span>    const event = {</span>
+<span class="line"><span class="ln"> 287</span>      ts: assembledAt,</span>
+<span class="line"><span class="ln"> 288</span>      actor,</span>
+<span class="line"><span class="ln"> 289</span>      agentId,</span>
+<span class="line"><span class="ln"> 290</span>      op: "assemble",</span>
+<span class="line"><span class="ln"> 291</span>      memoryId: null,</span>
+<span class="line"><span class="ln"> 292</span>      namespace,</span>
+<span class="line"><span class="ln"> 293</span>      purpose: taskHint ?? null,</span>
+<span class="line"><span class="ln"> 294</span>      result: "ok",</span>
+<span class="line"><span class="ln"> 295</span>      detail: `blocks=${selected.length} tokens=${totalTokens} budget=${budget} rejectedPins=${rejectedPins}${policyDetail}${brownoutDetail}`,</span>
+<span class="line"><span class="ln"> 296</span>    } as const;</span>
+<span class="line"><span class="ln"> 297</span>    // D36: with the kernel's transact/usage wiring the audit row and its</span>
+<span class="line"><span class="ln"> 298</span>    // companion usage row commit in one transaction; module-level tests keep</span>
+<span class="line"><span class="ln"> 299</span>    // the standalone append.</span>
+<span class="line"><span class="ln"> 300</span>    const writeAudit = async (audit: AuditPort, tx?: unknown): Promise&lt;void&gt; =&gt; {</span>
+<span class="line"><span class="ln"> 301</span>      const auditSeq = await audit.append(event);</span>
+<span class="line"><span class="ln"> 302</span>      if (this.deps.usage &amp;&amp; tx !== undefined &amp;&amp; typeof auditSeq === "number" &amp;&amp; args.usage) {</span>
+<span class="line"><span class="ln"> 303</span>        await this.deps.usage(tx, {</span>
+<span class="line"><span class="ln"> 304</span>          auditSeq,</span>
+<span class="line"><span class="ln"> 305</span>          traceId: args.usage.traceId,</span>
+<span class="line"><span class="ln"> 306</span>          ts: assembledAt,</span>
+<span class="line"><span class="ln"> 307</span>          namespace,</span>
+<span class="line"><span class="ln"> 308</span>          actor,</span>
+<span class="line"><span class="ln"> 309</span>          principal: args.usage.principal,</span>
+<span class="line"><span class="ln"> 310</span>          callerClass: args.usage.callerClass,</span>
+<span class="line"><span class="ln"> 311</span>          op: "assemble",</span>
+<span class="line"><span class="ln"> 312</span>          tool: args.usage.tool,</span>
+<span class="line"><span class="ln"> 313</span>          result: "ok",</span>
+<span class="line"><span class="ln"> 314</span>          latencyMs: performance.now() - t0,</span>
+<span class="line"><span class="ln"> 315</span>          tokens: totalTokens,</span>
+<span class="line"><span class="ln"> 316</span>          returned: selected.length,</span>
+<span class="line"><span class="ln"> 317</span>          driver: null,</span>
+<span class="line"><span class="ln"> 318</span>          sourceTier: null,</span>
+<span class="line"><span class="ln"> 319</span>          sourceIds: null,</span>
+<span class="line"><span class="ln"> 320</span>          topScore: null,</span>
+<span class="line"><span class="ln"> 321</span>        });</span>
+<span class="line"><span class="ln"> 322</span>      }</span>
+<span class="line"><span class="ln"> 323</span>    };</span>
+<span class="line"><span class="ln"> 324</span>    if (this.deps.transact) {</span>
+<span class="line"><span class="ln"> 325</span>      await this.deps.transact(writeAudit);</span>
+<span class="line"><span class="ln"> 326</span>    } else {</span>
+<span class="line"><span class="ln"> 327</span>      await writeAudit(this.deps.audit);</span>
+<span class="line"><span class="ln"> 328</span>    }</span>
+<span class="line"><span class="ln"> 329</span></span>
+<span class="line"><span class="ln"> 330</span>    if (deliveredPolicy &amp;&amp; this.deps.policyDirectives?.onDelivered) {</span>
+<span class="line"><span class="ln"> 331</span>      try {</span>
+<span class="line"><span class="ln"> 332</span>        await this.deps.policyDirectives.onDelivered(deliveredPolicy, args);</span>
+<span class="line"><span class="ln"> 333</span>      } catch {</span>
+<span class="line"><span class="ln"> 334</span>        // The ledger is evidence, not a gate: a failed compliance write never</span>
+<span class="line"><span class="ln"> 335</span>        // costs the agent its working set.</span>
+<span class="line"><span class="ln"> 336</span>      }</span>
+<span class="line"><span class="ln"> 337</span>    }</span>
+<span class="line"><span class="ln"> 338</span></span>
+<span class="line"><span class="ln"> 339</span>    return {</span>
+<span class="line"><span class="ln"> 340</span>      namespace,</span>
+<span class="line"><span class="ln"> 341</span>      blocks: selected,</span>
+<span class="line"><span class="ln"> 342</span>      totalTokens,</span>
+<span class="line"><span class="ln"> 343</span>      budget,</span>
+<span class="line"><span class="ln"> 344</span>      assembledAt,</span>
+<span class="line"><span class="ln"> 345</span>      ...(deliveredPolicy</span>
+<span class="line"><span class="ln"> 346</span>        ? {</span>
+<span class="line"><span class="ln"> 347</span>            policy: {</span>
+<span class="line"><span class="ln"> 348</span>              digest: deliveredPolicy.digest,</span>
+<span class="line"><span class="ln"> 349</span>              documents: deliveredPolicy.documents,</span>
+<span class="line"><span class="ln"> 350</span>              tokens: deliveredPolicy.totalTokens,</span>
+<span class="line"><span class="ln"> 351</span>              required: deliveredPolicy.required,</span>
+<span class="line"><span class="ln"> 352</span>              truncated: deliveredPolicy.truncated,</span>
+<span class="line"><span class="ln"> 353</span>            },</span>
+<span class="line"><span class="ln"> 354</span>          }</span>
+<span class="line"><span class="ln"> 355</span>        : {}),</span>
+<span class="line"><span class="ln"> 356</span>    };</span></code></pre></div></section>
+<section class="sec" id="fault"><div class="sec-no"><b>03</b> / brownout</div><h2 class="sec-title">Fault 命中必须过绝对分数门槛</h2><h3>源码判断</h3><p><code>src/fault/index.ts:49</code> L2/L3 score floor 把 fault 变成有门槛的补召回。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:182</code> driver-planned L2 仍要经过 absoluteScores 校准。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:217</code> embedding brownout 会退到 BM25。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:265</code> L2 不足才走 L3 cold concept。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:317</code> access/fault telemetry 与 audit 一起提交。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>src/fault/index.ts:361</code> absoluteScores 的注释解释为什么 driver 分数不能直接和固定 floor 比。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/allocator-fault.test.ts:227</code> assemble 测试覆盖优先级与预算。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/allocator-fault.test.ts:459</code> embedding 失败测试确认 brownout 行为。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/allocator-fault.test.ts:586</code> driver-lane 测试防止只用返回 refs 计算 BM25 IDF。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p>
+<p><code>test/cold-encryption.test.ts:326</code> 冷层 pin 组装测试确认 secret canary 不会进入错误 namespace 的 working set。 这处引用用于判断实现边界，而不是只给页面堆行号；它把设计说法落到可检查的控制流、数据模型或测试断言上，读者可以沿着同一文件继续追踪上下游。</p><div class="code-wrap"><div class="code-head"><span>src/fault/index.ts:160-249</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 160</span>  async fault(args: FaultArgs): Promise&lt;FaultResult&gt; {</span>
+<span class="line"><span class="ln"> 161</span>    const t0 = performance.now();</span>
+<span class="line"><span class="ln"> 162</span>    const { namespace, query } = args;</span>
+<span class="line"><span class="ln"> 163</span>    // Defensive: some callers (syscall layer) route audit attribution</span>
+<span class="line"><span class="ln"> 164</span>    // themselves and may omit actor/agentId at runtime.</span>
+<span class="line"><span class="ln"> 165</span>    const actor = args.actor ?? "unknown";</span>
+<span class="line"><span class="ln"> 166</span>    const agentId = args.agentId ?? "unknown";</span>
+<span class="line"><span class="ln"> 167</span>    const k = args.k ?? DEFAULT_K;</span>
+<span class="line"><span class="ln"> 168</span>    const tokenBudget = args.tokenBudget ?? DEFAULT_TOKEN_BUDGET;</span>
+<span class="line"><span class="ln"> 169</span></span>
+<span class="line"><span class="ln"> 170</span>    // -- tier L2 --------------------------------------------------------------</span>
+<span class="line"><span class="ln"> 171</span>    // M2: when the kernel wired a driver-routed planner, the L2 candidates</span>
+<span class="line"><span class="ln"> 172</span>    // come from the policy-selected retriever cartridge; otherwise the</span>
+<span class="line"><span class="ln"> 173</span>    // legacy hybrid search runs. Either way the ACCEPTANCE decision uses the</span>
+<span class="line"><span class="ln"> 174</span>    // absolute hybrid score against L2_SCORE_FLOOR (see FaultHandlerDeps).</span>
+<span class="line"><span class="ln"> 175</span>    let l2Refs: ScoredRef[];</span>
+<span class="line"><span class="ln"> 176</span>    let acceptL2: boolean;</span>
+<span class="line"><span class="ln"> 177</span>    let bumpTargetId: string | null;</span>
+<span class="line"><span class="ln"> 178</span>    let driverDetail = "";</span>
+<span class="line"><span class="ln"> 179</span>    let driverName: string | null = null;</span>
+<span class="line"><span class="ln"> 180</span>    let degradedReason: FaultResult["degradedReason"];</span>
+<span class="line"><span class="ln"> 181</span></span>
+<span class="line"><span class="ln"> 182</span>    try {</span>
+<span class="line"><span class="ln"> 183</span>      if (this.deps.l2Planner) {</span>
+<span class="line"><span class="ln"> 184</span>        const outcome = await this.deps.l2Planner(query, k, tokenBudget, args.access);</span>
+<span class="line"><span class="ln"> 185</span>        driverDetail =</span>
+<span class="line"><span class="ln"> 186</span>          ` driver=${outcome.driver}` +</span>
+<span class="line"><span class="ln"> 187</span>          (outcome.fallback ? ` driver_fallback=${outcome.fallback}` : "");</span>
+<span class="line"><span class="ln"> 188</span>        driverName = outcome.driver;</span>
+<span class="line"><span class="ln"> 189</span>        l2Refs = outcome.refs;</span>
+<span class="line"><span class="ln"> 190</span>        const abs = await this.absoluteScores(namespace, query, outcome.refs, args.access);</span>
+<span class="line"><span class="ln"> 191</span>        acceptL2 = abs.some((s) =&gt; s &gt;= L2_SCORE_FLOOR);</span>
+<span class="line"><span class="ln"> 192</span>        bumpTargetId = outcome.refs[0]?.ref ?? null;</span>
+<span class="line"><span class="ln"> 193</span>      } else {</span>
+<span class="line"><span class="ln"> 194</span>        const l2Hits: HybridHit[] = await hybridSearchL2({</span>
+<span class="line"><span class="ln"> 195</span>          index: this.deps.index,</span>
+<span class="line"><span class="ln"> 196</span>          embedder: this.deps.embedder,</span>
+<span class="line"><span class="ln"> 197</span>          namespace,</span>
+<span class="line"><span class="ln"> 198</span>          query,</span>
+<span class="line"><span class="ln"> 199</span>          k: Math.max(k * 3, 12),</span>
+<span class="line"><span class="ln"> 200</span>          access: args.access,</span>
+<span class="line"><span class="ln"> 201</span>        });</span>
+<span class="line"><span class="ln"> 202</span>        const bestL2 = l2Hits.length &gt; 0 ? l2Hits[0] : null;</span>
+<span class="line"><span class="ln"> 203</span>        acceptL2 = bestL2 !== null &amp;&amp; bestL2.score &gt;= L2_SCORE_FLOOR;</span>
+<span class="line"><span class="ln"> 204</span>        bumpTargetId = bestL2?.row.id ?? null;</span>
+<span class="line"><span class="ln"> 205</span>        l2Refs = l2Hits</span>
+<span class="line"><span class="ln"> 206</span>          .filter((h) =&gt; h.score &gt; 0)</span>
+<span class="line"><span class="ln"> 207</span>          .slice(0, k)</span>
+<span class="line"><span class="ln"> 208</span>          .map((h) =&gt; ({</span>
+<span class="line"><span class="ln"> 209</span>            id: h.row.id,</span>
+<span class="line"><span class="ln"> 210</span>            tier: "L2" as const,</span>
+<span class="line"><span class="ln"> 211</span>            ref: h.row.id,</span>
+<span class="line"><span class="ln"> 212</span>            score: h.score,</span>
+<span class="line"><span class="ln"> 213</span>            content: h.row.content,</span>
+<span class="line"><span class="ln"> 214</span>            tokenEstimate: estimateTokens(h.row.content),</span>
+<span class="line"><span class="ln"> 215</span>          }));</span>
+<span class="line"><span class="ln"> 216</span>      }</span>
+<span class="line"><span class="ln"> 217</span>    } catch {</span>
+<span class="line"><span class="ln"> 218</span>      // Immediate brownout, including failures before the circuit breaker has</span>
+<span class="line"><span class="ln"> 219</span>      // opened: retain the governed lexical lane and expose the degradation.</span>
+<span class="line"><span class="ln"> 220</span>      const rows = await this.deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 221</span>        validOnly: true,</span>
+<span class="line"><span class="ln"> 222</span>        limit: 200,</span>
+<span class="line"><span class="ln"> 223</span>        access: args.access,</span>
+<span class="line"><span class="ln"> 224</span>      });</span>
+<span class="line"><span class="ln"> 225</span>      const scores = bm25Scores(</span>
+<span class="line"><span class="ln"> 226</span>        query,</span>
+<span class="line"><span class="ln"> 227</span>        rows.map((row) =&gt; ({ ref: row.id, content: row.content })),</span>
+<span class="line"><span class="ln"> 228</span>      );</span>
+<span class="line"><span class="ln"> 229</span>      l2Refs = rows</span>
+<span class="line"><span class="ln"> 230</span>        .map((row) =&gt; ({</span>
+<span class="line"><span class="ln"> 231</span>          id: row.id,</span>
+<span class="line"><span class="ln"> 232</span>          tier: "L2" as const,</span>
+<span class="line"><span class="ln"> 233</span>          ref: row.id,</span>
+<span class="line"><span class="ln"> 234</span>          // In a lexical-only brownout the BM25 lane owns the full confidence</span>
+<span class="line"><span class="ln"> 235</span>          // scale; retaining the hybrid 0.4 weight would make its maximum too</span>
+<span class="line"><span class="ln"> 236</span>          // small to clear the calibrated acceptance floor reliably.</span>
+<span class="line"><span class="ln"> 237</span>          score: saturate(scores.get(row.id) ?? 0),</span>
+<span class="line"><span class="ln"> 238</span>          content: row.content,</span>
+<span class="line"><span class="ln"> 239</span>          tokenEstimate: estimateTokens(row.content),</span>
+<span class="line"><span class="ln"> 240</span>        }))</span>
+<span class="line"><span class="ln"> 241</span>        .filter((ref) =&gt; ref.score &gt; 0)</span>
+<span class="line"><span class="ln"> 242</span>        .sort((a, b) =&gt; b.score - a.score || a.ref.localeCompare(b.ref))</span>
+<span class="line"><span class="ln"> 243</span>        .slice(0, k);</span>
+<span class="line"><span class="ln"> 244</span>      acceptL2 = (l2Refs[0]?.score ?? 0) &gt;= L2_SCORE_FLOOR;</span>
+<span class="line"><span class="ln"> 245</span>      bumpTargetId = l2Refs[0]?.ref ?? null;</span>
+<span class="line"><span class="ln"> 246</span>      driverDetail = " driver=bm25-degraded brownout=embedding_unavailable";</span>
+<span class="line"><span class="ln"> 247</span>      driverName = "bm25-degraded";</span>
+<span class="line"><span class="ln"> 248</span>      degradedReason = "embedding_unavailable";</span>
+<span class="line"><span class="ln"> 249</span>    }</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/fault/index.ts:260-358</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 260</span>      result = "ok";</span>
+<span class="line"><span class="ln"> 261</span>      if (injected.length &gt; 0) {</span>
+<span class="line"><span class="ln"> 262</span>        accessIds = injected.map((r) =&gt; r.ref);</span>
+<span class="line"><span class="ln"> 263</span>      }</span>
+<span class="line"><span class="ln"> 264</span>    } else {</span>
+<span class="line"><span class="ln"> 265</span>      // -- tier L3: cold concept search --------------------------------------</span>
+<span class="line"><span class="ln"> 266</span>      let l3Refs: ScoredRef[];</span>
+<span class="line"><span class="ln"> 267</span>      try {</span>
+<span class="line"><span class="ln"> 268</span>        l3Refs = (</span>
+<span class="line"><span class="ln"> 269</span>          await this.deps.cold.searchConcepts(</span>
+<span class="line"><span class="ln"> 270</span>            this.deps.db,</span>
+<span class="line"><span class="ln"> 271</span>            this.deps.embedder,</span>
+<span class="line"><span class="ln"> 272</span>            namespace,</span>
+<span class="line"><span class="ln"> 273</span>            query,</span>
+<span class="line"><span class="ln"> 274</span>            k,</span>
+<span class="line"><span class="ln"> 275</span>          )</span>
+<span class="line"><span class="ln"> 276</span>        ).filter((s) =&gt; s.score &gt; L3_SCORE_FLOOR);</span>
+<span class="line"><span class="ln"> 277</span>      } catch {</span>
+<span class="line"><span class="ln"> 278</span>        // Brownout: an unavailable/corrupt cold tier must not crash the agent</span>
+<span class="line"><span class="ln"> 279</span>        // after the governed L2 lane has already been exhausted. The additive</span>
+<span class="line"><span class="ln"> 280</span>        // result field and audit detail distinguish this from a genuine miss.</span>
+<span class="line"><span class="ln"> 281</span>        l3Refs = [];</span>
+<span class="line"><span class="ln"> 282</span>        degradedReason = "cold_unavailable";</span>
+<span class="line"><span class="ln"> 283</span>      }</span>
+<span class="line"><span class="ln"> 284</span></span>
+<span class="line"><span class="ln"> 285</span>      if (l3Refs.length &gt; 0) {</span>
+<span class="line"><span class="ln"> 286</span>        source = "L3";</span>
+<span class="line"><span class="ln"> 287</span>        injected = packToBudget(l3Refs.slice(0, k), tokenBudget);</span>
+<span class="line"><span class="ln"> 288</span>        result = "ok";</span>
+<span class="line"><span class="ln"> 289</span>      } else {</span>
+<span class="line"><span class="ln"> 290</span>        source = null;</span>
+<span class="line"><span class="ln"> 291</span>        injected = [];</span>
+<span class="line"><span class="ln"> 292</span>        result = "miss";</span>
+<span class="line"><span class="ln"> 293</span>      }</span>
+<span class="line"><span class="ln"> 294</span>      // Fault pressure: the closest L2 memory was not good enough.</span>
+<span class="line"><span class="ln"> 295</span>      if (bumpTargetId !== null) {</span>
+<span class="line"><span class="ln"> 296</span>        faultId = bumpTargetId;</span>
+<span class="line"><span class="ln"> 297</span>      }</span>
+<span class="line"><span class="ln"> 298</span>    }</span>
+<span class="line"><span class="ln"> 299</span></span>
+<span class="line"><span class="ln"> 300</span>    const latencyMs = Math.max(0, Math.round(performance.now() - t0));</span>
+<span class="line"><span class="ln"> 301</span>    const injectedTokens = injected.reduce((s, r) =&gt; s + r.tokenEstimate, 0);</span>
+<span class="line"><span class="ln"> 302</span></span>
+<span class="line"><span class="ln"> 303</span>    const event = {</span>
+<span class="line"><span class="ln"> 304</span>      ts: new Date().toISOString(),</span>
+<span class="line"><span class="ln"> 305</span>      actor,</span>
+<span class="line"><span class="ln"> 306</span>      agentId,</span>
+<span class="line"><span class="ln"> 307</span>      op: "fault",</span>
+<span class="line"><span class="ln"> 308</span>      memoryId: injected.length &gt; 0 ? injected[0].id : null,</span>
+<span class="line"><span class="ln"> 309</span>      namespace,</span>
+<span class="line"><span class="ln"> 310</span>      purpose: args.auditPurpose ?? query,</span>
+<span class="line"><span class="ln"> 311</span>      result,</span>
+<span class="line"><span class="ln"> 312</span>      detail:</span>
+<span class="line"><span class="ln"> 313</span>        `source=${source ?? "none"} injected=${injected.length} tokens=${injectedTokens} latencyMs=${latencyMs}${driverDetail}` +</span>
+<span class="line"><span class="ln"> 314</span>        (degradedReason ? ` brownout=${degradedReason}` : ""),</span>
+<span class="line"><span class="ln"> 315</span>    } as const;</span>
+<span class="line"><span class="ln"> 316</span></span>
+<span class="line"><span class="ln"> 317</span>    const mutateAndAudit = async (index: L2IndexPort, audit: AuditPort, tx?: TDb): Promise&lt;void&gt; =&gt; {</span>
+<span class="line"><span class="ln"> 318</span>      if (accessIds.length &gt; 0) await index.bumpAccess(accessIds);</span>
+<span class="line"><span class="ln"> 319</span>      if (faultId !== null) await index.bumpFault(faultId);</span>
+<span class="line"><span class="ln"> 320</span>      const auditSeq = await audit.append(event);</span>
+<span class="line"><span class="ln"> 321</span>      // D36: the companion usage row rides the audit transaction (the hook</span>
+<span class="line"><span class="ln"> 322</span>      // wraps its writes in a SAVEPOINT brownout). The audit detail string</span>
+<span class="line"><span class="ln"> 323</span>      // above stays byte-identical.</span>
+<span class="line"><span class="ln"> 324</span>      if (this.deps.usage &amp;&amp; tx !== undefined &amp;&amp; typeof auditSeq === "number" &amp;&amp; args.usage) {</span>
+<span class="line"><span class="ln"> 325</span>        await this.deps.usage(tx, {</span>
+<span class="line"><span class="ln"> 326</span>          auditSeq,</span>
+<span class="line"><span class="ln"> 327</span>          traceId: args.usage.traceId,</span>
+<span class="line"><span class="ln"> 328</span>          ts: event.ts,</span>
+<span class="line"><span class="ln"> 329</span>          namespace,</span>
+<span class="line"><span class="ln"> 330</span>          actor,</span>
+<span class="line"><span class="ln"> 331</span>          principal: args.usage.principal,</span>
+<span class="line"><span class="ln"> 332</span>          callerClass: args.usage.callerClass,</span>
+<span class="line"><span class="ln"> 333</span>          op: "fault",</span>
+<span class="line"><span class="ln"> 334</span>          tool: args.usage.tool,</span>
+<span class="line"><span class="ln"> 335</span>          result,</span>
+<span class="line"><span class="ln"> 336</span>          latencyMs,</span>
+<span class="line"><span class="ln"> 337</span>          tokens: injectedTokens,</span>
+<span class="line"><span class="ln"> 338</span>          returned: injected.length,</span>
+<span class="line"><span class="ln"> 339</span>          driver: driverName,</span>
+<span class="line"><span class="ln"> 340</span>          sourceTier: source === "L2" ? "warm" : source === "L3" ? "cold" : null,</span>
+<span class="line"><span class="ln"> 341</span>          sourceIds: null,</span>
+<span class="line"><span class="ln"> 342</span>          topScore: injected[0]?.score ?? null,</span>
+<span class="line"><span class="ln"> 343</span>        });</span>
+<span class="line"><span class="ln"> 344</span>      }</span>
+<span class="line"><span class="ln"> 345</span>    };</span>
+<span class="line"><span class="ln"> 346</span>    if (this.deps.transact) {</span>
+<span class="line"><span class="ln"> 347</span>      await this.deps.transact(mutateAndAudit);</span>
+<span class="line"><span class="ln"> 348</span>    } else {</span>
+<span class="line"><span class="ln"> 349</span>      await mutateAndAudit(this.deps.index, this.deps.audit);</span>
+<span class="line"><span class="ln"> 350</span>    }</span>
+<span class="line"><span class="ln"> 351</span></span>
+<span class="line"><span class="ln"> 352</span>    return {</span>
+<span class="line"><span class="ln"> 353</span>      hit: result === "ok",</span>
+<span class="line"><span class="ln"> 354</span>      source,</span>
+<span class="line"><span class="ln"> 355</span>      injected,</span>
+<span class="line"><span class="ln"> 356</span>      latencyMs,</span>
+<span class="line"><span class="ln"> 357</span>      ...(degradedReason ? { degradedReason } : {}),</span>
+<span class="line"><span class="ln"> 358</span>    };</span></code></pre></div><div class="code-wrap"><div class="code-head"><span>src/fault/index.ts:361-403</span><span>source</span></div><pre><code><span class="line"><span class="ln"> 361</span>  /**</span>
+<span class="line"><span class="ln"> 362</span>   * Absolute 0.6·cosine + 0.4·saturated-BM25 score per driver-planned ref —</span>
+<span class="line"><span class="ln"> 363</span>   * the same scale L2_SCORE_FLOOR was calibrated against (driver plan()</span>
+<span class="line"><span class="ln"> 364</span>   * scores are per-query normalized and NOT comparable to a fixed floor).</span>
+<span class="line"><span class="ln"> 365</span>   *</span>
+<span class="line"><span class="ln"> 366</span>   * BM25 IDF is computed over the SAME ~200-row ACL-scoped candidate pool</span>
+<span class="line"><span class="ln"> 367</span>   * the legacy hybridSearchL2 lane used, NOT over just the &lt;=k returned refs.</span>
+<span class="line"><span class="ln"> 368</span>   * With an n&lt;=k pool the IDF of a rare query term collapses (≈log(1.2)</span>
+<span class="line"><span class="ln"> 369</span>   * instead of ≈log(pool/df)), systematically deflating lexical-dominant</span>
+<span class="line"><span class="ln"> 370</span>   * matches below a floor they cleared in M1 — a silent fault hit-rate</span>
+<span class="line"><span class="ln"> 371</span>   * regression. Refs beyond the pool cap are unioned in so every ref still</span>
+<span class="line"><span class="ln"> 372</span>   * gets a score.</span>
+<span class="line"><span class="ln"> 373</span>   */</span>
+<span class="line"><span class="ln"> 374</span>  private async absoluteScores(</span>
+<span class="line"><span class="ln"> 375</span>    namespace: Namespace,</span>
+<span class="line"><span class="ln"> 376</span>    query: string,</span>
+<span class="line"><span class="ln"> 377</span>    refs: ScoredRef[],</span>
+<span class="line"><span class="ln"> 378</span>    access?: AccessSubject,</span>
+<span class="line"><span class="ln"> 379</span>  ): Promise&lt;number[]&gt; {</span>
+<span class="line"><span class="ln"> 380</span>    if (refs.length === 0) return [];</span>
+<span class="line"><span class="ln"> 381</span>    const [queryVec] = await this.deps.embedder.embed([query]);</span>
+<span class="line"><span class="ln"> 382</span>    const contentVecs = await this.deps.embedder.embed(refs.map((r) =&gt; r.content));</span>
+<span class="line"><span class="ln"> 383</span></span>
+<span class="line"><span class="ln"> 384</span>    // IDF context: full ACL-scoped candidate pool (M1 parity: hybridSearchL2</span>
+<span class="line"><span class="ln"> 385</span>    // ran bm25Scores over listCandidates(limit 200) ∪ vectorSearch).</span>
+<span class="line"><span class="ln"> 386</span>    const pool = await this.deps.index.listCandidates(namespace, {</span>
+<span class="line"><span class="ln"> 387</span>      validOnly: true,</span>
+<span class="line"><span class="ln"> 388</span>      limit: 200,</span>
+<span class="line"><span class="ln"> 389</span>      access,</span>
+<span class="line"><span class="ln"> 390</span>    });</span>
+<span class="line"><span class="ln"> 391</span>    const docsByRef = new Map&lt;string, { ref: string; content: string }&gt;();</span>
+<span class="line"><span class="ln"> 392</span>    for (const row of pool) docsByRef.set(row.id, { ref: row.id, content: row.content });</span>
+<span class="line"><span class="ln"> 393</span>    for (const r of refs) {</span>
+<span class="line"><span class="ln"> 394</span>      if (!docsByRef.has(r.ref)) docsByRef.set(r.ref, { ref: r.ref, content: r.content });</span>
+<span class="line"><span class="ln"> 395</span>    }</span>
+<span class="line"><span class="ln"> 396</span>    const bm = bm25Scores(query, [...docsByRef.values()]);</span>
+<span class="line"><span class="ln"> 397</span></span>
+<span class="line"><span class="ln"> 398</span>    return refs.map((r, i) =&gt; {</span>
+<span class="line"><span class="ln"> 399</span>      const vecScore = Math.max(0, cosineSim(queryVec, contentVecs[i]));</span>
+<span class="line"><span class="ln"> 400</span>      const bmScore = saturate(bm.get(r.ref) ?? 0);</span>
+<span class="line"><span class="ln"> 401</span>      return 0.6 * vecScore + 0.4 * bmScore;</span>
+<span class="line"><span class="ln"> 402</span>    });</span>
+<span class="line"><span class="ln"> 403</span>  }</span></code></pre></div></section>
+
+</main>
+</div>
+<script>
+const links=[...document.querySelectorAll('.nav-list a')];
+const secs=links.map(a=>document.querySelector(a.getAttribute('href'))).filter(Boolean);
+const spy=()=>{let active=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<180)active=i});links.forEach((a,i)=>a.classList.toggle('active',i===active));};
+addEventListener('scroll',spy,{passive:true});spy();
+</script>
+</body>
+</html>
