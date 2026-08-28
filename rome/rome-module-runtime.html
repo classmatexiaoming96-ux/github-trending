@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>模块加载与运行时刷新 · 深度解析 · rome</title>
+<meta name="description" content="rome-os/rome 源码级深度解析" />
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #6bd2ff;
+  --star-soft: #a9e7ff;
+  --star-deep: #1f8fb7;
+}
+.evidence-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.evidence-card{border:1px solid color-mix(in oklab,var(--star) 22%,transparent);background:rgba(255,255,255,.035);border-radius:14px;padding:16px}
+.evidence-card b{display:block;margin-bottom:6px;color:var(--ink)}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">rome<b>OS</b></div><div class="sub">源码级架构解析 · src/</div></div>
+    <span class="nav-ver">TypeScript · pnpm monorepo</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+      <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+      <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+      <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+      <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★377 · 2026-08-23</div><div><a href="https://github.com/rome-os/rome" target="_blank">rome-os/rome</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+        <div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">模块加载与运行时刷新 <em>深度解析</em></h1><p class="hero-desc">这页拆 Rome 如何在 Node ESM、tsx loader、app action 和 env 变化之间保持热刷新可控。</p></div>
+        <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p><code>packages/core/src/actions/module-loader.ts:9</code> 到 <code>packages/core/src/actions/module-loader.ts:26</code> 的注释解释了问题根因：entry URL 的 query 会被 Node/tsx 路径归一化破坏，helper 模块可能继续使用旧缓存。<code>packages/core/src/actions/module-loader.ts:27</code> 定义 salt，<code>packages/core/src/actions/module-loader.ts:34</code> 注册 hook，<code>packages/core/src/actions/module-loader.ts:53</code> 接管带 query 的 file URL load，<code>packages/core/src/actions/module-loader.ts:121</code> 到 <code>packages/core/src/actions/module-loader.ts:138</code> 用 envEpoch 组成 cache key。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/module-loader.ts</span> · L9-65</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">9</span>// Node&#x27;s ESM resolver drops the query string when a module resolves its own
+<span class="ln">10</span>// static imports, so the ?v= cache-buster on an entry URL re-evaluates only
+<span class="ln">11</span>// the entry file: a helper it imports keeps its unsalted URL and stays cached
+<span class="ln">12</span>// with whatever it captured at module scope. These hooks give the entry&#x27;s
+<span class="ln">13</span>// whole own-file graph one identity per (file stats, env epoch):
+<span class="ln">14</span>//
+<span class="ln">15</span>// - resolve: short-circuits already-salted file URLs before any other loader
+<span class="ln">16</span>//   sees them (tsx — the `source` container mode — otherwise normalizes the
+<span class="ln">17</span>//   query away, collapsing every epoch onto one cached instance), and
+<span class="ln">18</span>//   propagates the parent&#x27;s salt onto relative imports.
+<span class="ln">19</span>// - load: serves salted URLs from disk itself, because downstream loaders
+<span class="ln">20</span>//   fail on file URLs that carry a query.
+<span class="ln">21</span>//
+<span class="ln">22</span>// Only compiled `.js`/`.mjs` files are salted: TypeScript app sources need
+<span class="ln">23</span>// tsx&#x27;s transform pipeline, which the bypass would skip — source-mode
+<span class="ln">24</span>// workspace apps keep their existing repack-or-restart reload story. Bare
+<span class="ln">25</span>// specifiers stay untouched on purpose: node_modules must resolve to the one
+<span class="ln">26</span>// shared instance per process.
+<span class="ln">27</span>const SALT_QUERY = /\?v=[^&amp;]*$/;
+<span class="ln">28</span>
+<span class="ln">29</span>function isSaltableUrl(url: string): boolean {
+<span class="ln">30</span>  const path = url.split(&quot;?&quot;)[0];
+<span class="ln">31</span>  return path.endsWith(&quot;.js&quot;) || path.endsWith(&quot;.mjs&quot;);
+<span class="ln">32</span>}
+<span class="ln">33</span>
+<span class="ln">34</span>registerHooks({
+<span class="ln">35</span>  resolve(specifier, context, nextResolve) {
+<span class="ln">36</span>    if (specifier.startsWith(&quot;file:&quot;) &amp;&amp; SALT_QUERY.test(specifier) &amp;&amp; isSaltableUrl(specifier)) {
+<span class="ln">37</span>      return { url: specifier, format: &quot;module&quot;, shortCircuit: true };
+<span class="ln">38</span>    }
+<span class="ln">39</span>    const result = nextResolve(specifier, context);
+<span class="ln">40</span>    if (
+<span class="ln">41</span>      (specifier.startsWith(&quot;./&quot;) || specifier.startsWith(&quot;../&quot;)) &amp;&amp;
+<span class="ln">42</span>      context.parentURL !== undefined &amp;&amp;
+<span class="ln">43</span>      SALT_QUERY.test(context.parentURL) &amp;&amp;
+<span class="ln">44</span>      result.url.startsWith(&quot;file:&quot;) &amp;&amp;
+<span class="ln">45</span>      !result.url.includes(&quot;?&quot;) &amp;&amp;
+<span class="ln">46</span>      isSaltableUrl(result.url)
+<span class="ln">47</span>    ) {
+<span class="ln">48</span>      const salt = new URL(context.parentURL).searchParams.get(&quot;v&quot;);
+<span class="ln">49</span>      if (salt) return { url: `${result.url}?v=${salt}`, format: &quot;module&quot;, shortCircuit: true };
+<span class="ln">50</span>    }
+<span class="ln">51</span>    return result;
+<span class="ln">52</span>  },
+<span class="ln">53</span>  load(url, context, nextLoad) {
+<span class="ln">54</span>    if (url.startsWith(&quot;file:&quot;) &amp;&amp; SALT_QUERY.test(url) &amp;&amp; isSaltableUrl(url)) {
+<span class="ln">55</span>      const cleanUrl = new URL(url);
+<span class="ln">56</span>      cleanUrl.search = &quot;&quot;;
+<span class="ln">57</span>      return {
+<span class="ln">58</span>        format: &quot;module&quot;,
+<span class="ln">59</span>        source: readFileSync(fileURLToPath(cleanUrl)),
+<span class="ln">60</span>        shortCircuit: true,
+<span class="ln">61</span>      };
+<span class="ln">62</span>    }
+<span class="ln">63</span>    return nextLoad(url, context);
+<span class="ln">64</span>  },
+<span class="ln">65</span>});</pre>
+</div></section>
+        <section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>Entry 解析与逃逸保护</h3><p><code>packages/core/src/actions/module-loader.ts:67</code> 到 <code>packages/core/src/actions/module-loader.ts:85</code> 让 resolver 同时理解 js/ts/mjs/cjs/tsx 等扩展，<code>packages/core/src/actions/module-loader.ts:101</code> 到 <code>packages/core/src/actions/module-loader.ts:118</code> 则用 realpath 和 relative 检查 entry 不能逃出 actionDir。这个边界对 app marketplace 很关键。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/module-loader.ts</span> · L67-118</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">67</span>// Apps written in TypeScript declare `entry: ./index.ts` against their `src/`
+<span class="ln">68</span>// layout; `rome build` emits `.js` into `dist/` and copies the YAML unchanged.
+<span class="ln">69</span>// `extensionAlias` lets the resolver try the compiled `.js` sibling first and
+<span class="ln">70</span>// fall back to `.ts` when running against source (e.g. `tsx` on the host).
+<span class="ln">71</span>// Node&#x27;s own resolver doesn&#x27;t know about TypeScript extensions.
+<span class="ln">72</span>const sharedResolver = new ResolverFactory({
+<span class="ln">73</span>  extensions: [&quot;.js&quot;, &quot;.ts&quot;, &quot;.mjs&quot;, &quot;.cjs&quot;, &quot;.mts&quot;, &quot;.cts&quot;, &quot;.jsx&quot;, &quot;.tsx&quot;, &quot;.json&quot;],
+<span class="ln">74</span>  extensionAlias: {
+<span class="ln">75</span>    &quot;.js&quot;: [&quot;.js&quot;, &quot;.ts&quot;],
+<span class="ln">76</span>    &quot;.jsx&quot;: [&quot;.jsx&quot;, &quot;.tsx&quot;],
+<span class="ln">77</span>    &quot;.mjs&quot;: [&quot;.mjs&quot;, &quot;.mts&quot;],
+<span class="ln">78</span>    &quot;.cjs&quot;: [&quot;.cjs&quot;, &quot;.cts&quot;],
+<span class="ln">79</span>    &quot;.ts&quot;: [&quot;.js&quot;, &quot;.ts&quot;],
+<span class="ln">80</span>    &quot;.tsx&quot;: [&quot;.jsx&quot;, &quot;.tsx&quot;],
+<span class="ln">81</span>    &quot;.mts&quot;: [&quot;.mjs&quot;, &quot;.mts&quot;],
+<span class="ln">82</span>    &quot;.cts&quot;: [&quot;.cjs&quot;, &quot;.cts&quot;],
+<span class="ln">83</span>  },
+<span class="ln">84</span>  mainFiles: [&quot;index&quot;],
+<span class="ln">85</span>});
+<span class="ln">86</span>
+<span class="ln">87</span>export type GenericActionFactory&lt;TDeps = unknown&gt; = (config: ActionConfig, deps: TDeps) =&gt; Action;
+<span class="ln">88</span>
+<span class="ln">89</span>function isActionFactory&lt;TDeps&gt;(value: unknown): value is GenericActionFactory&lt;TDeps&gt; {
+<span class="ln">90</span>  return typeof value === &quot;function&quot;;
+<span class="ln">91</span>}
+<span class="ln">92</span>
+<span class="ln">93</span>function toPascalCase(name: string): string {
+<span class="ln">94</span>  return name
+<span class="ln">95</span>    .split(/[^a-zA-Z0-9]+/)
+<span class="ln">96</span>    .filter(Boolean)
+<span class="ln">97</span>    .map((part) =&gt; part[0].toUpperCase() + part.slice(1))
+<span class="ln">98</span>    .join(&quot;&quot;);
+<span class="ln">99</span>}
+<span class="ln">100</span>
+<span class="ln">101</span>export async function resolveModuleEntryPath(baseDir: string, entry?: string): Promise&lt;string&gt; {
+<span class="ln">102</span>  const absoluteBaseDir = resolve(baseDir);
+<span class="ln">103</span>  const specifier = entry ?? &quot;./index&quot;;
+<span class="ln">104</span>  const result = await sharedResolver.async(absoluteBaseDir, specifier);
+<span class="ln">105</span>  if (!result.path) {
+<span class="ln">106</span>    throw new Error(
+<span class="ln">107</span>      `No entry module found for &quot;${baseDir}&quot; (resolving &quot;${specifier}&quot;): ${result.error ?? &quot;no path returned&quot;}`,
+<span class="ln">108</span>    );
+<span class="ln">109</span>  }
+<span class="ln">110</span>  const [realBaseDir, realEntryPath] = await Promise.all([
+<span class="ln">111</span>    realpath(absoluteBaseDir),
+<span class="ln">112</span>    realpath(result.path),
+<span class="ln">113</span>  ]);
+<span class="ln">114</span>  const relativeEntryPath = relative(realBaseDir, realEntryPath);
+<span class="ln">115</span>  if (relativeEntryPath.startsWith(&quot;..&quot;) || isAbsolute(relativeEntryPath)) {
+<span class="ln">116</span>    throw new Error(`Invalid entry path &quot;${specifier}&quot; for ${baseDir}: escapes base dir`);
+<span class="ln">117</span>  }
+<span class="ln">118</span>  return result.path;</pre>
+</div><h3><span class="arr">▸</span>Factory 选择</h3><p><code>packages/core/src/actions/module-loader.ts:140</code> 到 <code>packages/core/src/actions/module-loader.ts:168</code> 把 action factory 的可接受形状写死在一处：createAction、createNameAction、default 或唯一 create*Action。错误消息绑定 <code>packages/core/src/actions/module-loader.ts:166</code>，所以 bad app 不会沉默失败。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/module-loader.ts</span> · L140-180</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">140</span>export function resolveActionFactory&lt;TDeps&gt;(
+<span class="ln">141</span>  module: Record&lt;string, unknown&gt;,
+<span class="ln">142</span>  actionName: string,
+<span class="ln">143</span>): GenericActionFactory&lt;TDeps&gt; {
+<span class="ln">144</span>  const preferredNamed = `create${toPascalCase(actionName)}Action`;
+<span class="ln">145</span>
+<span class="ln">146</span>  if (isActionFactory&lt;TDeps&gt;(module.createAction)) {
+<span class="ln">147</span>    return module.createAction;
+<span class="ln">148</span>  }
+<span class="ln">149</span>  if (isActionFactory&lt;TDeps&gt;(module[preferredNamed])) {
+<span class="ln">150</span>    return module[preferredNamed];
+<span class="ln">151</span>  }
+<span class="ln">152</span>  if (isActionFactory&lt;TDeps&gt;(module.default)) {
+<span class="ln">153</span>    return module.default;
+<span class="ln">154</span>  }
+<span class="ln">155</span>
+<span class="ln">156</span>  const candidates = Object.entries(module)
+<span class="ln">157</span>    .filter(
+<span class="ln">158</span>      ([name, value]) =&gt; /^create[A-Za-z0-9_]*Action$/.test(name) &amp;&amp; isActionFactory&lt;TDeps&gt;(value),
+<span class="ln">159</span>    )
+<span class="ln">160</span>    .map(([, value]) =&gt; value as GenericActionFactory&lt;TDeps&gt;);
+<span class="ln">161</span>
+<span class="ln">162</span>  if (candidates.length === 1) {
+<span class="ln">163</span>    return candidates[0];
+<span class="ln">164</span>  }
+<span class="ln">165</span>
+<span class="ln">166</span>  throw new Error(
+<span class="ln">167</span>    `No action factory found for &quot;${actionName}&quot;. Export createAction(config, deps) or a single create*Action function.`,
+<span class="ln">168</span>  );
+<span class="ln">169</span>}
+<span class="ln">170</span>
+<span class="ln">171</span>export async function instantiateActionFromDirectory&lt;TDeps&gt;(
+<span class="ln">172</span>  config: ActionConfig,
+<span class="ln">173</span>  actionDir: string,
+<span class="ln">174</span>  deps: TDeps,
+<span class="ln">175</span>): Promise&lt;Action&gt; {
+<span class="ln">176</span>  const entryPath = await resolveModuleEntryPath(actionDir, config.entry);
+<span class="ln">177</span>  const module = await importModuleWithCacheBuster(entryPath);
+<span class="ln">178</span>  const factory = resolveActionFactory&lt;TDeps&gt;(module, config.name);
+<span class="ln">179</span>  return factory(config, deps);
+<span class="ln">180</span>}</pre>
+</div><h3><span class="arr">▸</span>Catalog 事件重注册</h3><p><code>packages/core/src/actions/app-actions-wiring.ts:127</code> 到 <code>packages/core/src/actions/app-actions-wiring.ts:159</code> 的 lazy action 保留第一次执行时再实例化的路径；<code>packages/core/src/actions/app-actions-wiring.ts:162</code> 到 <code>packages/core/src/actions/app-actions-wiring.ts:197</code> 的 eager 注册会收集 loaded/failed；<code>packages/core/src/actions/app-actions-wiring.ts:242</code> 到 <code>packages/core/src/actions/app-actions-wiring.ts:250</code> 在 app 变化时先 unregisterOwnedBy 再只重载该 app。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/app-actions-wiring.ts</span> · L127-223</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">127</span>function createLazyAppAction(
+<span class="ln">128</span>  record: AppActionRecord,
+<span class="ln">129</span>  catalog: AppCatalog,
+<span class="ln">130</span>  deps: Record&lt;string, unknown&gt;,
+<span class="ln">131</span>  services: AppActionServices,
+<span class="ln">132</span>): Action {
+<span class="ln">133</span>  let actionPromise: Promise&lt;Action&gt; | null = null;
+<span class="ln">134</span>
+<span class="ln">135</span>  const load = async (): Promise&lt;Action&gt; =&gt; {
+<span class="ln">136</span>    if (!actionPromise) {
+<span class="ln">137</span>      actionPromise = instantiateActionFromDirectory(
+<span class="ln">138</span>        record.config,
+<span class="ln">139</span>        record.directory,
+<span class="ln">140</span>        createAppActionRuntimeDeps(record, catalog, deps, services),
+<span class="ln">141</span>      ).catch((err) =&gt; {
+<span class="ln">142</span>        actionPromise = null;
+<span class="ln">143</span>        throw err;
+<span class="ln">144</span>      });
+<span class="ln">145</span>    }
+<span class="ln">146</span>    return actionPromise;
+<span class="ln">147</span>  };
+<span class="ln">148</span>
+<span class="ln">149</span>  return {
+<span class="ln">150</span>    config: record.config,
+<span class="ln">151</span>    async execute(args: Record&lt;string, unknown&gt;, context?: ActionExecutionContext) {
+<span class="ln">152</span>      const action = await load();
+<span class="ln">153</span>      return action.execute(args, context);
+<span class="ln">154</span>    },
+<span class="ln">155</span>    async preview(args: Record&lt;string, unknown&gt;) {
+<span class="ln">156</span>      const action = await load();
+<span class="ln">157</span>      return action.preview?.(args);
+<span class="ln">158</span>    },
+<span class="ln">159</span>  };
+<span class="ln">160</span>}
+<span class="ln">161</span>
+<span class="ln">162</span>export async function registerAppActions(
+<span class="ln">163</span>  actionLoader: ActionLoader,
+<span class="ln">164</span>  actionRegistry: ActionRegistryImpl,
+<span class="ln">165</span>  catalog: AppCatalog,
+<span class="ln">166</span>  deps: Record&lt;string, unknown&gt;,
+<span class="ln">167</span>  services: AppActionServices,
+<span class="ln">168</span>  options: { onlyAppId?: string } = {},
+<span class="ln">169</span>): Promise&lt;{ loaded: string[]; failed: AppActionLoadFailure[] }&gt; {
+<span class="ln">170</span>  const loaded: string[] = [];
+<span class="ln">171</span>  const failed: AppActionLoadFailure[] = [];
+<span class="ln">172</span>
+<span class="ln">173</span>  for (const [name, record] of actionLoader.getAllRecords()) {
+<span class="ln">174</span>    if (record.metadata.ownerType !== &quot;app&quot;) {
+<span class="ln">175</span>      continue;
+<span class="ln">176</span>    }
+<span class="ln">177</span>    if (options.onlyAppId !== undefined &amp;&amp; record.metadata.ownerId !== options.onlyAppId) {
+<span class="ln">178</span>      continue;
+<span class="ln">179</span>    }
+<span class="ln">180</span>
+<span class="ln">181</span>    try {
+<span class="ln">182</span>      const action = await instantiateActionFromDirectory(record.config, record.directory, {
+<span class="ln">183</span>        ...createAppActionRuntimeDeps(record, catalog, deps, services),
+<span class="ln">184</span>      });
+<span class="ln">185</span>      actionRegistry.register(action, record.metadata);
+<span class="ln">186</span>      loaded.push(name);
+<span class="ln">187</span>    } catch (err) {
+<span class="ln">188</span>      failed.push({
+<span class="ln">189</span>        name,
+<span class="ln">190</span>        ownerId: record.metadata.ownerId,
+<span class="ln">191</span>        error: err instanceof Error ? err.message : String(err),
+<span class="ln">192</span>      });
+<span class="ln">193</span>    }
+<span class="ln">194</span>  }
+<span class="ln">195</span>
+<span class="ln">196</span>  return { loaded, failed };
+<span class="ln">197</span>}
+<span class="ln">198</span>
+<span class="ln">199</span>export function registerLazyAppActions(
+<span class="ln">200</span>  actionLoader: ActionLoader,
+<span class="ln">201</span>  actionRegistry: ActionRegistryImpl,
+<span class="ln">202</span>  catalog: AppCatalog,
+<span class="ln">203</span>  deps: Record&lt;string, unknown&gt;,
+<span class="ln">204</span>  services: AppActionServices,
+<span class="ln">205</span>  options: { onlyAppId?: string } = {},
+<span class="ln">206</span>): { loaded: string[]; failed: AppActionLoadFailure[] } {
+<span class="ln">207</span>  const loaded: string[] = [];
+<span class="ln">208</span>  const failed: AppActionLoadFailure[] = [];
+<span class="ln">209</span>
+<span class="ln">210</span>  for (const [name, record] of actionLoader.getAllRecords()) {
+<span class="ln">211</span>    if (record.metadata.ownerType !== &quot;app&quot;) {
+<span class="ln">212</span>      continue;
+<span class="ln">213</span>    }
+<span class="ln">214</span>    if (options.onlyAppId !== undefined &amp;&amp; record.metadata.ownerId !== options.onlyAppId) {
+<span class="ln">215</span>      continue;
+<span class="ln">216</span>    }
+<span class="ln">217</span>
+<span class="ln">218</span>    actionRegistry.register(createLazyAppAction(record, catalog, deps, services), record.metadata);
+<span class="ln">219</span>    loaded.push(name);
+<span class="ln">220</span>  }
+<span class="ln">221</span>
+<span class="ln">222</span>  return { loaded, failed };
+<span class="ln">223</span>}</pre>
+</div></section>
+        <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><pre>catalog event → unregister app actions → instantiateActionFromDirectory
+  → resolveModuleEntryPath
+  → importModuleWithCacheBuster(mtime-size-envEpoch)
+  → resolveActionFactory → registry.register</pre></div><p><code>packages/core/src/actions/app-actions-wiring.ts:181</code>、<code>packages/core/src/actions/app-actions-wiring.ts:185</code>、<code>packages/core/src/actions/app-actions-wiring.ts:188</code>、<code>packages/core/src/actions/app-actions-wiring.ts:196</code> 展示 eager 路径如何把失败收集为 AppActionLoadFailure；这比启动时直接 throw 更适合 dashboard 展示局部坏 app。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/app-actions-wiring.ts</span> · L162-197</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">162</span>export async function registerAppActions(
+<span class="ln">163</span>  actionLoader: ActionLoader,
+<span class="ln">164</span>  actionRegistry: ActionRegistryImpl,
+<span class="ln">165</span>  catalog: AppCatalog,
+<span class="ln">166</span>  deps: Record&lt;string, unknown&gt;,
+<span class="ln">167</span>  services: AppActionServices,
+<span class="ln">168</span>  options: { onlyAppId?: string } = {},
+<span class="ln">169</span>): Promise&lt;{ loaded: string[]; failed: AppActionLoadFailure[] }&gt; {
+<span class="ln">170</span>  const loaded: string[] = [];
+<span class="ln">171</span>  const failed: AppActionLoadFailure[] = [];
+<span class="ln">172</span>
+<span class="ln">173</span>  for (const [name, record] of actionLoader.getAllRecords()) {
+<span class="ln">174</span>    if (record.metadata.ownerType !== &quot;app&quot;) {
+<span class="ln">175</span>      continue;
+<span class="ln">176</span>    }
+<span class="ln">177</span>    if (options.onlyAppId !== undefined &amp;&amp; record.metadata.ownerId !== options.onlyAppId) {
+<span class="ln">178</span>      continue;
+<span class="ln">179</span>    }
+<span class="ln">180</span>
+<span class="ln">181</span>    try {
+<span class="ln">182</span>      const action = await instantiateActionFromDirectory(record.config, record.directory, {
+<span class="ln">183</span>        ...createAppActionRuntimeDeps(record, catalog, deps, services),
+<span class="ln">184</span>      });
+<span class="ln">185</span>      actionRegistry.register(action, record.metadata);
+<span class="ln">186</span>      loaded.push(name);
+<span class="ln">187</span>    } catch (err) {
+<span class="ln">188</span>      failed.push({
+<span class="ln">189</span>        name,
+<span class="ln">190</span>        ownerId: record.metadata.ownerId,
+<span class="ln">191</span>        error: err instanceof Error ? err.message : String(err),
+<span class="ln">192</span>      });
+<span class="ln">193</span>    }
+<span class="ln">194</span>  }
+<span class="ln">195</span>
+<span class="ln">196</span>  return { loaded, failed };
+<span class="ln">197</span>}</pre>
+</div></section>
+        <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>packages/core/src/actions/module-loader.test.ts:11</code> 到 <code>packages/core/src/actions/module-loader.test.ts:15</code> 解释为什么测试必须跑真实 Node 进程。</li><li><code>packages/core/src/actions/module-loader.test.ts:22</code> 到 <code>packages/core/src/actions/module-loader.test.ts:30</code> 构造 helper 捕获 env 的复现用例。</li><li><code>packages/core/src/actions/module-loader.test.ts:39</code> 到 <code>packages/core/src/actions/module-loader.test.ts:47</code> 比较 bump 前后 import 行为。</li><li><code>packages/core/src/actions/module-loader.test.ts:67</code> 到 <code>packages/core/src/actions/module-loader.test.ts:71</code> 断言 withoutBump 保持 unset、after 变成 v1。</li></ul><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/actions/module-loader.test.ts</span> · L19-75</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">19</span>  it(&quot;re-evaluates the relative-import graph only after an epoch bump&quot;, async () =&gt; {
+<span class="ln">20</span>    const dir = await mkdtemp(join(tmpdir(), &quot;module-loader-epoch-&quot;));
+<span class="ln">21</span>    try {
+<span class="ln">22</span>      // The env read lives in an imported helper, not the entry: the resolve
+<span class="ln">23</span>      // hook must propagate the entry&#x27;s cache salt onto the relative import
+<span class="ln">24</span>      // or the helper stays cached across epochs.
+<span class="ln">25</span>      await writeFile(
+<span class="ln">26</span>        join(dir, &quot;config.js&quot;),
+<span class="ln">27</span>        `export const captured = process.env.${TEST_KEY} ?? &quot;unset&quot;;\n`,
+<span class="ln">28</span>        &quot;utf-8&quot;,
+<span class="ln">29</span>      );
+<span class="ln">30</span>      await writeFile(join(dir, &quot;entry.js&quot;), `export { captured } from &quot;./config.js&quot;;\n`, &quot;utf-8&quot;);
+<span class="ln">31</span>
+<span class="ln">32</span>      const loaderUrl = pathToFileURL(
+<span class="ln">33</span>        resolve(dirname(fileURLToPath(import.meta.url)), &quot;module-loader.ts&quot;),
+<span class="ln">34</span>      ).href;
+<span class="ln">35</span>      const probePath = join(dir, &quot;probe.mjs&quot;);
+<span class="ln">36</span>      await writeFile(
+<span class="ln">37</span>        probePath,
+<span class="ln">38</span>        `
+<span class="ln">39</span>import { bumpModuleEnvEpoch, importModuleWithCacheBuster } from ${JSON.stringify(loaderUrl)};
+<span class="ln">40</span>
+<span class="ln">41</span>const entry = process.argv[2];
+<span class="ln">42</span>const before = await importModuleWithCacheBuster(entry);
+<span class="ln">43</span>process.env.${TEST_KEY} = &quot;v1&quot;;
+<span class="ln">44</span>const withoutBump = await importModuleWithCacheBuster(entry);
+<span class="ln">45</span>bumpModuleEnvEpoch();
+<span class="ln">46</span>const after = await importModuleWithCacheBuster(entry);
+<span class="ln">47</span>console.log(JSON.stringify({
+<span class="ln">48</span>  before: before.captured,
+<span class="ln">49</span>  withoutBump: withoutBump.captured,
+<span class="ln">50</span>  after: after.captured,
+<span class="ln">51</span>}));
+<span class="ln">52</span>`,
+<span class="ln">53</span>        &quot;utf-8&quot;,
+<span class="ln">54</span>      );
+<span class="ln">55</span>
+<span class="ln">56</span>      // Run under tsx — both the `source` container mode and the forked action
+<span class="ln">57</span>      // workers in dev use it, and it is the loader that normalizes queries
+<span class="ln">58</span>      // away without the short-circuit hook. (Plain node, the `compiled` mode,
+<span class="ln">59</span>      // exercises the same hooks minus the tsx chain.)
+<span class="ln">60</span>      const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), &quot;..&quot;, &quot;..&quot;);
+<span class="ln">61</span>      const { stdout } = await execFileAsync(
+<span class="ln">62</span>        process.execPath,
+<span class="ln">63</span>        [&quot;--import&quot;, &quot;tsx&quot;, probePath, join(dir, &quot;entry.js&quot;)],
+<span class="ln">64</span>        { cwd: coreRoot },
+<span class="ln">65</span>      );
+<span class="ln">66</span>      const lines = stdout.trim().split(&quot;\n&quot;);
+<span class="ln">67</span>      expect(JSON.parse(lines[lines.length - 1])).toEqual({
+<span class="ln">68</span>        before: &quot;unset&quot;,
+<span class="ln">69</span>        withoutBump: &quot;unset&quot;,
+<span class="ln">70</span>        after: &quot;v1&quot;,
+<span class="ln">71</span>      });
+<span class="ln">72</span>    } finally {
+<span class="ln">73</span>      await rm(dir, { recursive: true, force: true });
+<span class="ln">74</span>    }
+<span class="ln">75</span>  }, 30_000);</pre>
+</div></section>
+        <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="evidence-grid"><div class="evidence-card"><b>App keys</b><code>packages/core/src/api/routes/app-keys.ts:60</code> 触发 refreshAppRuntime。</div><div class="evidence-card"><b>Action registry</b><code>packages/core/src/actions/app-actions-wiring.ts:218</code> 把 lazy wrapper 注册成正式 action。</div></div></section>
+        
+    <div class="foot"><span>Generated · 2026-08-28</span><span>Source · <a href="https://github.com/rome-os/rome">rome-os/rome</a></span></div>
+  </main>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('stars');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+  resize(); addEventListener('resize', resize);
+  const pts = Array.from({length: 70}, () => ({x: Math.random()*innerWidth, y: Math.random()*innerHeight, r: Math.random()*1.4+.3, a: Math.random()}));
+  function tick() { ctx.clearRect(0,0,canvas.width,canvas.height); pts.forEach(p => { p.a += .01; ctx.globalAlpha = .35 + Math.sin(p.a)*.25; ctx.fillStyle = '#a9e7ff'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); }
+  tick();
+})();
+</script>
+</body>
+</html>

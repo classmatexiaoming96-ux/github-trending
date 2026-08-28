@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>App Keys 密钥治理 · 深度解析 · rome</title>
+<meta name="description" content="rome-os/rome 源码级深度解析" />
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #6bd2ff;
+  --star-soft: #a9e7ff;
+  --star-deep: #1f8fb7;
+}
+.evidence-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.evidence-card{border:1px solid color-mix(in oklab,var(--star) 22%,transparent);background:rgba(255,255,255,.035);border-radius:14px;padding:16px}
+.evidence-card b{display:block;margin-bottom:6px;color:var(--ink)}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">rome<b>OS</b></div><div class="sub">源码级架构解析 · src/</div></div>
+    <span class="nav-ver">TypeScript · pnpm monorepo</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+      <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+      <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+      <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+      <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★377 · 2026-08-23</div><div><a href="https://github.com/rome-os/rome" target="_blank">rome-os/rome</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+        <div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">App Keys 密钥治理 <em>深度解析</em></h1><p class="hero-desc">这页拆 Rome 的 write-only app key：值能写入 app 环境，但 API 和 UI 都不能读回明文。</p></div>
+        <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>共享契约在 <code>packages/api-types/src/app-keys.ts:6</code> 到 <code>packages/api-types/src/app-keys.ts:15</code> 先规定 wire DTO 不带 value；<code>packages/web/src/lib/app-keys-api.ts:6</code> 到 <code>packages/web/src/lib/app-keys-api.ts:25</code> 让前端只调用列表、保存、删除三个 API；<code>packages/web/src/components/connections/app-keys-section.tsx:19</code> 到 <code>packages/web/src/components/connections/app-keys-section.tsx:22</code> 又把 replace 表单设计成永远重输 value。<code>packages/core/src/api/routes/app-keys.ts:16</code> 是只读列表入口，<code>packages/core/src/api/routes/app-keys.ts:28</code> 是写入入口，<code>packages/core/src/api/routes/app-keys.ts:54</code> 负责持久化，<code>packages/core/src/api/routes/app-keys.ts:71</code> 负责删除后刷新；其余校验行分散在后文逐段解释，避免把源码证据堆成不可读的行号清单。 这些路由行共同证明秘密值没有读回路径。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/api-types/src/app-keys.ts</span> · L1-30</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">1</span>// App keys — guardian-entered named values injected into the Rome process
+<span class="ln">2</span>// environment for apps to read. Shared contract between core&#x27;s routes, the
+<span class="ln">3</span>// dashboard, and mock mode. Name validation lives here rather than in core so
+<span class="ln">4</span>// the mock rejects exactly the names the server rejects.
+<span class="ln">5</span>
+<span class="ln">6</span>/** The value-free wire shape. Values never travel: the API returns names and
+<span class="ln">7</span> * labels only, and `overridden` says a real environment variable is shadowing
+<span class="ln">8</span> * the stored value (operator env always wins). */
+<span class="ln">9</span>export interface AppKeyDto {
+<span class="ln">10</span>  name: string;
+<span class="ln">11</span>  label: string;
+<span class="ln">12</span>  /** ISO-8601 timestamp of the last write. */
+<span class="ln">13</span>  updatedAt: string;
+<span class="ln">14</span>  overridden: boolean;
+<span class="ln">15</span>}
+<span class="ln">16</span>
+<span class="ln">17</span>export interface AppKeysListResponse {
+<span class="ln">18</span>  keys: AppKeyDto[];
+<span class="ln">19</span>}
+<span class="ln">20</span>
+<span class="ln">21</span>export const APP_KEY_MAX_NAME_LENGTH = 64;
+<span class="ln">22</span>export const APP_KEY_MAX_LABEL_LENGTH = 120;
+<span class="ln">23</span>export const APP_KEY_MAX_VALUE_LENGTH = 32768;
+<span class="ln">24</span>
+<span class="ln">25</span>const NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+<span class="ln">26</span>
+<span class="ln">27</span>// An app key lands in `process.env`, so a name that collides with platform
+<span class="ln">28</span>// configuration could reroute the database, the API ports, or an upstream
+<span class="ln">29</span>// credential. Config env names are only expressed as inline `env.X` reads in
+<span class="ln">30</span>// core&#x27;s `config.ts` (`envToRawConfig`) — there is no enumerable schema to</pre>
+</div></section>
+        <section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>API route 只返回投影</h3><p><code>packages/core/src/api/routes/app-keys.ts:16</code> 到 <code>packages/core/src/api/routes/app-keys.ts:25</code> 把 repository rows 映射成 name、label、updatedAt、overridden；<code>packages/core/src/api/routes/app-keys.ts:37</code> 到 <code>packages/core/src/api/routes/app-keys.ts:45</code> 拒绝空值和超长值；<code>packages/core/src/api/routes/app-keys.ts:54</code> 到 <code>packages/core/src/api/routes/app-keys.ts:61</code> 写入后按 injector 返回结果决定是否刷新 runtime。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/api/routes/app-keys.ts</span> · L16-76</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">16</span>  app.get(&quot;/app-keys&quot;, async (c) =&gt; {
+<span class="ln">17</span>    const rows = await deps.appKeysRepo.list();
+<span class="ln">18</span>    return c.json({
+<span class="ln">19</span>      keys: rows.map((row) =&gt; ({
+<span class="ln">20</span>        name: row.name,
+<span class="ln">21</span>        label: row.label,
+<span class="ln">22</span>        updatedAt: row.updatedAt.toISOString(),
+<span class="ln">23</span>        overridden: deps.appKeyInjector.isOverridden(row.name),
+<span class="ln">24</span>      })),
+<span class="ln">25</span>    });
+<span class="ln">26</span>  });
+<span class="ln">27</span>
+<span class="ln">28</span>  app.put(&quot;/app-keys/:name&quot;, async (c) =&gt; {
+<span class="ln">29</span>    const name = c.req.param(&quot;name&quot;);
+<span class="ln">30</span>    const nameError = appKeyNameError(name);
+<span class="ln">31</span>    if (nameError) return c.json({ error: nameError }, 400);
+<span class="ln">32</span>
+<span class="ln">33</span>    const body = await c.req
+<span class="ln">34</span>      .json&lt;{ label?: unknown; value?: unknown }&gt;()
+<span class="ln">35</span>      .catch(() =&gt; ({}) as { label?: unknown; value?: unknown });
+<span class="ln">36</span>
+<span class="ln">37</span>    if (typeof body.value !== &quot;string&quot; || body.value.length === 0) {
+<span class="ln">38</span>      return c.json({ error: &quot;Value is required.&quot; }, 400);
+<span class="ln">39</span>    }
+<span class="ln">40</span>    if (body.value.length &gt; APP_KEY_MAX_VALUE_LENGTH) {
+<span class="ln">41</span>      return c.json(
+<span class="ln">42</span>        { error: `Value must be at most ${APP_KEY_MAX_VALUE_LENGTH} characters.` },
+<span class="ln">43</span>        400,
+<span class="ln">44</span>      );
+<span class="ln">45</span>    }
+<span class="ln">46</span>    const label = typeof body.label === &quot;string&quot; &amp;&amp; body.label.trim() ? body.label.trim() : name;
+<span class="ln">47</span>    if (label.length &gt; APP_KEY_MAX_LABEL_LENGTH) {
+<span class="ln">48</span>      return c.json(
+<span class="ln">49</span>        { error: `Label must be at most ${APP_KEY_MAX_LABEL_LENGTH} characters.` },
+<span class="ln">50</span>        400,
+<span class="ln">51</span>      );
+<span class="ln">52</span>    }
+<span class="ln">53</span>
+<span class="ln">54</span>    await deps.appKeysRepo.upsert({ name, label, value: body.value });
+<span class="ln">55</span>    const live = deps.appKeyInjector.apply(name, body.value);
+<span class="ln">56</span>    // Running app code captured the old environment: warm workers hold a
+<span class="ln">57</span>    // fork-time snapshot, and cached main-process modules (API handlers,
+<span class="ln">58</span>    // hooks) may have read env at module scope. Refresh them whenever the
+<span class="ln">59</span>    // environment actually changed (an overridden save changes nothing).
+<span class="ln">60</span>    if (live) await deps.refreshAppRuntime();
+<span class="ln">61</span>    return c.json({ ok: true, overridden: !live });
+<span class="ln">62</span>  });
+<span class="ln">63</span>
+<span class="ln">64</span>  app.delete(&quot;/app-keys/:name&quot;, async (c) =&gt; {
+<span class="ln">65</span>    const name = c.req.param(&quot;name&quot;);
+<span class="ln">66</span>    const existing = await deps.appKeysRepo.get(name);
+<span class="ln">67</span>    if (!existing) return c.json({ error: &quot;Unknown app key.&quot; }, 404);
+<span class="ln">68</span>    await deps.appKeysRepo.delete(name);
+<span class="ln">69</span>    // Same staleness as the save path: without a refresh, running app code
+<span class="ln">70</span>    // keeps serving the deleted secret until Rome restarts.
+<span class="ln">71</span>    if (deps.appKeyInjector.remove(name)) await deps.refreshAppRuntime();
+<span class="ln">72</span>    return c.json({ ok: true });
+<span class="ln">73</span>  });
+<span class="ln">74</span>
+<span class="ln">75</span>  return app;
+<span class="ln">76</span>}</pre>
+</div><h3><span class="arr">▸</span>Repository 保留 value-free list</h3><p><code>packages/core/src/db/repositories/app-keys.ts:13</code> 到 <code>packages/core/src/db/repositories/app-keys.ts:21</code> 明确 summary 不带 value，<code>packages/core/src/db/repositories/app-keys.ts:26</code> 到 <code>packages/core/src/db/repositories/app-keys.ts:35</code> 的 list 只 select 四个字段；只有 <code>packages/core/src/db/repositories/app-keys.ts:38</code> 到 <code>packages/core/src/db/repositories/app-keys.ts:40</code> 的 listWithValues 能读出明文，注释限定给启动和注入路径使用。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/db/repositories/app-keys.ts</span> · L13-64</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">13</span>/** The value-free projection the API returns. The secret only leaves this
+<span class="ln">14</span> * repository through `listWithValues`, whose sole consumer is the boot/save
+<span class="ln">15</span> * injector. */
+<span class="ln">16</span>export interface AppKeySummary {
+<span class="ln">17</span>  name: string;
+<span class="ln">18</span>  label: string;
+<span class="ln">19</span>  createdAt: Date;
+<span class="ln">20</span>  updatedAt: Date;
+<span class="ln">21</span>}
+<span class="ln">22</span>
+<span class="ln">23</span>export class AppKeysRepository {
+<span class="ln">24</span>  constructor(private db: DrizzleDb) {}
+<span class="ln">25</span>
+<span class="ln">26</span>  async list(): Promise&lt;AppKeySummary[]&gt; {
+<span class="ln">27</span>    const rows = await this.db
+<span class="ln">28</span>      .select({
+<span class="ln">29</span>        name: appKeys.name,
+<span class="ln">30</span>        label: appKeys.label,
+<span class="ln">31</span>        createdAt: appKeys.createdAt,
+<span class="ln">32</span>        updatedAt: appKeys.updatedAt,
+<span class="ln">33</span>      })
+<span class="ln">34</span>      .from(appKeys);
+<span class="ln">35</span>    return rows.sort((a, b) =&gt; a.name.localeCompare(b.name));
+<span class="ln">36</span>  }
+<span class="ln">37</span>
+<span class="ln">38</span>  async listWithValues(): Promise&lt;AppKeyRow[]&gt; {
+<span class="ln">39</span>    return await this.db.select().from(appKeys);
+<span class="ln">40</span>  }
+<span class="ln">41</span>
+<span class="ln">42</span>  async get(name: string): Promise&lt;AppKeyRow | null&gt; {
+<span class="ln">43</span>    const rows = await this.db.select().from(appKeys).where(eq(appKeys.name, name));
+<span class="ln">44</span>    return rows[0] ?? null;
+<span class="ln">45</span>  }
+<span class="ln">46</span>
+<span class="ln">47</span>  // One atomic upsert rather than a read-then-branch: two concurrent writers to
+<span class="ln">48</span>  // the same name would both observe an empty read and race into a duplicate
+<span class="ln">49</span>  // insert on the `app_keys.name` primary key.
+<span class="ln">50</span>  async upsert(input: { name: string; label: string; value: string }): Promise&lt;void&gt; {
+<span class="ln">51</span>    const now = new Date();
+<span class="ln">52</span>    await this.db
+<span class="ln">53</span>      .insert(appKeys)
+<span class="ln">54</span>      .values({ ...input, createdAt: now, updatedAt: now })
+<span class="ln">55</span>      .onConflictDoUpdate({
+<span class="ln">56</span>        target: appKeys.name,
+<span class="ln">57</span>        set: { label: input.label, value: input.value, updatedAt: now },
+<span class="ln">58</span>      });
+<span class="ln">59</span>  }
+<span class="ln">60</span>
+<span class="ln">61</span>  async delete(name: string): Promise&lt;void&gt; {
+<span class="ln">62</span>    await this.db.delete(appKeys).where(eq(appKeys.name, name));
+<span class="ln">63</span>  }
+<span class="ln">64</span>}</pre>
+</div><h3><span class="arr">▸</span>Injector 尊重 operator env</h3><p><code>packages/core/src/app-keys/injector.ts:5</code> 到 <code>packages/core/src/app-keys/injector.ts:15</code> 写出两个不变量：真实环境变量优先，以及只删除自己写过的键。<code>packages/core/src/app-keys/injector.ts:25</code>、<code>packages/core/src/app-keys/injector.ts:32</code>、<code>packages/core/src/app-keys/injector.ts:40</code>、<code>packages/core/src/app-keys/injector.ts:42</code> 是这个状态机的关键转移点。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/core/src/app-keys/injector.ts</span> · L5-50</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">5</span>/**
+<span class="ln">6</span> * Owns the stored-key slice of `process.env`. Two invariants:
+<span class="ln">7</span> *
+<span class="ln">8</span> * - The real process environment always wins. A name that already had a value
+<span class="ln">9</span> *   before injection is never overwritten — operator config (env files, CI,
+<span class="ln">10</span> *   container env) cannot be shadowed from the dashboard. Such keys are
+<span class="ln">11</span> *   reported as overridden instead of silently going live.
+<span class="ln">12</span> * - Only names this injector set are ever deleted or scrubbed. It tracks its
+<span class="ln">13</span> *   own writes, so removing a stored key can never unset an operator-set var
+<span class="ln">14</span> *   that happens to share the name.
+<span class="ln">15</span> */
+<span class="ln">16</span>export class AppKeyInjector {
+<span class="ln">17</span>  private injected = new Set&lt;string&gt;();
+<span class="ln">18</span>  private overridden = new Set&lt;string&gt;();
+<span class="ln">19</span>
+<span class="ln">20</span>  constructor(private env: NodeJS.ProcessEnv = process.env) {}
+<span class="ln">21</span>
+<span class="ln">22</span>  /** Applies a stored key. Returns true when the value went live, false when a
+<span class="ln">23</span>   * pre-existing environment value kept precedence. */
+<span class="ln">24</span>  apply(name: string, value: string): boolean {
+<span class="ln">25</span>    if (!this.injected.has(name) &amp;&amp; this.env[name] !== undefined) {
+<span class="ln">26</span>      this.overridden.add(name);
+<span class="ln">27</span>      logger.warn(
+<span class="ln">28</span>        `App key ${name} is overridden by the process environment; the stored value is not live`,
+<span class="ln">29</span>      );
+<span class="ln">30</span>      return false;
+<span class="ln">31</span>    }
+<span class="ln">32</span>    this.env[name] = value;
+<span class="ln">33</span>    this.injected.add(name);
+<span class="ln">34</span>    return true;
+<span class="ln">35</span>  }
+<span class="ln">36</span>
+<span class="ln">37</span>  /** Removes a stored key from the environment, only if this injector set it.
+<span class="ln">38</span>   * Returns true when the environment actually changed. */
+<span class="ln">39</span>  remove(name: string): boolean {
+<span class="ln">40</span>    this.overridden.delete(name);
+<span class="ln">41</span>    if (!this.injected.has(name)) return false;
+<span class="ln">42</span>    delete this.env[name];
+<span class="ln">43</span>    this.injected.delete(name);
+<span class="ln">44</span>    return true;
+<span class="ln">45</span>  }
+<span class="ln">46</span>
+<span class="ln">47</span>  isOverridden(name: string): boolean {
+<span class="ln">48</span>    return this.overridden.has(name);
+<span class="ln">49</span>  }
+<span class="ln">50</span>}</pre>
+</div></section>
+        <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><pre>UI form → /api/app-keys/:name → AppKeysRepository.upsert → AppKeyInjector.apply → refreshAppRuntime
+delete → repository.delete → injector.remove → refresh only when env changed</pre></div><p>UI 侧 <code>packages/web/src/components/connections/app-keys-section.tsx:77</code> 到 <code>packages/web/src/components/connections/app-keys-section.tsx:89</code> 先做客户端校验和 upper-case name；<code>packages/web/src/components/connections/app-keys-section.tsx:157</code> 到 <code>packages/web/src/components/connections/app-keys-section.tsx:163</code> 显示 overridden/set 状态；<code>packages/web/src/components/connections/app-keys-section.tsx:210</code> 到 <code>packages/web/src/components/connections/app-keys-section.tsx:220</code> 使用 password input 且 value 不回填。这个流程把用户体验和服务端安全模型对齐。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/web/src/components/connections/app-keys-section.tsx</span> · L77-89</span><span>TSX</span></div>
+  <pre class="code"><span class="ln">77</span>  const submit = () =&gt; {
+<span class="ln">78</span>    const trimmedName = name.trim();
+<span class="ln">79</span>    const nameError = appKeyNameError(trimmedName);
+<span class="ln">80</span>    if (nameError) {
+<span class="ln">81</span>      setFormError(nameError);
+<span class="ln">82</span>      return;
+<span class="ln">83</span>    }
+<span class="ln">84</span>    if (!value) {
+<span class="ln">85</span>      setFormError(t(&quot;appKeys.form.valueRequired&quot;));
+<span class="ln">86</span>      return;
+<span class="ln">87</span>    }
+<span class="ln">88</span>    saveMutation.mutate({ name: trimmedName, label: label.trim() || trimmedName, value });
+<span class="ln">89</span>  };</pre>
+</div></section>
+        <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>packages/core/src/api/routes/app-keys.test.ts:33</code> 到 <code>packages/core/src/api/routes/app-keys.test.ts:48</code> 验证 list 不泄漏 hunter2。</li><li><code>packages/core/src/api/routes/app-keys.test.ts:71</code> 到 <code>packages/core/src/api/routes/app-keys.test.ts:84</code> 验证 operator env 覆盖 dashboard 值。</li><li><code>packages/core/src/api/routes/app-keys.test.ts:86</code> 到 <code>packages/core/src/api/routes/app-keys.test.ts:157</code> 验证 warm worker pool 因密钥变化重启。</li><li><code>packages/core/src/app-keys/reserved.test.ts:21</code> 到 <code>packages/core/src/app-keys/reserved.test.ts:30</code> 验证 PATH、ROME、ANTHROPIC、DATABASE 等保留名被拒绝。</li></ul></section>
+        <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="evidence-grid"><div class="evidence-card"><b>module-loader</b>密钥变化后用 env epoch 驱动模块重评估。</div><div class="evidence-card"><b>SettingsTabPage</b>把 write-only 和 all-apps consent 显示给用户。</div></div></section>
+        
+    <div class="foot"><span>Generated · 2026-08-28</span><span>Source · <a href="https://github.com/rome-os/rome">rome-os/rome</a></span></div>
+  </main>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('stars');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+  resize(); addEventListener('resize', resize);
+  const pts = Array.from({length: 70}, () => ({x: Math.random()*innerWidth, y: Math.random()*innerHeight, r: Math.random()*1.4+.3, a: Math.random()}));
+  function tick() { ctx.clearRect(0,0,canvas.width,canvas.height); pts.forEach(p => { p.a += .01; ctx.globalAlpha = .35 + Math.sin(p.a)*.25; ctx.fillStyle = '#a9e7ff'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); }
+  tick();
+})();
+</script>
+</body>
+</html>

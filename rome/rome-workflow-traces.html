@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Workflow 与 Trace · 深度解析 · rome</title>
+<meta name="description" content="rome-os/rome 源码级深度解析" />
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #6bd2ff;
+  --star-soft: #a9e7ff;
+  --star-deep: #1f8fb7;
+}
+.evidence-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.evidence-card{border:1px solid color-mix(in oklab,var(--star) 22%,transparent);background:rgba(255,255,255,.035);border-radius:14px;padding:16px}
+.evidence-card b{display:block;margin-bottom:6px;color:var(--ink)}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">rome<b>OS</b></div><div class="sub">源码级架构解析 · src/</div></div>
+    <span class="nav-ver">TypeScript · pnpm monorepo</span>
+    <nav><ul class="nav-list" id="navlist">
+      <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+      <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+      <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+      <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+      <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+    </ul></nav>
+    <div class="nav-foot"><div>Stars ★377 · 2026-08-23</div><div><a href="https://github.com/rome-os/rome" target="_blank">rome-os/rome</a></div><div><a href="../index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+        <div class="hero"><div class="hero-eyebrow">§ · Nested detail page</div><h1 class="hero-title">Workflow 与 Trace <em>深度解析</em></h1><p class="hero-desc">这页拆 Rome 如何把自然语言 workflow 入口、技能约束、routine action 和 trace DTO 串成可观察自动化。</p></div>
+        <section class="sec" id="intro"><div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div><h2 class="sec-title">导入链与<em>契约</em></h2><p>Workflow Studio 的 UI 入口非常薄：<code>rome_apps/workflow-studio/src/web/App.tsx:3</code> 引入 startChat，<code>rome_apps/workflow-studio/src/web/App.tsx:19</code> 到 <code>rome_apps/workflow-studio/src/web/App.tsx:31</code> 把 textarea 文本转成带 skillName 的新聊天。真正的行为约束在 skill：<code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:14</code> 先塑形，<code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:52</code> 要求批准，<code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:59</code> 后才构建。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">rome_apps/workflow-studio/src/web/App.tsx</span> · L1-76</span><span>TSX</span></div>
+  <pre class="code"><span class="ln">1</span>import &quot;./styles.css&quot;;
+<span class="ln">2</span>import { useCallback, useState } from &quot;react&quot;;
+<span class="ln">3</span>import { startChat, type RomeAppBootstrap } from &quot;@rome-os/app-web-sdk&quot;;
+<span class="ln">4</span>
+<span class="ln">5</span>const EXAMPLE_PROMPTS = [
+<span class="ln">6</span>  &quot;Every morning, summarize my unread emails and post the digest to my chat.&quot;,
+<span class="ln">7</span>  &quot;When I save a link to my reading list, fetch the article and add a short summary.&quot;,
+<span class="ln">8</span>];
+<span class="ln">9</span>
+<span class="ln">10</span>// The app is a front door: describing an automation opens a fresh guardian chat
+<span class="ln">11</span>// with that message under the `design-workflow` skill, which shapes it into a
+<span class="ln">12</span>// short spec, gets the guardian&#x27;s approval, and builds the workflow — all in that
+<span class="ln">13</span>// one conversation. There is no panel to mirror, so the page is just the launcher.
+<span class="ln">14</span>export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBootstrap }) {
+<span class="ln">15</span>  const [draft, setDraft] = useState(&quot;&quot;);
+<span class="ln">16</span>  const [starting, setStarting] = useState(false);
+<span class="ln">17</span>  const [error, setError] = useState&lt;string | null&gt;(null);
+<span class="ln">18</span>
+<span class="ln">19</span>  const start = useCallback(async () =&gt; {
+<span class="ln">20</span>    const message = draft.trim();
+<span class="ln">21</span>    if (!message || starting) return;
+<span class="ln">22</span>    setStarting(true);
+<span class="ln">23</span>    setError(null);
+<span class="ln">24</span>    try {
+<span class="ln">25</span>      await startChat({ message, skillName: &quot;design-workflow&quot; });
+<span class="ln">26</span>      // startChat navigates to the new chat on success; no further work here.
+<span class="ln">27</span>    } catch {
+<span class="ln">28</span>      setStarting(false);
+<span class="ln">29</span>      setError(&quot;Couldn&#x27;t start a chat just now — try again.&quot;);
+<span class="ln">30</span>    }
+<span class="ln">31</span>  }, [draft, starting]);
+<span class="ln">32</span>
+<span class="ln">33</span>  return (
+<span class="ln">34</span>    &lt;div className=&quot;ws-root&quot;&gt;
+<span class="ln">35</span>      &lt;div className=&quot;ws-frontdoor&quot;&gt;
+<span class="ln">36</span>        &lt;h1&gt;Build a workflow&lt;/h1&gt;
+<span class="ln">37</span>        &lt;p className=&quot;ws-lede&quot;&gt;
+<span class="ln">38</span>          Describe an automation in plain language. Your guardian shapes it into a short spec you
+<span class="ln">39</span>          approve, then builds it into a runnable workflow — all in one conversation.
+<span class="ln">40</span>        &lt;/p&gt;
+<span class="ln">41</span>        &lt;textarea
+<span class="ln">42</span>          className=&quot;ws-input&quot;
+<span class="ln">43</span>          rows={3}
+<span class="ln">44</span>          placeholder=&quot;e.g. Every morning, summarize my unread emails and post the digest to my chat.&quot;
+<span class="ln">45</span>          value={draft}
+<span class="ln">46</span>          onChange={(e) =&gt; setDraft(e.target.value)}
+<span class="ln">47</span>          disabled={starting}
+<span class="ln">48</span>        /&gt;
+<span class="ln">49</span>        &lt;div className=&quot;ws-cta-row&quot;&gt;
+<span class="ln">50</span>          &lt;button
+<span class="ln">51</span>            className=&quot;ws-cta&quot;
+<span class="ln">52</span>            onClick={() =&gt; void start()}
+<span class="ln">53</span>            disabled={!draft.trim() || starting}
+<span class="ln">54</span>          &gt;
+<span class="ln">55</span>            {starting ? &quot;Starting…&quot; : &quot;Design this workflow&quot;}
+<span class="ln">56</span>          &lt;/button&gt;
+<span class="ln">57</span>        &lt;/div&gt;
+<span class="ln">58</span>        {error &amp;&amp; &lt;p className=&quot;ws-error-line&quot;&gt;{error}&lt;/p&gt;}
+<span class="ln">59</span>        &lt;div className=&quot;ws-examples&quot;&gt;
+<span class="ln">60</span>          &lt;span className=&quot;ws-examples-label&quot;&gt;Try one of these&lt;/span&gt;
+<span class="ln">61</span>          {EXAMPLE_PROMPTS.map((p) =&gt; (
+<span class="ln">62</span>            &lt;button
+<span class="ln">63</span>              key={p}
+<span class="ln">64</span>              type=&quot;button&quot;
+<span class="ln">65</span>              className=&quot;ws-example&quot;
+<span class="ln">66</span>              onClick={() =&gt; setDraft(p)}
+<span class="ln">67</span>              disabled={starting}
+<span class="ln">68</span>            &gt;
+<span class="ln">69</span>              {p}
+<span class="ln">70</span>            &lt;/button&gt;
+<span class="ln">71</span>          ))}
+<span class="ln">72</span>        &lt;/div&gt;
+<span class="ln">73</span>      &lt;/div&gt;
+<span class="ln">74</span>    &lt;/div&gt;
+<span class="ln">75</span>  );
+<span class="ln">76</span>}</pre>
+</div></section>
+        <section class="sec" id="core-impl"><div class="sec-no">§ <b>01</b> · CORE IMPL</div><h2 class="sec-title">核心实现，<em>逐段</em>拆</h2><h3><span class="arr">▸</span>Workflow skill 的静态边界</h3><p><code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:20</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:28</code> 规定 spec 必须包含触发、步骤、决策、per-item work 和交付；<code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:31</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:47</code> 禁止捏造事实和无界循环；<code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:61</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:68</code> 把构建委托给 workflow_creation。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md</span> · L14-68</span><span>Markdown</span></div>
+  <pre class="code"><span class="ln">14</span>## Phase 1 — Shape the idea into a spec
+<span class="ln">15</span>
+<span class="ln">16</span>Turn what the guardian said into a short, plain-language spec they can read and
+<span class="ln">17</span>sign off on. The spec is the thing they approve, so write it for a non-technical
+<span class="ln">18</span>reader — what the automation *does*, not how it&#x27;s coded. Use this shape:
+<span class="ln">19</span>
+<span class="ln">20</span>&gt; **Trigger** — what kicks it off (a schedule, an event, a &quot;run now&quot;).
+<span class="ln">21</span>&gt; **Steps** — the ordered things it does, one short verb phrase each
+<span class="ln">22</span>&gt; (&quot;fetch my unread emails&quot;, &quot;summarize them&quot;, &quot;post the digest to my chat&quot;).
+<span class="ln">23</span>&gt; **Decisions** — any branch (&quot;if the total is over $5k, escalate; otherwise file
+<span class="ln">24</span>&gt; it&quot;), stated as plain conditions.
+<span class="ln">25</span>&gt; **Per-item work** — anything done &quot;for each&quot; of a list (&quot;for each ticket, rate
+<span class="ln">26</span>&gt; its severity&quot;).
+<span class="ln">27</span>&gt; **Delivers** — the final step that sends, posts, saves, or shows the result.
+<span class="ln">28</span>
+<span class="ln">29</span>Hold these disciplines while you shape it — they decide whether the spec is real:
+<span class="ln">30</span>
+<span class="ln">31</span>- **Ask the guardian for facts only they can supply; never invent them.** A
+<span class="ln">32</span>  threshold amount, a recipient, a channel, which account, which event fires the
+<span class="ln">33</span>  trigger — a made-up &quot;$5,000&quot; looks authoritative and gets approved by accident.
+<span class="ln">34</span>  When a fact like this is missing, ask for it in your reply rather than guessing.
+<span class="ln">35</span>- **Resolve design questions in conversation, not in the spec.** Anything that
+<span class="ln">36</span>  changes the *shape* — whether to branch, what to do per item — gets settled with
+<span class="ln">37</span>  the guardian before you present the spec, not parked as an open question in it.
+<span class="ln">38</span>- **Every workflow must deliver.** A spec that only fetches and computes, with no
+<span class="ln">39</span>  step that sends/posts/saves/shows a result, has no destination and is never
+<span class="ln">40</span>  finished. If the guardian didn&#x27;t say where the result goes, that&#x27;s a fact to ask
+<span class="ln">41</span>  for (see above).
+<span class="ln">42</span>- **Don&#x27;t let vague quantifiers pass.** &quot;the top labs&quot;, &quot;the latest news&quot;, &quot;key
+<span class="ln">43</span>  themes&quot;, &quot;top outlets&quot; each hide a fact — how many, which sources, what time
+<span class="ln">44</span>  window. If it changes what the automation does, pin it down with the guardian.
+<span class="ln">45</span>- **Keep it statically structured.** The full space of what it does must be
+<span class="ln">46</span>  knowable before it runs: ordered steps, parallel work, a decision, or bounded
+<span class="ln">47</span>  per-item fan-out. No &quot;keep polling until…&quot;, no unbounded loops.
+<span class="ln">48</span>
+<span class="ln">49</span>Keep the spec itself conversational and free of technical artifacts — no JSON, no
+<span class="ln">50</span>flow chart, no node/combinator vocabulary. Talk about what it will *do*.
+<span class="ln">51</span>
+<span class="ln">52</span>## Phase 2 — Get approval
+<span class="ln">53</span>
+<span class="ln">54</span>Present the spec and ask the guardian to approve it or tell you what to change.
+<span class="ln">55</span>Make the ask explicit (&quot;Want me to build this, or change anything first?&quot;). If
+<span class="ln">56</span>they ask for a change, revise the spec and ask again. Build **only** after a clear
+<span class="ln">57</span>yes — don&#x27;t start scaffolding on a maybe.
+<span class="ln">58</span>
+<span class="ln">59</span>## Phase 3 — Build it
+<span class="ln">60</span>
+<span class="ln">61</span>On approval, build the workflow into a new, runnable Rome app. **Load the
+<span class="ln">62</span>`coding:workflow_creation` skill and follow it end to end** — it owns the real work:
+<span class="ln">63</span>deriving the control flow, scaffolding the `workflow` template, authoring
+<span class="ln">64</span>`src/workflow/definition.ts` in plain TypeScript (`await`/`if`/`for`/`Promise.all`),
+<span class="ln">65</span>the `system:summon` discipline for generative steps, the `connector:connector_proxy` discipline for
+<span class="ln">66</span>SaaS calls, the `ctx.dryRun` guard on every write, the display envelope, the web
+<span class="ln">67</span>surface, and the install. Translate the approved spec into its control flow
+<span class="ln">68</span>faithfully — don&#x27;t redesign the automation while coding it.</pre>
+</div><h3><span class="arr">▸</span>Dream action 作为日常自动化样本</h3><p><code>rome_apps/dream/src/actions/dream/index.ts:22</code> 到 <code>rome_apps/dream/src/actions/dream/index.ts:67</code> 展示 app action 如何自注册 daily routine，<code>rome_apps/dream/src/actions/dream/index.ts:85</code> 到 <code>rome_apps/dream/src/actions/dream/index.ts:114</code> 生成 review prompt，<code>rome_apps/dream/src/actions/dream/index.ts:119</code> 到 <code>rome_apps/dream/src/actions/dream/index.ts:141</code> 通过 agentRunner 收集 result/error/text。这是 Rome app action 和 agent runner 的实际组合样本。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">rome_apps/dream/src/actions/dream/index.ts</span> · L22-67</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">22</span>async function ensureDailySchedule(
+<span class="ln">23</span>  runAction: (name: string, args: Record&lt;string, unknown&gt;) =&gt; Promise&lt;ActionResult&gt;,
+<span class="ln">24</span>  listRoutines: () =&gt; Promise&lt;Routine[]&gt;,
+<span class="ln">25</span>): Promise&lt;void&gt; {
+<span class="ln">26</span>  const existing = await listRoutines();
+<span class="ln">27</span>  // Dedup on the routine name alone. Matching on actionName too would let any
+<span class="ln">28</span>  // unrelated routine that happens to run `dream` suppress this required daily
+<span class="ln">29</span>  // self-register.
+<span class="ln">30</span>  const alreadyScheduled = existing.some((r) =&gt; r.name === DREAM_EVENT_NAME);
+<span class="ln">31</span>
+<span class="ln">32</span>  if (alreadyScheduled) {
+<span class="ln">33</span>    return;
+<span class="ln">34</span>  }
+<span class="ln">35</span>
+<span class="ln">36</span>  log.info(&quot;no daily dream routine found, registering one now&quot;);
+<span class="ln">37</span>
+<span class="ln">38</span>  // create_routine reports caller-fixable problems via { status: &quot;error&quot; },
+<span class="ln">39</span>  // not a throw — surface that so a failed registration isn&#x27;t mistaken for a
+<span class="ln">40</span>  // scheduled routine.
+<span class="ln">41</span>  // This required daily self-review is auto-attributed to dream by the runtime
+<span class="ln">42</span>  // (create_routine reads the calling app), so it isn&#x27;t the user&#x27;s to delete —
+<span class="ln">43</span>  // dream re-registers it if missing.
+<span class="ln">44</span>  const result = await runAction(&quot;create_routine&quot;, {
+<span class="ln">45</span>    name: DREAM_EVENT_NAME,
+<span class="ln">46</span>    trigger: {
+<span class="ln">47</span>      type: &quot;schedule&quot;,
+<span class="ln">48</span>      tzid: DEFAULT_REVIEW_TZ,
+<span class="ln">49</span>      // Floating: the nightly review runs at the guardian&#x27;s local 03:00 and
+<span class="ln">50</span>      // follows them if they move.
+<span class="ln">51</span>      tzMode: &quot;floating&quot;,
+<span class="ln">52</span>      localTime: DEFAULT_REVIEW_TIME,
+<span class="ln">53</span>      rrule: DAILY_RRULE,
+<span class="ln">54</span>    },
+<span class="ln">55</span>    actionName: &quot;dream&quot;,
+<span class="ln">56</span>    args: {},
+<span class="ln">57</span>  });
+<span class="ln">58</span>  if (result.status === &quot;error&quot;) {
+<span class="ln">59</span>    throw new Error(`create_routine failed: ${result.error}`);
+<span class="ln">60</span>  }
+<span class="ln">61</span>
+<span class="ln">62</span>  log.info(&quot;daily dream event registered&quot;, {
+<span class="ln">63</span>    time: DEFAULT_REVIEW_TIME,
+<span class="ln">64</span>    tz: DEFAULT_REVIEW_TZ,
+<span class="ln">65</span>    rrule: DAILY_RRULE,
+<span class="ln">66</span>  });
+<span class="ln">67</span>}</pre>
+</div><h3><span class="arr">▸</span>Trace blocks 结构化执行过程</h3><p><code>packages/api-types/src/trace-segments.ts:27</code> 到 <code>packages/api-types/src/trace-segments.ts:54</code> 定义 session/turn 生命周期，<code>packages/api-types/src/trace-segments.ts:74</code> 到 <code>packages/api-types/src/trace-segments.ts:90</code> 定义工具调用配对，<code>packages/api-types/src/trace-segments.ts:92</code> 到 <code>packages/api-types/src/trace-segments.ts:122</code> 定义子代理 start/result。UI 不需要解析日志文本，而是消费 typed DTO。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/api-types/src/trace-segments.ts</span> · L27-122</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">27</span>export interface SessionInitBlock extends TraceBlockBase {
+<span class="ln">28</span>  type: &quot;session_init&quot;;
+<span class="ln">29</span>  sessionId: string;
+<span class="ln">30</span>  romeSession?: RomeSessionRefDto;
+<span class="ln">31</span>  systemPrompt?: string;
+<span class="ln">32</span>  userPrompt?: string;
+<span class="ln">33</span>  projectPath?: string;
+<span class="ln">34</span>}
+<span class="ln">35</span>
+<span class="ln">36</span>export interface TurnStartBlock extends TraceBlockBase {
+<span class="ln">37</span>  type: &quot;turn_start&quot;;
+<span class="ln">38</span>  turnId: string;
+<span class="ln">39</span>  sessionId: string;
+<span class="ln">40</span>  userPrompt: string;
+<span class="ln">41</span>}
+<span class="ln">42</span>
+<span class="ln">43</span>/** Follows the terminal result or error and closes its turn. */
+<span class="ln">44</span>export interface TurnEndBlock extends TraceBlockBase {
+<span class="ln">45</span>  type: &quot;turn_end&quot;;
+<span class="ln">46</span>  turnId: string;
+<span class="ln">47</span>  /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
+<span class="ln">48</span>   *  it takes precedence over `error`. */
+<span class="ln">49</span>  status: &quot;completed&quot; | &quot;interrupted&quot; | &quot;error&quot;;
+<span class="ln">50</span>  /** Turn wall-clock measured by the AgentSession. Distinct from
+<span class="ln">51</span>   *  `accounting.durationMs` on the terminal block, which is the provider&#x27;s
+<span class="ln">52</span>   *  self-reported per-call duration. */
+<span class="ln">53</span>  durationMs: number;
+<span class="ln">54</span>}
+<span class="ln">55</span>
+<span class="ln">56</span>export interface TextBlock extends TraceBlockBase {
+<span class="ln">57</span>  type: &quot;text&quot;;
+<span class="ln">58</span>  content: string;
+<span class="ln">59</span>  /** Provider-agnostic role of this text within its turn. `commentary` =
+<span class="ln">60</span>   *  in-turn narration the model emitted between/before tool calls; `final` =
+<span class="ln">61</span>   *  the turn&#x27;s closing answer (also carried by the terminal `result` block /
+<span class="ln">62</span>   *  the assistant bubble). Sourced from the provider&#x27;s native terminal signal
+<span class="ln">63</span>   *  (Anthropic `stop_reason`; Codex app-server `phase`). Absent on legacy
+<span class="ln">64</span>   *  blocks persisted before this field existed — treat absence as &quot;unknown&quot;
+<span class="ln">65</span>   *  (not promoted). Deliberately borrows Codex&#x27;s vocabulary; not Codex-only. */
+<span class="ln">66</span>  turnPhase?: &quot;commentary&quot; | &quot;final&quot;;
+<span class="ln">67</span>}
+<span class="ln">68</span>
+<span class="ln">69</span>export interface ThinkingBlock extends TraceBlockBase {
+<span class="ln">70</span>  type: &quot;thinking&quot;;
+<span class="ln">71</span>  content: string;
+<span class="ln">72</span>}
+<span class="ln">73</span>
+<span class="ln">74</span>export interface ToolUseBlock extends TraceBlockBase {
+<span class="ln">75</span>  type: &quot;tool_use&quot;;
+<span class="ln">76</span>  tool: string;
+<span class="ln">77</span>  input: unknown;
+<span class="ln">78</span>  /** Provider-issued ID used to pair the matching tool result. */
+<span class="ln">79</span>  id?: string;
+<span class="ln">80</span>  startedAt?: string;
+<span class="ln">81</span>}
+<span class="ln">82</span>
+<span class="ln">83</span>export interface ToolResultBlock extends TraceBlockBase {
+<span class="ln">84</span>  type: &quot;tool_result&quot;;
+<span class="ln">85</span>  tool: string;
+<span class="ln">86</span>  output: unknown;
+<span class="ln">87</span>  /** Provider-issued ID of the corresponding tool use. */
+<span class="ln">88</span>  toolUseId?: string;
+<span class="ln">89</span>  endedAt?: string;
+<span class="ln">90</span>}
+<span class="ln">91</span>
+<span class="ln">92</span>export interface SubagentStartBlock extends TraceBlockBase {
+<span class="ln">93</span>  type: &quot;subagent_start&quot;;
+<span class="ln">94</span>  toolUseId: string;
+<span class="ln">95</span>  agentName: string;
+<span class="ln">96</span>  input: unknown;
+<span class="ln">97</span>  sessionId: string;
+<span class="ln">98</span>  turnId: string;
+<span class="ln">99</span>  startedAt?: string;
+<span class="ln">100</span>}
+<span class="ln">101</span>
+<span class="ln">102</span>export type SubagentResultBlock =
+<span class="ln">103</span>  | (TraceBlockBase &amp; {
+<span class="ln">104</span>      type: &quot;subagent_result&quot;;
+<span class="ln">105</span>      toolUseId: string;
+<span class="ln">106</span>      agentName: string;
+<span class="ln">107</span>      sessionId: string;
+<span class="ln">108</span>      turnId: string;
+<span class="ln">109</span>      status: &quot;completed&quot;;
+<span class="ln">110</span>      output: unknown;
+<span class="ln">111</span>      endedAt?: string;
+<span class="ln">112</span>    })
+<span class="ln">113</span>  | (TraceBlockBase &amp; {
+<span class="ln">114</span>      type: &quot;subagent_result&quot;;
+<span class="ln">115</span>      toolUseId: string;
+<span class="ln">116</span>      agentName: string;
+<span class="ln">117</span>      sessionId: string;
+<span class="ln">118</span>      turnId: string;
+<span class="ln">119</span>      status: &quot;failed&quot; | &quot;cancelled&quot;;
+<span class="ln">120</span>      error: { message: string; code?: string };
+<span class="ln">121</span>      endedAt?: string;
+<span class="ln">122</span>    });</pre>
+</div></section>
+        <section class="sec" id="flow"><div class="sec-no">§ <b>02</b> · KEY FLOW</div><h2 class="sec-title">关键<em>流程</em></h2><div class="flow"><pre>plain-language workflow request
+  → startChat({ skillName: "design-workflow" })
+  → approved spec
+  → workflow_creation builds app
+  → app action/routine executes
+  → trace DTO stores tool/subagent/result blocks</pre></div><p><code>packages/api-types/src/trace-segments.ts:124</code> 到 <code>packages/api-types/src/trace-segments.ts:162</code> 让每次运行带 usage/accounting，<code>packages/api-types/src/trace-segments.ts:209</code> 到 <code>packages/api-types/src/trace-segments.ts:231</code> 将 run segment 和 block segment 分开，<code>packages/api-types/src/trace-segments.ts:247</code> 到 <code>packages/api-types/src/trace-segments.ts:271</code> 汇总 distinct apps、total steps、subagents、duration 和 plan。</p><p>这组 trace 引用体现了 Rome 的可观测性边界：<code>packages/api-types/src/trace-segments.ts:146</code> 保存 provider/model 账本，<code>packages/api-types/src/trace-segments.ts:156</code> 标记 descendant subagent 数量，<code>packages/api-types/src/trace-segments.ts:215</code> 要求 paired tool 或 subagent block 按时间排列，<code>packages/api-types/src/trace-segments.ts:253</code> 再把子代理汇总挂回 summary。也就是说，Workflow 不是只留下最终文本，而是把运行过程拆成可以复盘的结构化事件。</p><div class="code-wrap">
+  <div class="code-bar"><span><span class="src">packages/api-types/src/trace-segments.ts</span> · L124-271</span><span>TypeScript</span></div>
+  <pre class="code"><span class="ln">124</span>export interface TraceTokenUsage {
+<span class="ln">125</span>  cacheReadTokens: number;
+<span class="ln">126</span>  cacheWriteTokens: number;
+<span class="ln">127</span>  inputTokens: number;
+<span class="ln">128</span>  outputTokens: number;
+<span class="ln">129</span>}
+<span class="ln">130</span>
+<span class="ln">131</span>export interface TraceContextUsage {
+<span class="ln">132</span>  usedTokens: number;
+<span class="ln">133</span>  windowTokens?: number;
+<span class="ln">134</span>  remainingTokens?: number;
+<span class="ln">135</span>}
+<span class="ln">136</span>
+<span class="ln">137</span>/** Read-time usage grouped by the provider/model that produced it. */
+<span class="ln">138</span>export interface TraceModelUsage {
+<span class="ln">139</span>  provider: string;
+<span class="ln">140</span>  model: string;
+<span class="ln">141</span>  usage: TraceTokenUsage;
+<span class="ln">142</span>  costUsd?: number;
+<span class="ln">143</span>  runCount: number;
+<span class="ln">144</span>}
+<span class="ln">145</span>
+<span class="ln">146</span>export interface TraceAccounting {
+<span class="ln">147</span>  provider: string;
+<span class="ln">148</span>  model: string;
+<span class="ln">149</span>  usage: TraceTokenUsage;
+<span class="ln">150</span>  context?: TraceContextUsage;
+<span class="ln">151</span>  costUsd?: number;
+<span class="ln">152</span>  numTurns?: number;
+<span class="ln">153</span>  stopReason?: string;
+<span class="ln">154</span>  durationMs?: number;
+<span class="ln">155</span>  rawUsage?: Record&lt;string, unknown&gt;;
+<span class="ln">156</span>  /** Number of descendant subagent runs included in `usage` and `costUsd`.
+<span class="ln">157</span>   *  Derived only for trace reads; never persisted in canonical trace blocks. */
+<span class="ln">158</span>  includedSubagentCount?: number;
+<span class="ln">159</span>  /** Main + descendant usage grouped by provider/model. Like
+<span class="ln">160</span>   *  `includedSubagentCount`, this is derived only on trace reads. */
+<span class="ln">161</span>  usageByModel?: TraceModelUsage[];
+<span class="ln">162</span>}
+<span class="ln">163</span>
+<span class="ln">164</span>export interface ResultBlock extends TraceBlockBase {
+<span class="ln">165</span>  type: &quot;result&quot;;
+<span class="ln">166</span>  content: string;
+<span class="ln">167</span>  accounting?: TraceAccounting;
+<span class="ln">168</span>}
+<span class="ln">169</span>
+<span class="ln">170</span>export interface ErrorBlock extends TraceBlockBase {
+<span class="ln">171</span>  type: &quot;error&quot;;
+<span class="ln">172</span>  error: string;
+<span class="ln">173</span>  accounting?: TraceAccounting;
+<span class="ln">174</span>  code?:
+<span class="ln">175</span>    | &quot;usage_limit&quot;
+<span class="ln">176</span>    | &quot;auth_revoked&quot;
+<span class="ln">177</span>    | &quot;model_provider_unavailable&quot;
+<span class="ln">178</span>    | &quot;model_unavailable&quot;
+<span class="ln">179</span>    | &quot;no_model_provider_available&quot;;
+<span class="ln">180</span>  provider?: &quot;openai&quot; | &quot;anthropic&quot;;
+<span class="ln">181</span>  reason?: &quot;not_logged_in&quot; | &quot;quota_exhausted&quot; | &quot;model_access_denied&quot; | &quot;no_available_provider&quot;;
+<span class="ln">182</span>}
+<span class="ln">183</span>
+<span class="ln">184</span>export interface StructuredOutputBlock extends TraceBlockBase {
+<span class="ln">185</span>  type: &quot;structured_output&quot;;
+<span class="ln">186</span>  payload: unknown;
+<span class="ln">187</span>}
+<span class="ln">188</span>
+<span class="ln">189</span>export interface PlanUpdateBlock extends TraceBlockBase {
+<span class="ln">190</span>  type: &quot;plan_update&quot;;
+<span class="ln">191</span>  plan: AgentPlan;
+<span class="ln">192</span>}
+<span class="ln">193</span>
+<span class="ln">194</span>export type TraceBlockDto =
+<span class="ln">195</span>  | SessionInitBlock
+<span class="ln">196</span>  | TurnStartBlock
+<span class="ln">197</span>  | TurnEndBlock
+<span class="ln">198</span>  | TextBlock
+<span class="ln">199</span>  | ThinkingBlock
+<span class="ln">200</span>  | ToolUseBlock
+<span class="ln">201</span>  | ToolResultBlock
+<span class="ln">202</span>  | SubagentStartBlock
+<span class="ln">203</span>  | SubagentResultBlock
+<span class="ln">204</span>  | ResultBlock
+<span class="ln">205</span>  | ErrorBlock
+<span class="ln">206</span>  | StructuredOutputBlock
+<span class="ln">207</span>  | PlanUpdateBlock;
+<span class="ln">208</span>
+<span class="ln">209</span>export interface TraceRunSegment {
+<span class="ln">210</span>  kind: &quot;run&quot;;
+<span class="ln">211</span>  /** Stable across upserts for the lifetime of the run. */
+<span class="ln">212</span>  id: string;
+<span class="ln">213</span>  app: AppRefDto;
+<span class="ln">214</span>  count: number;
+<span class="ln">215</span>  /** Paired tool or subagent invocation blocks in time order. */
+<span class="ln">216</span>  blocks: TraceBlockDto[];
+<span class="ln">217</span>  /** Sum of (endedAt − startedAt) over paired steps; undefined if any step
+<span class="ln">218</span>   *  in the run is missing a timestamp. */
+<span class="ln">219</span>  durationMs?: number;
+<span class="ln">220</span>  /** Render order across all segments. Stable across upserts. */
+<span class="ln">221</span>  ordinal: number;
+<span class="ln">222</span>}
+<span class="ln">223</span>
+<span class="ln">224</span>export interface TraceBlockSegment {
+<span class="ln">225</span>  kind: &quot;block&quot;;
+<span class="ln">226</span>  id: string;
+<span class="ln">227</span>  block: TraceBlockDto;
+<span class="ln">228</span>  ordinal: number;
+<span class="ln">229</span>}
+<span class="ln">230</span>
+<span class="ln">231</span>export type TraceSegment = TraceRunSegment | TraceBlockSegment;
+<span class="ln">232</span>
+<span class="ln">233</span>export type TraceSubagentStatus = &quot;running&quot; | &quot;completed&quot; | &quot;failed&quot; | &quot;cancelled&quot;;
+<span class="ln">234</span>
+<span class="ln">235</span>/** Direct child invocation projected from the parent&#x27;s subagent lifecycle.
+<span class="ln">236</span> *  `traceSummary` is a read-time aggregation of the canonical child trace;
+<span class="ln">237</span> *  it is never written back into either trace. */
+<span class="ln">238</span>export interface TraceSubagentSummary {
+<span class="ln">239</span>  toolUseId: string;
+<span class="ln">240</span>  agentName: string;
+<span class="ln">241</span>  sessionId: string;
+<span class="ln">242</span>  turnId: string;
+<span class="ln">243</span>  status: TraceSubagentStatus;
+<span class="ln">244</span>  traceSummary?: TraceSummary;
+<span class="ln">245</span>}
+<span class="ln">246</span>
+<span class="ln">247</span>export interface TraceSummary {
+<span class="ln">248</span>  /** Distinct apps in first-appearance order. Deduped across all sub-agents. */
+<span class="ln">249</span>  distinctApps: AppRefDto[];
+<span class="ln">250</span>  /** Count of tool_use blocks across all sub-agents. */
+<span class="ln">251</span>  totalSteps: number;
+<span class="ln">252</span>  /** Direct child invocations; their trace summaries are joined at read time. */
+<span class="ln">253</span>  subagents?: TraceSubagentSummary[];
+<span class="ln">254</span>  /** Wall-clock duration the outermost AgentSession measured for the turn.
+<span class="ln">255</span>   *  Read from the turn&#x27;s `turn_end` block. */
+<span class="ln">256</span>  totalDurationMs?: number;
+<span class="ln">257</span>  /** Per-app invocation totals for the icon-strip tooltip. Keyed by app.id. */
+<span class="ln">258</span>  invocationCounts: Record&lt;string, number&gt;;
+<span class="ln">259</span>  /** True when the turn was interrupted by the user via Stop. Derived by the
+<span class="ln">260</span>   *  segment builder from a result/error block whose accounting.stopReason is
+<span class="ln">261</span>   *  &quot;interrupted&quot; — the AnthropicProvider&#x27;s signal for a graceful abort. */
+<span class="ln">262</span>  stoppedByUser?: boolean;
+<span class="ln">263</span>  /** Terminal agent error for failed turns. Present only when the trace ended
+<span class="ln">264</span>   *  with an error rather than a user stop. */
+<span class="ln">265</span>  terminalError?: string;
+<span class="ln">266</span>  plan?: AgentPlan;
+<span class="ln">267</span>}
+<span class="ln">268</span>
+<span class="ln">269</span>export interface TraceSnapshot {
+<span class="ln">270</span>  segments: TraceSegment[];
+<span class="ln">271</span>  summary: TraceSummary;</pre>
+</div></section>
+        <section class="sec" id="edge"><div class="sec-no">§ <b>03</b> · EDGE CASES</div><h2 class="sec-title">边界 / <em>失败模式</em></h2><ul><li><code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:38</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:41</code>：workflow 必须有交付目的地。</li><li><code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:45</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:47</code>：结构必须静态可知，不能无界轮询。</li><li><code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:73</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:77</code>：先构建，再让用户连接缺失工具。</li><li><code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:78</code> 到 <code>rome_apps/workflow-studio/src/skills/design-workflow/SKILL.md:82</code>：禁止把 generative step 错误地 fan-out。</li><li><code>rome_apps/dream/src/actions/dream/index.ts:96</code> 到 <code>rome_apps/dream/src/actions/dream/index.ts:100</code>：自动注册失败是 non-fatal，但会记录 warning。</li></ul></section>
+        <section class="sec" id="related"><div class="sec-no">§ <b>04</b> · RELATED</div><h2 class="sec-title">关联<em>模块</em></h2><div class="evidence-grid"><div class="evidence-card"><b>Subagent summary</b><code>packages/api-types/src/trace-segments.ts:235</code> 到 <code>packages/api-types/src/trace-segments.ts:245</code> 将 child invocation 投影出来。</div><div class="evidence-card"><b>Result accounting</b><code>packages/api-types/src/trace-segments.ts:164</code> 到 <code>packages/api-types/src/trace-segments.ts:168</code> 让 final result 携带 accounting。</div></div></section>
+        
+    <div class="foot"><span>Generated · 2026-08-28</span><span>Source · <a href="https://github.com/rome-os/rome">rome-os/rome</a></span></div>
+  </main>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('stars');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+  resize(); addEventListener('resize', resize);
+  const pts = Array.from({length: 70}, () => ({x: Math.random()*innerWidth, y: Math.random()*innerHeight, r: Math.random()*1.4+.3, a: Math.random()}));
+  function tick() { ctx.clearRect(0,0,canvas.width,canvas.height); pts.forEach(p => { p.a += .01; ctx.globalAlpha = .35 + Math.sin(p.a)*.25; ctx.fillStyle = '#a9e7ff'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); }
+  tick();
+})();
+</script>
+</body>
+</html>
