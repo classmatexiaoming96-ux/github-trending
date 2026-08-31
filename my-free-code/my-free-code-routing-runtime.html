@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>路由与运行时限流 · my-free-code</title>
+<meta name="description" content="路由与运行时限流 source-level deep dive for hkqr/my-free-code" />
+<style>
+/* LAYOUT SHELL START */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #65d6ff;
+  --star-soft: #a7ecff;
+  --star-deep: #2597bd;
+}
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">my-free<b>code</b></div><select id="msel" aria-label="跳转章节"></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">my-free<b>code</b></div><div class="sub">源码级架构解析 · src/</div></div>
+    <span class="nav-ver">Python · FastAPI gateway</span>
+    <nav><ul class="nav-list" id="navlist">
+<li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+<li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+<li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+<li><a href="#related"><span class="idx">04</span>关联模块</a></li></ul></nav>
+    <div class="nav-foot">
+      <div>Stars ★411 · 2026-08-27</div>
+      <div><a href="https://github.com/hkqr/my-free-code" target="_blank">hkqr/my-free-code</a></div>
+      <div><a href="../my-free-code.html">← 返回 my-free-code 主页面</a></div><div><a href="../../index.html">全部分析</a></div>
+    </div>
+  </aside>
+  <main class="main">
+  <div class="hero">
+    <div class="hero-eyebrow">§ · Nested detail page</div>
+    <h1 class="hero-title">路由与运行时限流 <em>深度解析</em></h1>
+    <p class="hero-desc">拆解 select_model、fallback candidate、ProviderRuntime.admit 和 complete/stream 的并发边界。</p>
+  </div>
+  <section class="sec" id="intro">
+    <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+    <h2 class="sec-title">导入链与<em>契约</em></h2>
+    <h3><span class="arr">▸</span>入口契约</h3>
+    <p>这条链路从 HTTP 入口开始：<code>sources/my-free-code/my_free_code/api/routes.py:49</code> 接收 Anthropic Messages，<code>sources/my-free-code/my_free_code/api/routes.py:51</code> 先做代理鉴权，<code>sources/my-free-code/my_free_code/api/routes.py:52</code> 调用模型选择，再把非流式和流式分开。入口函数本身不认识 provider 细节，这是后续可维护性的关键。</p>
+    <div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/my-free-code/my_free_code/api/routes.py:49</span> - sources/my-free-code/my_free_code/api/routes.py:67</span><span>Python</span></div>
+  <pre class="code"><span class="ln">49</span>@router.post("/v1/messages")
+<span class="ln">50</span>async def messages(body: dict, authorization: str | None = Header(None)):
+<span class="ln">51</span>    require_auth(authorization)
+<span class="ln">52</span>    selected = select_model(body.get("model"), settings)
+<span class="ln">53</span>
+<span class="ln">54</span>    if not body.get("stream"):
+<span class="ln">55</span>        last = None
+<span class="ln">56</span>        for model in candidates(selected, settings):
+<span class="ln">57</span>            try:
+<span class="ln">58</span>                return await runtime.complete(body, model)
+<span class="ln">59</span>            except Exception as exc:
+<span class="ln">60</span>                last = exc
+<span class="ln">61</span>        raise HTTPException(status_code=502, detail=str(last))
+<span class="ln">62</span>
+<span class="ln">63</span>    return StreamingResponse(
+<span class="ln">64</span>        stream_messages(body, selected),
+<span class="ln">65</span>        media_type="text/event-stream",
+<span class="ln">66</span>        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+<span class="ln">67</span>    )</pre>
+</div>
+  </section>
+  <section class="sec" id="core-impl">
+    <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+    <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+    <h3><span class="arr">▸</span>模型别名和 fallback 候选</h3>
+    <p>路由器的设计重点是“显式优先，别名其次”。<code>sources/my-free-code/my_free_code/core/router.py:5</code> 到 <code>sources/my-free-code/my_free_code/core/router.py:6</code> 保护 provider/model 直连模型，<code>sources/my-free-code/my_free_code/core/router.py:7</code> 到 <code>sources/my-free-code/my_free_code/core/router.py:15</code> 才处理 Claude 档位别名，<code>sources/my-free-code/my_free_code/core/router.py:17</code> 到 <code>sources/my-free-code/my_free_code/core/router.py:18</code> 让 fallback 列表去重保序。</p>
+    <div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/my-free-code/my_free_code/core/router.py:3</span> - sources/my-free-code/my_free_code/core/router.py:24</span><span>Python</span></div>
+  <pre class="code"><span class="ln">3</span>def select_model(requested: str | None, s: Settings) -&gt; str:
+<span class="ln">4</span>    value = (requested or "").lower()
+<span class="ln">5</span>    if "/" in value:
+<span class="ln">6</span>        return requested or s.model
+<span class="ln">7</span>    if "opus" in value and s.opus:
+<span class="ln">8</span>        return s.opus
+<span class="ln">9</span>    if "sonnet" in value and s.sonnet:
+<span class="ln">10</span>        return s.sonnet
+<span class="ln">11</span>    if "haiku" in value and s.haiku:
+<span class="ln">12</span>        return s.haiku
+<span class="ln">13</span>    if "fable" in value and s.fable:
+<span class="ln">14</span>        return s.fable
+<span class="ln">15</span>    return s.model
+<span class="ln">16</span>
+<span class="ln">17</span>def candidates(primary: str, s: Settings) -&gt; list[str]:
+<span class="ln">18</span>    return list(dict.fromkeys([primary, *s.fallbacks]))
+<span class="ln">19</span>
+<span class="ln">20</span>def split_model(model: str) -&gt; tuple[str, str]:
+<span class="ln">21</span>    provider, sep, remote = model.partition("/")
+<span class="ln">22</span>    if not sep or not provider or not remote:
+<span class="ln">23</span>        raise ValueError("model must have the form provider/model")
+<span class="ln">24</span>    return provider, remote</pre>
+</div>
+    <h3><span class="arr">▸</span>ProviderRuntime 的限流状态</h3>
+    <p>ProviderRuntime 把每个 provider 当成独立资源池。<code>sources/my-free-code/my_free_code/providers/runtime.py:13</code> 建并发 semaphore，<code>sources/my-free-code/my_free_code/providers/runtime.py:33</code> 到 <code>sources/my-free-code/my_free_code/providers/runtime.py:43</code> 用 monotonic 时间实现窗口限流，<code>sources/my-free-code/my_free_code/providers/runtime.py:35</code> 到 <code>sources/my-free-code/my_free_code/providers/runtime.py:36</code> 阻断处于恢复 backoff 的 provider。</p>
+    <div class="code-wrap">
+  <div class="code-bar"><span><span class="src">sources/my-free-code/my_free_code/providers/runtime.py:10</span> - sources/my-free-code/my_free_code/providers/runtime.py:43</span><span>Python</span></div>
+  <pre class="code"><span class="ln">10</span>class ProviderRuntime:
+<span class="ln">11</span>    def __init__(self, settings: Settings):
+<span class="ln">12</span>        self.settings = settings
+<span class="ln">13</span>        self.semaphores = {p.id: asyncio.Semaphore(settings.max_concurrency) for p in PROVIDER_MAP.values()}
+<span class="ln">14</span>        self.calls = {p.id: deque() for p in PROVIDER_MAP.values()}
+<span class="ln">15</span>        self.unhealthy_until = {}
+<span class="ln">16</span>
+<span class="ln">17</span>    def context(self, provider_id, remote_model):
+<span class="ln">18</span>        p = PROVIDER_MAP[provider_id]
+<span class="ln">19</span>        base = p.base_url
+<span class="ln">20</span>        if provider_id == "ollama":
+<span class="ln">21</span>            base = self.settings.key("OLLAMA_BASE_URL") or base
+<span class="ln">22</span>        elif provider_id == "lmstudio":
+<span class="ln">23</span>            base = self.settings.key("LM_STUDIO_BASE_URL") or base
+<span class="ln">24</span>        elif provider_id == "llamacpp":
+<span class="ln">25</span>            base = self.settings.key("LLAMACPP_BASE_URL") or base
+<span class="ln">26</span>        if not base:
+<span class="ln">27</span>            raise RuntimeError(f"{p.name} requires a specialized adapter")
+<span class="ln">28</span>        return ProviderContext(provider_id, remote_model, self.settings.key(p.key), base, self.settings.http_timeout)
+<span class="ln">29</span>
+<span class="ln">30</span>    def adapter(self, provider_id):
+<span class="ln">31</span>        return SPECIALIZED.get(provider_id, OpenAIChatAdapter)()
+<span class="ln">32</span>
+<span class="ln">33</span>    async def admit(self, provider_id):
+<span class="ln">34</span>        now = time.monotonic()
+<span class="ln">35</span>        if now &lt; self.unhealthy_until.get(provider_id, 0):
+<span class="ln">36</span>            raise RuntimeError(f"provider {provider_id} is in recovery backoff")
+<span class="ln">37</span>        q = self.calls[provider_id]
+<span class="ln">38</span>        while q and now - q[0] &gt; self.settings.rate_window:
+<span class="ln">39</span>            q.popleft()
+<span class="ln">40</span>        if len(q) &gt;= self.settings.rate_limit:
+<span class="ln">41</span>            await asyncio.sleep(max(0.01, self.settings.rate_window - (now - q[0])))
+<span class="ln">42</span>        q.append(time.monotonic())
+<span class="ln">43</span>        return self.semaphores[provider_id]</pre>
+</div>
+  </section>
+  <section class="sec" id="flow">
+    <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+    <h2 class="sec-title">关键<em>流程</em></h2>
+    <div class="flow">request.model -> select_model -> candidates -> ProviderRuntime.admit -> adapter.complete/stream -> unhealthy_until on failure -> next fallback</div>
+    <p>完整请求进入 runtime 后，<code>sources/my-free-code/my_free_code/providers/runtime.py:45</code> 到 <code>sources/my-free-code/my_free_code/providers/runtime.py:56</code> 负责非流式 complete，<code>sources/my-free-code/my_free_code/providers/runtime.py:58</code> 到 <code>sources/my-free-code/my_free_code/providers/runtime.py:73</code> 负责 stream。两个分支都先 admit，再 adapter，再 context，这让限流、鉴权和协议转换保持同一条顺序。</p>
+  </section>
+  <section class="sec" id="edge">
+    <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+    <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+    <ul><li><code>sources/my-free-code/my_free_code/providers/runtime.py:40</code> 只在队列长度达到 limit 后 sleep；突发流量会在 coroutine 层等待，而不是直接返回 429。</li><li><code>sources/my-free-code/my_free_code/api/routes.py:103</code> 到 <code>sources/my-free-code/my_free_code/api/routes.py:106</code> 说明流式输出一旦 started，就不会继续 fallback，避免混合两个模型的 token。</li><li><code>sources/my-free-code/my_free_code/core/failures.py:14</code> 到 <code>sources/my-free-code/my_free_code/core/failures.py:22</code> 的 retryable 分类尚未被 adapter 使用，错误语义还有断点。</li></ul>
+  </section>
+  <section class="sec" id="related">
+    <div class="sec-no">§ <b>04</b> · RELATED</div>
+    <h2 class="sec-title">关联<em>模块</em></h2>
+    <div class="g2"><div class="card"><div class="card-h">协议转换</div><div class="card-d"><code>sources/my-free-code/my_free_code/core/anthropic.py:60</code> 生成 OpenAI payload，runtime 才能把请求交给通用 adapter。</div></div><div class="card"><div class="card-h">模型目录</div><div class="card-d"><code>sources/my-free-code/my_free_code/core/model_catalog.py:14</code> 暴露可选模型，客户端发现依赖它。</div></div></div>
+  </section>
+  <div class="foot">
+    <span>Sub-page · 2026-08-31</span>
+    <span>Source · <a href="https://github.com/hkqr/my-free-code">hkqr/my-free-code</a></span>
+    <span><a href="../my-free-code.html">↑ my-free-code 主页面</a></span>
+  </div></main>
+</div>
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => { const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) map.set(el, a); });
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (!e.isIntersecting) return; links.forEach(a => a.classList.remove('active')); const a = map.get(e.target); if (a) a.classList.add('active'); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) { links.forEach(a => { const o = document.createElement('option'); o.value = a.getAttribute('href'); o.textContent = a.textContent.trim(); sel.appendChild(o); }); sel.addEventListener('change', e => location.href = e.target.value); }
+  const canvas = document.getElementById('stars');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+  resize(); addEventListener('resize', resize);
+  const stars = Array.from({length:64}, () => ({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.2+.3,a:Math.random(),s:Math.random()*.02+.006}));
+  const tick = () => { ctx.clearRect(0,0,canvas.width,canvas.height); stars.forEach(s => { s.a += s.s; if (s.a > 1 || s.a < .2) s.s *= -1; ctx.globalAlpha = s.a; ctx.fillStyle = '#a7ecff'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }); requestAnimationFrame(tick); };
+  tick();
+})();
+</script>
+</body>
+</html>
