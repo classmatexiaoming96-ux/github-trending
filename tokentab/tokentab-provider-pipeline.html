@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Provider pipeline · tokentab 源码观测台</title>
+<meta name="description" content="damejan80/tokentab 源码级深度解析" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+:root {
+  --star: #56c2ff;
+  --star-soft: #9ddfff;
+  --star-deep: #1d7fb2;
+}
+.evidence p { margin-bottom: 1rem; }
+.deep-link { display:inline-flex; margin:.35rem .5rem .35rem 0; padding:.55rem .75rem; border:1px solid var(--star); border-radius:999px; color:var(--star); }
+</style>
+</head>
+<body>
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div><div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+<div class="mobile-bar"><div class="glyph">token<b>tab</b></div><select id="msel" aria-label="跳转章节"><option value="#intro">导入</option>
+<option value="#core-impl">核心</option>
+<option value="#flow">流程</option>
+<option value="#edge">边界</option>
+<option value="#related">关联</option></select></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">token<b>tab</b></div><div class="sub">源码级架构解析 · src/</div></div>
+    <span class="nav-ver">Python · local CLI</span>
+    <nav><ul class="nav-list" id="navlist"><li><a href="#intro"><span class="idx">00</span>导入</a></li>
+<li><a href="#core-impl"><span class="idx">01</span>核心</a></li>
+<li><a href="#flow"><span class="idx">02</span>流程</a></li>
+<li><a href="#edge"><span class="idx">03</span>边界</a></li>
+<li><a href="#related"><span class="idx">04</span>关联</a></li></ul></nav>
+    <div class="nav-foot"><div>Stars ★713 · 2026-08-27</div><div><a href="https://github.com/damejan80/tokentab" target="_blank">damejan80/tokentab</a></div><div><a href="index.html">← 全部分析</a></div></div>
+  </aside>
+  <main class="main">
+    <div class="hero"><div class="hero-eyebrow">§ Source-level Observatory</div><h1 class="hero-title">tokentab <em>provider pipeline</em></h1><p class="hero-desc">Provider pipeline</p><div class="hero-stats"><div class="stat"><div class="stat-num">★ 713</div><div class="stat-lbl">GitHub Stars</div></div><div class="stat"><div class="stat-num">2.0K</div><div class="stat-lbl">LOC</div></div><div class="stat"><div class="stat-num">24</div><div class="stat-lbl">Files</div></div><div class="stat"><div class="stat-num">2026-08-27</div><div class="stat-lbl">Last commit</div></div></div></div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">Provider pipeline的<em>证据链</em></h2>
+      <p>这一页专门拆 Claude、Codex、Gemini 三类日志如何被归一化。为了避免变成行号清单，本页每个源码定位都绑定具体设计含义：在 <code>sources/tokentab/tokentab/providers/claude.py:45</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/claude.py:53</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/claude.py:63</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/claude.py:78</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/claude.py:95</code> 这一处，页面把源码证据和设计判断绑定起来。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/tokentab/tokentab/providers/claude.py</span> · L45-110</span><span>Python</span></div>
+        <pre class="code"><span class="ln">45</span>def collect() -&gt; list[UsageRecord]:
+<span class="ln">46</span>    root = _config_dir() / "projects"
+<span class="ln">47</span>    if not root.is_dir():
+<span class="ln">48</span>        return []
+<span class="ln">49</span>
+<span class="ln">50</span>    records: list[UsageRecord] = []
+<span class="ln">51</span>    seen: set[str] = set()
+<span class="ln">52</span>
+<span class="ln">53</span>    for file in walk_files(root, lambda n: n.endswith(".jsonl")):
+<span class="ln">54</span>        project = pretty_project(_derive_project(file))
+<span class="ln">55</span>
+<span class="ln">56</span>        try:
+<span class="ln">57</span>            text = file.read_text(encoding="utf-8")
+<span class="ln">58</span>        except OSError:
+<span class="ln">59</span>            continue
+<span class="ln">60</span>
+<span class="ln">61</span>        lines = text.split("\n")
+<span class="ln">62</span>
+<span class="ln">63</span>        # first pass: first user message (for activity) + tools used this session
+<span class="ln">64</span>        first_user_text = ""
+<span class="ln">65</span>        tool_names: list[str] = []
+<span class="ln">66</span>        for line in lines:
+<span class="ln">67</span>            if not line.strip():
+<span class="ln">68</span>                continue
+<span class="ln">69</span>            obj = try_json(line)
+<span class="ln">70</span>            msg = obj.get("message") if isinstance(obj, dict) else None
+<span class="ln">71</span>            if not msg:
+<span class="ln">72</span>                continue
+<span class="ln">73</span>            if msg.get("role") == "user" and not first_user_text:
+<span class="ln">74</span>                first_user_text = _extract_text(msg.get("content"))
+<span class="ln">75</span>            for block in msg.get("content") or []:
+<span class="ln">76</span>                if block.get("type") == "tool_use" and block.get("name"):
+<span class="ln">77</span>                    tool_names.append(block["name"])
+<span class="ln">78</span>        activity = classify(tool_names, first_user_text)
+<span class="ln">79</span>
+<span class="ln">80</span>        # second pass: token usage from assistant turns
+<span class="ln">81</span>        for line in lines:
+<span class="ln">82</span>            if not line.strip():
+<span class="ln">83</span>                continue
+<span class="ln">84</span>            obj = try_json(line)
+<span class="ln">85</span>            msg = obj.get("message") if isinstance(obj, dict) else None
+<span class="ln">86</span>            usage = msg.get("usage") if msg else None
+<span class="ln">87</span>            if not usage:
+<span class="ln">88</span>                continue
+<span class="ln">89</span>
+<span class="ln">90</span>            rec_id = msg.get("id") or f"{file}:{len(records)}"
+<span class="ln">91</span>            if rec_id in seen:
+<span class="ln">92</span>                continue
+<span class="ln">93</span>            seen.add(rec_id)
+<span class="ln">94</span>
+<span class="ln">95</span>            records.append(
+<span class="ln">96</span>                UsageRecord(
+<span class="ln">97</span>                    provider=NAME,
+<span class="ln">98</span>                    model=msg.get("model") or "unknown",
+<span class="ln">99</span>                    project=project,
+<span class="ln">100</span>                    timestamp=to_date(obj.get("timestamp")) or EPOCH,
+<span class="ln">101</span>                    activity=activity,
+<span class="ln">102</span>                    id=rec_id,
+<span class="ln">103</span>                    tokens=TokenCounts(
+<span class="ln">104</span>                        input=usage.get("input_tokens", 0),
+<span class="ln">105</span>                        output=usage.get("output_tokens", 0),
+<span class="ln">106</span>                        cache_read=usage.get("cache_read_input_tokens", 0),
+<span class="ln">107</span>                        cache_write=usage.get("cache_creation_input_tokens", 0),
+<span class="ln">108</span>                    ),
+<span class="ln">109</span>                )
+<span class="ln">110</span>            )</pre>
+      </div>
+    </section>
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+      
+      <h3><span class="arr">▸</span>Codex 累计 token 差分</h3>
+      <p>在 <code>sources/tokentab/tokentab/providers/codex.py:38</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/codex.py:46</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/codex.py:58</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/codex.py:81</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/codex.py:98</code> 这一处，页面把源码证据和设计判断绑定起来。这一段的关键不是单个语句，而是它和上下游契约如何相互约束：输入必须先被压到统一字段，后续 pricing、aggregate、serialize 才能保持无状态且可复用。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/tokentab/tokentab/providers/codex.py</span> · L38-117</span><span>Python</span></div>
+        <pre class="code"><span class="ln">38</span>def collect() -&gt; list[UsageRecord]:
+<span class="ln">39</span>    roots = [_config_dir() / "sessions", _config_dir() / "archived_sessions"]
+<span class="ln">40</span>    records: list[UsageRecord] = []
+<span class="ln">41</span>
+<span class="ln">42</span>    for root in roots:
+<span class="ln">43</span>        if not root.is_dir():
+<span class="ln">44</span>            continue
+<span class="ln">45</span>
+<span class="ln">46</span>        for file in walk_files(root, lambda n: n.startswith("rollout-") and n.endswith(".jsonl")):
+<span class="ln">47</span>            try:
+<span class="ln">48</span>                text = file.read_text(encoding="utf-8")
+<span class="ln">49</span>            except OSError:
+<span class="ln">50</span>                continue
+<span class="ln">51</span>
+<span class="ln">52</span>            lines = text.split("\n")
+<span class="ln">53</span>            project = "unknown"
+<span class="ln">54</span>            model = "unknown"
+<span class="ln">55</span>            first_user_text = ""
+<span class="ln">56</span>            tool_names: list[str] = []
+<span class="ln">57</span>
+<span class="ln">58</span>            # context pass
+<span class="ln">59</span>            for line in lines:
+<span class="ln">60</span>                if not line.strip():
+<span class="ln">61</span>                    continue
+<span class="ln">62</span>                ev = try_json(line)
+<span class="ln">63</span>                if not isinstance(ev, dict):
+<span class="ln">64</span>                    continue
+<span class="ln">65</span>                if ev.get("cwd"):
+<span class="ln">66</span>                    project = pretty_project(ev["cwd"])
+<span class="ln">67</span>                if ev.get("model"):
+<span class="ln">68</span>                    model = ev["model"]
+<span class="ln">69</span>                payload = ev.get("payload") or {}
+<span class="ln">70</span>                if ev.get("type") == "function_call" or payload.get("type") == "function_call":
+<span class="ln">71</span>                    name = payload.get("name") or (ev.get("info") or {}).get("name")
+<span class="ln">72</span>                    if name:
+<span class="ln">73</span>                        tool_names.append(str(name))
+<span class="ln">74</span>                if (ev.get("type") == "message" or payload.get("role") == "user") and not first_user_text:
+<span class="ln">75</span>                    content = payload.get("content") or (ev.get("info") or {}).get("content")
+<span class="ln">76</span>                    if isinstance(content, str):
+<span class="ln">77</span>                        first_user_text = content[:500]
+<span class="ln">78</span>
+<span class="ln">79</span>            activity = classify(tool_names, first_user_text)
+<span class="ln">80</span>
+<span class="ln">81</span>            # usage pass — cumulative totals diffed into per-call deltas
+<span class="ln">82</span>            prev_in = prev_out = prev_cache = 0
+<span class="ln">83</span>            i = 0
+<span class="ln">84</span>            for line in lines:
+<span class="ln">85</span>                if not line.strip():
+<span class="ln">86</span>                    continue
+<span class="ln">87</span>                ev = try_json(line)
+<span class="ln">88</span>                if not isinstance(ev, dict):
+<span class="ln">89</span>                    continue
+<span class="ln">90</span>                tc = _find_token_count(ev)
+<span class="ln">91</span>                if not tc:
+<span class="ln">92</span>                    continue
+<span class="ln">93</span>
+<span class="ln">94</span>                tot_in = tc.get("input_tokens", tc.get("input", 0)) or 0
+<span class="ln">95</span>                tot_out = tc.get("output_tokens", tc.get("output", 0)) or 0
+<span class="ln">96</span>                tot_cache = tc.get("cached_input_tokens", tc.get("cache_read", 0)) or 0
+<span class="ln">97</span>
+<span class="ln">98</span>                d_in = max(0, tot_in - prev_in)
+<span class="ln">99</span>                d_out = max(0, tot_out - prev_out)
+<span class="ln">100</span>                d_cache = max(0, tot_cache - prev_cache)
+<span class="ln">101</span>                prev_in, prev_out, prev_cache = tot_in, tot_out, tot_cache
+<span class="ln">102</span>
+<span class="ln">103</span>                if d_in + d_out + d_cache == 0:
+<span class="ln">104</span>                    continue
+<span class="ln">105</span>
+<span class="ln">106</span>                records.append(
+<span class="ln">107</span>                    UsageRecord(
+<span class="ln">108</span>                        provider=NAME,
+<span class="ln">109</span>                        model=model,
+<span class="ln">110</span>                        project=project,
+<span class="ln">111</span>                        timestamp=to_date(ev.get("timestamp")) or EPOCH,
+<span class="ln">112</span>                        activity=activity,
+<span class="ln">113</span>                        id=f"{file}:{i}",
+<span class="ln">114</span>                        tokens=TokenCounts(input=d_in, output=d_out, cache_read=d_cache, cache_write=0),
+<span class="ln">115</span>                    )
+<span class="ln">116</span>                )
+<span class="ln">117</span>                i += 1</pre>
+      </div>
+      <h3><span class="arr">▸</span>Gemini cached input 修正</h3>
+      <p>在 <code>sources/tokentab/tokentab/providers/gemini.py:30</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/gemini.py:37</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/gemini.py:42</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/gemini.py:64</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/gemini.py:72</code> 这一处，页面把源码证据和设计判断绑定起来。这一段的关键不是单个语句，而是它和上下游契约如何相互约束：输入必须先被压到统一字段，后续 pricing、aggregate、serialize 才能保持无状态且可复用。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/tokentab/tokentab/providers/gemini.py</span> · L30-83</span><span>Python</span></div>
+        <pre class="code"><span class="ln">30</span>def collect() -&gt; list[UsageRecord]:
+<span class="ln">31</span>    root = home(".gemini", "tmp")
+<span class="ln">32</span>    if not root.is_dir():
+<span class="ln">33</span>        return []
+<span class="ln">34</span>
+<span class="ln">35</span>    records: list[UsageRecord] = []
+<span class="ln">36</span>
+<span class="ln">37</span>    for file in walk_files(root, lambda n: n.startswith("session-") and n.endswith(".json")):
+<span class="ln">38</span>        try:
+<span class="ln">39</span>            raw = file.read_text(encoding="utf-8")
+<span class="ln">40</span>        except OSError:
+<span class="ln">41</span>            continue
+<span class="ln">42</span>        doc = try_json(raw)
+<span class="ln">43</span>        messages = doc.get("messages") if isinstance(doc, dict) else None
+<span class="ln">44</span>        if not messages:
+<span class="ln">45</span>            continue
+<span class="ln">46</span>
+<span class="ln">47</span>        project = pretty_project(_derive_project(file))
+<span class="ln">48</span>
+<span class="ln">49</span>        first_user_text = ""
+<span class="ln">50</span>        tool_names: list[str] = []
+<span class="ln">51</span>        for m in messages:
+<span class="ln">52</span>            if m.get("role") == "user" and not first_user_text:
+<span class="ln">53</span>                first_user_text = (m.get("text") or "")[:500]
+<span class="ln">54</span>            for p in m.get("parts") or []:
+<span class="ln">55</span>                fc = p.get("functionCall")
+<span class="ln">56</span>                if fc and fc.get("name"):
+<span class="ln">57</span>                    tool_names.append(fc["name"])
+<span class="ln">58</span>        activity = classify(tool_names, first_user_text)
+<span class="ln">59</span>
+<span class="ln">60</span>        for i, m in enumerate(messages):
+<span class="ln">61</span>            t = m.get("tokens")
+<span class="ln">62</span>            if not t:
+<span class="ln">63</span>                continue
+<span class="ln">64</span>            cached = t.get("cached", 0) or 0
+<span class="ln">65</span>            raw_input = t.get("input", 0) or 0
+<span class="ln">66</span>            fresh_input = max(0, raw_input - cached)  # input is inclusive of cache
+<span class="ln">67</span>            output = t.get("output", 0) or 0
+<span class="ln">68</span>
+<span class="ln">69</span>            if fresh_input + output + cached == 0:
+<span class="ln">70</span>                continue
+<span class="ln">71</span>
+<span class="ln">72</span>            records.append(
+<span class="ln">73</span>                UsageRecord(
+<span class="ln">74</span>                    provider=NAME,
+<span class="ln">75</span>                    model=m.get("model") or "gemini-2.5-pro",
+<span class="ln">76</span>                    project=project,
+<span class="ln">77</span>                    timestamp=to_date(m.get("timestamp")) or EPOCH,
+<span class="ln">78</span>                    activity=activity,
+<span class="ln">79</span>                    id=f"{file}:{i}",
+<span class="ln">80</span>                    tokens=TokenCounts(input=fresh_input, output=output, cache_read=cached, cache_write=0),
+<span class="ln">81</span>                )
+<span class="ln">82</span>            )
+<span class="ln">83</span></pre>
+      </div>
+      <h3><span class="arr">▸</span>共享容错工具</h3>
+      <p>在 <code>sources/tokentab/tokentab/providers/shared.py:16</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:24</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:37</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:49</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:63</code> 这一处，页面把源码证据和设计判断绑定起来。这一段的关键不是单个语句，而是它和上下游契约如何相互约束：输入必须先被压到统一字段，后续 pricing、aggregate、serialize 才能保持无状态且可复用。</p>
+      
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">sources/tokentab/tokentab/providers/shared.py</span> · L16-63</span><span>Python</span></div>
+        <pre class="code"><span class="ln">16</span>def try_json(text: str):
+<span class="ln">17</span>    """Parse one JSON value, returning None instead of raising."""
+<span class="ln">18</span>    try:
+<span class="ln">19</span>        return json.loads(text)
+<span class="ln">20</span>    except (json.JSONDecodeError, ValueError):
+<span class="ln">21</span>        return None
+<span class="ln">22</span>
+<span class="ln">23</span>
+<span class="ln">24</span>def walk_files(root: Path, test) -&gt; Iterator[Path]:
+<span class="ln">25</span>    """Yield every file under root whose name passes test(name).
+<span class="ln">26</span>
+<span class="ln">27</span>    Skips anything unreadable rather than blowing up the whole run.
+<span class="ln">28</span>    """
+<span class="ln">29</span>    if not root.is_dir():
+<span class="ln">30</span>        return
+<span class="ln">31</span>    for dirpath, _dirs, files in os.walk(root):
+<span class="ln">32</span>        for name in files:
+<span class="ln">33</span>            if test(name):
+<span class="ln">34</span>                yield Path(dirpath) / name
+<span class="ln">35</span>
+<span class="ln">36</span>
+<span class="ln">37</span>def pretty_project(raw: str) -&gt; str:
+<span class="ln">38</span>    """Tools encode the project path into a folder name by swapping slashes for
+<span class="ln">39</span>    dashes. We can't perfectly reverse that, but the last meaningful segment is a
+<span class="ln">40</span>    good label — "my-app" instead of a giant string.
+<span class="ln">41</span>    """
+<span class="ln">42</span>    if not raw:
+<span class="ln">43</span>        return "unknown"
+<span class="ln">44</span>    cleaned = raw.lstrip("-")
+<span class="ln">45</span>    parts = [p for p in cleaned.replace("\\", "/").replace("-", "/").split("/") if p]
+<span class="ln">46</span>    return parts[-1] if parts else "unknown"
+<span class="ln">47</span>
+<span class="ln">48</span>
+<span class="ln">49</span>def to_date(value) -&gt; datetime | None:
+<span class="ln">50</span>    if value is None:
+<span class="ln">51</span>        return None
+<span class="ln">52</span>    try:
+<span class="ln">53</span>        if isinstance(value, (int, float)):
+<span class="ln">54</span>            # heuristic: seconds vs milliseconds
+<span class="ln">55</span>            secs = value / 1000 if value &gt; 1e12 else value
+<span class="ln">56</span>            return datetime.fromtimestamp(secs, tz=timezone.utc)
+<span class="ln">57</span>        s = str(value).replace("Z", "+00:00")
+<span class="ln">58</span>        return datetime.fromisoformat(s)
+<span class="ln">59</span>    except (ValueError, OSError, OverflowError):
+<span class="ln">60</span>        return None
+<span class="ln">61</span>
+<span class="ln">62</span>
+<span class="ln">63</span>EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)</pre>
+      </div>
+    </section>
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">disk logs → tolerant parser → UsageRecord → PricedRecord → grouped Report → CLI table / browser invoice</div>
+      <p>在 <code>sources/tokentab/tokentab/providers/shared.py:16</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:24</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:37</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:49</code> 这一处，页面把源码证据和设计判断绑定起来；在 <code>sources/tokentab/tokentab/providers/shared.py:63</code> 这一处，页面把源码证据和设计判断绑定起来。这条流程的优点是每层只承认一种输入形状；风险是入口文件一旦没有走到这个链路，底层解析器再干净也无法被用户正常调用。</p>
+    </section>
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE</div>
+      <h2 class="sec-title">边界与<em>失败</em></h2>
+      <p>边界主要集中在日志格式漂移、模型价格表滞后、缓存 token 含义不一致和 provider 文件不可读。源码用 try_json、walk_files、provider try/except 和 unknown model warning 做了软失败处理；这适合本地观测工具，因为用户更需要“尽量给出已有数据”，而不是因为一个工具坏了让整份账单失败。</p>
+    </section>
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联模块</h2>
+      <div class="g2">
+        <a class="card" href="../tokentab.html"><div class="card-h">tokentab 主页面</div><div class="card-d">回到完整架构和风险结论</div></a>
+        <a class="card" href="tokentab-provider-pipeline.html"><div class="card-h">Provider pipeline</div><div class="card-d">Claude、Codex、Gemini 三套日志解析器</div></a>
+        <a class="card" href="tokentab-pricing-aggregation.html"><div class="card-h">Pricing aggregation</div><div class="card-d">价格表、聚合器、活动分类</div></a>
+        <a class="card" href="tokentab-web-dashboard.html"><div class="card-h">Web dashboard</div><div class="card-d">本地 HTTP server 与 invoice UI</div></a>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
