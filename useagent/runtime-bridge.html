@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>useagent 运行时桥接深读</title>
+<meta name="description" content="这页聚焦 OpenCode/T3 runtime 如何启动、注入配置、等待 provider 并投影 turn。" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+.flow{font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--text-2);border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:10px;padding:18px;white-space:pre-wrap}
+.code-head{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--text-dim);font-family:var(--mono);font-size:11px}
+.code-wrap pre{margin:0;padding:14px;overflow:auto}
+.cl{display:block;min-height:1.45em}
+.ln{display:inline-block;width:44px;color:var(--text-faint);user-select:none}
+.pill-row{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}
+.pill{border:1px solid var(--line);border-radius:999px;padding:7px 10px;color:var(--text-2);font-family:var(--mono);font-size:11px;background:rgba(255,255,255,.025)}
+.deep-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--panel);color:var(--text);text-decoration:none}
+.deep-link b{display:block;color:var(--star);margin-bottom:6px}
+.deep-link span{color:var(--text-2);font-size:13px;line-height:1.45}
+@media(max-width:960px){.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><span>useagent</span><a href="index.html">Index</a></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">use<b>agent</b></div><div class="sub">runtime bridge</div></div>
+    <ul class="nav-list"><li><a href="#server"><span class="idx">01</span>OpenCode server</a></li>
+<li><a href="#config"><span class="idx">02</span>配置注入</a></li>
+<li><a href="#dispatch"><span class="idx">03</span>Turn 调度</a></li></ul>
+    <div class="nav-foot"><a href="index.html">GitHub Trending Index</a><br/>Source commit b233c46</div>
+  </aside>
+  <main class="main">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">AI coworker · runtime orchestration</div>
+          <h1 class="hero-title">useagent 运行时桥接深读</h1>
+          <p class="hero-desc">这页聚焦 OpenCode/T3 runtime 如何启动、注入配置、等待 provider 并投影 turn。</p>
+          <div class="pill-row"><span class="pill">Created 2026-08-29</span><span class="pill">TypeScript</span><span class="pill">AGPL-3.0-only</span><span class="pill">270 stars when sampled</span></div>
+        </div>
+        <div class="hero-stats"><div class="stat"><div class="stat-num">4096</div><div class="stat-lbl">serve port</div></div>
+<div class="stat"><div class="stat-num">4</div><div class="stat-lbl">bridge proto</div></div>
+<div class="stat"><div class="stat-num">2</div><div class="stat-lbl">barriers</div></div>
+<div class="stat"><div class="stat-num">5s</div><div class="stat-lbl">health probe</div></div></div>
+      </div>
+    </section>
+<section class="sec" id="server"><div class="sec-no"><b>01</b> / SOURCE READ</div><h2 class="sec-title">OpenCode server 是可复用 resident process</h2><h3>先探活再启动</h3><p>`ensureServer` 先准备 workdir、拿 sandbox preview link，再探测 `/global/health`。如果已有 healthy resident process，它直接复用；只有不健康时才删除 session、创建 `skynet-opencode-serve` 并执行 `opencode serve`。 <code>backend/src/engines/opencode-server.ts:252</code> <code>backend/src/engines/opencode-server.ts:267</code> <code>backend/src/engines/opencode-server.ts:279</code> <code>backend/src/engines/opencode-server.ts:283</code></p><div class="code-wrap"><div class="code-head"><span>ensureServer 的启动与探活</span><code>backend/src/engines/opencode-server.ts:252</code></div><pre><code><span class="cl"><span class="ln">252</span>async function ensureServer(</span>
+<span class="cl"><span class="ln">253</span>  sandbox: SandboxHandle,</span>
+<span class="cl"><span class="ln">254</span>  npx: boolean,</span>
+<span class="cl"><span class="ln">255</span>  signal: AbortSignal,</span>
+<span class="cl"><span class="ln">256</span>  secretSourceCommand = sandboxSecretSourceCommand(),</span>
+<span class="cl"><span class="ln">257</span>): Promise&lt;OpenCodeRuntimeServer&gt; {</span>
+<span class="cl"><span class="ln">258</span>  const bin = npx ? `npx -y opencode-ai@${OPENCODE_VERSION}` : &quot;opencode&quot;;</span>
+<span class="cl"><span class="ln">259</span>  const homeResult = await sandbox.process.executeCommand(</span>
+<span class="cl"><span class="ln">260</span>    &#x27;mkdir -p ~/work &amp;&amp; printf %s &quot;$HOME&quot;&#x27;,</span>
+<span class="cl"><span class="ln">261</span>    undefined,</span>
+<span class="cl"><span class="ln">262</span>    undefined,</span>
+<span class="cl"><span class="ln">263</span>    15,</span>
+<span class="cl"><span class="ln">264</span>  );</span>
+<span class="cl"><span class="ln">265</span>  if ((homeResult.exitCode ?? 1) !== 0) throw new Error(&quot;opencode workspace preparation failed&quot;);</span>
+<span class="cl"><span class="ln">266</span>  const home = homeResult.result?.trim() || &quot;/home/daytona&quot;;</span>
+<span class="cl"><span class="ln">267</span>  const link = await sandbox.getPreviewLink(SERVE_PORT);</span>
+<span class="cl"><span class="ln">268</span>  const baseUrl = link.url.replace(/\/+$/, &quot;&quot;);</span>
+<span class="cl"><span class="ln">269</span>  const token = link.token ?? &quot;&quot;;</span>
+<span class="cl"><span class="ln">270</span>  const server = { baseUrl, token, workdir: `${home}/work` };</span>
+<span class="cl"><span class="ln">271</span></span>
+<span class="cl"><span class="ln">272</span>  // A healthy resident process survives turns and is always reused: the liveness</span>
+<span class="cl"><span class="ln">273</span>  // probe here already proves it is serving, so return immediately and skip the</span>
+<span class="cl"><span class="ln">274</span>  // readiness poll&#x27;s redundant first probe (perf plan Phase 1 item 4 - skip probes</span>
+<span class="cl"><span class="ln">275</span>  // once a prior step proves liveness). Only when the sandbox was stopped/restarted</span>
+<span class="cl"><span class="ln">276</span>  // (probe not 2xx) do we recreate Daytona&#x27;s dedicated background session:</span>
+<span class="cl"><span class="ln">277</span>  // executeCommand is synchronous even with shell `&amp;`, whereas an async session</span>
+<span class="cl"><span class="ln">278</span>  // command is Daytona&#x27;s supported long-lived-process primitive.</span>
+<span class="cl"><span class="ln">279</span>  const initialStatus = await opencodeHealthStatus(server, signal);</span>
+<span class="cl"><span class="ln">280</span>  if (initialStatus !== null &amp;&amp; initialStatus &gt;= 200 &amp;&amp; initialStatus &lt; 300) {</span>
+<span class="cl"><span class="ln">281</span>    return server;</span>
+<span class="cl"><span class="ln">282</span>  }</span>
+<span class="cl"><span class="ln">283</span>  await sandbox.process.deleteSession(SERVER_PROCESS_SESSION).catch(() =&gt; {});</span>
+<span class="cl"><span class="ln">284</span>  await sandbox.process.createSession(SERVER_PROCESS_SESSION);</span>
+<span class="cl"><span class="ln">285</span>  await sandbox.process.executeSessionCommand(</span>
+<span class="cl"><span class="ln">286</span>    SERVER_PROCESS_SESSION,</span>
+<span class="cl"><span class="ln">287</span>    {</span>
+<span class="cl"><span class="ln">288</span>      command: `${secretSourceCommand} &amp;&amp; cd ${shq(`${home}/work`)} &amp;&amp; exec ${bin} serve --hostname 0.0.0.0 --port ${SERVE_PORT}`,</span>
+<span class="cl"><span class="ln">289</span>      runAsync: true,</span>
+<span class="cl"><span class="ln">290</span>      suppressInputEcho: true,</span>
+<span class="cl"><span class="ln">291</span>    },</span>
+<span class="cl"><span class="ln">292</span>    30,</span>
+<span class="cl"><span class="ln">293</span>  );</span>
+<span class="cl"><span class="ln">294</span></span>
+<span class="cl"><span class="ln">295</span>  const deadline = Date.now() + 120_000;</span>
+<span class="cl"><span class="ln">296</span>  let lastStatus: number | null = null;</span>
+<span class="cl"><span class="ln">297</span>  // Bounded exponential polling (perf plan Phase 1): a server that is ready in</span>
+<span class="cl"><span class="ln">298</span>  // 200ms is seen in ~200ms instead of at the next full-second tick; the overall</span>
+<span class="cl"><span class="ln">299</span>  // deadline is unchanged.</span>
+<span class="cl"><span class="ln">300</span>  let pollDelay: number | null = null;</span>
+<span class="cl"><span class="ln">301</span>  while (Date.now() &lt; deadline &amp;&amp; !signal.aborted) {</span>
+<span class="cl"><span class="ln">302</span>    lastStatus = await opencodeHealthStatus(server, signal);</span>
+<span class="cl"><span class="ln">303</span>    if (lastStatus !== null &amp;&amp; lastStatus &gt;= 200 &amp;&amp; lastStatus &lt; 300) {</span>
+<span class="cl"><span class="ln">304</span>      return server;</span>
+<span class="cl"><span class="ln">305</span>    }</span>
+<span class="cl"><span class="ln">306</span>    const delay = nextPollDelayMs(pollDelay);</span>
+<span class="cl"><span class="ln">307</span>    pollDelay = delay;</span>
+<span class="cl"><span class="ln">308</span>    await new Promise((resolve) =&gt; setTimeout(resolve, delay));</span>
+<span class="cl"><span class="ln">309</span>  }</span>
+<span class="cl"><span class="ln">310</span>  if (signal.aborted) throw new Error(&quot;opencode run aborted (timeout)&quot;);</span>
+<span class="cl"><span class="ln">311</span>  let logs: { output?: string; stderr?: string; stdout?: string } | null = null;</span>
+<span class="cl"><span class="ln">312</span>  try {</span>
+<span class="cl"><span class="ln">313</span>    const session = await sandbox.process.getSession(SERVER_PROCESS_SESSION);</span>
+<span class="cl"><span class="ln">314</span>    const command = session.commands.at(-1);</span>
+<span class="cl"><span class="ln">315</span>    if (command?.id) {</span>
+<span class="cl"><span class="ln">316</span>      logs = await sandbox.process.getSessionCommandLogs(SERVER_PROCESS_SESSION, command.id);</span>
+<span class="cl"><span class="ln">317</span>    }</span>
+<span class="cl"><span class="ln">318</span>  } catch {</span>
+<span class="cl"><span class="ln">319</span>    // Readiness already failed. Logs are diagnostic only and must not mask the</span>
+<span class="cl"><span class="ln">320</span>    // stable, redacted error below.</span>
+<span class="cl"><span class="ln">321</span>  }</span>
+<span class="cl"><span class="ln">322</span>  const safeTail = (logs?.output ?? logs?.stderr ?? logs?.stdout ?? &quot;&quot;)</span>
+<span class="cl"><span class="ln">323</span>    .replace(/v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, &quot;&lt;capability&gt;&quot;)</span>
+<span class="cl"><span class="ln">324</span>    .trim();</span>
+<span class="cl"><span class="ln">325</span>  throw new Error(</span>
+<span class="cl"><span class="ln">326</span>    `opencode serve failed readiness${lastStatus ? ` (HTTP ${lastStatus})` : &quot;&quot;}: ${truncate(safeTail, 200)}`,</span>
+<span class="cl"><span class="ln">327</span>  );</span>
+<span class="cl"><span class="ln">328</span>}</span></code></pre></div><h3>健康检查是 bounded fetch</h3><p>`opencodeHealthStatus` 只做 5 秒 fetch，返回 status 或 null；`reuseHealthyResidentServer` 要求 sandboxId 匹配且 health 2xx。这里的判定小而保守，适合在热路径上多次调用。 <code>backend/src/engines/opencode-server.ts:363</code> <code>backend/src/engines/opencode-server.ts:368</code> <code>backend/src/engines/opencode-server.ts:380</code> <code>backend/src/engines/opencode-server.ts:386</code></p><div class="code-wrap"><div class="code-head"><span>健康检查不泄露 provider 细节</span><code>backend/src/engines/opencode-server.ts:363</code></div><pre><code><span class="cl"><span class="ln">363</span>async function opencodeHealthStatus(</span>
+<span class="cl"><span class="ln">364</span>  server: OpenCodeRuntimeServer,</span>
+<span class="cl"><span class="ln">365</span>  signal: AbortSignal,</span>
+<span class="cl"><span class="ln">366</span>): Promise&lt;number | null&gt; {</span>
+<span class="cl"><span class="ln">367</span>  try {</span>
+<span class="cl"><span class="ln">368</span>    const response = await fetch(`${server.baseUrl}/global/health`, {</span>
+<span class="cl"><span class="ln">369</span>      headers: authHeaders(server.token),</span>
+<span class="cl"><span class="ln">370</span>      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),</span>
+<span class="cl"><span class="ln">371</span>    });</span>
+<span class="cl"><span class="ln">372</span>    const status = response.status;</span>
+<span class="cl"><span class="ln">373</span>    await response.body?.cancel().catch(() =&gt; {});</span>
+<span class="cl"><span class="ln">374</span>    return status;</span>
+<span class="cl"><span class="ln">375</span>  } catch {</span>
+<span class="cl"><span class="ln">376</span>    return null;</span>
+<span class="cl"><span class="ln">377</span>  }</span>
+<span class="cl"><span class="ln">378</span>}</span>
+<span class="cl"><span class="ln">379</span></span>
+<span class="cl"><span class="ln">380</span>async function reuseHealthyResidentServer(</span>
+<span class="cl"><span class="ln">381</span>  cached: OpenCodeThreadServer | null,</span>
+<span class="cl"><span class="ln">382</span>  sandboxId: string,</span>
+<span class="cl"><span class="ln">383</span>  signal: AbortSignal,</span>
+<span class="cl"><span class="ln">384</span>): Promise&lt;OpenCodeRuntimeServer | null&gt; {</span>
+<span class="cl"><span class="ln">385</span>  if (!cached || cached.sandboxId !== sandboxId) return null;</span>
+<span class="cl"><span class="ln">386</span>  const status = await opencodeHealthStatus(cached, signal);</span>
+<span class="cl"><span class="ln">387</span>  return status !== null &amp;&amp; status &gt;= 200 &amp;&amp; status &lt; 300 ? cached : null;</span>
+<span class="cl"><span class="ln">388</span>}</span></code></pre></div></section><section class="sec" id="config"><div class="sec-no"><b>02</b> / SOURCE READ</div><h2 class="sec-title">配置注入围绕短期 capability 和 fail-closed</h2><h3>全局配置写入避开仓库污染</h3><p>`buildOpencodeConfigWriteCommand` 要求 base64 内容，只写 `~/.config/opencode/opencode.json`，并删除 `~/work/opencode.json`。这样 provider/MCP 配置不会跟随用户仓库 checkout，也不会把 token 混进项目文件。 <code>backend/src/engines/opencode-server.ts:148</code> <code>backend/src/engines/opencode-server.ts:153</code> <code>backend/src/engines/opencode-server.ts:155</code> <code>backend/src/engines/opencode-server.ts:156</code></p><div class="code-wrap"><div class="code-head"><span>配置写入和模型 body</span><code>backend/src/engines/opencode-server.ts:148</code></div><pre><code><span class="cl"><span class="ln">148</span>export function buildOpencodeConfigWriteCommand(encodedConfig: string): string {</span>
+<span class="cl"><span class="ln">149</span>  if (!/^[A-Za-z0-9+/=]+$/.test(encodedConfig)) {</span>
+<span class="cl"><span class="ln">150</span>    throw new Error(&quot;opencode config must be base64 encoded&quot;);</span>
+<span class="cl"><span class="ln">151</span>  }</span>
+<span class="cl"><span class="ln">152</span>  return (</span>
+<span class="cl"><span class="ln">153</span>    `mkdir -p ~/.config/opencode ~/work &amp;&amp; chmod 700 ~/.config ~/.config/opencode &amp;&amp; ` +</span>
+<span class="cl"><span class="ln">154</span>    `printf %s &#x27;${encodedConfig}&#x27; | base64 -d &gt; ~/.config/opencode/opencode.json &amp;&amp; ` +</span>
+<span class="cl"><span class="ln">155</span>    `chmod 600 ~/.config/opencode/opencode.json &amp;&amp; ` +</span>
+<span class="cl"><span class="ln">156</span>    `rm -f -- ~/work/opencode.json`</span>
+<span class="cl"><span class="ln">157</span>  );</span>
+<span class="cl"><span class="ln">158</span>}</span>
+<span class="cl"><span class="ln">159</span></span>
+<span class="cl"><span class="ln">160</span>function authHeaders(token: string): Record&lt;string, string&gt; {</span>
+<span class="cl"><span class="ln">161</span>  return sandboxPreviewHeaders(token);</span>
+<span class="cl"><span class="ln">162</span>}</span>
+<span class="cl"><span class="ln">163</span></span>
+<span class="cl"><span class="ln">164</span>function modelBody(model: string): { providerID: string; modelID: string } {</span>
+<span class="cl"><span class="ln">165</span>  if (model.startsWith(&quot;openai/&quot;)) {</span>
+<span class="cl"><span class="ln">166</span>    return { providerID: &quot;openai&quot;, modelID: model.slice(&quot;openai/&quot;.length) };</span>
+<span class="cl"><span class="ln">167</span>  }</span>
+<span class="cl"><span class="ln">168</span>  return model.includes(&quot;/&quot;)</span>
+<span class="cl"><span class="ln">169</span>    ? { providerID: &quot;openrouter&quot;, modelID: model }</span>
+<span class="cl"><span class="ln">170</span>    : { providerID: &quot;anthropic&quot;, modelID: model };</span>
+<span class="cl"><span class="ln">171</span>}</span>
+<span class="cl"><span class="ln">172</span></span>
+<span class="cl"><span class="ln">173</span>/** Bun&#x27;s fetch accepts a per-request `timeout` (ms; 0 = disable) that neither the</span>
+<span class="cl"><span class="ln">174</span> *  DOM `RequestInit` nor Bun&#x27;s own `BunFetchRequestInit` type declares, yet the</span>
+<span class="cl"><span class="ln">175</span> *  runtime honours (Bun PR #33647). Typed honestly here so the long-stream fetches</span>
+<span class="cl"><span class="ln">176</span> *  can disable Bun&#x27;s 5-min idle cap without an `as any`/`as RequestInit` bypass. */</span>
+<span class="cl"><span class="ln">177</span>type FetchInit = RequestInit &amp; { timeout?: number };</span></code></pre></div><h3>tool gateway token 是线程级 memoized</h3><p>`prepareOpencodeSandboxConfig` 构建 MCP entry 时，如果有 threadId，就用 `ThreadTokenMemo` 复用同一线程的短期 bearer token；没有 gateway 或 orgId 时返回非 required 空配置，准备失败则返回 null 让上层 fail closed。 <code>backend/src/engines/opencode-server.ts:467</code> <code>backend/src/engines/opencode-server.ts:477</code> <code>backend/src/engines/opencode-server.ts:499</code> <code>backend/src/engines/opencode-server.ts:512</code></p><div class="code-wrap"><div class="code-head"><span>MCP gateway 配置的生成入口</span><code>backend/src/engines/opencode-server.ts:467</code></div><pre><code><span class="cl"><span class="ln">467</span>export async function prepareOpencodeSandboxConfig(</span>
+<span class="cl"><span class="ln">468</span>  sandbox: SandboxHandle,</span>
+<span class="cl"><span class="ln">469</span>  ctx: EngineRunContext,</span>
+<span class="cl"><span class="ln">470</span>  baseConfig?: Record&lt;string, unknown&gt;,</span>
+<span class="cl"><span class="ln">471</span>): Promise&lt;PreparedOpenCodeConfig | null&gt; {</span>
+<span class="cl"><span class="ln">472</span>  const gw = toolGatewayConfig();</span>
+<span class="cl"><span class="ln">473</span>  const providerOptions = opencodeProviderGatewayOptions(ctx);</span>
+<span class="cl"><span class="ln">474</span>  // GUI automation is provided by the trusted useAgent-knowledge computer_* tools.</span>
+<span class="cl"><span class="ln">475</span>  // Remove any stale Playwright MCP entry from retained OpenCode configuration.</span>
+<span class="cl"><span class="ln">476</span>  const browser = null;</span>
+<span class="cl"><span class="ln">477</span>  const state = {</span>
+<span class="cl"><span class="ln">478</span>    knowledge: Boolean(gw &amp;&amp; ctx.orgId),</span>
+<span class="cl"><span class="ln">479</span>    provider: Object.keys(providerOptions).length &gt; 0,</span>
+<span class="cl"><span class="ln">480</span>    browser: Boolean(browser),</span>
+<span class="cl"><span class="ln">481</span>  } satisfies OpenCodeGatewayState;</span>
+<span class="cl"><span class="ln">482</span>  if ((!ctx.orgId || (!gw &amp;&amp; Object.keys(providerOptions).length === 0)) &amp;&amp; !browser) {</span>
+<span class="cl"><span class="ln">483</span>    return { config: {}, state, required: false };</span>
+<span class="cl"><span class="ln">484</span>  }</span>
+<span class="cl"><span class="ln">485</span>  try {</span>
+<span class="cl"><span class="ln">486</span>    // Merge into any existing global config so snapshot-provided settings (models,</span>
+<span class="cl"><span class="ln">487</span>    // allowlists) survive. Read-parse-merge in TS (a shell JSON merge is brittle).</span>
+<span class="cl"><span class="ln">488</span>    const cfg = baseConfig ?? await readOpencodeSandboxConfig(sandbox);</span>
+<span class="cl"><span class="ln">489</span>    cfg[&quot;$schema&quot;] = cfg[&quot;$schema&quot;] ?? &quot;https://opencode.ai/config.json&quot;;</span>
+<span class="cl"><span class="ln">490</span>    const mcp = (typeof cfg.mcp === &quot;object&quot; &amp;&amp; cfg.mcp ? (cfg.mcp as Record&lt;string, unknown&gt;) : {});</span>
+<span class="cl"><span class="ln">491</span>    if (gw &amp;&amp; ctx.orgId) {</span>
+<span class="cl"><span class="ln">492</span>      const orgId = ctx.orgId;</span>
+<span class="cl"><span class="ln">493</span>      // Thread-scoped + memoized so warm turns build a byte-identical MCP entry</span>
+<span class="cl"><span class="ln">494</span>      // (run-invariant config); a single-shot run keeps the strict run binding.</span>
+<span class="cl"><span class="ln">495</span>      const descriptor = ctx.threadId</span>
+<span class="cl"><span class="ln">496</span>        ? (() =&gt; {</span>
+<span class="cl"><span class="ln">497</span>            const ttlMs = gw.tokenTtlMs;</span>
+<span class="cl"><span class="ln">498</span>            const nowMs = Date.now();</span>
+<span class="cl"><span class="ln">499</span>            const token = opencodeToolTokens.get(</span>
+<span class="cl"><span class="ln">500</span>              `${orgId}:${ctx.threadId}:${ctx.userId ?? &quot;&quot;}:tool`,</span>
+<span class="cl"><span class="ln">501</span>              threadTokenMemoOptions(ttlMs, THREAD_TOKEN_REUSE_WINDOW_MS),</span>
+<span class="cl"><span class="ln">502</span>              () =&gt; {</span>
+<span class="cl"><span class="ln">503</span>                const minted = buildToolGatewayCapabilityDescriptor(</span>
+<span class="cl"><span class="ln">504</span>                  {</span>
+<span class="cl"><span class="ln">505</span>                    orgId,</span>
+<span class="cl"><span class="ln">506</span>                    userId: ctx.userId ?? &quot;&quot;,</span>
+<span class="cl"><span class="ln">507</span>                    threadId: ctx.threadId!,</span>
+<span class="cl"><span class="ln">508</span>                    runId: ctx.runId,</span>
+<span class="cl"><span class="ln">509</span>                  },</span>
+<span class="cl"><span class="ln">510</span>                  { config: gw, scope: &quot;thread&quot;, ttlMs, nowMs },</span>
+<span class="cl"><span class="ln">511</span>                );</span>
+<span class="cl"><span class="ln">512</span>                if (!minted) throw new Error(&quot;tool gateway could not mint OpenCode capability&quot;);</span>
+<span class="cl"><span class="ln">513</span>                return minted.bearerToken;</span>
+<span class="cl"><span class="ln">514</span>              },</span>
+<span class="cl"><span class="ln">515</span>              nowMs,</span>
+<span class="cl"><span class="ln">516</span>            );</span>
+<span class="cl"><span class="ln">517</span>            return describeToolGatewayCapabilityDescriptor(</span>
+<span class="cl"><span class="ln">518</span>              {</span>
+<span class="cl"><span class="ln">519</span>                orgId,</span>
+<span class="cl"><span class="ln">520</span>                userId: ctx.userId ?? &quot;&quot;,</span></code></pre></div></section><section class="sec" id="dispatch"><div class="sec-no"><b>03</b> / SOURCE READ</div><h2 class="sec-title">Turn 调度把 runtime snapshot 当权威事实</h2><h3>调度前先确认 provider ready</h3><p>runtime adapter 先执行 provider readiness barrier，失败就重启 runtime 并 invalidate access，再次验证不通过才抛错。这个策略让 provider 配置异步落盘带来的 race 能被显式处理。 <code>backend/src/engines/runtime-adapter.ts:90</code> <code>backend/src/engines/runtime-adapter.ts:101</code> <code>backend/src/engines/runtime-adapter.ts:111</code> <code>backend/src/engines/runtime-adapter.ts:123</code></p><div class="code-wrap"><div class="code-head"><span>通用 provider readiness barrier</span><code>backend/src/engines/runtime-adapter.ts:90</code></div><pre><code><span class="cl"><span class="ln">90</span>export async function ensureRuntimeProviderReadyForTurn(input: {</span>
+<span class="cl"><span class="ln">91</span>  readonly sandbox: SandboxHandle;</span>
+<span class="cl"><span class="ln">92</span>  readonly signal: AbortSignal;</span>
+<span class="cl"><span class="ln">93</span>  readonly readiness: RuntimeProviderReadiness;</span>
+<span class="cl"><span class="ln">94</span>  readonly barrierDeadlineMs: number;</span>
+<span class="cl"><span class="ln">95</span>  readonly verifyDeadlineMs: number;</span>
+<span class="cl"><span class="ln">96</span>  readonly providerLabel: string;</span>
+<span class="cl"><span class="ln">97</span>  readonly dependencies?: RuntimeProviderBarrierDependencies;</span>
+<span class="cl"><span class="ln">98</span>}): Promise&lt;void&gt; {</span>
+<span class="cl"><span class="ln">99</span>  const dependencies = input.dependencies ?? runtimeProviderBarrierDependencies;</span>
+<span class="cl"><span class="ln">100</span>  if (</span>
+<span class="cl"><span class="ln">101</span>    await dependencies.awaitReady(</span>
+<span class="cl"><span class="ln">102</span>      input.sandbox,</span>
+<span class="cl"><span class="ln">103</span>      input.signal,</span>
+<span class="cl"><span class="ln">104</span>      input.barrierDeadlineMs,</span>
+<span class="cl"><span class="ln">105</span>      input.readiness,</span>
+<span class="cl"><span class="ln">106</span>    )</span>
+<span class="cl"><span class="ln">107</span>  ) {</span>
+<span class="cl"><span class="ln">108</span>    return;</span>
+<span class="cl"><span class="ln">109</span>  }</span>
+<span class="cl"><span class="ln">110</span>  input.signal.throwIfAborted();</span>
+<span class="cl"><span class="ln">111</span>  await dependencies.restart(input.sandbox, input.signal);</span>
+<span class="cl"><span class="ln">112</span>  dependencies.invalidateAccess(input.sandbox);</span>
+<span class="cl"><span class="ln">113</span>  input.signal.throwIfAborted();</span>
+<span class="cl"><span class="ln">114</span>  if (</span>
+<span class="cl"><span class="ln">115</span>    !(await dependencies.awaitReady(</span>
+<span class="cl"><span class="ln">116</span>      input.sandbox,</span>
+<span class="cl"><span class="ln">117</span>      input.signal,</span>
+<span class="cl"><span class="ln">118</span>      input.verifyDeadlineMs,</span>
+<span class="cl"><span class="ln">119</span>      input.readiness,</span>
+<span class="cl"><span class="ln">120</span>    ))</span>
+<span class="cl"><span class="ln">121</span>  ) {</span>
+<span class="cl"><span class="ln">122</span>    input.signal.throwIfAborted();</span>
+<span class="cl"><span class="ln">123</span>    throw new Error(`${input.providerLabel} runtime did not become ready after restart`);</span>
+<span class="cl"><span class="ln">124</span>  }</span>
+<span class="cl"><span class="ln">125</span>}</span></code></pre></div><h3>文本投影要保持单调</h3><p>`projectRuntimeAssistantText` 只在新文本以已发布文本为前缀时输出 delta；不单调文本不会立即覆盖直播输出，而是在 settled 后进入 finalText。这个函数是 stream UI 和最终摘要之间的最小一致性规则。 <code>backend/src/engines/runtime-adapter.ts:402</code> <code>backend/src/engines/runtime-adapter.ts:407</code> <code>backend/src/engines/runtime-adapter.ts:409</code> <code>backend/src/engines/runtime-adapter.ts:411</code></p><div class="code-wrap"><div class="code-head"><span>assistant text 投影规则</span><code>backend/src/engines/runtime-adapter.ts:402</code></div><pre><code><span class="cl"><span class="ln">402</span>export function projectRuntimeAssistantText(</span>
+<span class="cl"><span class="ln">403</span>  state: { readonly publishedText: string; readonly finalText: string },</span>
+<span class="cl"><span class="ln">404</span>  text: string,</span>
+<span class="cl"><span class="ln">405</span>  settled: boolean,</span>
+<span class="cl"><span class="ln">406</span>): { readonly publishedText: string; readonly finalText: string; readonly delta: string } {</span>
+<span class="cl"><span class="ln">407</span>  const monotonic = text.startsWith(state.publishedText);</span>
+<span class="cl"><span class="ln">408</span>  return {</span>
+<span class="cl"><span class="ln">409</span>    publishedText: monotonic ? text : state.publishedText,</span>
+<span class="cl"><span class="ln">410</span>    finalText: settled ? text : state.finalText,</span>
+<span class="cl"><span class="ln">411</span>    delta: monotonic ? text.slice(state.publishedText.length) : &quot;&quot;,</span>
+<span class="cl"><span class="ln">412</span>  };</span>
+<span class="cl"><span class="ln">413</span>}</span></code></pre></div></section>
+  </main>
+</div>
+<script>
+document.querySelectorAll('.nav-list a').forEach(function(a){a.addEventListener('click',function(){document.querySelectorAll('.nav-list a').forEach(function(x){x.classList.remove('active')});a.classList.add('active')})})
+</script>
+</body>
+</html>

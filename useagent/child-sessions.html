@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>useagent 子会话控制深读</title>
+<meta name="description" content="这页说明 useagent 如何创建延期 child session、继承资源、分页读取事件并把执行关系投影成可验证结构。" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+.flow{font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--text-2);border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:10px;padding:18px;white-space:pre-wrap}
+.code-head{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--text-dim);font-family:var(--mono);font-size:11px}
+.code-wrap pre{margin:0;padding:14px;overflow:auto}
+.cl{display:block;min-height:1.45em}
+.ln{display:inline-block;width:44px;color:var(--text-faint);user-select:none}
+.pill-row{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}
+.pill{border:1px solid var(--line);border-radius:999px;padding:7px 10px;color:var(--text-2);font-family:var(--mono);font-size:11px;background:rgba(255,255,255,.025)}
+.deep-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--panel);color:var(--text);text-decoration:none}
+.deep-link b{display:block;color:var(--star);margin-bottom:6px}
+.deep-link span{color:var(--text-2);font-size:13px;line-height:1.45}
+@media(max-width:960px){.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><span>useagent</span><a href="index.html">Index</a></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">use<b>agent</b></div><div class="sub">child sessions</div></div>
+    <ul class="nav-list"><li><a href="#gateway"><span class="idx">01</span>Gateway 工具</a></li>
+<li><a href="#repo"><span class="idx">02</span>Run 继承</a></li>
+<li><a href="#events"><span class="idx">03</span>事件读取</a></li></ul>
+    <div class="nav-foot"><a href="index.html">GitHub Trending Index</a><br/>Source commit b233c46</div>
+  </aside>
+  <main class="main">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">AI coworker · runtime orchestration</div>
+          <h1 class="hero-title">useagent 子会话控制深读</h1>
+          <p class="hero-desc">这页说明 useagent 如何创建延期 child session、继承资源、分页读取事件并把执行关系投影成可验证结构。</p>
+          <div class="pill-row"><span class="pill">Created 2026-08-29</span><span class="pill">TypeScript</span><span class="pill">AGPL-3.0-only</span><span class="pill">270 stars when sampled</span></div>
+        </div>
+        <div class="hero-stats"><div class="stat"><div class="stat-num">20</div><div class="stat-lbl">child limit</div></div>
+<div class="stat"><div class="stat-num">50</div><div class="stat-lbl">event page</div></div>
+<div class="stat"><div class="stat-num">4k</div><div class="stat-lbl">prompt chars</div></div>
+<div class="stat"><div class="stat-num">320</div><div class="stat-lbl">payload preview</div></div></div>
+      </div>
+    </section>
+<section class="sec" id="gateway"><div class="sec-no"><b>01</b> / SOURCE READ</div><h2 class="sec-title">Gateway 工具先做 liveness 和能力判断</h2><h3>工具列表把用户预期写进 schema</h3><p>child session 工具的 schema 不暴露 engine、repo、model 选择，只有 idempotencyKey、prompt、childRunId、cursor、limit 等受限字段。执行入口先检查 current live run 与 sessionCapabilities，再调用 create/list/events/gather。 <code>backend/src/knowledge/gateway/child-session-tools.ts:20</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:155</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:178</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:316</code></p><div class="code-wrap"><div class="code-head"><span>create 工具的 liveness 与能力门</span><code>backend/src/knowledge/gateway/child-session-tools.ts:155</code></div><pre><code><span class="cl"><span class="ln">155</span>export async function childSessionToolsEnabled(</span>
+<span class="cl"><span class="ln">156</span>  claims: ToolTokenClaims,</span>
+<span class="cl"><span class="ln">157</span>): Promise&lt;boolean&gt; {</span>
+<span class="cl"><span class="ln">158</span>  const run = await getRunForOrg(claims.orgId, claims.runId);</span>
+<span class="cl"><span class="ln">159</span>  if (!run || run.status !== &quot;running&quot;) return false;</span>
+<span class="cl"><span class="ln">160</span>  // Gateway child sessions are engine-independent (deferred serial thread turns through the</span>
+<span class="cl"><span class="ln">161</span>  // product command lane), so no runtime-session-id requirement: any live run on a</span>
+<span class="cl"><span class="ln">162</span>  // dispatch-ready engine/model gets them, ACP claude/codex included.</span>
+<span class="cl"><span class="ln">163</span>  const capabilities = sessionCapabilities(run.engine, {</span>
+<span class="cl"><span class="ln">164</span>    desktop: Boolean(run.sandboxId),</span>
+<span class="cl"><span class="ln">165</span>    knowledgeTools: true,</span>
+<span class="cl"><span class="ln">166</span>  });</span>
+<span class="cl"><span class="ln">167</span>  return (</span>
+<span class="cl"><span class="ln">168</span>    capabilities.gatewayChildSessions &amp;&amp;</span>
+<span class="cl"><span class="ln">169</span>    persistedEngineModelReadyForDispatch(run.engine, run.model)</span>
+<span class="cl"><span class="ln">170</span>  );</span>
+<span class="cl"><span class="ln">171</span>}</span>
+<span class="cl"><span class="ln">172</span></span>
+<span class="cl"><span class="ln">173</span>async function currentRun(claims: ToolTokenClaims) {</span>
+<span class="cl"><span class="ln">174</span>  const run = await getRunForOrg(claims.orgId, claims.runId);</span>
+<span class="cl"><span class="ln">175</span>  return run?.status === &quot;running&quot; ? run : null;</span>
+<span class="cl"><span class="ln">176</span>}</span>
+<span class="cl"><span class="ln">177</span></span>
+<span class="cl"><span class="ln">178</span>async function create(</span>
+<span class="cl"><span class="ln">179</span>  claims: ToolTokenClaims,</span>
+<span class="cl"><span class="ln">180</span>  args: Record&lt;string, unknown&gt;,</span>
+<span class="cl"><span class="ln">181</span>): Promise&lt;ToolCallResult&gt; {</span>
+<span class="cl"><span class="ln">182</span>  const run = await currentRun(claims);</span>
+<span class="cl"><span class="ln">183</span>  if (!run || !(await childSessionToolsEnabled(claims))) {</span>
+<span class="cl"><span class="ln">184</span>    return errorResult(</span>
+<span class="cl"><span class="ln">185</span>      &quot;Child sessions are not enabled for the current live run; they work on every engine but require an active live turn with a dispatch-ready engine and model.&quot;,</span>
+<span class="cl"><span class="ln">186</span>    );</span>
+<span class="cl"><span class="ln">187</span>  }</span>
+<span class="cl"><span class="ln">188</span>  const idempotencyKey = cleanString(args.idempotencyKey);</span>
+<span class="cl"><span class="ln">189</span>  const prompt = cleanString(args.prompt);</span>
+<span class="cl"><span class="ln">190</span>  if (!idempotencyKey)</span>
+<span class="cl"><span class="ln">191</span>    return errorResult(&quot;child_session_create requires idempotencyKey.&quot;);</span>
+<span class="cl"><span class="ln">192</span>  if (!prompt) return errorResult(&quot;child_session_create requires prompt.&quot;);</span>
+<span class="cl"><span class="ln">193</span>  if (prompt.length &gt; MAX_PROMPT_CHARS) {</span>
+<span class="cl"><span class="ln">194</span>    return errorResult(</span>
+<span class="cl"><span class="ln">195</span>      `child_session_create prompt exceeds ${MAX_PROMPT_CHARS} characters.`,</span>
+<span class="cl"><span class="ln">196</span>    );</span>
+<span class="cl"><span class="ln">197</span>  }</span>
+<span class="cl"><span class="ln">198</span></span>
+<span class="cl"><span class="ln">199</span>  const outcome = await createChildSession({</span>
+<span class="cl"><span class="ln">200</span>    orgId: claims.orgId,</span>
+<span class="cl"><span class="ln">201</span>    actorId: claims.userId || null,</span>
+<span class="cl"><span class="ln">202</span>    parentRunId: run.id,</span>
+<span class="cl"><span class="ln">203</span>    threadId: run.threadId,</span>
+<span class="cl"><span class="ln">204</span>    prompt,</span>
+<span class="cl"><span class="ln">205</span>    engine: run.engine,</span>
+<span class="cl"><span class="ln">206</span>    model: run.model,</span>
+<span class="cl"><span class="ln">207</span>    repos: run.repos,</span>
+<span class="cl"><span class="ln">208</span>    memoryScope: run.memoryScope,</span>
+<span class="cl"><span class="ln">209</span>    idempotencyKey,</span>
+<span class="cl"><span class="ln">210</span>  });</span>
+<span class="cl"><span class="ln">211</span>  if (outcome.status === &quot;conflict&quot;) {</span>
+<span class="cl"><span class="ln">212</span>    return errorResult(</span>
+<span class="cl"><span class="ln">213</span>      &quot;idempotencyKey was already used for different child session input.&quot;,</span>
+<span class="cl"><span class="ln">214</span>    );</span>
+<span class="cl"><span class="ln">215</span>  }</span>
+<span class="cl"><span class="ln">216</span>  return textResult(</span>
+<span class="cl"><span class="ln">217</span>    `${outcome.status === &quot;created&quot; ? &quot;Created&quot; : &quot;Replayed&quot;} child session ${outcome.child.id} (${outcome.child.status}).`,</span>
+<span class="cl"><span class="ln">218</span>    { status: outcome.status, child: outcome.child },</span>
+<span class="cl"><span class="ln">219</span>  );</span>
+<span class="cl"><span class="ln">220</span>}</span></code></pre></div><h3>standalone gateway 不能直接写 commands</h3><p>当 `GATEWAY_DATABASE_URL` 存在时，gateway 只能读 runs，不能插入 run commands；源码用 `USEAGENT_API_ORIGIN` 把 child-session 操作转给 primary API，并用重新 mint 的短期 token 保持 tenant/run 绑定。 <code>backend/src/knowledge/gateway/child-session-tools.ts:328</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:347</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:358</code> <code>backend/src/knowledge/gateway/child-session-tools.ts:388</code></p><div class="code-wrap"><div class="code-head"><span>gateway mode 下的 primary API 委托</span><code>backend/src/knowledge/gateway/child-session-tools.ts:341</code></div><pre><code><span class="cl"><span class="ln">341</span>async function executeThroughPrimaryApi(</span>
+<span class="cl"><span class="ln">342</span>  origin: string,</span>
+<span class="cl"><span class="ln">343</span>  claims: ToolTokenClaims,</span>
+<span class="cl"><span class="ln">344</span>  name: string,</span>
+<span class="cl"><span class="ln">345</span>  args: Record&lt;string, unknown&gt;,</span>
+<span class="cl"><span class="ln">346</span>): Promise&lt;ToolCallResult&gt; {</span>
+<span class="cl"><span class="ln">347</span>  const remainingTtlMs = Math.max(1, Math.min(30_000, claims.exp - Date.now()));</span>
+<span class="cl"><span class="ln">348</span>  const token = mintToolToken(</span>
+<span class="cl"><span class="ln">349</span>    {</span>
+<span class="cl"><span class="ln">350</span>      orgId: claims.orgId,</span>
+<span class="cl"><span class="ln">351</span>      userId: claims.userId,</span>
+<span class="cl"><span class="ln">352</span>      threadId: claims.threadId,</span>
+<span class="cl"><span class="ln">353</span>      runId: claims.runId,</span>
+<span class="cl"><span class="ln">354</span>      scope: claims.scope,</span>
+<span class="cl"><span class="ln">355</span>    },</span>
+<span class="cl"><span class="ln">356</span>    remainingTtlMs,</span>
+<span class="cl"><span class="ln">357</span>  );</span>
+<span class="cl"><span class="ln">358</span>  const response = await fetch(`${origin}/api/internal/child-sessions`, {</span>
+<span class="cl"><span class="ln">359</span>    method: &quot;POST&quot;,</span>
+<span class="cl"><span class="ln">360</span>    headers: {</span>
+<span class="cl"><span class="ln">361</span>      authorization: `Bearer ${token}`,</span>
+<span class="cl"><span class="ln">362</span>      &quot;content-type&quot;: &quot;application/json&quot;,</span>
+<span class="cl"><span class="ln">363</span>    },</span>
+<span class="cl"><span class="ln">364</span>    body: JSON.stringify({ name, arguments: args }),</span>
+<span class="cl"><span class="ln">365</span>    signal: AbortSignal.timeout(30_000),</span>
+<span class="cl"><span class="ln">366</span>  });</span>
+<span class="cl"><span class="ln">367</span>  const body = (await response.json().catch(() =&gt; null)) as</span>
+<span class="cl"><span class="ln">368</span>    | { result?: ToolCallResult; error?: string }</span>
+<span class="cl"><span class="ln">369</span>    | null;</span>
+<span class="cl"><span class="ln">370</span>  if (!response.ok || !body?.result) {</span>
+<span class="cl"><span class="ln">371</span>    return errorResult(</span>
+<span class="cl"><span class="ln">372</span>      body?.error ?? `child-session control plane returned HTTP ${response.status}`,</span>
+<span class="cl"><span class="ln">373</span>      { status: response.status },</span>
+<span class="cl"><span class="ln">374</span>    );</span>
+<span class="cl"><span class="ln">375</span>  }</span>
+<span class="cl"><span class="ln">376</span>  return body.result;</span>
+<span class="cl"><span class="ln">377</span>}</span>
+<span class="cl"><span class="ln">378</span></span>
+<span class="cl"><span class="ln">379</span>/**</span>
+<span class="cl"><span class="ln">380</span> * The standalone gateway runs with a restricted database role that can read</span>
+<span class="cl"><span class="ln">381</span> * runs but never INSERT runs/run_commands/run_admissions - exactly what</span>
+<span class="cl"><span class="ln">382</span> * creating a child session does. Mirror the automation/approval seam: in</span>
+<span class="cl"><span class="ln">383</span> * gateway mode every child-session operation is delegated to the loopback</span>
+<span class="cl"><span class="ln">384</span> * primary API under a freshly minted, short-lived copy of the current live</span>
+<span class="cl"><span class="ln">385</span> * capability; the primary re-verifies liveness and tenant identity before</span>
+<span class="cl"><span class="ln">386</span> * executing. In-backend (non-gateway) mode keeps the direct path.</span>
+<span class="cl"><span class="ln">387</span> */</span>
+<span class="cl"><span class="ln">388</span>export async function executeChildSessionTool(</span>
+<span class="cl"><span class="ln">389</span>  claims: ToolTokenClaims,</span>
+<span class="cl"><span class="ln">390</span>  name: string,</span>
+<span class="cl"><span class="ln">391</span>  args: Record&lt;string, unknown&gt;,</span>
+<span class="cl"><span class="ln">392</span>): Promise&lt;ToolCallResult&gt; {</span>
+<span class="cl"><span class="ln">393</span>  const origin = primaryApiOrigin();</span>
+<span class="cl"><span class="ln">394</span>  if (process.env.GATEWAY_DATABASE_URL &amp;&amp; !origin) {</span>
+<span class="cl"><span class="ln">395</span>    return errorResult(</span>
+<span class="cl"><span class="ln">396</span>      &quot;child-session control plane is not configured; ask the workspace operator to set USEAGENT_API_ORIGIN for the gateway, then retry&quot;,</span>
+<span class="cl"><span class="ln">397</span>    );</span>
+<span class="cl"><span class="ln">398</span>  }</span>
+<span class="cl"><span class="ln">399</span>  return origin</span>
+<span class="cl"><span class="ln">400</span>    ? executeThroughPrimaryApi(origin, claims, name, args)</span>
+<span class="cl"><span class="ln">401</span>    : executeChildSessionToolLocal(claims, name, args);</span>
+<span class="cl"><span class="ln">402</span>}</span></code></pre></div></section><section class="sec" id="repo"><div class="sec-no"><b>02</b> / SOURCE READ</div><h2 class="sec-title">Child run 通过 command lane 落库</h2><h3>幂等 key 包含 thread 与 parent</h3><p>`childKey` 把 threadId、parentRunId 和 caller idempotencyKey 合成全局 key。`preflightRunCommandReplay` 和 `acceptRunCommand` 复用普通命令路径，所以 child session 与普通 run 共享一套 admission、run row 和生命周期事件。 <code>backend/src/runs/child-sessions.ts:47</code> <code>backend/src/runs/child-sessions.ts:51</code> <code>backend/src/runs/child-sessions.ts:138</code> <code>backend/src/runs/child-sessions.ts:192</code></p><div class="code-wrap"><div class="code-head"><span>key、summary 和分页上限</span><code>backend/src/runs/child-sessions.ts:47</code></div><pre><code><span class="cl"><span class="ln">47</span>function childKeyPrefix(threadId: string): string {</span>
+<span class="cl"><span class="ln">48</span>  return `${CHILD_SESSION_IDEMPOTENCY_PREFIX}:${threadId}:`;</span>
+<span class="cl"><span class="ln">49</span>}</span>
+<span class="cl"><span class="ln">50</span></span>
+<span class="cl"><span class="ln">51</span>function childKey(threadId: string, parentRunId: string, idempotencyKey: string): string {</span>
+<span class="cl"><span class="ln">52</span>  return `${childKeyPrefix(threadId)}${parentRunId}:${idempotencyKey}`;</span>
+<span class="cl"><span class="ln">53</span>}</span>
+<span class="cl"><span class="ln">54</span></span>
+<span class="cl"><span class="ln">55</span>function boundedLimit(value: unknown, max: number, fallback: number): number {</span>
+<span class="cl"><span class="ln">56</span>  if (typeof value !== &quot;number&quot; || !Number.isInteger(value)) return fallback;</span>
+<span class="cl"><span class="ln">57</span>  return Math.min(max, Math.max(1, value));</span>
+<span class="cl"><span class="ln">58</span>}</span>
+<span class="cl"><span class="ln">59</span></span>
+<span class="cl"><span class="ln">60</span>function preview(text: string): string {</span>
+<span class="cl"><span class="ln">61</span>  return text.length &gt; 240 ? `${text.slice(0, 240)}...` : text;</span>
+<span class="cl"><span class="ln">62</span>}</span>
+<span class="cl"><span class="ln">63</span></span>
+<span class="cl"><span class="ln">64</span>function toSummary(row: {</span>
+<span class="cl"><span class="ln">65</span>  readonly id: string;</span>
+<span class="cl"><span class="ln">66</span>  readonly parentRunId: string | null;</span>
+<span class="cl"><span class="ln">67</span>  readonly threadId: string;</span>
+<span class="cl"><span class="ln">68</span>  readonly status: RunStatus;</span>
+<span class="cl"><span class="ln">69</span>  readonly prompt: string;</span>
+<span class="cl"><span class="ln">70</span>  readonly engine: EngineId;</span>
+<span class="cl"><span class="ln">71</span>  readonly model: string;</span>
+<span class="cl"><span class="ln">72</span>  readonly createdAt: Date;</span>
+<span class="cl"><span class="ln">73</span>  readonly updatedAt: Date;</span>
+<span class="cl"><span class="ln">74</span>}): ChildSessionSummary {</span>
+<span class="cl"><span class="ln">75</span>  return {</span>
+<span class="cl"><span class="ln">76</span>    id: row.id,</span>
+<span class="cl"><span class="ln">77</span>    parentRunId: row.parentRunId,</span>
+<span class="cl"><span class="ln">78</span>    threadId: row.threadId,</span>
+<span class="cl"><span class="ln">79</span>    status: row.status,</span>
+<span class="cl"><span class="ln">80</span>    promptPreview: preview(row.prompt),</span>
+<span class="cl"><span class="ln">81</span>    engine: row.engine,</span>
+<span class="cl"><span class="ln">82</span>    model: row.model,</span>
+<span class="cl"><span class="ln">83</span>    createdAt: row.createdAt.toISOString(),</span>
+<span class="cl"><span class="ln">84</span>    updatedAt: row.updatedAt.toISOString(),</span>
+<span class="cl"><span class="ln">85</span>    eventRef: `skynet://runs/${row.id}/native-events`,</span>
+<span class="cl"><span class="ln">86</span>  };</span>
+<span class="cl"><span class="ln">87</span>}</span>
+<span class="cl"><span class="ln">88</span></span>
+<span class="cl"><span class="ln">89</span>export function childSessionLimit(value: unknown, fallback = 10): number {</span>
+<span class="cl"><span class="ln">90</span>  return boundedLimit(value, MAX_CHILD_LIMIT, fallback);</span>
+<span class="cl"><span class="ln">91</span>}</span>
+<span class="cl"><span class="ln">92</span></span>
+<span class="cl"><span class="ln">93</span>export function childSessionEventLimit(value: unknown, fallback = 25): number {</span>
+<span class="cl"><span class="ln">94</span>  return boundedLimit(value, MAX_EVENT_LIMIT, fallback);</span>
+<span class="cl"><span class="ln">95</span>}</span></code></pre></div><h3>继承资源但不扩大权限</h3><p>parent 不存在或不在同一 thread 会直接抛错；真正接受前只根据 parent.resolvedResources 或 legacyParentResources 做 intake。commandInput 中的 repos/resolvedResources 来自 intake，而不是 child prompt。 <code>backend/src/runs/child-sessions.ts:133</code> <code>backend/src/runs/child-sessions.ts:153</code> <code>backend/src/runs/child-sessions.ts:157</code> <code>backend/src/runs/child-sessions.ts:179</code></p><div class="code-wrap"><div class="code-head"><span>child run 的 intent 与接受路径</span><code>backend/src/runs/child-sessions.ts:115</code></div><pre><code><span class="cl"><span class="ln">115</span>  const intent: RunCommandIntent = {</span>
+<span class="cl"><span class="ln">116</span>    prompt: input.prompt,</span>
+<span class="cl"><span class="ln">117</span>    model: input.model,</span>
+<span class="cl"><span class="ln">118</span>    engine: input.engine,</span>
+<span class="cl"><span class="ln">119</span>    parentRunId: input.parentRunId,</span>
+<span class="cl"><span class="ln">120</span>    // Child sessions inherit the parent&#x27;s already-authorized resources. They</span>
+<span class="cl"><span class="ln">121</span>    // cannot make an explicit repository selection of their own.</span>
+<span class="cl"><span class="ln">122</span>    requestedRepos: [],</span>
+<span class="cl"><span class="ln">123</span>    requestedResources: [],</span>
+<span class="cl"><span class="ln">124</span>    attachmentIds: [],</span>
+<span class="cl"><span class="ln">125</span>    memoryScope: input.memoryScope,</span>
+<span class="cl"><span class="ln">126</span>    skillId: null,</span>
+<span class="cl"><span class="ln">127</span>    skillVersion: null,</span>
+<span class="cl"><span class="ln">128</span>    commandName: null,</span>
+<span class="cl"><span class="ln">129</span>    commandProvider: null,</span>
+<span class="cl"><span class="ln">130</span>    commandSessionId: null,</span>
+<span class="cl"><span class="ln">131</span>    commandCatalogRevision: null,</span>
+<span class="cl"><span class="ln">132</span>  };</span>
+<span class="cl"><span class="ln">133</span>  const parent = await getRunForOrg(input.orgId, input.parentRunId);</span>
+<span class="cl"><span class="ln">134</span>  if (!parent || parent.threadId !== input.threadId) {</span>
+<span class="cl"><span class="ln">135</span>    throw new Error(&quot;child session parent is not available in this thread&quot;);</span>
+<span class="cl"><span class="ln">136</span>  }</span>
+<span class="cl"><span class="ln">137</span>  const internalOrigin = isInternalRunOrigin(parent.origin) ? parent.origin : null;</span>
+<span class="cl"><span class="ln">138</span>  let accepted = internalOrigin</span>
+<span class="cl"><span class="ln">139</span>    ? await preflightInternalRunCommandReplay({</span>
+<span class="cl"><span class="ln">140</span>      orgId: input.orgId,</span>
+<span class="cl"><span class="ln">141</span>      idempotencyKey,</span>
+<span class="cl"><span class="ln">142</span>      intent,</span>
+<span class="cl"><span class="ln">143</span>      origin: internalOrigin,</span>
+<span class="cl"><span class="ln">144</span>    })</span>
+<span class="cl"><span class="ln">145</span>    : await preflightRunCommandReplay({</span>
+<span class="cl"><span class="ln">146</span>      orgId: input.orgId,</span>
+<span class="cl"><span class="ln">147</span>      idempotencyKey,</span>
+<span class="cl"><span class="ln">148</span>      intent,</span>
+<span class="cl"><span class="ln">149</span>    });</span>
+<span class="cl"><span class="ln">150</span>  if (accepted?.status === &quot;conflict&quot;) return { status: &quot;conflict&quot; };</span>
+<span class="cl"><span class="ln">151</span></span>
+<span class="cl"><span class="ln">152</span>  if (!accepted) {</span>
+<span class="cl"><span class="ln">153</span>    const inheritedResources =</span>
+<span class="cl"><span class="ln">154</span>      parent.resolvedResources.length &gt; 0</span>
+<span class="cl"><span class="ln">155</span>        ? parent.resolvedResources</span>
+<span class="cl"><span class="ln">156</span>        : legacyParentResources(parent.repos, &quot;api&quot;);</span>
+<span class="cl"><span class="ln">157</span>    const intake = await resolveRunIntake(</span>
+<span class="cl"><span class="ln">158</span>      {</span>
+<span class="cl"><span class="ln">159</span>        source: &quot;api&quot;,</span>
+<span class="cl"><span class="ln">160</span>        // Child prompts are agent-authored delegation text, not direct user</span>
+<span class="cl"><span class="ln">161</span>        // input, so they cannot discover or widen resource scope.</span>
+<span class="cl"><span class="ln">162</span>        text: &quot;&quot;,</span>
+<span class="cl"><span class="ln">163</span>        inheritedResources,</span>
+<span class="cl"><span class="ln">164</span>      },</span>
+<span class="cl"><span class="ln">165</span>      { authorize: createRunResourceAuthorization(input.orgId) },</span>
+<span class="cl"><span class="ln">166</span>    );</span>
+<span class="cl"><span class="ln">167</span>    const commandInput = {</span>
+<span class="cl"><span class="ln">168</span>      idempotencyKey,</span>
+<span class="cl"><span class="ln">169</span>      orgId: input.orgId,</span>
+<span class="cl"><span class="ln">170</span>      actorId: input.actorId,</span>
+<span class="cl"><span class="ln">171</span>      intent,</span>
+<span class="cl"><span class="ln">172</span>      run: {</span>
+<span class="cl"><span class="ln">173</span>        id: runId,</span>
+<span class="cl"><span class="ln">174</span>        prompt: input.prompt,</span>
+<span class="cl"><span class="ln">175</span>        model: input.model,</span>
+<span class="cl"><span class="ln">176</span>        engine: input.engine,</span>
+<span class="cl"><span class="ln">177</span>        parentRunId: input.parentRunId,</span>
+<span class="cl"><span class="ln">178</span>        threadId: input.threadId,</span>
+<span class="cl"><span class="ln">179</span>        repos: [...intake.repos],</span>
+<span class="cl"><span class="ln">180</span>        resolvedResources: intake.resources,</span>
+<span class="cl"><span class="ln">181</span>        attachmentIds: [],</span>
+<span class="cl"><span class="ln">182</span>        memoryScope: input.memoryScope,</span>
+<span class="cl"><span class="ln">183</span>        skillId: null,</span>
+<span class="cl"><span class="ln">184</span>        skillVersion: null,</span>
+<span class="cl"><span class="ln">185</span>        skillContentHash: null,</span>
+<span class="cl"><span class="ln">186</span>        commandName: null,</span>
+<span class="cl"><span class="ln">187</span>        commandProvider: null,</span>
+<span class="cl"><span class="ln">188</span>        commandSessionId: null,</span>
+<span class="cl"><span class="ln">189</span>        commandCatalogRevision: null,</span>
+<span class="cl"><span class="ln">190</span>      },</span>
+<span class="cl"><span class="ln">191</span>    };</span>
+<span class="cl"><span class="ln">192</span>    accepted = internalOrigin</span>
+<span class="cl"><span class="ln">193</span>      ? await acceptInternalRunCommand({ ...commandInput, origin: internalOrigin })</span>
+<span class="cl"><span class="ln">194</span>      : await acceptRunCommand(commandInput);</span>
+<span class="cl"><span class="ln">195</span>  }</span>
+<span class="cl"><span class="ln">196</span>  if (accepted.status === &quot;conflict&quot;) return { status: &quot;conflict&quot; };</span>
+<span class="cl"><span class="ln">197</span>  const child = await getChildSession(input.orgId, input.threadId, accepted.runId);</span>
+<span class="cl"><span class="ln">198</span>  if (!child) throw new Error(`Accepted child session ${accepted.runId} was not readable`);</span>
+<span class="cl"><span class="ln">199</span>  return { status: accepted.status, child };</span></code></pre></div></section><section class="sec" id="events"><div class="sec-no"><b>03</b> / SOURCE READ</div><h2 class="sec-title">Child execution 可以被投影和评估</h2><h3>native events 被分页读出</h3><p>`listChildSessionEvents` 先确认 child 属于当前 org/thread，再从 native frame storage 读 cursor 之后的事件，返回 nextCursor 和 `skynet://runs/.../native-events` 引用。gather 只聚合 count 和最近 event types，适合父线程快速汇总。 <code>backend/src/runs/child-sessions.ts:264</code> <code>backend/src/runs/child-sessions.ts:271</code> <code>backend/src/runs/child-sessions.ts:275</code> <code>backend/src/runs/child-sessions.ts:287</code></p><div class="code-wrap"><div class="code-head"><span>events/gather 的读取投影</span><code>backend/src/runs/child-sessions.ts:264</code></div><pre><code><span class="cl"><span class="ln">264</span>export async function listChildSessionEvents(input: {</span>
+<span class="cl"><span class="ln">265</span>  readonly orgId: string;</span>
+<span class="cl"><span class="ln">266</span>  readonly threadId: string;</span>
+<span class="cl"><span class="ln">267</span>  readonly childRunId: string;</span>
+<span class="cl"><span class="ln">268</span>  readonly cursor?: unknown;</span>
+<span class="cl"><span class="ln">269</span>  readonly limit?: unknown;</span>
+<span class="cl"><span class="ln">270</span>}): Promise&lt;ChildSessionEventPage | null&gt; {</span>
+<span class="cl"><span class="ln">271</span>  const child = await getChildSession(input.orgId, input.threadId, input.childRunId);</span>
+<span class="cl"><span class="ln">272</span>  if (!child) return null;</span>
+<span class="cl"><span class="ln">273</span>  const cursor = typeof input.cursor === &quot;number&quot; &amp;&amp; Number.isInteger(input.cursor) ? input.cursor : -1;</span>
+<span class="cl"><span class="ln">274</span>  const limit = childSessionEventLimit(input.limit);</span>
+<span class="cl"><span class="ln">275</span>  const rows = (await getNativeFramesSince(input.childRunId, cursor)).slice(0, limit + 1);</span>
+<span class="cl"><span class="ln">276</span>  const hasMore = rows.length &gt; limit;</span>
+<span class="cl"><span class="ln">277</span>  const events = rows.slice(0, limit);</span>
+<span class="cl"><span class="ln">278</span>  const last = events.at(-1);</span>
+<span class="cl"><span class="ln">279</span>  return {</span>
+<span class="cl"><span class="ln">280</span>    childRunId: input.childRunId,</span>
+<span class="cl"><span class="ln">281</span>    events,</span>
+<span class="cl"><span class="ln">282</span>    nextCursor: hasMore &amp;&amp; last ? last.seq : null,</span>
+<span class="cl"><span class="ln">283</span>    eventRef: child.eventRef,</span>
+<span class="cl"><span class="ln">284</span>  };</span>
+<span class="cl"><span class="ln">285</span>}</span>
+<span class="cl"><span class="ln">286</span></span>
+<span class="cl"><span class="ln">287</span>export async function gatherChildSessions(input: {</span>
+<span class="cl"><span class="ln">288</span>  readonly orgId: string;</span>
+<span class="cl"><span class="ln">289</span>  readonly threadId: string;</span>
+<span class="cl"><span class="ln">290</span>  readonly limit?: unknown;</span>
+<span class="cl"><span class="ln">291</span>}): Promise&lt;ReadonlyArray&lt;ChildSessionSummary &amp; {</span>
+<span class="cl"><span class="ln">292</span>  readonly eventCount: number;</span>
+<span class="cl"><span class="ln">293</span>  readonly latestEventTypes: readonly string[];</span>
+<span class="cl"><span class="ln">294</span>}&gt;&gt; {</span>
+<span class="cl"><span class="ln">295</span>  const children = await listChildSessions(input);</span>
+<span class="cl"><span class="ln">296</span>  if (children.length === 0) return [];</span>
+<span class="cl"><span class="ln">297</span>  const rows = await db</span>
+<span class="cl"><span class="ln">298</span>    .select({</span>
+<span class="cl"><span class="ln">299</span>      runId: providerEvents.runId,</span>
+<span class="cl"><span class="ln">300</span>      count: sql&lt;number&gt;`count(*)::int`,</span>
+<span class="cl"><span class="ln">301</span>      latestTypes: sql&lt;string[]&gt;`(array_remove(array_agg(${providerEvents.eventType} order by ${providerEvents.seq} desc), null))[1:5]`,</span>
+<span class="cl"><span class="ln">302</span>    })</span>
+<span class="cl"><span class="ln">303</span>    .from(providerEvents)</span>
+<span class="cl"><span class="ln">304</span>    .where(inArray(providerEvents.runId, children.map((child) =&gt; child.id)))</span>
+<span class="cl"><span class="ln">305</span>    .groupBy(providerEvents.runId)</span>
+<span class="cl"><span class="ln">306</span>    .orderBy(asc(providerEvents.runId));</span>
+<span class="cl"><span class="ln">307</span>  const byRun = new Map(rows.map((row) =&gt; [row.runId, row]));</span>
+<span class="cl"><span class="ln">308</span>  return children.map((child) =&gt; {</span>
+<span class="cl"><span class="ln">309</span>    const row = byRun.get(child.id);</span>
+<span class="cl"><span class="ln">310</span>    return {</span>
+<span class="cl"><span class="ln">311</span>      ...child,</span>
+<span class="cl"><span class="ln">312</span>      eventCount: row?.count ?? 0,</span>
+<span class="cl"><span class="ln">313</span>      latestEventTypes: row?.latestTypes ?? [],</span>
+<span class="cl"><span class="ln">314</span>    };</span>
+<span class="cl"><span class="ln">315</span>  });</span>
+<span class="cl"><span class="ln">316</span>}</span></code></pre></div><h3>conformance evaluator 区分合成证明和产品能力</h3><p>conformance 包里的 `SYNTHETIC_FIXTURE_NOTICE` 明确说合成 fixture 只证明 canonical semantics，不宣称 adapter parsing 或 live provider fidelity。`projectExecutions` 再把 canonical events 投影成 executionIds、childIds 和 delegationEdges。 <code>packages/conformance/test/child-execution-evaluator.ts:11</code> <code>packages/conformance/test/child-execution-evaluator.ts:36</code> <code>packages/conformance/test/child-execution-evaluator.ts:230</code> <code>packages/conformance/test/child-execution-evaluator.ts:238</code></p><div class="code-wrap"><div class="code-head"><span>execution projector 的 child edge 规则</span><code>packages/conformance/test/child-execution-evaluator.ts:238</code></div><pre><code><span class="cl"><span class="ln">238</span>export function createExecutionProjector(): ExecutionProjector {</span>
+<span class="cl"><span class="ln">239</span>  const childIds = new Set&lt;string&gt;();</span>
+<span class="cl"><span class="ln">240</span>  const delegationEdges = new Map&lt;string, { parentId: string; childId: string }&gt;();</span>
+<span class="cl"><span class="ln">241</span>  const eventsByExecution = new Map&lt;string, Map&lt;string, CanonicalThreadEvent&gt;&gt;();</span>
+<span class="cl"><span class="ln">242</span></span>
+<span class="cl"><span class="ln">243</span>  return {</span>
+<span class="cl"><span class="ln">244</span>    ingest(event) {</span>
+<span class="cl"><span class="ln">245</span>      if (event.kind === &quot;child.started&quot;) {</span>
+<span class="cl"><span class="ln">246</span>        childIds.add(event.childId);</span>
+<span class="cl"><span class="ln">247</span>        const parentId = event.parentChildId</span>
+<span class="cl"><span class="ln">248</span>          ?? event.identity.nativeParentSessionId</span>
+<span class="cl"><span class="ln">249</span>          ?? (event.identity.nativeSessionId !== undefined</span>
+<span class="cl"><span class="ln">250</span>            &amp;&amp; event.identity.nativeSessionId !== event.childId</span>
+<span class="cl"><span class="ln">251</span>            ? event.identity.nativeSessionId</span>
+<span class="cl"><span class="ln">252</span>            : event.runId);</span>
+<span class="cl"><span class="ln">253</span>        delegationEdges.set(`${parentId}:${event.childId}`, { parentId, childId: event.childId });</span>
+<span class="cl"><span class="ln">254</span>      } else if (event.kind === &quot;child.updated&quot; || event.kind === &quot;child.completed&quot;) {</span>
+<span class="cl"><span class="ln">255</span>        childIds.add(event.childId);</span>
+<span class="cl"><span class="ln">256</span>      }</span>
+<span class="cl"><span class="ln">257</span>      const executionId = event.identity.nativeSessionId ?? event.runId;</span>
+<span class="cl"><span class="ln">258</span>      const existing = eventsByExecution.get(executionId) ?? new Map&lt;string, CanonicalThreadEvent&gt;();</span>
+<span class="cl"><span class="ln">259</span>      const previous = existing.get(event.eventId);</span>
+<span class="cl"><span class="ln">260</span>      if (</span>
+<span class="cl"><span class="ln">261</span>        previous === undefined ||</span>
+<span class="cl"><span class="ln">262</span>        event.revision &gt; previous.revision ||</span>
+<span class="cl"><span class="ln">263</span>        (event.revision === previous.revision &amp;&amp; event.deliverySeq &gt; previous.deliverySeq)</span>
+<span class="cl"><span class="ln">264</span>      ) {</span>
+<span class="cl"><span class="ln">265</span>        existing.set(event.eventId, event);</span>
+<span class="cl"><span class="ln">266</span>      }</span>
+<span class="cl"><span class="ln">267</span>      eventsByExecution.set(executionId, existing);</span>
+<span class="cl"><span class="ln">268</span>    },</span>
+<span class="cl"><span class="ln">269</span>    snapshot() {</span>
+<span class="cl"><span class="ln">270</span>      return {</span>
+<span class="cl"><span class="ln">271</span>        executionIds: [...eventsByExecution.keys()],</span>
+<span class="cl"><span class="ln">272</span>        childIds: [...childIds],</span>
+<span class="cl"><span class="ln">273</span>        delegationEdges: [...delegationEdges.values()],</span>
+<span class="cl"><span class="ln">274</span>        eventsByExecution: new Map(</span>
+<span class="cl"><span class="ln">275</span>          [...eventsByExecution].map(([executionId, byId]) =&gt; [</span>
+<span class="cl"><span class="ln">276</span>            executionId,</span>
+<span class="cl"><span class="ln">277</span>            [...byId.values()].toSorted((a, b) =&gt; a.deliverySeq - b.deliverySeq),</span>
+<span class="cl"><span class="ln">278</span>          ]),</span>
+<span class="cl"><span class="ln">279</span>        ),</span>
+<span class="cl"><span class="ln">280</span>      };</span>
+<span class="cl"><span class="ln">281</span>    },</span>
+<span class="cl"><span class="ln">282</span>  };</span>
+<span class="cl"><span class="ln">283</span>}</span></code></pre></div></section>
+  </main>
+</div>
+<script>
+document.querySelectorAll('.nav-list a').forEach(function(a){a.addEventListener('click',function(){document.querySelectorAll('.nav-list a').forEach(function(x){x.classList.remove('active')});a.classList.add('active')})})
+</script>
+</body>
+</html>

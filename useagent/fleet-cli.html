@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>useagent Fleet 与 CLI 深读</title>
+<meta name="description" content="这页聚焦批量任务客户端、服务端 batch admission 和 CLI fan/QC 的真实执行路径。" />
+<style>
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+.flow{font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--text-2);border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:10px;padding:18px;white-space:pre-wrap}
+.code-head{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--text-dim);font-family:var(--mono);font-size:11px}
+.code-wrap pre{margin:0;padding:14px;overflow:auto}
+.cl{display:block;min-height:1.45em}
+.ln{display:inline-block;width:44px;color:var(--text-faint);user-select:none}
+.pill-row{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}
+.pill{border:1px solid var(--line);border-radius:999px;padding:7px 10px;color:var(--text-2);font-family:var(--mono);font-size:11px;background:rgba(255,255,255,.025)}
+.deep-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+.deep-link{display:block;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--panel);color:var(--text);text-decoration:none}
+.deep-link b{display:block;color:var(--star);margin-bottom:6px}
+.deep-link span{color:var(--text-2);font-size:13px;line-height:1.45}
+@media(max-width:960px){.deep-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="bg-stars"></div><div class="bg-glow"></div><div class="bg-grid"></div><div class="bg-grain"></div>
+<div class="mobile-bar"><span>useagent</span><a href="index.html">Index</a></div>
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand"><div class="glyph">use<b>agent</b></div><div class="sub">fleet cli</div></div>
+    <ul class="nav-list"><li><a href="#client"><span class="idx">01</span>Client API</a></li>
+<li><a href="#server"><span class="idx">02</span>Batch server</a></li>
+<li><a href="#cli"><span class="idx">03</span>CLI</a></li></ul>
+    <div class="nav-foot"><a href="index.html">GitHub Trending Index</a><br/>Source commit b233c46</div>
+  </aside>
+  <main class="main">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">AI coworker · runtime orchestration</div>
+          <h1 class="hero-title">useagent Fleet 与 CLI 深读</h1>
+          <p class="hero-desc">这页聚焦批量任务客户端、服务端 batch admission 和 CLI fan/QC 的真实执行路径。</p>
+          <div class="pill-row"><span class="pill">Created 2026-08-29</span><span class="pill">TypeScript</span><span class="pill">AGPL-3.0-only</span><span class="pill">270 stars when sampled</span></div>
+        </div>
+        <div class="hero-stats"><div class="stat"><div class="stat-num">100</div><div class="stat-lbl">client tasks</div></div>
+<div class="stat"><div class="stat-num">20</div><div class="stat-lbl">durable batch</div></div>
+<div class="stat"><div class="stat-num">4</div><div class="stat-lbl">default conc</div></div>
+<div class="stat"><div class="stat-num">15m</div><div class="stat-lbl">settle timeout</div></div></div>
+      </div>
+    </section>
+<section class="sec" id="client"><div class="sec-no"><b>01</b> / SOURCE READ</div><h2 class="sec-title">Fleet client 保持 runtime-neutral</h2><h3>Fetch 和 sleep 都可注入</h3><p>`FleetClientConfig` 只需要 baseUrl/apiKey/fetch，`AwaitSettledOptions` 允许注入 now/sleep/onPoll。这个结构让同一套 client 能在 CLI、worker 或浏览器里使用，同时测试可以不碰真实网络和计时器。 <code>packages/agent-client/src/fleet.ts:25</code> <code>packages/agent-client/src/fleet.ts:91</code> <code>packages/agent-client/src/fleet.ts:96</code> <code>packages/agent-client/src/fleet.ts:196</code></p><div class="code-wrap"><div class="code-head"><span>配置与 settle options</span><code>packages/agent-client/src/fleet.ts:25</code></div><pre><code><span class="cl"><span class="ln">25</span>export interface FleetClientConfig {</span>
+<span class="cl"><span class="ln">26</span>  /** Origin of the hosted org. Defaults to {@link DEFAULT_BASE_URL}. */</span>
+<span class="cl"><span class="ln">27</span>  baseUrl?: string;</span>
+<span class="cl"><span class="ln">28</span>  /** Org API key. Sent verbatim as `Authorization: Bearer &lt;apiKey&gt;` on every request. */</span>
+<span class="cl"><span class="ln">29</span>  apiKey: string;</span>
+<span class="cl"><span class="ln">30</span>  /** Injected fetch (tests / non-standard runtimes). Defaults to the ambient global. */</span>
+<span class="cl"><span class="ln">31</span>  fetch?: FetchLike;</span>
+<span class="cl"><span class="ln">32</span>}</span>
+<span class="cl"><span class="ln">33</span></span>
+<span class="cl"><span class="ln">34</span>/** One unit of work to dispatch as a run. Mirrors the accepted POST /api/runs body. */</span>
+<span class="cl"><span class="ln">35</span>export interface FleetTask {</span>
+<span class="cl"><span class="ln">36</span>  prompt: string;</span>
+<span class="cl"><span class="ln">37</span>  engine?: string;</span>
+<span class="cl"><span class="ln">38</span>  model?: string;</span>
+<span class="cl"><span class="ln">39</span>  repos?: readonly string[];</span>
+<span class="cl"><span class="ln">40</span>  /** Makes a lost-response retry safe (backend dedupes on this key). */</span>
+<span class="cl"><span class="ln">41</span>  idempotencyKey?: string;</span>
+<span class="cl"><span class="ln">42</span>}</span>
+<span class="cl"><span class="ln">43</span></span>
+<span class="cl"><span class="ln">44</span>/** A run accepted by the backend, with its web session URL for a human to open. */</span>
+<span class="cl"><span class="ln">45</span>export interface DispatchedRun {</span>
+<span class="cl"><span class="ln">46</span>  readonly runId: string;</span>
+<span class="cl"><span class="ln">47</span>  readonly status: string;</span>
+<span class="cl"><span class="ln">48</span>  readonly url: string;</span>
+<span class="cl"><span class="ln">49</span>}</span>
+<span class="cl"><span class="ln">50</span></span>
+<span class="cl"><span class="ln">51</span>/** Per-task result of a fan-out: never throws, so one bad task cannot sink the batch. */</span>
+<span class="cl"><span class="ln">52</span>export type DispatchOutcome =</span>
+<span class="cl"><span class="ln">53</span>  | { readonly ok: true; readonly task: FleetTask; readonly run: DispatchedRun }</span>
+<span class="cl"><span class="ln">54</span>  | { readonly ok: false; readonly task: FleetTask; readonly error: string };</span>
+<span class="cl"><span class="ln">55</span></span>
+<span class="cl"><span class="ln">56</span>export interface DispatchManyOptions {</span>
+<span class="cl"><span class="ln">57</span>  /** Max in-flight dispatches (default 4). Clamped to &gt;= 1. */</span>
+<span class="cl"><span class="ln">58</span>  concurrency?: number;</span>
+<span class="cl"><span class="ln">59</span>  /** When set, a task with no explicit key gets `${idempotencyPrefix}-${index}`. */</span>
+<span class="cl"><span class="ln">60</span>  idempotencyPrefix?: string;</span>
+<span class="cl"><span class="ln">61</span>}</span>
+<span class="cl"><span class="ln">62</span></span>
+<span class="cl"><span class="ln">63</span>export interface DispatchBatchOptions {</span>
+<span class="cl"><span class="ln">64</span>  /** Required batch-level key. Retrying the same request with this key is safe. */</span>
+<span class="cl"><span class="ln">65</span>  idempotencyKey: string;</span>
+<span class="cl"><span class="ln">66</span>}</span>
+<span class="cl"><span class="ln">67</span></span>
+<span class="cl"><span class="ln">68</span>export interface FleetBatchQueue {</span>
+<span class="cl"><span class="ln">69</span>  readonly state: string | null;</span>
+<span class="cl"><span class="ln">70</span>  readonly reason: string | null;</span>
+<span class="cl"><span class="ln">71</span>}</span>
+<span class="cl"><span class="ln">72</span></span>
+<span class="cl"><span class="ln">73</span>export interface FleetBatchRun {</span>
+<span class="cl"><span class="ln">74</span>  readonly ordinal: number;</span>
+<span class="cl"><span class="ln">75</span>  readonly runId: string;</span>
+<span class="cl"><span class="ln">76</span>  readonly status: string;</span>
+<span class="cl"><span class="ln">77</span>  readonly queue: FleetBatchQueue;</span>
+<span class="cl"><span class="ln">78</span>  readonly url: string;</span>
+<span class="cl"><span class="ln">79</span>}</span>
+<span class="cl"><span class="ln">80</span></span>
+<span class="cl"><span class="ln">81</span>export interface FleetBatch {</span>
+<span class="cl"><span class="ln">82</span>  readonly batchId: string;</span>
+<span class="cl"><span class="ln">83</span>  readonly status: string;</span>
+<span class="cl"><span class="ln">84</span>  readonly createdAt: string;</span>
+<span class="cl"><span class="ln">85</span>  /** True only when POST returned a previously accepted idempotent request. */</span>
+<span class="cl"><span class="ln">86</span>  readonly replayed: boolean;</span>
+<span class="cl"><span class="ln">87</span>  /** Child runs in caller-request order. */</span>
+<span class="cl"><span class="ln">88</span>  readonly runs: readonly FleetBatchRun[];</span>
+<span class="cl"><span class="ln">89</span>}</span>
+<span class="cl"><span class="ln">90</span></span>
+<span class="cl"><span class="ln">91</span>export interface AwaitSettledOptions {</span>
+<span class="cl"><span class="ln">92</span>  /** Give up after this long and return status &quot;timeout&quot; (default 15 min). */</span>
+<span class="cl"><span class="ln">93</span>  timeoutMs?: number;</span>
+<span class="cl"><span class="ln">94</span>  /** Delay between thread polls (default 3s). */</span>
+<span class="cl"><span class="ln">95</span>  pollMs?: number;</span>
+<span class="cl"><span class="ln">96</span>  /** Clock seam (defaults to Date.now) - injected so tests stay deterministic. */</span>
+<span class="cl"><span class="ln">97</span>  now?: () =&gt; number;</span>
+<span class="cl"><span class="ln">98</span>  /** Sleep seam (defaults to setTimeout) - injected so tests stay deterministic. */</span>
+<span class="cl"><span class="ln">99</span>  sleep?: (ms: number) =&gt; Promise&lt;void&gt;;</span>
+<span class="cl"><span class="ln">100</span>  /** Called once per poll with the current run row (null until it first appears).</span>
+<span class="cl"><span class="ln">101</span>   *  Lets a caller stream status transitions (e.g. `useagent run --watch`). */</span>
+<span class="cl"><span class="ln">102</span>  onPoll?: (run: RunSummary | null) =&gt; void;</span>
+<span class="cl"><span class="ln">103</span>}</span></code></pre></div><h3>dispatchMany 不让一个任务拖垮批次</h3><p>`dispatchMany` 先校验任务数不超过 100，再用 `mapWithConcurrency` 控并发；每个任务返回 ok/error outcome，而不是整批 reject。这样 CLI fan 可以把失败任务写进 JSONL 结果而不是丢失所有成功 run。 <code>packages/agent-client/src/fleet.ts:161</code> <code>packages/agent-client/src/fleet.ts:199</code> <code>packages/agent-client/src/fleet.ts:319</code> <code>packages/agent-client/src/fleet.ts:333</code></p><div class="code-wrap"><div class="code-head"><span>mapWithConcurrency 保序控并发</span><code>packages/agent-client/src/fleet.ts:199</code></div><pre><code><span class="cl"><span class="ln">199</span>/** Run `fn` over `items` with at most `concurrency` in flight, preserving input order. */</span>
+<span class="cl"><span class="ln">200</span>async function mapWithConcurrency&lt;T, R&gt;(</span>
+<span class="cl"><span class="ln">201</span>  items: readonly T[],</span>
+<span class="cl"><span class="ln">202</span>  concurrency: number,</span>
+<span class="cl"><span class="ln">203</span>  fn: (item: T, index: number) =&gt; Promise&lt;R&gt;,</span>
+<span class="cl"><span class="ln">204</span>): Promise&lt;R[]&gt; {</span>
+<span class="cl"><span class="ln">205</span>  const results = new Array&lt;R&gt;(items.length);</span>
+<span class="cl"><span class="ln">206</span>  let cursor = 0;</span>
+<span class="cl"><span class="ln">207</span>  const worker = async (): Promise&lt;void&gt; =&gt; {</span>
+<span class="cl"><span class="ln">208</span>    for (;;) {</span>
+<span class="cl"><span class="ln">209</span>      const index = cursor++;</span>
+<span class="cl"><span class="ln">210</span>      if (index &gt;= items.length) return;</span>
+<span class="cl"><span class="ln">211</span>      results[index] = await fn(items[index]!, index);</span>
+<span class="cl"><span class="ln">212</span>    }</span>
+<span class="cl"><span class="ln">213</span>  };</span>
+<span class="cl"><span class="ln">214</span>  const size = Math.min(Math.max(1, concurrency), items.length);</span>
+<span class="cl"><span class="ln">215</span>  await Promise.all(Array.from({ length: size }, () =&gt; worker()));</span>
+<span class="cl"><span class="ln">216</span>  return results;</span>
+<span class="cl"><span class="ln">217</span>}</span></code></pre></div></section><section class="sec" id="server"><div class="sec-no"><b>02</b> / SOURCE READ</div><h2 class="sec-title">服务端 batch 接受是原子提交</h2><h3>请求体白名单足够窄</h3><p>batch service 的 `TASK_KEYS` 和 `BODY_KEYS` 是硬白名单；`validateFleetBatchBody` 会逐项 normalize task 并计算 fingerprint。资源和 engine/model readiness 在 `resolveFleetBatchTasks` 中完成，错误带 index 返回给调用者。 <code>backend/src/fleet/batch-service.ts:37</code> <code>backend/src/fleet/batch-service.ts:72</code> <code>backend/src/fleet/batch-service.ts:107</code> <code>backend/src/fleet/batch-service.ts:137</code></p><div class="code-wrap"><div class="code-head"><span>任务解析后的 engine/model/resource resolve</span><code>backend/src/fleet/batch-service.ts:137</code></div><pre><code><span class="cl"><span class="ln">137</span>export async function resolveFleetBatchTasks(</span>
+<span class="cl"><span class="ln">138</span>  orgId: string,</span>
+<span class="cl"><span class="ln">139</span>  tasks: readonly FleetBatchTaskInput[],</span>
+<span class="cl"><span class="ln">140</span>): Promise&lt;FleetBatchResolveResult&gt; {</span>
+<span class="cl"><span class="ln">141</span>  const resolved: ResolvedFleetBatchTask[] = [];</span>
+<span class="cl"><span class="ln">142</span>  for (const [index, task] of tasks.entries()) {</span>
+<span class="cl"><span class="ln">143</span>    const engineResolution = resolveAcceptedEngine(task.engine);</span>
+<span class="cl"><span class="ln">144</span>    if (!engineResolution.ok) {</span>
+<span class="cl"><span class="ln">145</span>      return {</span>
+<span class="cl"><span class="ln">146</span>        ok: false,</span>
+<span class="cl"><span class="ln">147</span>        status: engineResolution.status,</span>
+<span class="cl"><span class="ln">148</span>        body: { ...engineResolutionErrorBody(engineResolution), index },</span>
+<span class="cl"><span class="ln">149</span>      };</span>
+<span class="cl"><span class="ln">150</span>    }</span>
+<span class="cl"><span class="ln">151</span>    const engine = engineResolution.engine;</span>
+<span class="cl"><span class="ln">152</span>    const model = task.model ?? defaultModelForEngine(engine);</span>
+<span class="cl"><span class="ln">153</span>    if (!isModelAllowedForEngine(engine, model)) {</span>
+<span class="cl"><span class="ln">154</span>      return { ok: false, status: 400, body: { error: &quot;model_not_allowed&quot;, engine, model, index } };</span>
+<span class="cl"><span class="ln">155</span>    }</span>
+<span class="cl"><span class="ln">156</span>    if (!modelProviderReadyForEngine(engine, model)) {</span>
+<span class="cl"><span class="ln">157</span>      return {</span>
+<span class="cl"><span class="ln">158</span>        ok: false,</span>
+<span class="cl"><span class="ln">159</span>        status: 403,</span>
+<span class="cl"><span class="ln">160</span>        body: { ...modelProviderReadinessErrorBody(engine, model), index },</span>
+<span class="cl"><span class="ln">161</span>      };</span>
+<span class="cl"><span class="ln">162</span>    }</span>
+<span class="cl"><span class="ln">163</span></span>
+<span class="cl"><span class="ln">164</span>    try {</span>
+<span class="cl"><span class="ln">165</span>      const intake = await resolveRunIntake(</span>
+<span class="cl"><span class="ln">166</span>        {</span>
+<span class="cl"><span class="ln">167</span>          source: &quot;web&quot;,</span>
+<span class="cl"><span class="ln">168</span>          text: task.prompt,</span>
+<span class="cl"><span class="ln">169</span>          explicitResources: explicitRepositoryResources(task.repos),</span>
+<span class="cl"><span class="ln">170</span>        },</span>
+<span class="cl"><span class="ln">171</span>        { authorize: createRunResourceAuthorization(orgId) },</span>
+<span class="cl"><span class="ln">172</span>      );</span>
+<span class="cl"><span class="ln">173</span>      resolved.push({</span>
+<span class="cl"><span class="ln">174</span>        input: task,</span>
+<span class="cl"><span class="ln">175</span>        engine,</span>
+<span class="cl"><span class="ln">176</span>        model,</span>
+<span class="cl"><span class="ln">177</span>        repos: [...intake.repos],</span>
+<span class="cl"><span class="ln">178</span>        resources: intake.resources,</span>
+<span class="cl"><span class="ln">179</span>      });</span>
+<span class="cl"><span class="ln">180</span>    } catch (error) {</span>
+<span class="cl"><span class="ln">181</span>      if (error instanceof RunIntakeError) {</span>
+<span class="cl"><span class="ln">182</span>        return {</span>
+<span class="cl"><span class="ln">183</span>          ok: false,</span>
+<span class="cl"><span class="ln">184</span>          status: error.code === &quot;resource_unauthorized&quot; ? 403 : 400,</span>
+<span class="cl"><span class="ln">185</span>          body: { error: error.code, ...error.diagnostic, index },</span>
+<span class="cl"><span class="ln">186</span>        };</span>
+<span class="cl"><span class="ln">187</span>      }</span>
+<span class="cl"><span class="ln">188</span>      throw error;</span>
+<span class="cl"><span class="ln">189</span>    }</span>
+<span class="cl"><span class="ln">190</span>  }</span>
+<span class="cl"><span class="ln">191</span>  return { ok: true, tasks: resolved };</span>
+<span class="cl"><span class="ln">192</span>}</span></code></pre></div><h3>接受批次时先锁 org 队列</h3><p>`acceptFleetBatch` 在事务里拿 org advisory lock，先查 replay，再断言 admission open，然后为每个 task 生成 runId 和 command payload，最后 `ensureFleetBatch` 写完整 manifest。只有事务创建新 batch 后才发布 run lifecycle signal。 <code>backend/src/fleet/batch-service.ts:194</code> <code>backend/src/fleet/batch-service.ts:257</code> <code>backend/src/fleet/batch-service.ts:264</code> <code>backend/src/fleet/batch-service.ts:304</code></p><div class="code-wrap"><div class="code-head"><span>批次 manifest 与 run commands 原子落库</span><code>backend/src/fleet/batch-service.ts:256</code></div><pre><code><span class="cl"><span class="ln">256</span>/** Commit the complete fan-out manifest and all accepted roots atomically. */</span>
+<span class="cl"><span class="ln">257</span>export async function acceptFleetBatch(input: {</span>
+<span class="cl"><span class="ln">258</span>  readonly orgId: string;</span>
+<span class="cl"><span class="ln">259</span>  readonly actorId: string;</span>
+<span class="cl"><span class="ln">260</span>  readonly idempotencyKey: string;</span>
+<span class="cl"><span class="ln">261</span>  readonly requestFingerprint: string;</span>
+<span class="cl"><span class="ln">262</span>  readonly tasks: readonly ResolvedFleetBatchTask[];</span>
+<span class="cl"><span class="ln">263</span>}): Promise&lt;FleetBatchAcceptance&gt; {</span>
+<span class="cl"><span class="ln">264</span>  const result = await db.transaction(async (tx) =&gt; {</span>
+<span class="cl"><span class="ln">265</span>    await lockOrgBatchQueue(tx, input.orgId);</span>
+<span class="cl"><span class="ln">266</span>    const replay = await preflightFleetBatch({</span>
+<span class="cl"><span class="ln">267</span>      orgId: input.orgId,</span>
+<span class="cl"><span class="ln">268</span>      actorId: input.actorId,</span>
+<span class="cl"><span class="ln">269</span>      idempotencyKey: input.idempotencyKey,</span>
+<span class="cl"><span class="ln">270</span>      requestFingerprint: input.requestFingerprint,</span>
+<span class="cl"><span class="ln">271</span>      itemCount: input.tasks.length,</span>
+<span class="cl"><span class="ln">272</span>    }, tx);</span>
+<span class="cl"><span class="ln">273</span>    if (replay) return { created: false, batch: replay } as const;</span>
+<span class="cl"><span class="ln">274</span></span>
+<span class="cl"><span class="ln">275</span>    await assertRunAdmissionOpen(tx);</span>
+<span class="cl"><span class="ln">276</span>    const runIds = input.tasks.map(() =&gt; crypto.randomUUID());</span>
+<span class="cl"><span class="ln">277</span>    for (const [index, task] of input.tasks.entries()) {</span>
+<span class="cl"><span class="ln">278</span>      const run = acceptedRun(task, runIds[index]!);</span>
+<span class="cl"><span class="ln">279</span>      const intent = commandIntent(task);</span>
+<span class="cl"><span class="ln">280</span>      const payload = JSON.stringify({</span>
+<span class="cl"><span class="ln">281</span>        prompt: run.prompt,</span>
+<span class="cl"><span class="ln">282</span>        model: run.model,</span>
+<span class="cl"><span class="ln">283</span>        engine: run.engine,</span>
+<span class="cl"><span class="ln">284</span>        parentRunId: null,</span>
+<span class="cl"><span class="ln">285</span>        threadId: run.threadId,</span>
+<span class="cl"><span class="ln">286</span>        repos: run.repos,</span>
+<span class="cl"><span class="ln">287</span>        resolvedResources: run.resolvedResources,</span>
+<span class="cl"><span class="ln">288</span>        attachmentIds: [],</span>
+<span class="cl"><span class="ln">289</span>        memoryScope: run.memoryScope,</span>
+<span class="cl"><span class="ln">290</span>        intent,</span>
+<span class="cl"><span class="ln">291</span>      }).slice(0, MAX_COMMAND_PAYLOAD);</span>
+<span class="cl"><span class="ln">292</span>      await insertCommandWithRun({</span>
+<span class="cl"><span class="ln">293</span>        commandId: crypto.randomUUID(),</span>
+<span class="cl"><span class="ln">294</span>        idempotencyKey: null,</span>
+<span class="cl"><span class="ln">295</span>        orgId: input.orgId,</span>
+<span class="cl"><span class="ln">296</span>        actorId: input.actorId,</span>
+<span class="cl"><span class="ln">297</span>        payloadFingerprint: runIntentFingerprint(intent),</span>
+<span class="cl"><span class="ln">298</span>        payload,</span>
+<span class="cl"><span class="ln">299</span>        run,</span>
+<span class="cl"><span class="ln">300</span>        origin: null,</span>
+<span class="cl"><span class="ln">301</span>        priority: 0,</span>
+<span class="cl"><span class="ln">302</span>      }, tx);</span>
+<span class="cl"><span class="ln">303</span>    }</span>
+<span class="cl"><span class="ln">304</span>    return ensureFleetBatch({</span>
+<span class="cl"><span class="ln">305</span>      orgId: input.orgId,</span>
+<span class="cl"><span class="ln">306</span>      actorId: input.actorId,</span>
+<span class="cl"><span class="ln">307</span>      idempotencyKey: input.idempotencyKey,</span>
+<span class="cl"><span class="ln">308</span>      requestFingerprint: input.requestFingerprint,</span>
+<span class="cl"><span class="ln">309</span>      runIds,</span>
+<span class="cl"><span class="ln">310</span>    }, tx);</span>
+<span class="cl"><span class="ln">311</span>  });</span>
+<span class="cl"><span class="ln">312</span></span>
+<span class="cl"><span class="ln">313</span>  if (result.created) {</span>
+<span class="cl"><span class="ln">314</span>    for (const run of result.batch.runs) {</span>
+<span class="cl"><span class="ln">315</span>      publishRunLifecycleChange({</span>
+<span class="cl"><span class="ln">316</span>        orgId: input.orgId,</span>
+<span class="cl"><span class="ln">317</span>        threadId: run.runId,</span>
+<span class="cl"><span class="ln">318</span>        runId: run.runId,</span>
+<span class="cl"><span class="ln">319</span>        kind: &quot;created&quot;,</span>
+<span class="cl"><span class="ln">320</span>      });</span>
+<span class="cl"><span class="ln">321</span>    }</span>
+<span class="cl"><span class="ln">322</span>  }</span>
+<span class="cl"><span class="ln">323</span>  return result;</span>
+<span class="cl"><span class="ln">324</span>}</span></code></pre></div></section><section class="sec" id="cli"><div class="sec-no"><b>03</b> / SOURCE READ</div><h2 class="sec-title">CLI 把 run、status、fan 映射为退出码</h2><h3>run/status 命令只做薄调度</h3><p>`runCommand` 只构造 dispatch task、输出 runId/url，并在 watch 模式轮询状态；`statusCommand` 读取 snapshot，unknown/failed 映射为非零退出码。命令层的职责边界相当清晰。 <code>packages/cli/src/commands.ts:24</code> <code>packages/cli/src/commands.ts:31</code> <code>packages/cli/src/commands.ts:49</code> <code>packages/cli/src/commands.ts:58</code></p><div class="code-wrap"><div class="code-head"><span>run/status 命令</span><code>packages/cli/src/commands.ts:24</code></div><pre><code><span class="cl"><span class="ln">24</span>export async function runCommand(client: FleetClient, args: RunArgs, io: CommandIO): Promise&lt;number&gt; {</span>
+<span class="cl"><span class="ln">25</span>  const run = await client.dispatch({</span>
+<span class="cl"><span class="ln">26</span>    prompt: args.prompt,</span>
+<span class="cl"><span class="ln">27</span>    engine: args.engine,</span>
+<span class="cl"><span class="ln">28</span>    model: args.model,</span>
+<span class="cl"><span class="ln">29</span>    repos: args.repos,</span>
+<span class="cl"><span class="ln">30</span>  });</span>
+<span class="cl"><span class="ln">31</span>  io.out(`run ${run.runId}`);</span>
+<span class="cl"><span class="ln">32</span>  io.out(run.url);</span>
+<span class="cl"><span class="ln">33</span>  if (!args.watch) return 0;</span>
+<span class="cl"><span class="ln">34</span></span>
+<span class="cl"><span class="ln">35</span>  let lastStatus = &quot;&quot;;</span>
+<span class="cl"><span class="ln">36</span>  const settled = await client.awaitSettled(run.runId, {</span>
+<span class="cl"><span class="ln">37</span>    onPoll: (r) =&gt; {</span>
+<span class="cl"><span class="ln">38</span>      if (r &amp;&amp; r.status !== lastStatus) {</span>
+<span class="cl"><span class="ln">39</span>        lastStatus = r.status;</span>
+<span class="cl"><span class="ln">40</span>        io.err(`... ${r.status}`);</span>
+<span class="cl"><span class="ln">41</span>      }</span>
+<span class="cl"><span class="ln">42</span>    },</span>
+<span class="cl"><span class="ln">43</span>  });</span>
+<span class="cl"><span class="ln">44</span>  io.err(`status: ${settled.status}`);</span>
+<span class="cl"><span class="ln">45</span>  if (settled.answer) io.out(settled.answer);</span>
+<span class="cl"><span class="ln">46</span>  return settled.status === &quot;completed&quot; ? 0 : 1;</span>
+<span class="cl"><span class="ln">47</span>}</span>
+<span class="cl"><span class="ln">48</span></span>
+<span class="cl"><span class="ln">49</span>export async function statusCommand(client: FleetClient, args: StatusArgs, io: CommandIO): Promise&lt;number&gt; {</span>
+<span class="cl"><span class="ln">50</span>  const snapshot = await client.getRun(args.runId);</span>
+<span class="cl"><span class="ln">51</span>  if (snapshot.status === &quot;unknown&quot;) {</span>
+<span class="cl"><span class="ln">52</span>    io.err(`run ${args.runId} not found`);</span>
+<span class="cl"><span class="ln">53</span>    return 1;</span>
+<span class="cl"><span class="ln">54</span>  }</span>
+<span class="cl"><span class="ln">55</span>  io.err(`status: ${snapshot.status}`);</span>
+<span class="cl"><span class="ln">56</span>  io.out(snapshot.url);</span>
+<span class="cl"><span class="ln">57</span>  if (snapshot.answer) io.out(snapshot.answer);</span>
+<span class="cl"><span class="ln">58</span>  return snapshot.status === &quot;failed&quot; ? 1 : 0;</span>
+<span class="cl"><span class="ln">59</span>}</span></code></pre></div><h3>fan 命令把 QC 作为真实 reply run</h3><p>`fanCommand` 解析 JSONL 后 dispatchMany，再对每个 accepted run awaitSettled；开启 QC 时调用 `client.verify`，结果里保存 verdict。最后只有 completed、无 error、verdict 不为 fail 才返回 0。 <code>packages/cli/src/commands.ts:61</code> <code>packages/cli/src/commands.ts:65</code> <code>packages/cli/src/commands.ts:91</code> <code>packages/cli/src/commands.ts:117</code></p><div class="code-wrap"><div class="code-head"><span>fan 命令和 QC 聚合</span><code>packages/cli/src/commands.ts:61</code></div><pre><code><span class="cl"><span class="ln">61</span>export async function fanCommand(client: FleetClient, args: FanArgs, io: CommandIO): Promise&lt;number&gt; {</span>
+<span class="cl"><span class="ln">62</span>  const tasks = parseTasksJsonl(await io.readFile(args.file));</span>
+<span class="cl"><span class="ln">63</span>  io.err(`dispatching ${tasks.length} task(s), parallelism ${args.parallel}${args.qc ? &quot;, QC on&quot; : &quot;&quot;}...`);</span>
+<span class="cl"><span class="ln">64</span></span>
+<span class="cl"><span class="ln">65</span>  const outcomes = await client.dispatchMany(tasks, { concurrency: args.parallel });</span>
+<span class="cl"><span class="ln">66</span>  const results: FanResultLine[] = await Promise.all(</span>
+<span class="cl"><span class="ln">67</span>    outcomes.map(async (outcome): Promise&lt;FanResultLine&gt; =&gt; {</span>
+<span class="cl"><span class="ln">68</span>      if (!outcome.ok) {</span>
+<span class="cl"><span class="ln">69</span>        return { prompt: outcome.task.prompt, runId: null, status: &quot;dispatch_error&quot;, answer: &quot;&quot;, url: null, error: outcome.error };</span>
+<span class="cl"><span class="ln">70</span>      }</span>
+<span class="cl"><span class="ln">71</span>      let settled: Awaited&lt;ReturnType&lt;FleetClient[&quot;awaitSettled&quot;]&gt;&gt;;</span>
+<span class="cl"><span class="ln">72</span>      try {</span>
+<span class="cl"><span class="ln">73</span>        settled = await client.awaitSettled(outcome.run.runId);</span>
+<span class="cl"><span class="ln">74</span>      } catch (error) {</span>
+<span class="cl"><span class="ln">75</span>        return {</span>
+<span class="cl"><span class="ln">76</span>          prompt: outcome.task.prompt,</span>
+<span class="cl"><span class="ln">77</span>          runId: outcome.run.runId,</span>
+<span class="cl"><span class="ln">78</span>          status: &quot;settle_error&quot;,</span>
+<span class="cl"><span class="ln">79</span>          answer: &quot;&quot;,</span>
+<span class="cl"><span class="ln">80</span>          url: outcome.run.url,</span>
+<span class="cl"><span class="ln">81</span>          error: errorMessage(error),</span>
+<span class="cl"><span class="ln">82</span>        };</span>
+<span class="cl"><span class="ln">83</span>      }</span>
+<span class="cl"><span class="ln">84</span>      const base: FanResultLine = {</span>
+<span class="cl"><span class="ln">85</span>        prompt: outcome.task.prompt,</span>
+<span class="cl"><span class="ln">86</span>        runId: outcome.run.runId,</span>
+<span class="cl"><span class="ln">87</span>        status: settled.status,</span>
+<span class="cl"><span class="ln">88</span>        answer: settled.answer,</span>
+<span class="cl"><span class="ln">89</span>        url: settled.url,</span>
+<span class="cl"><span class="ln">90</span>      };</span>
+<span class="cl"><span class="ln">91</span>      if (!args.qc) return base;</span>
+<span class="cl"><span class="ln">92</span>      // QC is a real reply run recorded in the SAME thread as the work it judges.</span>
+<span class="cl"><span class="ln">93</span>      try {</span>
+<span class="cl"><span class="ln">94</span>        const verified = await client.verify(outcome.run.runId, args.qc);</span>
+<span class="cl"><span class="ln">95</span>        return { ...base, verdict: verified.verdict };</span>
+<span class="cl"><span class="ln">96</span>      } catch (error) {</span>
+<span class="cl"><span class="ln">97</span>        return {</span>
+<span class="cl"><span class="ln">98</span>          ...base,</span>
+<span class="cl"><span class="ln">99</span>          status: &quot;verification_error&quot;,</span>
+<span class="cl"><span class="ln">100</span>          verdict: &quot;unknown&quot;,</span>
+<span class="cl"><span class="ln">101</span>          error: errorMessage(error),</span>
+<span class="cl"><span class="ln">102</span>        };</span>
+<span class="cl"><span class="ln">103</span>      }</span>
+<span class="cl"><span class="ln">104</span>    }),</span>
+<span class="cl"><span class="ln">105</span>  );</span>
+<span class="cl"><span class="ln">106</span></span>
+<span class="cl"><span class="ln">107</span>  const jsonl = serializeResults(results);</span>
+<span class="cl"><span class="ln">108</span>  if (args.out) {</span>
+<span class="cl"><span class="ln">109</span>    await io.writeFile(args.out, jsonl);</span>
+<span class="cl"><span class="ln">110</span>    io.err(`wrote ${results.length} result(s) to ${args.out}`);</span>
+<span class="cl"><span class="ln">111</span>  } else {</span>
+<span class="cl"><span class="ln">112</span>    io.out(jsonl.trimEnd());</span>
+<span class="cl"><span class="ln">113</span>  }</span>
+<span class="cl"><span class="ln">114</span>  io.err(&quot;&quot;);</span>
+<span class="cl"><span class="ln">115</span>  io.err(formatFanSummary(results));</span>
+<span class="cl"><span class="ln">116</span></span>
+<span class="cl"><span class="ln">117</span>  const allGood = results.every(</span>
+<span class="cl"><span class="ln">118</span>    (r) =&gt; r.status === &quot;completed&quot; &amp;&amp; r.error === undefined &amp;&amp; r.verdict !== &quot;fail&quot;,</span>
+<span class="cl"><span class="ln">119</span>  );</span>
+<span class="cl"><span class="ln">120</span>  return allGood ? 0 : 1;</span>
+<span class="cl"><span class="ln">121</span>}</span></code></pre></div></section>
+  </main>
+</div>
+<script>
+document.querySelectorAll('.nav-list a').forEach(function(a){a.addEventListener('click',function(){document.querySelectorAll('.nav-list a').forEach(function(x){x.classList.remove('active')});a.classList.add('active')})})
+</script>
+</body>
+</html>
