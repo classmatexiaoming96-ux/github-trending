@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Turn Loop 与 Streaming Round · 深度解析 · commerce-agents</title>
+<meta name="description" content="commerce-agents turn-loop 子模块完整解析 — Anthropic 的购物与商家 Agent 参考蓝图，重点展示 turn loop、工具执行、记忆、安全围栏与人工审批如何组合成可治理的 commerce agent。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #7fd7ff;
+  --star-soft:  rgba(127, 215, 255, 0.18);
+  --star-deep:  #1d5f78;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">commerce-agents<b>.py</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">commerce-agents<b>.py</b></div>
+      <div class="sub">turn-loop · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../commerce-agents.html">← 返回 commerce-agents 主页面</a></div>
+      <div><a href="../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Turn Loop 与 Streaming Round <em>深度解析</em></h1>
+      <p class="hero-desc">这一页只拆公共 turn runtime：如何找到最新用户输入、压缩历史、边收 stream 边合成 tool_use，并在中断后 salvage 成可继续处理的事件序列。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>turn.py 的入口并不复杂，但职责很集中：<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:67</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:87</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:110</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:124</code> 先定义本轮上下文怎么从历史里取出来，再把后续流式事件放进一个可以被 executor 消费的结构。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/turn.py</span> · L67-95</span><span>Python</span></div>
+        <pre class="code"><span class="ln">  67</span> def latest_user_text(messages: list[dict[str, Any]], host_texts: Collection[str] = ()) -&gt; str:
+<span class="ln">  68</span>     &quot;&quot;&quot;The most recent user-authored text; &quot;&quot; when the conversation has none.&quot;&quot;&quot;
+<span class="ln">  69</span>     for message in reversed(messages):
+<span class="ln">  70</span>         if message.get(&quot;role&quot;) != &quot;user&quot;:
+<span class="ln">  71</span>             continue
+<span class="ln">  72</span>         content = message.get(&quot;content&quot;)
+<span class="ln">  73</span>         texts = _text_blocks(content)
+<span class="ln">  74</span>         if texts and all(text in host_texts for text in texts):
+<span class="ln">  75</span>             continue
+<span class="ln">  76</span>         if texts:
+<span class="ln">  77</span>             return &quot;\n&quot;.join(texts)
+<span class="ln">  78</span>         # A message of tool results is the loop&#x27;s own; anything else ends the search.
+<span class="ln">  79</span>         if isinstance(content, list) and any(
+<span class="ln">  80</span>             isinstance(block, dict) and block.get(&quot;type&quot;) == &quot;tool_result&quot; for block in content
+<span class="ln">  81</span>         ):
+<span class="ln">  82</span>             continue
+<span class="ln">  83</span>         return &quot;&quot;
+<span class="ln">  84</span>     return &quot;&quot;
+<span class="ln">  85</span> 
+<span class="ln">  86</span> 
+<span class="ln">  87</span> def latest_exchange(
+<span class="ln">  88</span>     messages: list[dict[str, Any]], host_texts: Collection[str] = ()
+<span class="ln">  89</span> ) -&gt; list[dict[str, Any]]:
+<span class="ln">  90</span>     &quot;&quot;&quot;The slice from the most recent user-authored message onward: what one turn&#x27;s
+<span class="ln">  91</span>     extraction pass reads, so earlier turns are not re-extracted in new words.&quot;&quot;&quot;
+<span class="ln">  92</span>     for index in range(len(messages) - 1, -1, -1):
+<span class="ln">  93</span>         if _is_user_text(messages[index], host_texts):
+<span class="ln">  94</span>             return messages[index:]
+<span class="ln">  95</span>     return messages</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>EagerDispatcher 让工具调用提前执行</h3>
+      <p>dispatcher 观察 tool_use block 的 JSON 参数，一旦满足 contract 就提前 dispatch；<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:174</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:186</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:199</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:214</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:214</code> 说明它既追求低延迟，也保留了失败时返回到普通 round 处理的空间。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/turn.py</span> · L174-220</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 174</span> class EagerDispatcher:
+<span class="ln"> 175</span>     &quot;&quot;&quot;Tool execution started mid-stream. When a ``tool_use`` block&#x27;s buffered JSON
+<span class="ln"> 176</span>     parses at ``content_block_stop``, the call&#x27;s arguments are final — the loop starts
+<span class="ln"> 177</span>     executing then, while the model writes the rest of the round, so tool time overlaps
+<span class="ln"> 178</span>     generation time. ``collect`` is the post-stream join: started calls are awaited,
+<span class="ln"> 179</span>     anything the stream path missed (unparseable buffer, dispatch off) executes from the
+<span class="ln"> 180</span>     final message&#x27;s canonical args, and every call runs exactly once. ``cancel`` is the
+<span class="ln"> 181</span>     error and malformed-stream backstop; a started task must not outlive its turn.&quot;&quot;&quot;
+<span class="ln"> 182</span> 
+<span class="ln"> 183</span>     def __init__(
+<span class="ln"> 184</span>         self, execute: Callable[[str, dict[str, Any]], Awaitable[ToolOutcome]], enabled: bool
+<span class="ln"> 185</span>     ) -&gt; None:
+<span class="ln"> 186</span>         self._execute = execute
+<span class="ln"> 187</span>         self._enabled = enabled
+<span class="ln"> 188</span>         self._tasks: dict[str, asyncio.Future[ToolOutcome]] = {}
+<span class="ln"> 189</span> 
+<span class="ln"> 190</span>     def started(self, tool_use_id: str) -&gt; bool:
+<span class="ln"> 191</span>         return tool_use_id in self._tasks
+<span class="ln"> 192</span> 
+<span class="ln"> 193</span>     def dispatch(self, name: str, tool_use_id: str, args: dict[str, Any] | None) -&gt; bool:
+<span class="ln"> 194</span>         &quot;&quot;&quot;Start ``name`` on ``args``; False when it did not start (dispatch off, already
+<span class="ln"> 195</span>         started, or no parsed args) and the join executes it later.&quot;&quot;&quot;
+<span class="ln"> 196</span>         if not self._enabled or args is None or tool_use_id in self._tasks:
+<span class="ln"> 197</span>             return False
+<span class="ln"> 198</span>         self._tasks[tool_use_id] = asyncio.ensure_future(self._execute(name, args))
+<span class="ln"> 199</span>         return True
+<span class="ln"> 200</span> 
+<span class="ln"> 201</span>     def settle(self, tool_use_id: str, outcome: ToolOutcome) -&gt; None:
+<span class="ln"> 202</span>         &quot;&quot;&quot;Give ``tool_use_id`` its outcome without executing it (a call whose input
+<span class="ln"> 203</span>         never parsed); the join returns it in place. A started call keeps its task.&quot;&quot;&quot;
+<span class="ln"> 204</span>         if tool_use_id in self._tasks:
+<span class="ln"> 205</span>             return
+<span class="ln"> 206</span>         settled: asyncio.Future[ToolOutcome] = asyncio.get_running_loop().create_future()
+<span class="ln"> 207</span>         settled.set_result(outcome)
+<span class="ln"> 208</span>         self._tasks[tool_use_id] = settled
+<span class="ln"> 209</span> 
+<span class="ln"> 210</span>     async def collect(self, tool_uses: list[Any]) -&gt; list[ToolOutcome]:
+<span class="ln"> 211</span>         return await asyncio.gather(
+<span class="ln"> 212</span>             *(
+<span class="ln"> 213</span>                 self._tasks[block.id]
+<span class="ln"> 214</span>                 if block.id in self._tasks
+<span class="ln"> 215</span>                 else self._execute(block.name, dict(block.input or {}))
+<span class="ln"> 216</span>                 for block in tool_uses
+<span class="ln"> 217</span>             )
+<span class="ln"> 218</span>         )
+<span class="ln"> 219</span> 
+<span class="ln"> 220</span>     def cancel(self) -&gt; None:</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>salvage 与 close_open_tool_uses 兜住半截 stream</h3>
+      <p>当模型输出停在 tool_use 半路，runtime 不能把会话留在不一致状态；<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:379</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:401</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:501</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:520</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:544</code> 把 partial round 转成可记录事件，再补齐未关闭工具调用的结果。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/turn.py</span> · L401-427</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 401</span> def salvage_round(
+<span class="ln"> 402</span>     streamed: StreamedRound,
+<span class="ln"> 403</span>     dispatcher: EagerDispatcher,
+<span class="ln"> 404</span>     caller: logging.Logger,
+<span class="ln"> 405</span>     session_id: str | None,
+<span class="ln"> 406</span>     round_index: int,
+<span class="ln"> 407</span> ) -&gt; tuple[dict[str, Any] | None, list[Any], set[str]]:
+<span class="ln"> 408</span>     &quot;&quot;&quot;:meth:`StreamedRound.salvaged` for a round the SDK&#x27;s accumulator abandoned, with
+<span class="ln"> 409</span>     each unreadable client call settled on ``dispatcher`` as an error result so the model
+<span class="ln"> 410</span>     sends it again, and a WARNING per unreadable call on ``caller`` naming it and the size
+<span class="ln"> 411</span>     of what arrived, never the input.&quot;&quot;&quot;
+<span class="ln"> 412</span>     reply, tool_uses, unreadable = streamed.salvaged()
+<span class="ln"> 413</span>     for tool in streamed.tools.values():
+<span class="ln"> 414</span>         if tool.id not in unreadable:
+<span class="ln"> 415</span>             continue
+<span class="ln"> 416</span>         caller.warning(
+<span class="ln"> 417</span>             &quot;tool input unreadable session=%s round=%d tool=%s id=%s chars=%d&quot;,
+<span class="ln"> 418</span>             session_tag(session_id),
+<span class="ln"> 419</span>             round_index,
+<span class="ln"> 420</span>             tool.name,
+<span class="ln"> 421</span>             tool.id,
+<span class="ln"> 422</span>             len(tool.buffer),
+<span class="ln"> 423</span>             stacklevel=2,
+<span class="ln"> 424</span>         )
+<span class="ln"> 425</span>         if not tool.server:
+<span class="ln"> 426</span>             dispatcher.settle(tool.id, ToolOutcome.error(UNREADABLE_INPUT_TEXT))
+<span class="ln"> 427</span>     return reply, tool_uses, unreadable</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">
+          <div><b>history</b><small>latest_exchange + compact_history</small></div>
+          <span>→</span><div><b>stream blocks</b><small>text/tool_use/json_delta</small></div>
+          <span>→</span><div><b>eager dispatch</b><small>contract-ready inputs</small></div>
+          <span>→</span><div><b>salvage</b><small>outcome events + closure</small></div>
+        </div>
+      <p>完整流程由历史提取、stream feed、frame/relay、outcome event 和关闭工具调用组成；这些节点分布在 <code>sources/commerce-agents/commerce-common/commerce_common/turn.py:124</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:270</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:326</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:344</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:501</code>、<code>sources/commerce-agents/commerce-common/tests/test_turn.py:77</code>，测试直接覆盖了文本输出、工具结果和中断恢复。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul>
+          <li>如果 partial JSON 不能被解析，sources/commerce-agents/commerce-common/commerce_common/turn.py:379 会保留原始输入而不是伪造参数。</li>
+          <li>如果 stop_reason 已经关闭一轮，sources/commerce-agents/commerce-common/commerce_common/turn.py:520 会影响是否继续追加工具结果。</li>
+          <li>sources/commerce-agents/commerce-common/tests/test_turn.py:147 和 sources/commerce-agents/commerce-common/tests/test_turn.py:191 覆盖了 salvage 与未关闭 tool_use。</li>
+        </ul>
+    </section>
+
+    
+    <section class="sec">
+      <h3><span class="arr">▸</span>测试如何固定 turn loop 语义</h3>
+      <p>turn loop 的测试价值在于覆盖异常形态，而不是只测一条完整文本回复；sources/commerce-agents/commerce-common/tests/test_turn.py:42、sources/commerce-agents/commerce-common/tests/test_turn.py:106 与 sources/commerce-agents/commerce-common/tests/test_turn.py:220 分别把最新输入、tool_use 聚合和关闭动作固定下来。</p>
+    </section>
+        
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2">
+          <div class="card"><div class="card-h">Executor coupling</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/execution.py:214 接收 eager 或普通 round 给出的工具调用。</div></div>
+          <div class="card"><div class="card-h">Prompt assembly</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:60 决定当前 turn 如何带上历史与 cache-control。</div></div>
+          <div class="card"><div class="card-h">Streaming tests</div><div class="card-d">sources/commerce-agents/commerce-common/tests/test_streaming.py:1 补充验证 stream envelope。</div></div>
+        </div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-09-03</span>
+      <span>Source · <a href="https://github.com/anthropics/commerce-agents">anthropics/commerce-agents</a></span>
+      <span><a href="../commerce-agents.html">↑ commerce-agents 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

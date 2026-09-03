@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>commerce-agents · 把购物流程做成可审计 Agent 蓝图 · 源码观测台</title>
+<meta name="description" content="anthropics/commerce-agents 源码级深度解析 — Anthropic 的购物与商家 Agent 参考蓝图，重点展示 turn loop、工具执行、记忆、安全围栏与人工审批如何组合成可治理的 commerce agent。" />
+<meta property="og:title" content="commerce-agents · 源码观测台" />
+<meta property="og:description" content="Anthropic 的购物与商家 Agent 参考蓝图，重点展示 turn loop、工具执行、记忆、安全围栏与人工审批如何组合成可治理的 commerce agent。" />
+<meta property="og:type" content="article" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+/* 项目专属 accent 覆盖（仅改 --star 三件套） */
+:root {
+  --star:       #7fd7ff;
+  --star-soft:  rgba(127, 215, 255, 0.18);
+  --star-deep:  #1d5f78;
+}
+</style>
+</head>
+<body>
+
+<!-- ── background layers ─────────────────────────────────────── -->
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<!-- ── mobile bar ────────────────────────────────────────────── -->
+<div class="mobile-bar">
+  <div class="glyph">commerce-agents<b>.py</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+
+  <!-- =================== SIDE NAV =================== -->
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">commerce-agents<b>.py</b></div>
+      <div class="sub">源码级架构解析 · src/</div>
+    </div>
+    <span class="nav-ver">Python · Claude Agent SDK · FastMCP · pytest</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#overview"><span class="idx">00</span>概览</a></li>
+        <li><a href="#section-1"><span class="idx">01</span>双 Agent 蓝图与公共运行时</a></li>
+        <li><a href="#section-2"><span class="idx">02</span>Turn、工具、记忆如何接起来</a></li>
+        <li><a href="#section-3"><span class="idx">03</span>从用户话术到受控动作</a></li>
+        <li><a href="#section-4"><span class="idx">04</span>测试把安全约束落成回归契约</a></li>
+        <li><a href="#section-5"><span class="idx">05</span>值得借鉴的工程取舍</a></li>
+        <li><a href="#section-6"><span class="idx">06</span>风险、缺口与生产化边界</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div>Stars ★497 · 2026-09-01</div>
+      <div><a href="https://github.com/anthropics/commerce-agents" target="_blank">anthropics/commerce-agents</a></div>
+      <div><a href="index.html">← 全部分析</a></div>
+    </div>
+  </aside>
+
+  <!-- =================== MAIN =================== -->
+  <main class="main">
+
+    <!-- ── HERO ────────────────────────────────────────────── -->
+    <div class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-eyebrow">§ 00 · Source-level Observatory</div>
+          <h1 class="hero-title">commerce-agents <em>把购物流程做成可审计 Agent 蓝图</em></h1>
+          <p class="hero-desc">commerce-agents 不是一个泛化聊天样例，而是把购物 Agent 与商家 Agent 同时放进同一套公共运行时里。源码里用 <code>sources/commerce-agents/commerce-common/commerce_common/turn.py:67</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:214</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/executor.py:132</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:192</code> 串起输入归约、工具执行、领域动作、审批门与测试夹具，适合观察 Anthropic 如何把 Claude Agent SDK 用在真实交易边界。</p>
+          <div class="hero-stats">
+            <div class="stat"><div class="stat-num">★ 497</div><div class="stat-lbl">GitHub Stars</div></div>
+            <div class="stat"><div class="stat-num">15k+</div><div class="stat-lbl">LOC</div></div>
+            <div class="stat"><div class="stat-num">600</div><div class="stat-lbl">Files</div></div>
+            <div class="stat"><div class="stat-num">2026-08-31</div><div class="stat-lbl">Last commit</div></div>
+          </div>
+        </div>
+        <div>
+          <!-- 选填：项目架构缩略图 / SVG logo -->
+          
+          <div class="flow">
+            <div><b>User / Merchant</b><small>natural language intent</small></div>
+            <span>→</span><div><b>common turn runtime</b><small>history · streaming · tool closure</small></div>
+            <span>→</span><div><b>domain executor</b><small>shopping cart · listings · campaigns</small></div>
+            <span>→</span><div><b>gates</b><small>provenance · approval · follow-through</small></div>
+          </div>
+    
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 01 OVERVIEW ─────────────────────────────────────── -->
+    <section class="sec" id="overview">
+      <div class="sec-no">§ <b>00</b> · OVERVIEW</div>
+      <h2 class="sec-title">它解决什么，<em>凭什么</em>值得拆</h2>
+      <p>这个仓库的价值在于它把两个相反角色放到同一个工程框架里：买家侧 shopping agent 处理搜索、详情、购物车和订单，商家侧 merchant agent 处理库存、活动和上架草稿。公共层先在 <code>sources/commerce-agents/commerce-common/commerce_common/turn.py:67</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:124</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:60</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:184</code> 抽掉对话历史、提示块、工具契约与执行入口，领域层再把这些能力收敛到明确的商业动作。</p>
+      <p>源码最值得看的是防线分布，而不是单个 prompt。输入先经过 fencing 与 prompt assembly，工具调用再经过 executor 的 schema/状态注入，最后由 gates 判断是否必须澄清、补证据或等待人工确认。这条链在 <code>sources/commerce-agents/commerce-common/commerce_common/fencing.py:83</code>、<code>sources/commerce-agents/commerce-common/commerce_common/grounding.py:55</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:102</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:163</code>、<code>sources/commerce-agents/commerce-common/tests/test_turn.py:147</code> 都有测试或显式实现，因此它更像一份可复制的 agent 安全蓝图。</p>
+
+      <h3><span class="arr">▸</span>核心数据</h3>
+      <div class="g2">
+        <div class="card">
+          <div class="card-h">架构模式</div>
+          <div class="card-d">公共 turn/runtime + 双领域 executor + gate 后置约束</div>
+        </div>
+        <div class="card">
+          <div class="card-h">核心抽象</div>
+          <div class="card-d">StreamedRound、BaseToolExecutor、MemoryFact、GroundingRule、shopping/merchant gates</div>
+        </div>
+        <div class="card">
+          <div class="card-h">性能/精度数据</div>
+          <div class="card-d">仓库没有 benchmark；验证重心在回归测试和安全语义测试</div>
+        </div>
+        <div class="card">
+          <div class="card-h">下游依赖</div>
+          <div class="card-d">Claude Agent SDK、FastMCP、pytest、示例 Web UI 和 domain fixture</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>本文导航</strong> — 6 个章节依次：概述 → 架构图 → 核心模块 → 关键流程 → 测试与验证 → 风险。子页面在每个 H3 末尾以 <code>深度阅读 →</code> 入口展开。
+      </div>
+    </section>
+
+    <!-- ── 02 ARCHITECTURE ─────────────────────────────────── -->
+    <section class="sec" id="section-1">
+      <div class="sec-no">§ <b>01</b> · ARCHITECTURE</div>
+      <h2 class="sec-title">双 Agent 蓝图与公共运行时</h2>
+      <p>架构上它没有把购物和商家流程塞进一个巨大的 agent，而是先定义公共 turn、prompt、memory、fencing、grounding 和 executor，再由 shopping / merchant 两套子包注册领域工具。从 <code>sources/commerce-agents/commerce-common/commerce_common/types.py:17</code>、<code>sources/commerce-agents/commerce-common/commerce_common/skills.py:17</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/prompt.py:145</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/prompt.py:188</code> 可以看到这套分层让提示词规则、工具契约和可持久化事实分别演进。</p>
+
+      <h3><span class="arr">▸</span>系统拓扑</h3>
+      <div class="flow">
+        <div><b>Client turn</b><small>latest user text + compact history</small></div>
+        <span>→</span><div><b>Prompt blocks</b><small>static rules + dynamic context</small></div>
+        <span>→</span><div><b>Claude stream</b><small>tool calls arrive incrementally</small></div>
+        <span>→</span><div><b>Executor</b><small>validate args + inject state</small></div>
+        <span>→</span><div><b>Gate layer</b><small>prove, clarify, approve, close</small></div>
+    </div>
+
+      <h3><span class="arr">▸</span>模块清单</h3>
+      <p>公共包里的 turn 负责把 stream 转成可恢复的 round，execution 负责把工具名映射到处理器，fencing 和 grounding 负责让外部文本进 prompt 前先降权，memory 负责写入前过滤隐私与会话性事实。这些边界分别落在 <code>sources/commerce-agents/commerce-common/commerce_common/turn.py:270</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:106</code>、<code>sources/commerce-agents/commerce-common/commerce_common/fencing.py:99</code>、<code>sources/commerce-agents/commerce-common/commerce_common/grounding.py:72</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:130</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:43</code>，而 shopping 与 merchant 只需要实现自己领域里的工具 handler 和 gate。</p>
+      <div class="g3">
+        <div class="card"><div class="card-h">commerce_common.turn</div><div class="card-d">维护最新用户输入、history compact、streamed tool calls、salvage 与 turn close。</div></div>
+        <div class="card"><div class="card-h">commerce_common.execution</div><div class="card-d">统一校验工具参数，把 session/context/cache/status 注入 handler。</div></div>
+        <div class="card"><div class="card-h">shopping_agent / merchant_agent</div><div class="card-d">分别实现面向买家与商家的领域工具、提示词和审批 gate。</div></div>
+    </div>
+
+      <h3><span class="arr">▸</span>关键数据结构</h3>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/types.py</span> · L17-48</span><span>Python</span></div>
+        <pre class="code"><span class="ln">  17</span> 
+<span class="ln">  18</span> RecordT = TypeVar(&quot;RecordT&quot;)
+<span class="ln">  19</span> 
+<span class="ln">  20</span> 
+<span class="ln">  21</span> def remember(records: dict[str, RecordT], key: str, value: RecordT) -&gt; None:
+<span class="ln">  22</span>     records.pop(key, None)
+<span class="ln">  23</span>     records[key] = value
+<span class="ln">  24</span>     while len(records) &gt; PROVENANCE_CAP:
+<span class="ln">  25</span>         del records[next(iter(records))]
+<span class="ln">  26</span> 
+<span class="ln">  27</span> 
+<span class="ln">  28</span> class MemoryCategory(StrEnum):
+<span class="ln">  29</span>     PREFERENCE = &quot;preference&quot;
+<span class="ln">  30</span>     CONSTRAINT = &quot;constraint&quot;
+<span class="ln">  31</span>     CONTEXT = &quot;context&quot;
+<span class="ln">  32</span> 
+<span class="ln">  33</span> 
+<span class="ln">  34</span> class MemoryFact(BaseModel):
+<span class="ln">  35</span>     &quot;&quot;&quot;One stored fact. The schema bounds the shape; ``validate_fact`` decides what a
+<span class="ln">  36</span>     value may be about. Constraints are injected on every turn.&quot;&quot;&quot;
+<span class="ln">  37</span> 
+<span class="ln">  38</span>     key: str = Field(max_length=64)
+<span class="ln">  39</span>     value: str = Field(max_length=200)
+<span class="ln">  40</span>     category: MemoryCategory = MemoryCategory.PREFERENCE
+<span class="ln">  41</span>     updated_at: datetime | None = None
+<span class="ln">  42</span>     # Recalled facts carry the session that wrote them, so the model reads them as a
+<span class="ln">  43</span>     # past turn&#x27;s claim and a poisoned session&#x27;s writes stay traceable. The value is the
+<span class="ln">  44</span>     # session&#x27;s ``session_tag``, not the id: a fact is read back by other sessions of the
+<span class="ln">  45</span>     # subject, and on the example hosts the id is also the request credential.
+<span class="ln">  46</span>     source_session_id: str | None = Field(default=None, max_length=80)
+<span class="ln">  47</span> 
+<span class="ln">  48</span> </pre>
+      </div>
+
+      <a class="deep-link" href="commerce-agents/commerce-agents-turn-loop.html">深度阅读 · turn loop 与 streaming round</a>
+    </section>
+
+    <!-- ── 03 CORE MODULES ─────────────────────────────────── -->
+    <section class="sec" id="section-2">
+      <div class="sec-no">§ <b>02</b> · CORE MODULES</div>
+      <h2 class="sec-title">Turn、工具、记忆如何接起来</h2>
+
+      <h3><span class="arr">▸</span>StreamedRound：边收边拼的工具调用账本</h3>
+      <p>StreamedRound 把 Claude streaming 事件逐块聚合成文本、tool_use、tool_result 和 stop_reason，并在工具参数尚未完整时保留 partially parsed input。关键路径在 <code>sources/commerce-agents/commerce-common/commerce_common/turn.py:248</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:270</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:326</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:379</code>、<code>sources/commerce-agents/commerce-common/commerce_common/turn.py:401</code>；这解释了为什么测试要覆盖 salvage、关闭 open tool_use，以及 stream 中断后的最小可恢复状态。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/turn.py</span> · L270-319</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 270</span>     def feed(self, raw: Any) -&gt; StreamedTool | None:
+<span class="ln"> 271</span>         &quot;&quot;&quot;Record one raw stream event; returns the tool it touched, if any.&quot;&quot;&quot;
+<span class="ln"> 272</span>         raw_type = getattr(raw, &quot;type&quot;, &quot;&quot;)
+<span class="ln"> 273</span>         if raw_type in (&quot;message_start&quot;, &quot;message_delta&quot;):
+<span class="ln"> 274</span>             # The stream&#x27;s counts are cumulative, so the latest value of each replaces ours.
+<span class="ln"> 275</span>             counts = getattr(raw.message if raw_type == &quot;message_start&quot; else raw, &quot;usage&quot;, None)
+<span class="ln"> 276</span>             for key in usage_totals():
+<span class="ln"> 277</span>                 if isinstance(value := getattr(counts, key, None), int):
+<span class="ln"> 278</span>                     setattr(self.usage, key, value)
+<span class="ln"> 279</span>             return None
+<span class="ln"> 280</span>         index = getattr(raw, &quot;index&quot;, None)
+<span class="ln"> 281</span>         if not isinstance(index, int):
+<span class="ln"> 282</span>             return None
+<span class="ln"> 283</span>         if raw_type == &quot;content_block_start&quot;:
+<span class="ln"> 284</span>             block = raw.content_block
+<span class="ln"> 285</span>             entry = dict(block.model_dump(exclude_none=True, exclude={&quot;citations&quot;}))
+<span class="ln"> 286</span>             kind = entry.get(&quot;type&quot;)
+<span class="ln"> 287</span>             # The streamed fields start empty here and grow from the deltas.
+<span class="ln"> 288</span>             if kind == &quot;text&quot;:
+<span class="ln"> 289</span>                 entry[&quot;text&quot;] = &quot;&quot;
+<span class="ln"> 290</span>             elif kind == &quot;thinking&quot;:
+<span class="ln"> 291</span>                 entry[&quot;thinking&quot;] = &quot;&quot;
+<span class="ln"> 292</span>             elif kind in (&quot;tool_use&quot;, &quot;server_tool_use&quot;):
+<span class="ln"> 293</span>                 entry[&quot;input&quot;] = {}
+<span class="ln"> 294</span>                 self.tools[index] = StreamedTool(
+<span class="ln"> 295</span>                     name=block.name, id=block.id, server=kind == &quot;server_tool_use&quot;
+<span class="ln"> 296</span>                 )
+<span class="ln"> 297</span>             self.blocks.append(entry)
+<span class="ln"> 298</span>             return self.tools.get(index)
+<span class="ln"> 299</span>         if raw_type == &quot;content_block_delta&quot;:
+<span class="ln"> 300</span>             delta = raw.delta
+<span class="ln"> 301</span>             delta_type = getattr(delta, &quot;type&quot;, &quot;&quot;)
+<span class="ln"> 302</span>             if (tool := self.tools.get(index)) is not None:
+<span class="ln"> 303</span>                 if delta_type == &quot;input_json_delta&quot;:
+<span class="ln"> 304</span>                     tool.buffer += delta.partial_json
+<span class="ln"> 305</span>                 return tool
+<span class="ln"> 306</span>             entry = self.blocks[index] if index &lt; len(self.blocks) else {}
+<span class="ln"> 307</span>             if delta_type == &quot;text_delta&quot;:
+<span class="ln"> 308</span>                 entry[&quot;text&quot;] = entry.get(&quot;text&quot;, &quot;&quot;) + delta.text
+<span class="ln"> 309</span>             elif delta_type == &quot;thinking_delta&quot;:
+<span class="ln"> 310</span>                 entry[&quot;thinking&quot;] = entry.get(&quot;thinking&quot;, &quot;&quot;) + delta.thinking
+<span class="ln"> 311</span>             elif delta_type == &quot;signature_delta&quot;:
+<span class="ln"> 312</span>                 entry[&quot;signature&quot;] = delta.signature
+<span class="ln"> 313</span>             return None
+<span class="ln"> 314</span>         if raw_type == &quot;content_block_stop&quot; and (tool := self.tools.get(index)) is not None:
+<span class="ln"> 315</span>             tool.closed = True
+<span class="ln"> 316</span>             if tool.server and (args := tool.parsed()) is not None:
+<span class="ln"> 317</span>                 self.blocks[index][&quot;input&quot;] = args
+<span class="ln"> 318</span>             return tool
+<span class="ln"> 319</span>         return None</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>BaseToolExecutor：把工具表变成受控 dispatch</h3>
+      <p>executor 没有让模型直接触达业务函数，而是先按 contract 校验参数，再把 session、context、cache、status 等运行态按 handler 声明注入。这套分发在 <code>sources/commerce-agents/commerce-common/commerce_common/execution.py:54</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:69</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:106</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:214</code>、<code>sources/commerce-agents/commerce-common/commerce_common/execution.py:245</code> 形成了可测试的工具边界，领域 executor 只暴露表驱动 handler。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/execution.py</span> · L214-243</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 214</span>     async def execute(self, name: str, tool_input: dict[str, Any] | None) -&gt; ToolOutcome:
+<span class="ln"> 215</span>         try:
+<span class="ln"> 216</span>             return await self.dispatch(name, dict(tool_input or {}))
+<span class="ln"> 217</span>         except InvalidArguments as invalid:
+<span class="ln"> 218</span>             return ToolOutcome.error(invalid_arguments_text(name, invalid.invalid))
+<span class="ln"> 219</span>         except Exception as error:  # a tool failure must not end the turn
+<span class="ln"> 220</span>             if (outcome := self.domain_error(error)) is not None:
+<span class="ln"> 221</span>                 return outcome
+<span class="ln"> 222</span>             logger.warning(&quot;tool %s failed and is reported as unavailable&quot;, name, exc_info=True)
+<span class="ln"> 223</span>             return ToolOutcome.error(self.unavailable_text.format(name=name))
+<span class="ln"> 224</span> 
+<span class="ln"> 225</span>     async def dispatch(self, name: str, tool_input: dict[str, Any]) -&gt; ToolOutcome:
+<span class="ln"> 226</span>         &quot;&quot;&quot;:meth:`execute` without the failure ladder: what the tool raised propagates,
+<span class="ln"> 227</span>         so a host prefetching a read can tell a failed tool from a result the tool wrote
+<span class="ln"> 228</span>         (a not-found line, a held call). The ``status`` line is dropped here, before any
+<span class="ln"> 229</span>         argument is validated or any handler runs; a tool the deployment&#x27;s config leaves
+<span class="ln"> 230</span>         out of the tool list is unknown here too, whichever path calls it.&quot;&quot;&quot;
+<span class="ln"> 231</span>         tool_input, _status = self.split_status(name, tool_input)
+<span class="ln"> 232</span>         if name in self._absent:
+<span class="ln"> 233</span>             return ToolOutcome.error(self.absent_text.format(name=name))
+<span class="ln"> 234</span>         if name == LOAD_SKILL:
+<span class="ln"> 235</span>             return self._load_skill(tool_input)
+<span class="ln"> 236</span>         if (spec := self.components.get(name) or self._extensions.get(name)) is not None:
+<span class="ln"> 237</span>             return await self._present(spec, tool_input)
+<span class="ln"> 238</span>         if (delegate := self._delegates.get(name)) is not None:
+<span class="ln"> 239</span>             return await self._run_delegate(delegate, tool_input)
+<span class="ln"> 240</span>         handler = self._handlers.get(name)
+<span class="ln"> 241</span>         if handler is None:
+<span class="ln"> 242</span>             return ToolOutcome.error(f&quot;Unknown tool: {name}&quot;)
+<span class="ln"> 243</span>         return await handler(tool_input)</pre>
+      </div>
+
+      <a class="deep-link" href="commerce-agents/commerce-agents-grounding-memory.html">深度阅读 · grounding、fencing 与 memory</a>
+    </section>
+
+    <!-- ── 04 KEY FLOW ─────────────────────────────────────── -->
+    <section class="sec" id="section-3">
+      <div class="sec-no">§ <b>03</b> · KEY FLOW</div>
+      <h2 class="sec-title">从用户话术到受控动作</h2>
+      <p>关键流程可以读成两条：买家侧先查证商品与购物车状态，再允许加入或修改；商家侧先 stage 变更并生成确认文本，再由用户 apply 或 discard。购物路径落在 <code>sources/commerce-agents/shopping-agent/core/shopping_agent/executor.py:132</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/executor.py:155</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:86</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:102</code>，商家路径落在 <code>sources/commerce-agents/merchant-agent/core/merchant_agent/executor.py:248</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/executor.py:265</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:192</code>。</p>
+
+      <h3><span class="arr">▸</span>Shopping path：证据优先，再动购物车</h3>
+      <div class="flow">
+        <div><b>search_products</b><small>query + filters</small></div>
+        <span>→</span><div><b>get_product_details</b><small>grounded item evidence</small></div>
+        <span>→</span><div><b>cart gate</b><small>lock + option validation</small></div>
+        <span>→</span><div><b>cart mutation</b><small>add/update/remove</small></div>
+    </div>
+
+      <h3><span class="arr">▸</span>Merchant path：stage first，apply later</h3>
+      <div class="flow">
+        <div><b>listings/catalog</b><small>read current business state</small></div>
+        <span>→</span><div><b>stage update</b><small>pending mutations</small></div>
+        <span>→</span><div><b>follow-through gate</b><small>requires explicit confirmation</small></div>
+        <span>→</span><div><b>apply/discard</b><small>auditable outcome</small></div>
+    </div>
+
+      
+      <h3><span class="arr">▸</span>Shopping gate 的真实代码边界</h3>
+      <p>购物车变更不是只靠提示词提醒，代码会检查最近一轮是否已经证明了商品与选项；<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:102</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:113</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:126</code>、<code>sources/commerce-agents/shopping-agent/core/tests/test_executor.py:149</code> 把 add/update/remove 前的证据和锁定关系落成了可读条件。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py</span> · L102-130</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 102</span> async def gated_add_to_cart(
+<span class="ln"> 103</span>     *,
+<span class="ln"> 104</span>     backend: StorefrontBackend,
+<span class="ln"> 105</span>     config: ShoppingAgentConfig,
+<span class="ln"> 106</span>     session: ShoppingSessionContext,
+<span class="ln"> 107</span>     state: ShoppingSessionState,
+<span class="ln"> 108</span>     product_id: str,
+<span class="ln"> 109</span>     quantity: int,
+<span class="ln"> 110</span> ) -&gt; ToolOutcome:
+<span class="ln"> 111</span>     if held := check_provenance(state, product_id) or check_options(state, product_id):
+<span class="ln"> 112</span>         return held
+<span class="ln"> 113</span>     requested = max(1, quantity)
+<span class="ln"> 114</span>     max_quantity = config.max_quantity_per_item
+<span class="ln"> 115</span>     async with _cart_lock(session):
+<span class="ln"> 116</span>         current = await backend.get_cart(session)
+<span class="ln"> 117</span>         existing = next((i for i in current.items if i.product_id == product_id), None)
+<span class="ln"> 118</span>         if existing is None and len(current.items) &gt;= config.max_cart_lines:
+<span class="ln"> 119</span>             return ToolOutcome.error(&quot;The cart is full.&quot;)
+<span class="ln"> 120</span>         allowed = min(requested, max(0, max_quantity - (existing.quantity if existing else 0)))
+<span class="ln"> 121</span>         if allowed &lt;= 0:
+<span class="ln"> 122</span>             return ToolOutcome.error(
+<span class="ln"> 123</span>                 f&quot;This item is already at the per-item limit of {max_quantity}.&quot;
+<span class="ln"> 124</span>             )
+<span class="ln"> 125</span>         cart = await backend.add_to_cart(session, product_id, allowed)
+<span class="ln"> 126</span>     # The confirmation names the id only: titles are catalog text and stay inside fences.
+<span class="ln"> 127</span>     capped = f&quot; (capped at the per-item limit of {max_quantity})&quot; if allowed &lt; requested else &quot;&quot;
+<span class="ln"> 128</span>     return _written(
+<span class="ln"> 129</span>         f&quot;Added {product_id} x{allowed}{capped}. Cart now has {cart_summary(cart)}.&quot;, cart
+<span class="ln"> 130</span>     )</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>Merchant gate 的 staged-write 约束</h3>
+      <p>商家侧更强调先暂存再确认，模型生成的 listing、campaign 或 promotion 变更必须经过 follow-through；<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:192</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:201</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:218</code>、<code>sources/commerce-agents/merchant-agent/core/tests/test_executor.py:217</code> 显示生效动作被拆到了明确的 apply/discard 分支。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py</span> · L192-215</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 192</span> def check_apply_change(
+<span class="ln"> 193</span>     state: MerchantSessionState, config: MerchantAgentConfig, change_id: str
+<span class="ln"> 194</span> ) -&gt; ToolOutcome | None:
+<span class="ln"> 195</span>     &quot;&quot;&quot;Provenance, then the guardrails under the current config, then the host&#x27;s
+<span class="ln"> 196</span>     approval mark when the deployment requires one.&quot;&quot;&quot;
+<span class="ln"> 197</span>     known = state.seen_changes.get(change_id)
+<span class="ln"> 198</span>     if known is None:
+<span class="ln"> 199</span>         return ToolOutcome.held(
+<span class="ln"> 200</span>             PROVENANCE_GATE,
+<span class="ln"> 201</span>             f&quot;change_id {change_id} was not staged or listed in this session. Stage &quot;
+<span class="ln"> 202</span>             &quot;the change (or call get_pending_changes) first, preview it, and apply it &quot;
+<span class="ln"> 203</span>             &quot;only after the operator approves it.&quot;,
+<span class="ln"> 204</span>         )
+<span class="ln"> 205</span>     if violations := check_guardrails(known.kind, known.items, config):
+<span class="ln"> 206</span>         return ToolOutcome.held(GUARDRAIL_GATE, apply_guardrail_message(violations))
+<span class="ln"> 207</span>     if config.require_host_approval and change_id not in state.approved_change_ids:
+<span class="ln"> 208</span>         return ToolOutcome.held(
+<span class="ln"> 209</span>             APPROVAL_GATE,
+<span class="ln"> 210</span>             f&quot;change {change_id} has not been approved through &quot;
+<span class="ln"> 211</span>             f&quot;{config.approval_surface}. Tell the operator it is staged and &quot;
+<span class="ln"> 212</span>             f&quot;waiting for their approval on {config.approval_surface} — &quot;
+<span class="ln"> 213</span>             &quot;approving it there is what applies it.&quot;,
+<span class="ln"> 214</span>         )
+<span class="ln"> 215</span>     return None</pre>
+      </div>
+
+      <a class="deep-link" href="commerce-agents/commerce-agents-commerce-gates.html">深度阅读 · commerce gates 与审批语义</a>
+    </section>
+
+    <!-- ── 05 TESTS & VALIDATION ───────────────────────────── -->
+    <section class="sec" id="section-4">
+      <div class="sec-no">§ <b>04</b> · TESTS &amp; VALIDATION</div>
+      <h2 class="sec-title">测试把安全约束落成回归契约</h2>
+      <p>测试不是只确认 happy path，它把 turn salvage、工具 schema、记忆过滤、购物车锁、staged write 和 prompt guardrail 都写成了行为契约。例如 <code>sources/commerce-agents/commerce-common/tests/test_turn.py:42</code>、<code>sources/commerce-agents/commerce-common/tests/test_turn.py:106</code>、<code>sources/commerce-agents/shopping-agent/core/tests/test_executor.py:112</code>、<code>sources/commerce-agents/merchant-agent/core/tests/test_executor.py:130</code>、<code>sources/commerce-agents/commerce-common/tests/test_fencing.py:1</code> 覆盖了运行时最容易被模型输出扰乱的边界。</p>
+
+      <h3><span class="arr">▸</span>测试覆盖</h3>
+      <p>下面这个测试片段能代表项目风格：它不是 mock 一个“模型很听话”的响应，而是检查 executor 在订单、购物车和领域错误之间是否返回稳定 envelope。类似思路也出现在 <code>sources/commerce-agents/shopping-agent/core/tests/test_executor.py:75</code>、<code>sources/commerce-agents/shopping-agent/core/tests/test_executor.py:99</code>、<code>sources/commerce-agents/merchant-agent/core/tests/test_executor.py:78</code>、<code>sources/commerce-agents/merchant-agent/core/tests/test_executor.py:186</code>、<code>sources/commerce-agents/commerce-common/tests/test_execution.py:1</code>，这些测试让 agent 行为可回归，而不是只靠 prompt 文案。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">tests/sources/commerce-agents/shopping-agent/core/tests/test_executor.py</span> · L112-146</span><span>Python</span></div>
+        <pre class="code"><span class="ln"> 112</span> async def test_update_and_remove_require_provenance_or_cart_membership(executor, backend):
+<span class="ln"> 113</span>     update = await executor.execute(&quot;update_cart_item&quot;, {&quot;product_id&quot;: &quot;p-100&quot;, &quot;quantity&quot;: 2})
+<span class="ln"> 114</span>     assert update.blocked == &quot;provenance&quot;
+<span class="ln"> 115</span>     # The backend never sees the id; an upsert-style update would otherwise create the line.
+<span class="ln"> 116</span>     assert backend.cart_items == {}
+<span class="ln"> 117</span>     remove = await executor.execute(&quot;remove_from_cart&quot;, {&quot;product_id&quot;: &quot;p-100&quot;})
+<span class="ln"> 118</span>     assert remove.blocked == &quot;provenance&quot;
+<span class="ln"> 119</span> 
+<span class="ln"> 120</span>     await executor.execute(&quot;search_products&quot;, {&quot;query&quot;: &quot;tent&quot;})
+<span class="ln"> 121</span>     await executor.execute(&quot;add_to_cart&quot;, {&quot;product_id&quot;: &quot;p-100&quot;, &quot;quantity&quot;: 1})
+<span class="ln"> 122</span>     update = await executor.execute(&quot;update_cart_item&quot;, {&quot;product_id&quot;: &quot;p-100&quot;, &quot;quantity&quot;: 3})
+<span class="ln"> 123</span>     assert not update.is_error and update.blocked is None
+<span class="ln"> 124</span>     assert backend.cart_items[&quot;p-100&quot;].quantity == 3
+<span class="ln"> 125</span> 
+<span class="ln"> 126</span> 
+<span class="ln"> 127</span> async def test_cart_membership_alone_grants_update_and_remove(
+<span class="ln"> 128</span>     backend, config, skills, session, state
+<span class="ln"> 129</span> ):
+<span class="ln"> 130</span> 
+<span class="ln"> 131</span>     backend.cart_items[&quot;p-200&quot;] = CartItem(
+<span class="ln"> 132</span>         product_id=&quot;p-200&quot;, title=&quot;Two-Burner Camp Stove&quot;, price=64.5, quantity=2
+<span class="ln"> 133</span>     )
+<span class="ln"> 134</span>     executor = ShoppingToolExecutor(
+<span class="ln"> 135</span>         backend=backend,
+<span class="ln"> 136</span>         config=config,
+<span class="ln"> 137</span>         skills=skills,
+<span class="ln"> 138</span>         session=session,
+<span class="ln"> 139</span>         state=state,
+<span class="ln"> 140</span>         memory=build_memory(config, InMemoryMemoryStore()),
+<span class="ln"> 141</span>     )
+<span class="ln"> 142</span>     update = await executor.execute(&quot;update_cart_item&quot;, {&quot;product_id&quot;: &quot;p-200&quot;, &quot;quantity&quot;: 4})
+<span class="ln"> 143</span>     assert not update.is_error and update.blocked is None
+<span class="ln"> 144</span>     remove = await executor.execute(&quot;remove_from_cart&quot;, {&quot;product_id&quot;: &quot;p-200&quot;})
+<span class="ln"> 145</span>     assert not remove.is_error and remove.blocked is None
+<span class="ln"> 146</span>     assert backend.cart_items == {}</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>已知边界 / 失败模式</h3>
+      <ul>
+        <li>流式输出中断时，必须通过 <code>salvage_round</code> 补齐可恢复消息；对应 sources/commerce-agents/commerce-common/commerce_common/turn.py:401。</li>
+        <li>外部检索文本进入 prompt 前需要 fence 与特殊 token 清洗；对应 sources/commerce-agents/commerce-common/commerce_common/fencing.py:99。</li>
+        <li>商家侧 staged mutation 不能被模型自行 apply；对应 sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:192。</li>
+    </ul>
+    </section>
+
+    <!-- ── 06 HIGHLIGHTS & RISKS ───────────────────────────── -->
+    <section class="sec" id="section-5">
+      <div class="sec-no">§ <b>05</b> · HIGHLIGHTS</div>
+      <h2 class="sec-title">值得借鉴的工程取舍</h2>
+      <div class="g2">
+        <div class="card"><div class="card-h">流式工具调用可恢复</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/turn.py:379 记录 partial input，sources/commerce-agents/commerce-common/tests/test_turn.py:147 验证 salvage 后仍能关闭 round。</div></div>
+        <div class="card"><div class="card-h">工具执行边界清晰</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/execution.py:214 的 dispatch 只走注册 handler，sources/commerce-agents/commerce-common/commerce_common/execution.py:69 先处理参数契约。</div></div>
+        <div class="card"><div class="card-h">商业动作有后置 gate</div><div class="card-d">sources/commerce-agents/shopping-agent/core/shopping_agent/gates.py:102 与 sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:192 分别约束购物车和商家发布。</div></div>
+        <div class="card"><div class="card-h">记忆写入先过滤</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/memory.py:78 定义禁止模式，sources/commerce-agents/commerce-common/commerce_common/memory.py:130 再验证 fact 是否值得保存。</div></div>
+    </div>
+    </section>
+
+    <section class="sec" id="section-6">
+      <div class="sec-no">§ <b>06</b> · RISKS &amp; GAPS</div>
+      <h2 class="sec-title">技术亮点之外，<em>别忽略</em>这些</h2>
+      <p>这个项目是参考蓝图，不是完整生产平台；它清楚展示了 agent 安全边界，但仍需要接入真实身份、支付、库存一致性、审计存储和队列重试策略。源码里能看到 <code>sources/commerce-agents/shopping-agent/core/shopping_agent/executor.py:199</code>、<code>sources/commerce-agents/merchant-agent/core/merchant_agent/executor.py:211</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:101</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:103</code> 这些实现点还偏 demo/runtime 层，落地前需要按业务风险继续加厚。</p>
+      <div class="g2">
+        <div class="card"><div class="card-h">缺少端到端外部一致性</div><div class="card-d">订单、库存、活动等对象多由 fixtures 或内存状态模拟，sources/commerce-agents/examples/demo_common/storefront.py:1 这类示例层不能替代生产事务。</div></div>
+        <div class="card"><div class="card-h">审批语义仍依赖文案</div><div class="card-d">gates 能拦住一批危险动作，但真实系统仍要把 sources/commerce-agents/merchant-agent/core/merchant_agent/gates.py:218 的 apply/discard 映射到不可绕过的后端授权。</div></div>
+        <div class="card"><div class="card-h">记忆策略保守但不完整</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/memory.py:183 只做匹配选择，生产里还需要租户隔离、保留策略和可删除证明。</div></div>
+        <div class="card"><div class="card-h">模型供应商绑定明显</div><div class="card-d">prompt 与 streaming 事件契约贴近 Claude Agent SDK，sources/commerce-agents/commerce-common/commerce_common/agent_sdk.py:1 的适配层决定了迁移成本。</div></div>
+    </div>
+
+      <div class="callout warn">
+        <strong>诚实记录</strong> — 这部分列的是我在源码里看到、但作者没有明确文档化的限制。读者请按需取舍。
+      </div>
+    </section>
+
+    <div class="foot">
+      <span>Generated · 2026-09-03</span>
+      <span>Source · <a href="https://github.com/anthropics/commerce-agents">anthropics/commerce-agents</a></span>
+      <span><a href="index.html">← 返回 Trending 索引</a></span>
+      <span><a href="commerce-agents.html">↑ 返回主页面</a></span>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── scroll-spy + mobile select wiring ──────────────────── -->
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  // mobile select
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  // bg stars
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 80;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>

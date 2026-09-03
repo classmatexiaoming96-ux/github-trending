@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Grounding、Fencing 与 Memory · 深度解析 · commerce-agents</title>
+<meta name="description" content="commerce-agents grounding-memory 子模块完整解析 — Anthropic 的购物与商家 Agent 参考蓝图，重点展示 turn loop、工具执行、记忆、安全围栏与人工审批如何组合成可治理的 commerce agent。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,400..900&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0b0e'/%3E%3Ccircle cx='30' cy='35' r='10' fill='%23e8825a'/%3E%3Ccircle cx='70' cy='35' r='10' fill='%2354d6e0'/%3E%3Ccircle cx='30' cy='70' r='10' fill='%23e9b873'/%3E%3Ccircle cx='70' cy='70' r='10' fill='%237fcf9e'/%3E%3Cpath d='M30 45 V60 M70 45 V60 M40 35 H60 M40 70 H60' stroke='%23e0b07a' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+<style>
+/* LAYOUT SHELL START — Do NOT edit; copy as-is */
+/* ============================================================
+   GitHub Trending · Source-level Observatory
+   Layout Shell · v1.0
+   Based on openclaw.html / kimi-code.html
+   ============================================================ */
+
+:root {
+  /* surfaces — 暗色玻璃面板（统一锚点） */
+  --ink:        #07080c;
+  --ink-1:      #0a0b12;
+  --ink-2:      #10121c;
+  --ink-3:      #161a28;
+  --panel:      rgba(20, 22, 34, 0.62);
+  --panel-2:    rgba(13, 15, 24, 0.85);
+
+  /* project accent — 新项目只许改这 3 个值，其他颜色都用 --signal/--phosphor 等通用变量 */
+  --star:       #e8825a;   /* 项目专属主色（hex by project） */
+  --star-soft:  #f0a585;
+  --star-deep:  #c0653f;
+
+  /* 通用语义色 — 不许改 */
+  --signal:     #54d6e0;   /* cyan — data / signal */
+  --signal-soft:#8eebf2;
+  --phosphor:   #7fcf9e;   /* green — live / running */
+  --rose:       #f08a8a;   /* error / isError */
+  --violet:     #b3a4f0;
+
+  /* text scale */
+  --text:       #ece7da;
+  --text-2:     #b9bdca;
+  --text-dim:   #79809a;
+  --text-faint: #4a5172;
+
+  /* lines & glow */
+  --line:       rgba(255,255,255,0.085);
+  --line-2:     rgba(255,255,255,0.05);
+  --line-amber: rgba(232,130,90,0.34);
+  --line-cyan:  rgba(84,214,224,0.30);
+  --glow-amber: rgba(232,130,90,0.24);
+  --glow-cyan:  rgba(84,214,224,0.18);
+
+  /* fonts */
+  --serif: "Fraunces", Georgia, serif;
+  --sans:  "Hanken Grotesk", system-ui, sans-serif;
+  --mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* layout tokens */
+  --maxw: 1500px;
+  --nav-w: 270px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 145px; }
+body { background: var(--ink); color: var(--text); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+/* ── background layers ──────────────────────────────────────── */
+.bg-stars, .bg-glow, .bg-grid, .bg-grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: -1;
+}
+.bg-stars { opacity: .55; }
+.bg-glow  { background: radial-gradient(ellipse at 20% 0%, var(--glow-amber), transparent 60%); }
+.bg-grid  {
+  background-image:
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  opacity: .35;
+}
+.bg-grain { opacity: .35; mix-blend-mode: overlay; }
+
+/* ── shell ─────────────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  max-width: var(--maxw);
+  margin: 0 auto;
+}
+
+/* ── side nav (sticky + scroll-spy) ────────────────────────── */
+.nav {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  padding: 30px 22px 30px 30px;
+  display: flex; flex-direction: column; gap: 22px;
+  border-right: 1px solid var(--line-2);
+}
+.nav-brand { display: flex; flex-direction: column; gap: 6px; }
+.nav-brand .glyph { font-family: var(--serif); font-size: 22px; letter-spacing: -.02em; }
+.nav-brand .glyph b { color: var(--star); font-weight: 600; font-style: italic; }
+.nav-brand .sub   { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.nav-ver          { font-family: var(--mono); font-size: 10px; color: var(--text-faint); }
+
+.nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.nav-list a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 6px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  transition: background .25s var(--ease), color .25s var(--ease);
+}
+.nav-list a .idx { font-family: var(--mono); font-size: 10px; color: var(--text-faint); width: 16px; flex: none; }
+.nav-list a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-list a.active { color: var(--star); background: linear-gradient(90deg, rgba(232,130,90,0.12), transparent); }
+.nav-list a.active .idx { color: var(--star); }
+.nav-list a.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--star); margin-right: 4px; box-shadow: 0 0 8px var(--star);
+}
+
+.nav-foot { margin-top: auto; font-family: var(--mono); font-size: 10px; color: var(--text-faint); line-height: 1.7; }
+.nav-foot a { color: var(--text-dim); text-decoration: none; }
+.nav-foot a:hover { color: var(--signal); }
+
+/* ── mobile bar (hidden on desktop) ────────────────────────── */
+.mobile-bar { display: none; }
+@media (max-width: 960px) {
+  .mobile-bar {
+    display: flex; position: sticky; top: 0; z-index: 50;
+    align-items: center; justify-content: space-between;
+    padding: 14px 20px; background: var(--panel-2); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-2);
+  }
+  .shell { grid-template-columns: 1fr; }
+  .nav { display: none; }
+}
+
+/* ── main content ──────────────────────────────────────────── */
+.main { min-width: 0; padding: 0 clamp(20px,5vw,84px) 120px; }
+
+/* ── hero ──────────────────────────────────────────────────── */
+.hero { padding: 80px 0 60px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 48px; align-items: center; }
+.hero-eyebrow {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+  color: var(--star); text-transform: uppercase; margin-bottom: 18px;
+}
+.hero-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(36px, 5vw, 56px);
+  line-height: 1.05; letter-spacing: -.025em; margin-bottom: 22px;
+}
+.hero-title em { font-style: italic; color: var(--star); }
+.hero-desc { color: var(--text-2); font-size: 17px; line-height: 1.6; max-width: 580px; }
+.hero-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 54px;
+}
+.stat { padding: 16px 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.stat-num { font-family: var(--serif); font-size: 26px; color: var(--star); margin-bottom: 4px; }
+.stat-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); letter-spacing: .08em; text-transform: uppercase; }
+
+@media (max-width: 960px) {
+  .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── sections ─────────────────────────────────────────────── */
+section.sec { padding: 60px 0; border-bottom: 1px solid var(--line-2); }
+.sec-no {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  letter-spacing: .12em; margin-bottom: 10px;
+}
+.sec-no b { color: var(--star); font-weight: 500; }
+h2.sec-title {
+  font-family: var(--serif); font-weight: 400; font-size: clamp(28px, 3.5vw, 38px);
+  letter-spacing: -.02em; margin-bottom: 28px;
+}
+h2.sec-title em { font-style: italic; color: var(--star); }
+
+h3 {
+  font-family: var(--sans); font-weight: 500; font-size: 20px;
+  letter-spacing: -.01em; margin: 48px 0 14px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+h3 .arr { color: var(--star); font-family: var(--mono); font-size: 14px; }
+
+/* ── deep-link (H3 末尾的子页面入口) ─────────────────────── */
+.deep-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 8px 14px;
+  border: 1px solid var(--line-amber); border-radius: 8px;
+  font-family: var(--mono); font-size: 11px; color: var(--star);
+  text-decoration: none; background: rgba(232,130,90,0.06);
+  transition: background .25s var(--ease), border-color .25s var(--ease);
+}
+.deep-link:hover { background: rgba(232,130,90,0.16); border-color: var(--star); }
+.deep-link::after { content: '→'; font-family: var(--mono); }
+
+/* ── prose ─────────────────────────────────────────────────── */
+p { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 14px 0; }
+p strong { color: var(--text); font-weight: 600; }
+p code, li code { font-family: var(--mono); font-size: 13px; padding: 2px 6px; border-radius: 4px; background: var(--ink-3); color: var(--star-soft); }
+a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(84,214,224,0.4); }
+a:hover { color: var(--signal-soft); border-bottom-color: var(--signal); }
+
+ul, ol { padding-left: 22px; margin: 14px 0; }
+li { color: var(--text-2); font-size: 15.5px; line-height: 1.75; margin: 6px 0; }
+li::marker { color: var(--star); }
+
+/* ── code blocks (with line numbers) ──────────────────────── */
+.code-wrap {
+  margin: 18px 0; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--ink-1); overflow: hidden;
+}
+.code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; background: var(--ink-2); border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+}
+.code-bar .src { color: var(--signal); }
+pre.code {
+  margin: 0; padding: 14px 0; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--text);
+}
+pre.code .ln {
+  display: inline-block; width: 48px; padding-right: 12px;
+  text-align: right; color: var(--text-faint); user-select: none;
+  border-right: 1px solid var(--line-2);
+}
+pre.code .k  { color: var(--violet); }       /* keyword */
+pre.code .s  { color: var(--phosphor); }     /* string */
+pre.code .n  { color: var(--star-soft); }    /* number */
+pre.code .c  { color: var(--text-faint); font-style: italic; }  /* comment */
+pre.code .t  { color: var(--signal); }       /* type */
+
+/* ── flow diagram (ASCII art 容器) ────────────────────────── */
+.flow {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: var(--text-2); white-space: pre;
+  padding: 22px 24px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--ink-1);
+  overflow-x: auto;
+}
+.flow-stage { color: var(--star); font-weight: 600; }
+.flow-arr   { color: var(--signal); }
+.flow-node  { color: var(--phosphor); }
+
+/* ── mermaid containers ────────────────────────────────────── */
+.mermaid { margin: 22px 0; text-align: center; }
+
+/* ── callout boxes ─────────────────────────────────────────── */
+.callout {
+  margin: 18px 0; padding: 14px 18px;
+  border-left: 3px solid var(--star); border-radius: 4px;
+  background: var(--panel); color: var(--text-2);
+  font-size: 14.5px; line-height: 1.65;
+}
+.callout.warn { border-left-color: var(--rose); }
+.callout.info { border-left-color: var(--signal); }
+.callout strong { color: var(--star); }
+
+/* ── grids ─────────────────────────────────────────────────── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+@media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel); transition: border-color .25s var(--ease);
+}
+.card:hover { border-color: var(--line-amber); }
+.card-h { font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.card-d { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+/* ── footer ────────────────────────────────────────────────── */
+.foot {
+  margin-top: 80px; padding: 30px 0; border-top: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  display: flex; gap: 24px; flex-wrap: wrap;
+}
+.foot a { color: var(--text-dim); }
+.foot a:hover { color: var(--star); }
+
+/* ── utility ───────────────────────────────────────────────── */
+.copy {
+  font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+  background: transparent; border: 1px solid var(--line); padding: 3px 8px;
+  border-radius: 4px; cursor: pointer;
+}
+.copy:hover { color: var(--star); border-color: var(--star); }
+/* LAYOUT SHELL END */
+
+:root {
+  --star:       #7fd7ff;
+  --star-soft:  rgba(127, 215, 255, 0.18);
+  --star-deep:  #1d5f78;
+}
+</style>
+</head>
+<body>
+
+<canvas class="bg-stars" id="stars"></canvas>
+<div class="bg-glow"></div>
+<div class="bg-grid"></div>
+<svg class="bg-grain"><filter id="gr"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#gr)" opacity="0.4"/></svg>
+
+<div class="mobile-bar">
+  <div class="glyph">commerce-agents<b>.py</b></div>
+  <select id="msel" aria-label="跳转章节"></select>
+</div>
+
+<div class="shell">
+  <aside class="nav">
+    <div class="nav-brand">
+      <div class="glyph">commerce-agents<b>.py</b></div>
+      <div class="sub">grounding-memory · 深度解析</div>
+    </div>
+    <span class="nav-ver">Python</span>
+    <nav>
+      <ul class="nav-list" id="navlist">
+        <li><a href="#intro"><span class="idx">00</span>导入与契约</a></li>
+        <li><a href="#core-impl"><span class="idx">01</span>核心实现</a></li>
+        <li><a href="#flow"><span class="idx">02</span>关键流程</a></li>
+        <li><a href="#edge"><span class="idx">03</span>边界与失败</a></li>
+        <li><a href="#related"><span class="idx">04</span>关联模块</a></li>
+      </ul>
+    </nav>
+    <div class="nav-foot">
+      <div><a href="../commerce-agents.html">← 返回 commerce-agents 主页面</a></div>
+      <div><a href="../index.html">全部分析</a></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero">
+      <div class="hero-eyebrow">§ · Nested detail page</div>
+      <h1 class="hero-title">Grounding、Fencing 与 Memory <em>深度解析</em></h1>
+      <p class="hero-desc">这一页关注输入可信度：外部文本如何被围栏包住，提示块如何带上动态上下文，记忆事实又怎样在写入前被过滤和分层挑选。</p>
+    </div>
+
+    <section class="sec" id="intro">
+      <div class="sec-no">§ <b>00</b> · IMPORT CHAIN</div>
+      <h2 class="sec-title">导入链与<em>契约</em></h2>
+      <p>公共安全层先把外部文本降级为 data，再决定是否强制调用 grounding 工具；入口散布在 <code>sources/commerce-agents/commerce-common/commerce_common/fencing.py:20</code>、<code>sources/commerce-agents/commerce-common/commerce_common/fencing.py:83</code>、<code>sources/commerce-agents/commerce-common/commerce_common/grounding.py:55</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:33</code>，这让 prompt 不必假设检索内容天然可信。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/fencing.py</span> · L83-120</span><span>Python</span></div>
+        <pre class="code"><span class="ln">  83</span> @dataclass(frozen=True)
+<span class="ln">  84</span> class Fence:
+<span class="ln">  85</span>     &quot;&quot;&quot;The tag that wraps third-party content and the notice the static prompt carries
+<span class="ln">  86</span>     about it.&quot;&quot;&quot;
+<span class="ln">  87</span> 
+<span class="ln">  88</span>     label: str
+<span class="ln">  89</span>     notice: str
+<span class="ln">  90</span> 
+<span class="ln">  91</span>     @property
+<span class="ln">  92</span>     def open(self) -&gt; str:
+<span class="ln">  93</span>         return f&quot;&lt;{self.label}&gt;&quot;
+<span class="ln">  94</span> 
+<span class="ln">  95</span>     @property
+<span class="ln">  96</span>     def close(self) -&gt; str:
+<span class="ln">  97</span>         return f&quot;&lt;/{self.label}&gt;&quot;
+<span class="ln">  98</span> 
+<span class="ln">  99</span>     def sanitize_text(self, text: str, max_chars: int | None = None) -&gt; str:
+<span class="ln"> 100</span>         &quot;&quot;&quot;``max_chars`` bounds the result including the truncation suffix, so a schema
+<span class="ln"> 101</span>         limit can be passed as is.&quot;&quot;&quot;
+<span class="ln"> 102</span>         text = unicodedata.normalize(&quot;NFKC&quot;, text)
+<span class="ln"> 103</span>         text = _INVISIBLE.sub(&quot;&quot;, text)
+<span class="ln"> 104</span>         text = _CONTROL.sub(&quot; &quot;, text)
+<span class="ln"> 105</span>         # Markers and tokens are removed to a fixpoint, so one nested inside another
+<span class="ln"> 106</span>         # (``&lt;/label&lt;/label&gt;&gt;``) does not reassemble after the inner one goes.
+<span class="ln"> 107</span>         marker = _marker_pattern(self.label)
+<span class="ln"> 108</span>         while True:
+<span class="ln"> 109</span>             stripped = _SPECIAL_TOKEN.sub(&quot;[removed]&quot;, marker.sub(&quot;[removed]&quot;, text))
+<span class="ln"> 110</span>             if stripped == text:
+<span class="ln"> 111</span>                 break
+<span class="ln"> 112</span>             text = stripped
+<span class="ln"> 113</span>         text = _TURN_INDICATOR.sub(r&quot;\1\2 -&quot;, text)
+<span class="ln"> 114</span>         if max_chars is not None and len(text) &gt; max_chars:
+<span class="ln"> 115</span>             suffix = &quot; ...[truncated]&quot;
+<span class="ln"> 116</span>             if max_chars &gt; len(suffix):
+<span class="ln"> 117</span>                 text = text[: max_chars - len(suffix)] + suffix
+<span class="ln"> 118</span>             else:
+<span class="ln"> 119</span>                 text = text[:max_chars]
+<span class="ln"> 120</span>         return text</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="core-impl">
+      <div class="sec-no">§ <b>01</b> · CORE IMPL</div>
+      <h2 class="sec-title">核心实现，<em>逐段</em>拆</h2>
+
+      <h3><span class="arr">▸</span>Prompt assembly 把 cache-control 与 dynamic context 分开</h3>
+      <p>build_request_messages 先构建系统块，再决定 eager input、tool cache-control 和历史消息如何组合；<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:25</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:43</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:52</code>、<code>sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:60</code>、<code>sources/commerce-agents/shopping-agent/core/shopping_agent/prompt.py:197</code> 显示它把稳定规则和每轮上下文分开处理。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py</span> · L60-119</span><span>Python</span></div>
+        <pre class="code"><span class="ln">  60</span> def build_request_messages(
+<span class="ln">  61</span>     messages: list[dict[str, Any]],
+<span class="ln">  62</span>     *,
+<span class="ln">  63</span>     rolling_breakpoint: bool = True,
+<span class="ln">  64</span> ) -&gt; list[dict[str, Any]]:
+<span class="ln">  65</span>     &quot;&quot;&quot;The outgoing request&#x27;s messages: a request-shaped copy of ``messages`` with the
+<span class="ln">  66</span>     rolling cache breakpoint on the newest persisted content block.
+<span class="ln">  67</span> 
+<span class="ln">  68</span>     Within a turn the system blocks are constant, so the marker makes each round&#x27;s prior
+<span class="ln">  69</span>     rounds — the long tool results especially — a cache read instead of a reprocess. Two
+<span class="ln">  70</span>     cases skip it. A bare first call (one message) would write an entry a one-shot
+<span class="ln">  71</span>     session never reads, and the next call marks a later block whose span carries the
+<span class="ln">  72</span>     first message anyway. And the caller passes ``rolling_breakpoint=False`` on rounds
+<span class="ln">  73</span>     whose ``tool_choice`` is not ``auto``, because ``tool_choice`` keys the messages
+<span class="ln">  74</span>     span: an entry written under a forced round is unreadable by the auto rounds that
+<span class="ln">  75</span>     follow.
+<span class="ln">  76</span> 
+<span class="ln">  77</span>     A turn that closed on a presentation round leaves a tool_result message followed by
+<span class="ln">  78</span>     the next user message; the two go out as one user message, tool_result blocks first.
+<span class="ln">  79</span> 
+<span class="ln">  80</span>     Applied per call, to the outgoing request only: the returned list shallow-copies the
+<span class="ln">  81</span>     touched message and blocks, strips the marker any earlier call placed, and never
+<span class="ln">  82</span>     mutates the host&#x27;s persisted history. String content is lifted into a one-block list
+<span class="ln">  83</span>     because ``cache_control`` lives on content blocks.
+<span class="ln">  84</span>     &quot;&quot;&quot;
+<span class="ln">  85</span>     if not messages:
+<span class="ln">  86</span>         return []
+<span class="ln">  87</span> 
+<span class="ln">  88</span>     def without_marker(message: dict[str, Any]) -&gt; dict[str, Any]:
+<span class="ln">  89</span>         content = message.get(&quot;content&quot;)
+<span class="ln">  90</span>         if not isinstance(content, list) or not any(
+<span class="ln">  91</span>             isinstance(b, dict) and &quot;cache_control&quot; in b for b in content
+<span class="ln">  92</span>         ):
+<span class="ln">  93</span>             return message
+<span class="ln">  94</span>         return message | {
+<span class="ln">  95</span>             &quot;content&quot;: [
+<span class="ln">  96</span>                 {k: v for k, v in b.items() if k != &quot;cache_control&quot;} if isinstance(b, dict) else b
+<span class="ln">  97</span>                 for b in content
+<span class="ln">  98</span>             ]
+<span class="ln">  99</span>         }
+<span class="ln"> 100</span> 
+<span class="ln"> 101</span>     def blocks(raw: Any) -&gt; list[Any]:
+<span class="ln"> 102</span>         return [{&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: raw}] if isinstance(raw, str) else list(raw or [])
+<span class="ln"> 103</span> 
+<span class="ln"> 104</span>     request: list[dict[str, Any]] = []
+<span class="ln"> 105</span>     for message in messages:
+<span class="ln"> 106</span>         message = without_marker(message)
+<span class="ln"> 107</span>         if request and message.get(&quot;role&quot;) == &quot;user&quot; and request[-1].get(&quot;role&quot;) == &quot;user&quot;:
+<span class="ln"> 108</span>             request[-1] = request[-1] | {
+<span class="ln"> 109</span>                 &quot;content&quot;: blocks(request[-1].get(&quot;content&quot;)) + blocks(message.get(&quot;content&quot;))
+<span class="ln"> 110</span>             }
+<span class="ln"> 111</span>         else:
+<span class="ln"> 112</span>             request.append(message)
+<span class="ln"> 113</span>     if not rolling_breakpoint or len(request) &lt; 2:
+<span class="ln"> 114</span>         return request
+<span class="ln"> 115</span>     content = blocks(request[-1].get(&quot;content&quot;))
+<span class="ln"> 116</span>     if content and isinstance(content[-1], dict):
+<span class="ln"> 117</span>         content[-1] = {**content[-1], &quot;cache_control&quot;: {&quot;type&quot;: &quot;ephemeral&quot;}}
+<span class="ln"> 118</span>         request[-1] = request[-1] | {&quot;content&quot;: content}
+<span class="ln"> 119</span>     return request</pre>
+      </div>
+
+      <h3><span class="arr">▸</span>MemoryWriteFilter 拦截敏感与短期事实</h3>
+      <p>记忆层并非把所有对话都保存；<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:78</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:101</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:130</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:150</code>、<code>sources/commerce-agents/commerce-common/commerce_common/memory.py:216</code> 先过滤禁止模式、会话性内容和无效 fact，再挑选 tier-one fact 注入后续请求。</p>
+      <div class="code-wrap">
+        <div class="code-bar"><span><span class="src">src/sources/commerce-agents/commerce-common/commerce_common/memory.py</span> · L78-118</span><span>Python</span></div>
+        <pre class="code"><span class="ln">  78</span> class MemoryStore(Protocol):
+<span class="ln">  79</span>     &quot;&quot;&quot;Implement against your own storage. ``subject_id`` is the user or merchant the
+<span class="ln">  80</span>     facts belong to.&quot;&quot;&quot;
+<span class="ln">  81</span> 
+<span class="ln">  82</span>     async def get_facts(self, subject_id: str) -&gt; list[MemoryFact]: ...
+<span class="ln">  83</span> 
+<span class="ln">  84</span>     async def upsert_facts(self, subject_id: str, facts: list[MemoryFact]) -&gt; None: ...
+<span class="ln">  85</span> 
+<span class="ln">  86</span>     async def search_facts(self, subject_id: str, query: str) -&gt; list[MemoryFact]: ...
+<span class="ln">  87</span> 
+<span class="ln">  88</span>     async def delete_fact(self, subject_id: str, key: str) -&gt; bool:
+<span class="ln">  89</span>         &quot;&quot;&quot;Remove one fact by key; True when something was deleted.&quot;&quot;&quot;
+<span class="ln">  90</span>         ...
+<span class="ln">  91</span> 
+<span class="ln">  92</span>     async def clear(self, subject_id: str) -&gt; None:
+<span class="ln">  93</span>         &quot;&quot;&quot;Purge every fact for the subject and advance its purge generation.&quot;&quot;&quot;
+<span class="ln">  94</span>         ...
+<span class="ln">  95</span> 
+<span class="ln">  96</span>     async def purge_generation(self, subject_id: str) -&gt; int:
+<span class="ln">  97</span>         &quot;&quot;&quot;How many times the subject has been purged; 0 for a subject never purged.&quot;&quot;&quot;
+<span class="ln">  98</span>         ...
+<span class="ln">  99</span> 
+<span class="ln"> 100</span> 
+<span class="ln"> 101</span> MEMORY_STORE_METHODS: tuple[str, ...] = tuple(
+<span class="ln"> 102</span>     name
+<span class="ln"> 103</span>     for name, member in vars(MemoryStore).items()
+<span class="ln"> 104</span>     if callable(member) and not name.startswith(&quot;_&quot;)
+<span class="ln"> 105</span> )
+<span class="ln"> 106</span> 
+<span class="ln"> 107</span> 
+<span class="ln"> 108</span> def check_memory_store(store: MemoryStore) -&gt; MemoryStore:
+<span class="ln"> 109</span>     &quot;&quot;&quot;Raise ``TypeError`` naming the first :class:`MemoryStore` method ``store`` lacks.
+<span class="ln"> 110</span>     Runs where a store enters a deployment, so a partial store fails at startup instead
+<span class="ln"> 111</span>     of inside the post-turn extraction pass, whose failures do not stop the turn.&quot;&quot;&quot;
+<span class="ln"> 112</span>     for name in MEMORY_STORE_METHODS:
+<span class="ln"> 113</span>         if not callable(getattr(store, name, None)):
+<span class="ln"> 114</span>             raise TypeError(
+<span class="ln"> 115</span>                 f&quot;{type(store).__name__} does not implement MemoryStore.{name}; the store &quot;
+<span class="ln"> 116</span>                 f&quot;contract is {&#x27;, &#x27;.join(MEMORY_STORE_METHODS)}&quot;
+<span class="ln"> 117</span>             )
+<span class="ln"> 118</span>     return store</pre>
+      </div>
+    </section>
+
+    <section class="sec" id="flow">
+      <div class="sec-no">§ <b>02</b> · KEY FLOW</div>
+      <h2 class="sec-title">关键<em>流程</em></h2>
+      <div class="flow">
+          <div><b>external content</b><small>strip controls + fence</small></div>
+          <span>→</span><div><b>grounding rule</b><small>term and cue match</small></div>
+          <span>→</span><div><b>prompt blocks</b><small>system + dynamic context</small></div>
+          <span>→</span><div><b>memory facts</b><small>filter + select</small></div>
+        </div>
+      <p>这条路径的强点是每一步都可以单测：<code>sources/commerce-agents/commerce-common/tests/test_fencing.py:1</code>、<code>sources/commerce-agents/commerce-common/tests/test_grounding.py:1</code>、<code>sources/commerce-agents/commerce-common/tests/test_prompt_assembly.py:1</code>、<code>sources/commerce-agents/commerce-common/tests/test_memory_facts.py:1</code>、<code>sources/commerce-agents/commerce-common/tests/test_memory_runtime.py:1</code> 分别检查文本清洗、工具强制、prompt 结构和 memory runtime。</p>
+    </section>
+
+    <section class="sec" id="edge">
+      <div class="sec-no">§ <b>03</b> · EDGE CASES</div>
+      <h2 class="sec-title">边界 / <em>失败模式</em></h2>
+      <ul>
+          <li>sources/commerce-agents/commerce-common/commerce_common/fencing.py:42 会清理 bidi/control 字符，避免不可见文本改变 prompt 语义。</li>
+          <li>sources/commerce-agents/commerce-common/commerce_common/grounding.py:72 只返回第一个强制工具，因此多规则优先级要在配置里明确。</li>
+          <li>sources/commerce-agents/commerce-common/commerce_common/memory.py:183 的匹配选择偏轻量，生产级召回仍需要租户与权限边界。</li>
+        </ul>
+    </section>
+
+    
+    <section class="sec">
+      <h3><span class="arr">▸</span>Skill 与 prompt 如何共享可信边界</h3>
+      <p>技能加载、系统块和记忆事实并不是三套孤立机制；sources/commerce-agents/commerce-common/commerce_common/skills.py:42、sources/commerce-agents/commerce-common/commerce_common/prompt_assembly.py:103 与 sources/commerce-agents/commerce-common/commerce_common/memory.py:248 共同决定本轮哪些知识可以进入模型上下文。</p>
+    </section>
+        
+    <section class="sec" id="related">
+      <div class="sec-no">§ <b>04</b> · RELATED</div>
+      <h2 class="sec-title">关联<em>模块</em></h2>
+      <div class="g2">
+          <div class="card"><div class="card-h">Skill loading</div><div class="card-d">sources/commerce-agents/commerce-common/commerce_common/skills.py:17 解析 SKILL.md，sources/commerce-agents/commerce-common/commerce_common/skills.py:69 组合 registry。</div></div>
+          <div class="card"><div class="card-h">Shopping prompt</div><div class="card-d">sources/commerce-agents/shopping-agent/core/shopping_agent/prompt.py:145 把工具规则和商业边界写进系统提示。</div></div>
+          <div class="card"><div class="card-h">Merchant prompt</div><div class="card-d">sources/commerce-agents/merchant-agent/core/merchant_agent/prompt.py:188 明确 staged-write 与人工确认规则。</div></div>
+        </div>
+    </section>
+
+    <div class="foot">
+      <span>Sub-page · 2026-09-03</span>
+      <span>Source · <a href="https://github.com/anthropics/commerce-agents">anthropics/commerce-agents</a></span>
+      <span><a href="../commerce-agents.html">↑ commerce-agents 主页面</a></span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const links = document.querySelectorAll('.nav-list a');
+  const map = new Map();
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) map.set(el, a);
+  });
+  const setActive = (el) => {
+    links.forEach(a => a.classList.remove('active'));
+    if (el) map.get(el).classList.add('active');
+  };
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) setActive(e.target); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  map.forEach((_, el) => obs.observe(el));
+  const sel = document.getElementById('msel');
+  if (sel) {
+    links.forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.getAttribute('href');
+      o.textContent = a.textContent.trim();
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', e => location.href = e.target.value);
+  }
+  const canvas = document.getElementById('stars');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+    resize(); addEventListener('resize', resize);
+    const N = 60;
+    const stars = Array.from({length:N}, () => ({
+      x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+      r: Math.random()*1.4 + 0.2,
+      a: Math.random(), s: Math.random()*0.02 + 0.005
+    }));
+    const tick = () => {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      stars.forEach(s => {
+        s.a += s.s; if (s.a > 1 || s.a < 0.2) s.s *= -1;
+        ctx.globalAlpha = s.a;
+        ctx.fillStyle = '#f0a585';
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+      });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+})();
+</script>
+</body>
+</html>
